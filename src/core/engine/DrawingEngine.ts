@@ -583,7 +583,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
 
-    const stroke = createStrokeRecord(layerId, this.brush);
+    const stroke = createStrokeRecord(layerId, this.brush, this.activeTool().erases === true);
     const builder = new StrokeBuilder(stroke);
     builder.addSample(toStrokeSample(sample));
 

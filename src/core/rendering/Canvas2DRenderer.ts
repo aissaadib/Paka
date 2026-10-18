@@ -65,6 +65,17 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private devicePixelRatio = 1;
   private activeStroke: StrokeRecord | null = null;
+  /**
+   * Pixels of the active layer as they were when an erasing stroke started.
+   *
+   * Erasing subtracts coverage from the layer itself, so the layer must be
+   * rebuilt from a fixed base on every update: restoring this snapshot and
+   * subtracting the whole stroke once is what keeps a self-crossing eraser from
+   * subtracting twice, and what lets a cancelled erase leave no trace. Only
+   * allocated while an erasing stroke is in flight (one surface-sized canvas).
+   */
+  private eraseBase: HTMLCanvasElement | null = null;
+  private eraseLayerId: LayerId | null = null;
   private rasterScale: number;
   private destroyed = false;
 
@@ -111,6 +122,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (sizeChanged) {
       this.surfaces.setDocumentSize(doc.width, doc.height, this.rasterScale);
       resizeCanvas(this.strokeBuffer, doc.width * this.rasterScale, doc.height * this.rasterScale);
+      // The surfaces were dropped, so an in-flight stroke no longer belongs to
+      // the pixels that are about to be rebuilt. Forgetting it makes the next
+      // sample take the defensive path in `extendStroke`: the buffer is redrawn
+      // from scratch and, for an eraser, a fresh snapshot is taken of the
+      // rebuilt layer. The engine aborts strokes before replacing the document,
+      // so this only guards against a caller that skips that contract.
+      this.abandonStroke();
     }
 
     // Surfaces for removed layers are dropped; new layers get a dirty surface
@@ -140,6 +158,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (doc) {
       this.surfaces.setDocumentSize(doc.width, doc.height, scale);
       resizeCanvas(this.strokeBuffer, doc.width * scale, doc.height * scale);
+      this.abandonStroke();
     }
     this.requestFrame();
   }
@@ -152,6 +171,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
   beginStroke(stroke: StrokeRecord): void {
     this.activeStroke = stroke;
     this.clearStrokeBuffer();
+    if (stroke.erase === true) {
+      this.beginErase(stroke.layerId);
+    } else {
+      this.dropEraseBase();
+    }
     this.requestFrame();
   }
 
@@ -159,6 +183,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (this.activeStroke !== stroke) {
       // Defensive path: a stroke arrived without a matching `beginStroke`.
       this.activeStroke = stroke;
+      if (stroke.erase === true) {
+        this.beginErase(stroke.layerId);
+      }
       this.clearStrokeBuffer();
       this.prepareStrokeBuffer();
       rasterizeStroke(this.strokeCtx, stroke, 0);
@@ -178,6 +205,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.prepareStrokeBuffer();
       rasterizeStroke(this.strokeCtx, stroke, fromIndex);
     }
+    if (stroke.erase === true) {
+      this.applyErase(stroke);
+    }
     this.requestFrame();
   }
 
@@ -185,6 +215,24 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const doc = this.doc;
     if (!doc) {
       this.cancelStroke();
+      return;
+    }
+
+    if (stroke.erase === true) {
+      // The layer already holds the subtracted pixels: `applyErase` kept it in
+      // sync as the stroke grew, so painting the buffer on top would re-add the
+      // erased coverage.
+      if (this.eraseBase === null) {
+        // Only reachable when the document changed under the stroke, which
+        // dropped the snapshot. The pixels then no longer match the stroke list,
+        // so rebuild the layer from it - the stroke is in the store by the time
+        // the frame runs.
+        this.invalidateLayer(stroke.layerId);
+      }
+      this.dropEraseBase();
+      this.clearStrokeBuffer();
+      this.activeStroke = null;
+      this.requestFrame();
       return;
     }
 
@@ -196,6 +244,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   cancelStroke(): void {
+    if (this.eraseBase) {
+      // A cancelled erase leaves no pixels behind: during an erasing stroke the
+      // surface holds *snapshot minus stroke*, which is not what the stroke list
+      // says, so it must be put back before the snapshot is dropped.
+      this.restoreEraseBase();
+    }
+    this.dropEraseBase();
     this.clearStrokeBuffer();
     this.activeStroke = null;
     this.requestFrame();
@@ -233,8 +288,10 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     this.paintDocument(ctx);
 
-    if (this.activeStroke) {
+    if (this.activeStroke && this.activeStroke.erase !== true) {
       // The buffer holds full coverage; the stroke's alpha is applied here, once.
+      // An erasing stroke is not drawn at all: it was already subtracted from the
+      // layer surface, which `paintDocument` just composited.
       ctx.globalAlpha = strokeOpacity(this.activeStroke.brush, this.activeStroke.pressures);
       ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
       ctx.globalAlpha = 1;
@@ -294,6 +351,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.scheduler.cancel();
     this.surfaces.dispose();
     this.activeStroke = null;
+    this.dropEraseBase();
   }
 
   /**
@@ -337,7 +395,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.surfaces.prepare(surface);
     for (const stroke of this.strokeSource.listStrokes(surface.layerId)) {
       this.rasterizeStrokeToBuffer(stroke);
-      this.compositeStrokeBuffer(surface, strokeOpacity(stroke.brush, stroke.pressures));
+      this.compositeStrokeBuffer(
+        surface,
+        strokeOpacity(stroke.brush, stroke.pressures),
+        stroke.erase === true ? "destination-out" : "source-over",
+      );
     }
     surface.dirty = false;
   }
@@ -351,19 +413,116 @@ export class Canvas2DRenderer implements DrawingRenderer {
   /**
    * Paints the stroke buffer onto a layer surface at the stroke's own opacity.
    *
-   * `prepare` resets the surface context, so the alpha is set after it and
-   * cleared again afterwards: the surface context must not leak state into the
-   * next composite.
+   * `prepare` resets the surface context, so the alpha and the composite
+   * operation are set after it and cleared again afterwards: the surface context
+   * must not leak state into the next composite. `destination-out` turns the
+   * same buffer into an eraser, subtracting the stroke's coverage from whatever
+   * is already on the layer.
    */
-  private compositeStrokeBuffer(surface: LayerSurface, alpha: number): void {
+  private compositeStrokeBuffer(
+    surface: LayerSurface,
+    alpha: number,
+    operation: GlobalCompositeOperation = "source-over",
+  ): void {
     const doc = this.doc;
     if (!doc) {
       return;
     }
     this.surfaces.prepare(surface);
     surface.ctx.globalAlpha = alpha;
+    surface.ctx.globalCompositeOperation = operation;
     surface.ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
     surface.ctx.globalAlpha = 1;
+    surface.ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Snapshots the layer an erasing stroke affects.
+   *
+   * The snapshot is taken once, before the first subtraction, and every update
+   * rebuilds the surface from it: `destination-out` applied repeatedly to the
+   * same pixels would subtract more each time, so a stroke crossing itself would
+   * erase a darker path than the same stroke drawn once - exactly the artifact
+   * the full-coverage buffer avoids for painting.
+   */
+  private beginErase(layerId: LayerId): void {
+    const surface = this.ensureRasterized(layerId);
+    const base = this.eraseBase ?? document.createElement("canvas");
+    resizeCanvas(base, surface.canvas.width, surface.canvas.height);
+    const baseCtx = base.getContext("2d");
+    if (!baseCtx) {
+      this.dropEraseBase();
+      return;
+    }
+    baseCtx.setTransform(1, 0, 0, 1, 0, 0);
+    baseCtx.globalAlpha = 1;
+    baseCtx.globalCompositeOperation = "source-over";
+    baseCtx.clearRect(0, 0, base.width, base.height);
+    baseCtx.drawImage(surface.canvas, 0, 0);
+    this.eraseBase = base;
+    this.eraseLayerId = layerId;
+  }
+
+  /** Rebuilds the erasing stroke's layer as `snapshot minus the whole stroke`. */
+  private applyErase(stroke: StrokeRecord): void {
+    const base = this.eraseBase;
+    const doc = this.doc;
+    if (!base || !doc) {
+      // No snapshot means the layer was dropped and rebuilt underneath the
+      // stroke. Subtracting the buffer now would remove coverage from pixels the
+      // stroke never saw, so leave the layer alone: `endStroke` marks it dirty
+      // and the committed stroke is applied by the next re-rasterization.
+      return;
+    }
+    const surface = this.restoreEraseBase();
+    if (!surface) {
+      return;
+    }
+    surface.ctx.globalCompositeOperation = "destination-out";
+    surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
+    surface.ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+    surface.ctx.globalAlpha = 1;
+    surface.ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Puts the erasing layer back to its snapshot pixels and returns the surface.
+   *
+   * The surface is cleared rather than painted over: compositing the snapshot
+   * with `source-over` onto partially erased pixels would not restore them, it
+   * would only raise their alpha again (`a + d(1-a)`), leaving a halo exactly
+   * where the erase had been.
+   */
+  private restoreEraseBase(): LayerSurface | null {
+    const base = this.eraseBase;
+    const layerId = this.eraseLayerId;
+    const doc = this.doc;
+    if (!base || !layerId || !doc) {
+      return null;
+    }
+    const surface = this.ensureRasterized(layerId);
+    this.surfaces.clear(surface);
+    this.surfaces.prepare(surface);
+    surface.ctx.drawImage(base, 0, 0, doc.width, doc.height);
+    surface.dirty = false;
+    return surface;
+  }
+
+  private dropEraseBase(): void {
+    this.eraseBase = null;
+    this.eraseLayerId = null;
+  }
+
+  /**
+   * Forgets the in-flight stroke because the pixels it was drawn against are
+   * gone (document resize or raster-scale change). The next sample redraws the
+   * whole stroke and takes a fresh snapshot, so the live image keeps matching
+   * the stroke list instead of subtracting from rebuilt pixels.
+   */
+  private abandonStroke(): void {
+    this.activeStroke = null;
+    this.dropEraseBase();
+    this.clearStrokeBuffer();
   }
 
   private prepareStrokeBuffer(): void {

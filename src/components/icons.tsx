@@ -38,6 +38,16 @@ export function IconBrush(props: IconProps) {
   );
 }
 
+export function IconEraser(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 13.5h7.5" />
+      <path d="M9.6 2.9 3.4 9.1a1.4 1.4 0 0 0 0 2l1.5 1.5a1.4 1.4 0 0 0 2 0l6.2-6.2a1.4 1.4 0 0 0 0-2l-1.5-1.5a1.4 1.4 0 0 0-2 0z" />
+      <path d="M7.5 5 11 8.5" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>

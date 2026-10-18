@@ -51,7 +51,9 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 1 - The daily drawing loop
 
-- [ ] A reliable **eraser** with predictable compositing and brush options.
+- [x] A reliable **eraser** with predictable compositing and brush options.
+      Strikes subtract coverage (`destination-out`) instead of painting, share
+      the brush's size/opacity/pressure, are undoable, and survive save/reopen.
 - [x] Add, delete, rename, duplicate, reorder and select layers.
 - [x] Undoable layer operations and undoable layer visibility/opacity changes.
 - [x] Expected keyboard shortcuts (undo/redo, zoom, brush size, tool switch,
@@ -104,8 +106,10 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**The eraser** - a real tool with predictable compositing, pressure support and
-undo/redo - to complete the basic daily loop. Sampling and reverting knock-on
-work: the tool registry/definitions, the tool options panel, the rasterizer
-(an eraser stroke must subtract coverage rather than paint colour), and the
-stroke record (so a saved file reopens with eraser strokes intact).
+**The colour picker** (Phase 2, first item): a real eyedropper that samples the
+composited document or the active layer and sets the brush colour. The pieces it
+needs are known: a renderer read that returns pixels for a document point
+(today the renderer only writes), a hit-test-safe "pick while the canvas is
+transparent" rule, the tool definition/tool-options wiring, and an honest
+account of colour precision (the surfaces are `sRGB` `8-bit` per channel, so a
+picked colour is what is on screen, not what was mathematically authored).

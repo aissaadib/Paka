@@ -4,6 +4,7 @@ import {
   MAX_INTERPOLATED_POINTS,
   MAX_INTERPOLATION_DISTANCE,
   StrokeBuilder,
+  cloneStroke,
   createStrokeRecord,
 } from "../core/brushes/strokeBuilder";
 import type { BrushSettings } from "../types/brush";
@@ -96,5 +97,22 @@ describe("StrokeBuilder", () => {
     const builder = createBuilder();
     builder.addSample(sample(0, 0, 1, 0));
     expect(builder.finish()).toBe(builder.stroke);
+  });
+
+  it("marks a stroke as an eraser only when asked", () => {
+    expect(createStrokeRecord("layer-1", DEFAULT_BRUSH).erase).toBe(false);
+    expect(createStrokeRecord("layer-1", DEFAULT_BRUSH, true).erase).toBe(true);
+  });
+});
+
+describe("cloneStroke", () => {
+  it("keeps the erase flag and gives the copy a fresh id", () => {
+    const source = createStrokeRecord("layer-1", DEFAULT_BRUSH, true);
+    const copy = cloneStroke(source, "layer-2");
+
+    expect(copy.erase).toBe(true);
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.layerId).toBe("layer-2");
+    expect(copy.brush).not.toBe(source.brush);
   });
 });

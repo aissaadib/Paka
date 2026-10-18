@@ -62,11 +62,20 @@ export interface StrokeSource {
  * Arrays are structure-of-arrays on purpose. Appending numbers to `xs`/`ys`
  * during capture allocates no per-sample objects, which keeps the input hot
  * path free of garbage. Sample `i` is `(xs[i], ys[i], pressures[i], times[i])`.
+ *
+ * A stroke is self-describing: it carries the brush it was drawn with and
+ * whether it added or removed coverage, so re-rasterizing a layer after undo,
+ * reopen or resize reproduces the pixels without consulting tool state.
  */
 export interface StrokeRecord {
   readonly id: string;
   readonly layerId: LayerId;
   readonly brush: BrushSettings;
+  /**
+   * True when this stroke erased instead of painted. Absent means paint, which
+   * keeps brush strokes and older project files free of a redundant field.
+   */
+  readonly erase?: boolean;
   readonly xs: number[];
   readonly ys: number[];
   readonly pressures: number[];

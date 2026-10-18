@@ -34,6 +34,13 @@ export interface Tool {
   readonly definition: ToolDefinition;
   /** CSS cursor to use while this tool is active. */
   readonly cursor: string;
+  /**
+   * True when the strokes this tool captures *remove* coverage from the layer
+   * instead of adding it. The engine stamps each stroke with it, so a stroke
+   * stays self-describing: reopened files and re-rasterized layers know whether
+   * to paint or to subtract.
+   */
+  readonly erases?: boolean;
   onPointerDown(context: ToolContext, sample: PointerSample): void;
   onPointerMove(context: ToolContext, sample: PointerSample): void;
   onPointerUp(context: ToolContext, sample: PointerSample): void;

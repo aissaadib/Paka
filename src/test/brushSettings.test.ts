@@ -75,17 +75,19 @@ describe("brush configuration", () => {
 
 describe("tool definitions", () => {
   it("lists the implemented tools only", () => {
-    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual(["brush", "pan"]);
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual(["brush", "eraser", "pan"]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
+    expect(getToolDefinition("eraser").shortcut).toBe("E");
   });
 
   it("resolves shortcuts case-insensitively and ignores unknown keys", () => {
     expect(findToolByShortcut("b")?.id).toBe("brush");
-    expect(findToolByShortcut("H")?.id).toBe("pan");
+    expect(findToolByShortcut("E")?.id).toBe("eraser");
+    expect(findToolByShortcut("h")?.id).toBe("pan");
     expect(findToolByShortcut("x")).toBeUndefined();
   });
 
   it("throws for an unknown tool id", () => {
-    expect(() => getToolDefinition("eraser" as "brush")).toThrow(/Unknown tool id/);
+    expect(() => getToolDefinition("smudge" as "brush")).toThrow(/Unknown tool id/);
   });
 });

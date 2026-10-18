@@ -32,7 +32,9 @@ export function BrushCursor() {
   useEffect(() => {
     const element = elementRef.current;
     if (element) {
-      element.style.display = toolId === "brush" ? "block" : "none";
+      // The eraser has the same footprint as the brush, so the same outline
+      // tells the user how much paper one pass will remove.
+      element.style.display = toolId === "brush" || toolId === "eraser" ? "block" : "none";
     }
   }, [toolId]);
 

@@ -33,8 +33,16 @@ import type { BrushSettings } from "../../types/brush";
 import { reserveId } from "../../utils/id";
 
 export const PROJECT_FORMAT_ID = "paka-project";
-/** Bump when the shape of the file changes in a way older readers cannot read. */
-export const PROJECT_VERSION = 1;
+/**
+ * Version 1: metadata plus brush strokes.
+ * Version 2: strokes may carry `erase: true` (an eraser stroke subtracts
+ * coverage). A version-1 reader would paint such a stroke instead of removing
+ * it - the drawing would come out different, not merely incomplete - so the
+ * version was bumped. Version-1 files still open, and are written back as 2.
+ *
+ * Bump when the shape of the file changes in a way older readers cannot read.
+ */
+export const PROJECT_VERSION = 2;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -43,6 +51,8 @@ export interface SerializedStroke {
   readonly id: string;
   readonly brush: BrushSettings;
   readonly startTime: number;
+  /** Present and true only for eraser strokes; absent means a brush stroke. */
+  readonly erase?: boolean;
   readonly xs: readonly number[];
   readonly ys: readonly number[];
   readonly pressures: readonly number[];
@@ -168,6 +178,9 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         id: stroke.id,
         brush: stroke.brush,
         startTime: stroke.startTime,
+        // Only eraser strokes carry the flag, so brush-only drawings stay
+        // byte-identical to what version 2 wrote before erasers existed.
+        ...(stroke.erase === true ? { erase: true as const } : {}),
         xs: stroke.xs,
         ys: stroke.ys,
         pressures: stroke.pressures,
@@ -304,10 +317,16 @@ function readProject(text: string, maxSamples: number): ParsedProject {
 
       sampleCount += xs.length;
 
+      const erase =
+        stroke.erase === undefined ? false : readBoolean(stroke.erase, `${strokeLabel} erase flag`);
+
       strokes.push({
         id: readId(stroke.id, "stroke"),
         layerId: id,
         brush: readBrush(stroke.brush, strokeLabel),
+        // Only eraser strokes carry the flag: `erase: false` and "no flag" mean
+        // the same thing, and old files have no flag at all.
+        ...(erase ? { erase: true as const } : {}),
         xs,
         ys,
         pressures,

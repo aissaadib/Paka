@@ -135,6 +135,34 @@ describe("serialize and loadProject", () => {
     expect(reopened.getState().file).toEqual({ path: "C:\\art\\cat.paka", dirty: false });
   });
 
+  it("round-trips eraser strokes as erasers", () => {
+    const engine = new DrawingEngine();
+    paintStroke(engine, 0);
+    engine.setTool("eraser");
+    paintStroke(engine, 10);
+    const text = engine.serialize();
+
+    const reopened = new DrawingEngine();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    reopened.loadProject(parsed.project, null);
+
+    // The erasure survives as an erasure: reopening must not turn it into paint.
+    const strokes = reopened.listStrokes(activeLayerId(reopened));
+    expect(strokes).toHaveLength(2);
+    expect(strokes.map((stroke) => stroke.erase === true)).toEqual([false, true]);
+    expect(reopened.getState().history.undoLabel).toBe("Erase");
+
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))).toHaveLength(1);
+    // Undo/redo keeps the erasure an erasure.
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[1].erase).toBe(true);
+  });
+
   it("rebuilds one undoable step per loaded stroke", () => {
     const engine = new DrawingEngine();
     paintStroke(engine, 0);

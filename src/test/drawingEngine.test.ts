@@ -158,6 +158,39 @@ describe("DrawingEngine stroke capture", () => {
     expect(engine.getState().history).toMatchObject({ depth: 1, canUndo: true, undoLabel: "Stroke" });
   });
 
+  it("records eraser strokes as erasers, and only those", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("eraser");
+    expect(engine.getCursor()).toBe("none");
+
+    engine.beginStroke(createSample({ docX: 20, docY: 20 }));
+    engine.extendStroke(createSample({ docX: 80, docY: 60, timeStamp: 16 }));
+    engine.finishStroke();
+
+    const erased = engine.listStrokes(layerId)[0];
+    expect(erased.erase).toBe(true);
+    expect(engine.getState().history).toMatchObject({ undoLabel: "Erase" });
+
+    engine.setTool("brush");
+    engine.beginStroke(createSample({ docX: 20, docY: 40 }));
+    engine.extendStroke(createSample({ docX: 80, docY: 40, timeStamp: 32 }));
+    engine.finishStroke();
+
+    // Back on the brush the same gesture paints, and the label says so.
+    expect(engine.listStrokes(layerId)[1].erase).toBe(false);
+    expect(engine.getState().history).toMatchObject({ depth: 2, undoLabel: "Stroke" });
+
+    // The erasure is a normal history entry: undoing it removes the stroke.
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toEqual([erased]);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)[0].erase).toBe(true);
+  });
+
   it("does not publish React-facing state while drawing", () => {
     const engine = createEngine();
     const listener = vi.fn();

@@ -120,6 +120,22 @@ describe("serializeProject", () => {
 
     expect(serializeProject(document, store)).toBe(serializeProject(document, store));
   });
+
+  it("writes the erase flag only for eraser strokes", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const paint = strokeFor(layerId);
+    const erase = strokeFor(layerId, { erase: true });
+
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [paint, erase]]])),
+    ) as { layers: { strokes: Record<string, unknown>[] }[] };
+
+    // A brush stroke stays exactly as version 2 wrote it before erasers existed,
+    // so brush-only drawings diff cleanly against older saves.
+    expect("erase" in payload.layers[0].strokes[0]).toBe(false);
+    expect(payload.layers[0].strokes[1].erase).toBe(true);
+  });
 });
 
 describe("parseProject round trip", () => {
@@ -166,6 +182,46 @@ describe("parseProject round trip", () => {
     expect(parsed.project.strokes).toEqual([]);
   });
 
+  it("restores eraser strokes as erasers, not as paint", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const paint = strokeFor(layerId);
+    const erase = strokeFor(layerId, { erase: true, startTime: 500 });
+    const parsed = parseProject(serializeProject(document, storeOf([[layerId, [paint, erase]]])));
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    // Painting order is preserved, and the flag survives the round trip.
+    expect(parsed.project.strokes).toEqual([paint, erase]);
+    expect(parsed.project.strokes[1].erase).toBe(true);
+    expect("erase" in parsed.project.strokes[0]).toBe(false);
+  });
+
+  it("opens version 1 files, whose strokes all painted", () => {
+    const { document, bottom, top, bottomStrokes, topStrokes } = sampleProject();
+    const payload = JSON.parse(
+      serializeProject(
+        document,
+        storeOf([
+          [bottom.id, bottomStrokes],
+          [top.id, topStrokes],
+        ]),
+      ),
+    ) as { version: number };
+    payload.version = 1;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes).toEqual([...bottomStrokes, ...topStrokes]);
+    expect(parsed.project.strokes.every((stroke) => stroke.erase === undefined)).toBe(true);
+  });
+
   it("accepts a byte order mark", () => {
     const { text } = sampleProject();
     expect(parseProject(`\uFEFF${text}`).ok).toBe(true);
@@ -201,6 +257,7 @@ interface RawStroke {
   id: string;
   brush: unknown;
   startTime: number;
+  erase?: unknown;
   xs: unknown[];
   ys: unknown[];
   pressures: unknown[];
@@ -382,6 +439,15 @@ describe("parseProject rejections", () => {
     expect(
       rejectionOf(mutate((project) => (project.layers[0].strokes[0].brush = undefined))),
     ).toContain("must be an object");
+  });
+
+  it("refuses an erase flag that is not a boolean", () => {
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].strokes[0].erase = "yes"))),
+    ).toContain("erase flag");
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].strokes[0].erase = 1))),
+    ).toContain("erase flag");
   });
 
   it("refuses a project with more samples than the ceiling", () => {

@@ -35,11 +35,16 @@ export const MIN_SPACING_STEP = 0.75;
  * so undo/redo re-rasterizes exactly what was drawn, even if the user changes
  * brush settings afterwards.
  */
-export function createStrokeRecord(layerId: LayerId, brush: BrushSettings): StrokeRecord {
+export function createStrokeRecord(
+  layerId: LayerId,
+  brush: BrushSettings,
+  erase = false,
+): StrokeRecord {
   return {
     id: createId("stroke"),
     layerId,
     brush: { ...brush },
+    erase,
     xs: [],
     ys: [],
     pressures: [],
@@ -58,6 +63,7 @@ export function cloneStroke(stroke: StrokeRecord, layerId: LayerId = stroke.laye
     id: createId("stroke"),
     layerId,
     brush: { ...stroke.brush },
+    erase: stroke.erase,
     xs: [...stroke.xs],
     ys: [...stroke.ys],
     pressures: [...stroke.pressures],

@@ -117,7 +117,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, stroke store | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke command, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -134,7 +134,7 @@ touch Canvas 2D.
 
 ## Rendering pipeline
 
-`Canvas2DRenderer` owns three kinds of canvas:
+`Canvas2DRenderer` owns three kinds of canvas, plus one temporary:
 
 1. **The display canvas** - the element in the DOM. Its backing store is
    `CSS size * devicePixelRatio`.
@@ -142,6 +142,9 @@ touch Canvas 2D.
    layer pixels actually live.
 3. **One stroke buffer** - same resolution as a surface, holding the stroke
    currently under the pointer.
+4. **An erase snapshot** - a copy of the active layer taken when an *erasing*
+   stroke begins, allocated only while one is in flight (see
+   [Eraser strokes](#eraser-strokes)).
 
 A frame (`render()`) does, in order:
 
@@ -150,7 +153,10 @@ A frame (`render()`) does, in order:
 3. fill the paper with the document background,
 4. composite each **visible** layer with `opacity > 0`, bottom-first, applying
    the layer's blend mode and alpha,
-5. composite the in-progress stroke buffer on top, at the stroke's own opacity,
+5. composite the in-progress stroke buffer on top, at the stroke's own opacity -
+   unless the stroke erases, in which case the layer composited in step 4
+   *already contains* the erasure, so drawing the buffer would paint the erased
+   coverage back,
 6. stroke a hairline document border whose width is `1 / scale`, so it is
    exactly one device pixel at any zoom.
 
@@ -193,6 +199,59 @@ its first sample, the buffer is cleared and the stroke redrawn from scratch
 already identical to a full re-rasterization. Live drawing and the pixels that
 undo, reopen and export produce are therefore the same, which is asserted
 against the real display canvas, not just the draw-call stream.
+
+### Eraser strokes
+
+An eraser is a brush whose strokes **subtract** coverage instead of adding it.
+The stroke record is the same shape, carrying `erase: true` (see
+`docs/PROJECT_FORMAT.md`), so a saved file and a re-rasterized layer both know
+how to reproduce it. The tool itself is the same `BrushTool` instance
+parameterised with the eraser's definition and `erases: true`; the engine stamps
+`erase` onto the stroke it captures, which keeps the decision in the tool and
+the stroke self-describing.
+
+Subtracting is `destination-out` when the buffer composites into the layer, at
+the stroke's own opacity. Painting does `source-over` at the same point, so
+"one stroke, one alpha" holds for both tools: a half-opacity eraser removes half
+the covered alpha, and going over the same area twice within one stroke does not
+remove more than going over it once.
+
+That last property is why an erasing stroke keeps a **snapshot** of the layer's
+pixels from before the stroke. `destination-out` is not idempotent for partial
+alpha: applying it twice to the same pixel removes more each time, so an eraser
+that crosses itself would erase twice as hard at the crossing. Painting does not
+have this problem, because the *buffer* accumulates full coverage and the alpha
+is applied once. For erasing, the equivalent is to rebuild the layer from a fixed
+base on every update:
+
+```
+surface = snapshot;                    // clear + drawImage(snapshot)
+surface @ destination-out alpha = ...  // drawImage(stroke buffer)
+```
+
+The same snapshot makes cancellation exact. While an erasing stroke is in flight
+the layer holds *snapshot minus the stroke*, which is not what the stroke list
+says; `cancelStroke` therefore restores from the snapshot rather than trying to
+paint the erasure back (compositing the snapshot `source-over` would not restore
+erased pixels, it would only raise their alpha again, leaving a halo exactly
+where the erase had been). `endStroke`, by contrast, does nothing at all: the
+layer is already correct, and the stroke is about to enter the store.
+
+Re-rasterization takes the same path as painting, differing only in the
+composite operation per stroke:
+
+```
+for stroke in layer.strokes:
+  rasterizeStrokeToBuffer(stroke)
+  compositeStrokeBuffer(surface, strokeOpacity(...),
+                        stroke.erase ? "destination-out" : "source-over")
+```
+
+Because each stroke composites once, in order, the rebuilt pixels match what
+live drawing produced - the same guarantee the starter-dab rule enforces for
+painting. The cost of the snapshot is one extra surface-sized canvas while an
+erasing stroke is in flight; it is allocated lazily, reused across strokes, and
+dropped when the stroke ends, is cancelled, or the document is replaced.
 
 ### Dirty surfaces
 
@@ -306,14 +365,16 @@ the menus and buttons do.
 
 ## Native boundary (Rust)
 
-`src-tauri` currently contains one command, `native_environment()`, returning
-the compiled-in OS, architecture and crate version (`serde` camelCase). Its job
-is to prove the IPC bridge is wired and to let the status bar report the real
-host instead of guessing. `useNativeEnvironment` shows `native unavailable`
-when the frontend runs outside Tauri.
+`src-tauri` holds the project file I/O: `read_text_file`,
+`write_text_file_atomic`, `write_binary_file_atomic` (all path-validating,
+extension-restricted and size-capped) plus `native_environment()`, which returns
+the compiled-in OS, architecture and crate version so the status bar can report
+the real host instead of guessing. `useNativeEnvironment` shows
+`native unavailable` when the frontend runs outside Tauri.
 
-The template's unused `tauri-plugin-opener` dependency was removed. The native
-side is intentionally thin: nothing was moved into Rust pre-emptively.
+The native side is intentionally thin: nothing was moved into Rust
+pre-emptively, and the file commands exist because the WebView has no filesystem
+access at all.
 
 ## Replacing Canvas 2D with WebGL/WebGPU
 
@@ -363,8 +424,13 @@ DOM-free by design.
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
   no-ops) are asserted on the draw-call stream, including that a stroke reaches
-  both the display and the layer at its own alpha exactly once. Real pixel
-  coverage is out of scope for the unit suite.
+  both the display and the layer at its own alpha exactly once. The eraser suite
+  pins down the same stream for `erase: true` strokes: re-rasterization
+  subtracts with `destination-out`, a live eraser stroke rebuilds its layer from
+  the pre-stroke snapshot on every update (restore and subtract alternate, so a
+  crossing stroke erases once), cancellation restores the snapshot, and the
+  display never paints the eraser buffer. Real pixel coverage is out of scope for
+  the unit suite.
 
 Behaviour that only exists in a browser or a real window is verified manually
 against the running app (composited pixels on the display canvas, layer
@@ -373,16 +439,30 @@ document dialog, the native status bar). Stroke compositing is verified that way
 against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
 that retraces itself is pixel-identical in its retraced and single-covered
 parts, two separate strokes that overlap do build up, and the live composite
-matches the one rebuilt from the stroke list after undo/redo exactly. What has
-and has not been verified is reported separately rather than being implied by
-the test count.
+matches the one rebuilt from the stroke list after undo/redo exactly. The eraser
+is verified the same way, by sampling the PNG produced by the app's own export
+path: a full-opacity pass across a stroke reads back as pure paper (`255,255,255`)
+with no halo, a half-opacity pass reads back as exactly the 50% blend
+(`139,140,142` for `#16181c` over white), a stroke that retraces itself within one
+stroke removes exactly as much as a single pass, undo restores the covered pixels
+bit-for-bit and redo re-applies them, and a save/reopen round trip reproduces
+every sampled pixel. The same harness confirms the format guard in the running
+app: a file from a newer version is refused with a message and the open drawing
+is left untouched, while a version-1 file opens with its strokes painted (a
+version-1 file has no erasures to lose). What has and has not been verified is
+reported separately rather than being implied by the test count.
 
 ## Known limitations
 
 These are real gaps, not footnotes:
 
-- **Tools**: only `brush` and `pan`. There is no eraser, selection, transform or
-  fill tool.
+- **Tools**: only `brush`, `eraser` and `pan`. There is no selection, transform
+  or fill tool.
+- **An eraser stroke costs one extra surface-sized canvas** while it is in
+  flight (its pre-stroke snapshot). It is allocated lazily and released when the
+  stroke ends, but on a very large document it is a visible memory spike next to
+  the stroke buffer. Erasing inside a GPU backend becomes a blend mode, and the
+  snapshot disappears.
 - **Layer selection is not undoable.** Every layer *edit* is - add, duplicate,
   delete, rename, reorder, visibility and opacity - but selecting a layer
   changes no pixels and is deliberately not a history step.

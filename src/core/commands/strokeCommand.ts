@@ -43,7 +43,7 @@ export function createStrokeCommand(
 ): Command {
   return {
     id: createId("cmd"),
-    label: "Stroke",
+    label: stroke.erase === true ? "Erase" : "Stroke",
     apply(): void {
       host.insert(stroke, index);
       host.refresh(stroke.layerId);

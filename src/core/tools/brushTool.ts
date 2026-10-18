@@ -4,6 +4,10 @@
  * The tool owns no pixels and no samples — the engine holds the stroke data and
  * the renderer draws it. Cancellation commits whatever was drawn, because the
  * pixels are real once they have been rasterized into the stroke buffer.
+ *
+ * The same behaviour drives the eraser, which is a brush whose strokes subtract
+ * coverage: the pointer handling, the pressure policy and the sampling are
+ * identical, so the two tools differ only in their definition and in `erases`.
  */
 
 import type { PointerSample } from "../../types/pointer";
@@ -11,9 +15,15 @@ import type { ToolContext, Tool } from "./types";
 import { BRUSH_TOOL } from "./toolDefinitions";
 
 export class BrushTool implements Tool {
-  readonly definition = BRUSH_TOOL;
+  readonly definition: Tool["definition"];
   /** The brush outline overlay replaces the system cursor. */
   readonly cursor = "none";
+  readonly erases: boolean;
+
+  constructor(definition: Tool["definition"] = BRUSH_TOOL, erases = false) {
+    this.definition = definition;
+    this.erases = erases;
+  }
 
   onPointerDown(context: ToolContext, sample: PointerSample): void {
     if (sample.button !== 0) {

@@ -82,12 +82,13 @@ function createHarness(options: HarnessOptions = {}) {
 
 let strokeCounter = 0;
 
-function createStroke(layerId: LayerId, brush: BrushSettings = BRUSH): StrokeRecord {
+function createStroke(layerId: LayerId, brush: BrushSettings = BRUSH, erase = false): StrokeRecord {
   strokeCounter += 1;
   return {
     id: `stroke-${strokeCounter}`,
     layerId,
     brush,
+    erase,
     xs: [5, 25, 45],
     ys: [5, 20, 5],
     pressures: [0.5, 1, 0.5],
@@ -404,6 +405,223 @@ describe("Canvas2DRenderer compositing", () => {
 
     expect(harness.display.calls).toHaveLength(0);
     expect(harness.display.width).toBe(40);
+  });
+});
+
+describe("Canvas2DRenderer eraser", () => {
+  it("subtracts eraser strokes from the layer when re-rasterizing", () => {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    strokes.set(layerId, [
+      createStroke(layerId, { ...BRUSH, opacity: 0.5 }),
+      createStroke(layerId, BRUSH, true),
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const composites = surface.drawImages;
+
+    // Painting order within the layer is preserved: the stroke is added, then
+    // the eraser subtracts from what is already there.
+    expect(composites).toHaveLength(2);
+    expect(composites[0].composite).toBe("source-over");
+    expect(composites[0].alpha).toBe(0.5);
+    expect(composites[1].composite).toBe("destination-out");
+    expect(composites[1].alpha).toBe(1);
+    expect(composites[1].args.slice(1)).toEqual([0, 0, 100, 80]);
+
+    // The composite operation does not leak into whatever paints next.
+    surface.ctx.fillRect(0, 0, 1, 1);
+    expect(surface.named("fillRect")[0].composite).toBe("source-over");
+  });
+
+  it("subtracts a live eraser stroke from its layer and keeps it out of the display pass", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const erase = createStroke(layerId, BRUSH, true);
+    harness.renderer.beginStroke(erase);
+    // The snapshot is the last canvas the renderer allocates, and it is not the
+    // stroke buffer that holds the eraser's own coverage.
+    const snapshot = recording.allocated[recording.allocated.length - 1];
+    expect(snapshot).not.toBe(harness.strokeBuffer);
+
+    surface.calls.length = 0;
+    harness.renderer.extendStroke(erase, 0);
+
+    // The layer is rebuilt from the pre-stroke pixels, then the stroke is
+    // subtracted from them.
+    const images = surface.drawImages;
+    expect(images[0].args[0]).toBe(snapshot);
+    expect(images[0].composite).toBe("source-over");
+    expect(images[1].args[0]).toBe(harness.strokeBuffer);
+    expect(images[1].composite).toBe("destination-out");
+    expect(surface.named("clearRect").length).toBeGreaterThan(0);
+
+    // The erasure is already in the layer, so the display paints the layer
+    // alone - drawing the buffer on top would paint the erased coverage back.
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).toEqual([surface]);
+  });
+
+  it("rebuilds the layer from the snapshot on every update, so a crossing stroke erases once", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const erase = createStroke(layerId, BRUSH, true);
+    harness.renderer.beginStroke(erase);
+    const snapshot = recording.allocated[recording.allocated.length - 1];
+
+    surface.calls.length = 0;
+    harness.renderer.extendStroke(erase, 0);
+    erase.xs.push(60);
+    erase.ys.push(40);
+    erase.pressures.push(1);
+    erase.times.push(48);
+    harness.renderer.extendStroke(erase, 1);
+
+    // Restore and subtraction alternate: each update starts from the pixels as
+    // they were before the stroke, never from the previous subtraction. Applying
+    // `destination-out` twice to the same pixels would erase them twice as hard.
+    const images = surface.drawImages;
+    const order = images.map((call) => (call.args[0] === snapshot ? "restore" : "subtract"));
+    expect(order).toEqual(["restore", "subtract", "restore", "subtract"]);
+    expect(images.filter((call) => call.args[0] === snapshot).every((call) => call.composite === "source-over")).toBe(true);
+    expect(images.filter((call) => call.args[0] !== snapshot).every((call) => call.composite === "destination-out")).toBe(true);
+  });
+
+  it("restores the layer pixels when an eraser stroke is cancelled", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const erase = createStroke(layerId, BRUSH, true);
+    harness.renderer.beginStroke(erase);
+    const snapshot = recording.allocated[recording.allocated.length - 1];
+    harness.renderer.extendStroke(erase, 0);
+
+    surface.calls.length = 0;
+    harness.renderer.cancelStroke();
+
+    const images = surface.drawImages;
+    expect(images).toHaveLength(1);
+    expect(images[0].args[0]).toBe(snapshot);
+    expect(images[0].composite).toBe("source-over");
+    expect(surface.named("clearRect").length).toBeGreaterThan(0);
+
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
+  });
+
+  it("does not composite the eraser buffer again when the stroke ends", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const erase = createStroke(layerId, BRUSH, true);
+    harness.renderer.beginStroke(erase);
+    harness.renderer.extendStroke(erase, 0);
+    const before = surface.drawImages.length;
+
+    harness.renderer.endStroke(erase);
+
+    // The layer already holds the subtraction; committing must not paint the
+    // buffer on top of it.
+    expect(surface.drawImages).toHaveLength(before);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
+  });
+
+  it("re-anchors a live eraser stroke when the raster scale changes under it", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const erase = createStroke(doc.layers[0].id, BRUSH, true);
+    harness.renderer.beginStroke(erase);
+    harness.renderer.extendStroke(erase, 0);
+
+    // A HiDPI change drops and rebuilds every surface, so the snapshot the
+    // stroke was erasing against no longer describes the layer.
+    harness.renderer.setRasterScale(2);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
+
+    const rebuilt = recording.allocated[recording.allocated.length - 1];
+    expect(rebuilt.width).toBe(200);
+    rebuilt.calls.length = 0;
+
+    // The next sample redraws the whole stroke and takes a fresh snapshot of the
+    // rebuilt layer at the new scale, instead of subtracting from stale pixels.
+    erase.xs.push(60);
+    erase.ys.push(40);
+    erase.pressures.push(1);
+    erase.times.push(48);
+    harness.renderer.extendStroke(erase, 1);
+
+    const images = rebuilt.drawImages;
+    expect((images[0].args[0] as RecordingCanvas).width).toBe(200);
+    expect(images[0].composite).toBe("source-over");
+    expect(images[images.length - 1].args[0]).toBe(harness.strokeBuffer);
+    expect(images[images.length - 1].composite).toBe("destination-out");
+  });
+
+  it("applies the eraser's own opacity to the subtraction", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    const erase = createStroke(layerId, { ...BRUSH, opacity: 0.25 }, true);
+    harness.renderer.beginStroke(erase);
+    harness.renderer.extendStroke(erase, 0);
+
+    const subtraction = surface.drawImages.find(
+      (call) => call.args[0] === harness.strokeBuffer,
+    );
+    expect(subtraction?.composite).toBe("destination-out");
+    expect(subtraction?.alpha).toBe(0.25);
+
+    // The buffer itself still carries full coverage: the eraser's opacity is
+    // applied once, when the stroke is subtracted, not per segment.
+    expect(harness.strokeBuffer.named("stroke").every((call) => call.alpha === 1)).toBe(true);
   });
 });
 

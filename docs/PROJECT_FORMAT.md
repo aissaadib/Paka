@@ -34,7 +34,7 @@ changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 1,
+  "version": 2,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -67,6 +67,24 @@ changing the model.
           "ys": [200, 205.25, 210],
           "pressures": [0.62, 0.7, 0.55],
           "times": [0, 8.3, 16.9]
+        },
+        {
+          "id": "stroke-4",
+          "erase": true,
+          "brush": {
+            "size": 24,
+            "opacity": 1,
+            "color": "#16181c",
+            "pressureSize": 0,
+            "pressureOpacity": 0,
+            "minSizeRatio": 0.12,
+            "spacing": 0.12
+          },
+          "startTime": 1730000004000,
+          "xs": [104, 108],
+          "ys": [206, 240],
+          "pressures": [0.5, 0.5],
+          "times": [0, 9.1]
         }
       ]
     }
@@ -74,10 +92,13 @@ changing the model.
 }
 ```
 
+The second stroke is an eraser stroke: its `erase` flag makes it subtract coverage
+from the pixels painted before it instead of adding colour.
+
 ### `format`, `version`
 
 `format` must be exactly `"paka-project"`. `version` is the integer schema
-version described below.
+version described under [Versioning](#versioning).
 
 ### `document`
 
@@ -113,6 +134,7 @@ disagree with its own layer.
 | --- | --- | --- |
 | `id` | string | Stroke id. |
 | `brush` | object | The brush used, captured per stroke so later brush changes do not alter it. |
+| `erase` | boolean? | `true` only for eraser strokes, which subtract coverage from the layer instead of painting. Absent means paint. |
 | `startTime` | number | Timestamp of the first sample, for diagnostics; not used for rendering. |
 | `xs`, `ys` | number[] | Document-space centre of each sample. |
 | `pressures` | number[] | 0-1 per sample. |
@@ -122,6 +144,15 @@ The four sample arrays are parallel and must all have the same length. Samples
 are stored as the pointer produced them (already smoothed by `StrokeBuilder`);
 the file contains no interpolation state, so re-rasterizing from the file
 reproduces the stroke exactly.
+
+Strokes are applied in array order: a paint stroke composites its coverage at
+the brush's opacity, an eraser stroke subtracts its coverage at the same
+opacity. The order is therefore part of the drawing, and a reader must not
+reorder or drop strokes.
+
+An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
+Keeping the field means one brush shape describes both tools, and a stroke stays
+re-renderable if the brush model changes.
 
 ### `brush`
 
@@ -149,6 +180,7 @@ looks like:
 - document dimensions outside 8-8192, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
+- a non-boolean `erase` flag on a stroke;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
 - brush fields outside their ranges;
@@ -160,7 +192,9 @@ looks like:
 - an unusable `background` → white;
 - a missing/blank layer name → `"Layer N"`;
 - an `activeLayerId` that is not in the file → the bottom layer is selected;
-- a missing/non-numeric `startTime` → `0`.
+- a missing/non-numeric `startTime` → `0`;
+- a missing `erase` flag → the stroke paints (which is what every version-1
+  stroke does).
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
@@ -178,6 +212,11 @@ Two further guarantees:
 
 `version` is an integer starting at 1.
 
+| Version | Reading it | Writing it |
+| --- | --- | --- |
+| 1 | Metadata, layers and brush strokes. | - |
+| 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | The current version; what this build always writes. |
+
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
   what makes the format easy to extend.
@@ -186,6 +225,10 @@ Two further guarantees:
   with "created by a newer version of Paka" instead of mis-reading it.
 - **Downgrades are not supported.** A file written by a newer version is never
   opened by an older one; there is no lossy migration path.
+- **`erase` is why version 2 exists.** It is not an ignorable extra: a version-1
+  reader that skipped it would *paint* an eraser stroke, producing a visibly
+  different drawing. Refusing the file is the honest outcome, so the version was
+  bumped the moment the field could appear.
 
 `PROJECT_VERSION` in `projectFormat.ts` is the single source of truth for the
 version a build writes and the highest it reads.
@@ -238,7 +281,7 @@ The output has no border, no zoom and no surrounding UI.
 - **No compression.** Text JSON, so files are large for heavy drawings.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
-- **Version 1 has one blend mode**, so `blendMode` carries no information yet.
+- **The format has one blend mode**, so `blendMode` carries no information yet.
 - **No autosave and no recovery file.** An unclean exit loses unsaved work; the
   close guard is the only protection.
 - **Metadata is minimal**: no author, no timestamps, no thumbnails, no colour
