@@ -1,0 +1,91 @@
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+  normalizeBrush,
+  stepBrushSize,
+  updateBrushSettings,
+} from "../core/brushes/defaults";
+import { clamp, distance, fromLogPosition, lerp, roundTo, toLogPosition } from "../utils/math";
+import { findToolByShortcut, getToolDefinition, TOOL_DEFINITIONS } from "../core/tools/toolDefinitions";
+
+describe("math helpers", () => {
+  it("clamps and falls back for non-finite input", () => {
+    expect(clamp(5, 0, 1)).toBe(1);
+    expect(clamp(-5, 0, 1)).toBe(0);
+    expect(clamp(Number.NaN, 0, 1)).toBe(0);
+  });
+
+  it("interpolates and measures distance", () => {
+    expect(lerp(10, 20, 0.25)).toBe(12.5);
+    expect(distance(0, 0, 3, 4)).toBe(5);
+  });
+
+  it("rounds for display", () => {
+    expect(roundTo(1.23456, 2)).toBe(1.23);
+  });
+
+  it("round-trips a logarithmic slider position", () => {
+    for (const value of [1, 6, 42, 128, 512]) {
+      expect(fromLogPosition(toLogPosition(value, 1, 512), 1, 512)).toBeCloseTo(value, 6);
+    }
+    expect(toLogPosition(1, 1, 512)).toBe(0);
+    expect(toLogPosition(512, 1, 512)).toBeCloseTo(1, 9);
+    expect(toLogPosition(0, 1, 512)).toBe(0);
+  });
+});
+
+describe("brush configuration", () => {
+  it("clamps every numeric field", () => {
+    const normalized = normalizeBrush({
+      size: 10_000,
+      opacity: 4,
+      color: "  ",
+      pressureSize: -3,
+      pressureOpacity: 9,
+      minSizeRatio: 0,
+      spacing: 100,
+    });
+    expect(normalized.size).toBe(MAX_BRUSH_SIZE);
+    expect(normalized.opacity).toBe(1);
+    expect(normalized.color).toBe(DEFAULT_BRUSH.color);
+    expect(normalized.pressureSize).toBe(0);
+    expect(normalized.pressureOpacity).toBe(1);
+    expect(normalized.minSizeRatio).toBe(0.02);
+    expect(normalized.spacing).toBe(2);
+  });
+
+  it("applies a patch without mutating the current settings", () => {
+    const next = updateBrushSettings(DEFAULT_BRUSH, { size: 40, color: "#ff0000" });
+    expect(next.size).toBe(40);
+    expect(next.color).toBe("#ff0000");
+    expect(DEFAULT_BRUSH.size).toBe(6);
+  });
+
+  it("steps size finely for small brushes and proportionally for large ones", () => {
+    expect(stepBrushSize(6, 1)).toBe(7);
+    expect(stepBrushSize(6, -1)).toBe(5);
+    expect(stepBrushSize(100, 1)).toBe(110);
+    expect(stepBrushSize(100, -1)).toBe(90);
+    expect(stepBrushSize(MIN_BRUSH_SIZE, -1)).toBe(MIN_BRUSH_SIZE);
+    expect(stepBrushSize(MAX_BRUSH_SIZE, 1)).toBe(MAX_BRUSH_SIZE);
+  });
+});
+
+describe("tool definitions", () => {
+  it("lists the implemented tools only", () => {
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual(["brush", "pan"]);
+    expect(getToolDefinition("brush").shortcut).toBe("B");
+  });
+
+  it("resolves shortcuts case-insensitively and ignores unknown keys", () => {
+    expect(findToolByShortcut("b")?.id).toBe("brush");
+    expect(findToolByShortcut("H")?.id).toBe("pan");
+    expect(findToolByShortcut("x")).toBeUndefined();
+  });
+
+  it("throws for an unknown tool id", () => {
+    expect(() => getToolDefinition("eraser" as "brush")).toThrow(/Unknown tool id/);
+  });
+});

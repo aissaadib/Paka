@@ -1,0 +1,151 @@
+# Paka
+
+A desktop raster drawing application: a Tauri 2 shell around a small, modular
+drawing engine written in React + TypeScript, with HTML Canvas 2D as the current
+raster backend.
+
+This is the **foundation** of the app, not a finished product. You can draw
+pressure-sensitive strokes, change brush size and colour, pan and zoom, manage
+layers with working undo/redo for strokes, and **save, reopen and export your
+work as a project file or a PNG**. Several things are explicitly missing; see
+[Known limitations](#known-limitations).
+
+## What works
+
+- **Drawing** with a mouse, pen or touch. Pointer Events, pressure-sensitive
+  width and opacity, round joins and caps.
+- **Brush controls**: size (1-512 px, in document pixels), opacity, colour
+  (picker plus an 8-swatch palette), and toggles for pressure-driven size and
+  pressure-driven opacity.
+- **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
+  `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
+  moves the canvas. Zoom buttons, actual size and fit-to-window.
+- **Layers**: add, delete, rename (double-click), reorder, visibility, opacity,
+  and selection. Layer pixels composite bottom-first over the paper colour.
+- **Undo/redo** at stroke granularity, from the toolbar, the Edit menu and
+  `Ctrl+Z` / `Ctrl+Shift+Z`. History is capped at 200 commands.
+- **New document** dialog with size validation (8-8192 px per side).
+- **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
+  `Ctrl+Shift+S`) writing a versioned `.paka` file that stores document
+  metadata and **stroke data**, so reopening a file restores an editable
+  drawing rather than a flattened picture. Native open/save dialogs, an unsaved
+  changes indicator in the title and status bar, a discard warning before new,
+  open or close, and atomic writes that never leave a half-written file.
+- **PNG export** (`File → Export PNG…`) of the full composite at document size,
+  including layer visibility and opacity, without touching the editable
+  document.
+- **Status bar** reporting document size, zoom, history depth, the live cursor
+  position in document coordinates, the current file name and file messages.
+- **HiDPI** rendering: layer surfaces are rasterized at up to 2x and the display
+  canvas follows the device pixel ratio, while document geometry stays fixed.
+
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| Shell | Tauri 2 (native WebView; no Electron, no Qt) |
+| UI | React 19 + TypeScript (strict) |
+| Build | Vite |
+| State | A single engine instance shared through React context; no state library |
+| Raster | HTML Canvas 2D behind a `DrawingRenderer` interface |
+| Native | Rust: environment probe, scoped project/PNG file I/O, dialog plugin |
+| Tests | Vitest (Node environment) |
+
+## Getting started
+
+Requirements: **Node 20+**, **pnpm 9+** and a **Rust toolchain 1.85+**.
+
+```bash
+pnpm install
+pnpm dev            # frontend only, http://localhost:1420
+pnpm tauri dev      # the real desktop app
+```
+
+### Scripts
+
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Vite dev server for the frontend (no native APIs) |
+| `pnpm tauri dev` | Runs the Tauri desktop app against the dev server |
+| `pnpm build` | Type-checks the whole project, then builds the frontend bundle |
+| `pnpm typecheck` | `tsc --noEmit` over `src` |
+| `pnpm test` | Vitest run |
+| `pnpm test:watch` | Vitest in watch mode |
+| `pnpm tauri build` | Production desktop bundle |
+
+### Building on Windows without MSVC
+
+The build works with Rust's `x86_64-pc-windows-gnu` target, which needs a
+complete MinGW-w64 installation (rustup's bundled `dlltool` cannot link on its
+own). This project was developed against **WinLibs POSIX/MSVCRT** installs of
+`gcc`/`ld`/`dlltool`, selected through a machine-local `~/.cargo/config.toml`
+that points the target linker at that installation.
+
+Pin the **MSVCRT** flavour, not the UCRT one: the `windows-gnu` target is
+MSVCRT-based and the UCRT flavour links but produces load-time failures.
+
+## Project layout
+
+```
+src/
+  app/          entry point, provider wiring, global styles
+  components/   presentational shell (menu bar, toolbars, panels, icons)
+  features/     feature UI (canvas, brushes, colour, layers, history, document,
+                project: file commands, dialogs, title and close guard)
+  hooks/        React bindings for the engine
+  state/        the editor store and context holding the engine instance
+  core/
+    document/   document + layer metadata, stroke store
+    brushes/    brush defaults, stroke sample processing
+    tools/      tool registry and per-tool behaviour
+    commands/   command stack and the stroke command
+    input/      pointer normalization and DOM binding
+    rendering/  viewport math, frame scheduler, Canvas 2D renderer
+    engine/     integration of all of the above
+    project/    project file format, gateway port, file orchestration
+    export/     full-document PNG export
+  types/        shared value types
+  utils/        generic helpers
+src-tauri/      Rust shell: native environment probe and project/PNG I/O
+docs/           architecture notes and the project file format
+```
+
+Module boundaries, coordinate spaces, the rendering and input pipelines, the
+undo model and the path to a WebGL/WebGPU backend are documented in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The `.paka` file format, its
+validation rules, the atomic write strategy and the PNG export contract are
+documented in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md).
+
+## Known limitations
+
+- Only the **brush** and **pan** tools exist. No eraser, selection, fill or
+  transform.
+- **Layer operations are not undoable** - only strokes are. The command stack
+  supports it; the layer commands are not written yet.
+- Only the **`normal`** blend mode is implemented.
+- A semi-transparent stroke can show slight darkening where its segments
+  overlap, because opacity is applied per segment rather than once per stroke.
+- Strokes are rasterized per segment on the CPU. It holds up at the sizes
+  tested; it is the first thing to move behind the renderer interface if it does
+  not.
+- **A project file stores stroke samples, not pixels.** That keeps drawings
+  editable, but the JSON grows with the number of points: a long, heavily
+  sampled drawing can produce a file tens of megabytes in size. A compressed or
+  binary container is the natural v2 (the format is versioned, and the parser
+  refuses versions it does not know).
+- **Only one project version exists** (`version: 1`). Unknown versions, wrong
+  formats and unreadable files are rejected with a message instead of being
+  partially loaded.
+- Undo history is **not** part of the file. Reopening a project rebuilds one
+  undoable step per stored stroke, so the drawing stays editable, but there is
+  no redo of edits made before the save.
+- There is **no autosave or crash recovery**: unsaved work is lost if the app or
+  the machine goes down.
+- A pointer press inside the canvas viewport but **outside the document
+  rectangle** still records a stroke; its samples lie outside the document and
+  therefore do not show up in the composite. Clamping or ignoring such input is
+  not implemented.
+- `Ctrl+N` is not bound; use `File → New Document…`.
+- The React layer has **no automated tests**; it is verified manually in the
+  running app. The format, file-service and export orchestration have Vitest
+  coverage, and the Rust file I/O has `#[cfg(test)]` tests in `project_io.rs`.

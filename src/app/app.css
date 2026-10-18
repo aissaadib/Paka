@@ -1,0 +1,334 @@
+/** Application shell: menu bar, toolbar, tool rail, canvas, panels, status bar. */
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 30px 34px 1fr 22px;
+  height: 100%;
+  background: var(--bg-app);
+}
+
+.workspace-body {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 216px;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- menu bar */
+
+.menu-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.menu-bar__brand {
+  margin-right: 10px;
+  color: var(--text-dim);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: var(--control-height-sm);
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.menu__trigger:hover,
+.menu__trigger.is-open {
+  background: var(--bg-raised-hover);
+}
+
+.menu__popup {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 30;
+  min-width: 184px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  height: var(--control-height-sm);
+  padding: 0 8px;
+  border-radius: 2px;
+  text-align: left;
+}
+
+.menu__item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.menu__shortcut {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.menu__separator {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--border);
+}
+
+/* ----------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar__divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+}
+
+.toolbar__spacer {
+  flex: 1;
+}
+
+.toolbar__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.brush-controls {
+  gap: 12px;
+}
+
+.color-controls {
+  gap: 8px;
+}
+
+.color-controls__picker {
+  width: 28px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+.color-controls__palette {
+  display: grid;
+  grid-template-columns: repeat(4, 14px);
+  grid-auto-rows: 14px;
+  gap: 2px;
+}
+
+.color-controls__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.color-controls__swatch.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ---------------------------------------------------------------- tool rail */
+
+.tool-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------ canvas stage */
+
+.canvas-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-workspace);
+  overflow: hidden;
+}
+
+.canvas-stage__surface {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  /* Replaced imperatively by the active tool's cursor (see CanvasStage). */
+  cursor: crosshair;
+}
+
+.brush-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.status-bar__dirty {
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.status-bar__unsaved {
+  color: var(--text-dim);
+}
+
+.status-bar__message {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.status-bar__message.is-error {
+  color: var(--danger);
+}
+
+.status-bar__dismiss {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 3px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.status-bar__dismiss:hover {
+  color: var(--text-strong);
+}
+
+.status-bar__spacer {
+  flex: 1;
+}
+
+.status-bar__readout {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ dialog */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.dialog {
+  width: 320px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dialog__title {
+  color: var(--text-strong);
+}
+
+.dialog__row {
+  display: flex;
+  gap: 10px;
+}
+
+.dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  color: var(--text-dim);
+}
+
+.dialog__field .text-input {
+  width: 100%;
+}
+
+.dialog__note,
+.dialog__error {
+  margin: 0;
+  font-size: 11px;
+}
+
+.dialog__note {
+  color: var(--text-dim);
+}
+
+.dialog__error {
+  color: var(--danger);
+}
+
+.dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

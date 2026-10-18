@@ -1,0 +1,144 @@
+/**
+ * A Canvas 2D stand-in for tests that must run in plain Node.
+ *
+ * `RecordingCanvas` logs every draw call together with the state
+ * (`globalAlpha`, composite operation, `fillStyle`, `lineWidth`) that was live
+ * when the call was made. That is enough to pin down compositing rules without a
+ * real rasterizer: which canvas was painted, in what order, at what alpha, with
+ * which transform.
+ *
+ * `installRecordingDocument` wires it up as `globalThis.document`, because both
+ * the renderer and the PNG export create canvases with `document.createElement`.
+ */
+
+/** Context members the renderer, the stroke rasterizer and export actually call. */
+export const RECORDED_METHODS = [
+  "save",
+  "restore",
+  "setTransform",
+  "clearRect",
+  "fillRect",
+  "drawImage",
+  "beginPath",
+  "moveTo",
+  "lineTo",
+  "arc",
+  "fill",
+  "stroke",
+  "strokeRect",
+] as const;
+
+export interface DrawCall {
+  readonly name: string;
+  readonly args: readonly unknown[];
+  /** `globalAlpha` at the moment of the call. */
+  readonly alpha: number;
+  readonly composite: string;
+  readonly fillStyle: unknown;
+  readonly lineWidth: number;
+}
+
+/** The 8-byte PNG file signature, used as stand-in encoder output. */
+export const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+export class RecordingCanvas {
+  width = 0;
+  height = 0;
+  readonly calls: DrawCall[] = [];
+  readonly ctx: CanvasRenderingContext2D;
+  /** What `toBlob` hands back; `null` simulates an encoder failure. */
+  blobBytes: Uint8Array | null = PNG_SIGNATURE;
+  /** MIME types `toBlob` was asked for, in order. */
+  readonly blobTypes: string[] = [];
+
+  constructor() {
+    const ctx = {
+      canvas: this,
+      globalAlpha: 1,
+      globalCompositeOperation: "source-over",
+      fillStyle: "",
+      strokeStyle: "",
+      lineWidth: 1,
+      lineCap: "butt",
+      lineJoin: "miter",
+    };
+
+    const record =
+      (name: string) =>
+      (...args: unknown[]): void => {
+        this.calls.push({
+          name,
+          args,
+          alpha: ctx.globalAlpha,
+          composite: ctx.globalCompositeOperation,
+          fillStyle: ctx.fillStyle,
+          lineWidth: ctx.lineWidth,
+        });
+      };
+
+    for (const name of RECORDED_METHODS) {
+      (ctx as unknown as Record<string, unknown>)[name] = record(name);
+    }
+    this.ctx = ctx as unknown as CanvasRenderingContext2D;
+  }
+
+  getContext(): CanvasRenderingContext2D {
+    return this.ctx;
+  }
+
+  toBlob(callback: (blob: Blob | null) => void, type?: string): void {
+    const mime = type ?? "image/png";
+    this.blobTypes.push(mime);
+    if (this.blobBytes === null) {
+      callback(null);
+      return;
+    }
+    callback(new Blob([Uint8Array.from(this.blobBytes)], { type: mime }));
+  }
+
+  named(name: string): DrawCall[] {
+    return this.calls.filter((call) => call.name === name);
+  }
+
+  /** Calls that painted another canvas: a layer surface or the stroke buffer. */
+  get drawImages(): DrawCall[] {
+    return this.named("drawImage");
+  }
+
+  /** Sources of the canvases this context painted, in call order. */
+  get drawnSources(): unknown[] {
+    return this.drawImages.map((call) => call.args[0]);
+  }
+
+  /** The recorded canvas as the DOM type the app expects. */
+  asElement(): HTMLCanvasElement {
+    return this as unknown as HTMLCanvasElement;
+  }
+}
+
+export interface RecordingDocument {
+  /** Every canvas created through `document.createElement`, in creation order. */
+  readonly allocated: RecordingCanvas[];
+  restore(): void;
+}
+
+/** Installs the recording canvas factory; `restore()` puts the global back. */
+export function installRecordingDocument(): RecordingDocument {
+  const saved = (globalThis as { document?: unknown }).document;
+  const allocated: RecordingCanvas[] = [];
+
+  (globalThis as { document?: unknown }).document = {
+    createElement: (): RecordingCanvas => {
+      const canvas = new RecordingCanvas();
+      allocated.push(canvas);
+      return canvas;
+    },
+  };
+
+  return {
+    allocated,
+    restore(): void {
+      (globalThis as { document?: unknown }).document = saved;
+    },
+  };
+}

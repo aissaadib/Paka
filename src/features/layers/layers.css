@@ -1,0 +1,122 @@
+/** Layers panel: panel chrome, action row and layer rows. */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.panel__footer {
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.layer-row:hover {
+  background: var(--bg-raised);
+}
+
+.layer-row.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.layer-row__visibility {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-dim);
+  border-radius: 2px;
+}
+
+.layer-row__visibility:hover {
+  color: var(--text-strong);
+}
+
+.layer-row__name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 1;
+  height: 100%;
+  padding: 0 4px;
+  text-align: left;
+  overflow: hidden;
+}
+
+.layer-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-row__opacity {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-row__input {
+  flex: 1;
+  height: 20px;
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
