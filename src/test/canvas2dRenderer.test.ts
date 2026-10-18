@@ -82,12 +82,12 @@ function createHarness(options: HarnessOptions = {}) {
 
 let strokeCounter = 0;
 
-function createStroke(layerId: LayerId): StrokeRecord {
+function createStroke(layerId: LayerId, brush: BrushSettings = BRUSH): StrokeRecord {
   strokeCounter += 1;
   return {
     id: `stroke-${strokeCounter}`,
     layerId,
-    brush: BRUSH,
+    brush,
     xs: [5, 25, 45],
     ys: [5, 20, 5],
     pressures: [0.5, 1, 0.5],
@@ -268,6 +268,50 @@ describe("Canvas2DRenderer compositing", () => {
 
     expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
     expect(harness.display.drawImages).toHaveLength(1);
+  });
+
+  it("composites a semi-transparent stroke once, at the stroke's own opacity", () => {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    const brush: BrushSettings = { ...BRUSH, opacity: 0.5 };
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    // First frame allocates and rasterizes the still-empty layer surface.
+    harness.renderer.render();
+
+    const stroke = createStroke(layerId, brush);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    // Full coverage in the buffer: there is no per-segment alpha to accumulate,
+    // which is what used to darken every joint of a semi-transparent stroke.
+    const segments = harness.strokeBuffer.named("stroke");
+    expect(segments.length).toBeGreaterThan(0);
+    expect(segments.every((call) => call.alpha === 1)).toBe(true);
+
+    // The in-progress stroke is displayed at the stroke's opacity, applied once.
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    const inProgress = harness.display.drawImages.find(
+      (call) => call.args[0] === harness.strokeBuffer,
+    );
+    expect(inProgress?.alpha).toBe(0.5);
+
+    // Committing composites the buffer into the layer at the same alpha.
+    strokes.set(layerId, [stroke]);
+    harness.renderer.endStroke(stroke);
+    const [surface] = harness.layerSurfaces();
+    const composites = surface.drawImages.filter((call) => call.args[0] === harness.strokeBuffer);
+    expect(composites).toHaveLength(1);
+    expect(composites[0].alpha).toBe(0.5);
+
+    // Once committed the display paints the layer, not the live buffer.
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
   });
 
   it("only re-rasterizes a layer surface when it is dirty", () => {

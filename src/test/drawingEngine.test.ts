@@ -229,6 +229,76 @@ describe("DrawingEngine stroke capture", () => {
   });
 });
 
+describe("DrawingEngine document bounds", () => {
+  it("ignores a press outside the document rectangle", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    for (const [x, y] of [
+      [-1, 150],
+      [200, -1],
+      [401, 150],
+      [200, 301],
+    ]) {
+      engine.beginStroke(createSample({ docX: x, docY: y }));
+      engine.extendStroke(createSample({ docX: x + 10, docY: y + 10 }));
+      engine.finishStroke();
+    }
+
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("does not leave a half-started stroke behind after a rejected press", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample({ docX: -50, docY: 10 }));
+    // The rejected press must not block the next, valid one.
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 40, docY: 40 }));
+    engine.finishStroke();
+
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+  });
+
+  it("accepts a press on the document edge", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample({ docX: 400, docY: 300 }));
+    engine.finishStroke();
+
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+  });
+
+  it("keeps recording a stroke that began inside and left the document", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample({ docX: 200, docY: 150 }));
+    engine.extendStroke(createSample({ docX: -500, docY: 150 }));
+    engine.finishStroke();
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // Out-of-bounds samples are kept: the layer surface clips them at composite.
+    expect(strokes[0].xs).toContain(-500);
+  });
+
+  it("rejects a non-finite press", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample({ docX: Number.NaN, docY: 10 }));
+    engine.finishStroke();
+
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+});
+
 describe("DrawingEngine layers", () => {
   it("adds, renames, reorders and removes layers", () => {
     const engine = createEngine();

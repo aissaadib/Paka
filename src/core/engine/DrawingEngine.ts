@@ -108,6 +108,20 @@ const DEFAULT_DOCUMENT_HEIGHT = 1200;
 const WHEEL_ZOOM_SENSITIVITY = 0.0018;
 const WHEEL_ZOOM_FACTOR_LIMIT = 0.25;
 
+/**
+ * True when a document-space point lies on the document rectangle.
+ *
+ * The canvas is deliberately larger than the document - there is a margin of
+ * unpainted workspace around the paper - so a press in the margin must be
+ * ignored. Letting it through records samples that nothing can ever display: an
+ * undo step that appears to do nothing, and, if it is the only stroke, an
+ * exported PNG that looks blank. The bounds are inclusive so that a press
+ * exactly on the edge pixel still paints.
+ */
+function isInsideDocument(document: DrawingDocument, x: number, y: number): boolean {
+  return x >= 0 && y >= 0 && x <= document.width && y <= document.height;
+}
+
 export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
@@ -561,6 +575,11 @@ export class DrawingEngine implements StrokeSource {
     }
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
+      return;
+    }
+    // A press outside the paper is not a stroke. It is also how a non-finite
+    // sample (NaN never satisfies `>= 0`) is rejected before it reaches history.
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
       return;
     }
 

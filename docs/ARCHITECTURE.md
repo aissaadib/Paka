@@ -150,7 +150,7 @@ A frame (`render()`) does, in order:
 3. fill the paper with the document background,
 4. composite each **visible** layer with `opacity > 0`, bottom-first, applying
    the layer's blend mode and alpha,
-5. composite the in-progress stroke buffer on top, at full alpha,
+5. composite the in-progress stroke buffer on top, at the stroke's own opacity,
 6. stroke a hairline document border whose width is `1 / scale`, so it is
    exactly one device pixel at any zoom.
 
@@ -166,6 +166,23 @@ stroke on every input event. Instead, new samples are rasterized incrementally
 into the buffer (`extendStroke` → `rasterizeStroke(ctx, stroke, fromIndex)`) and
 only the new segments are drawn. When the stroke ends, the buffer is composited
 into the layer surface **once** and cleared.
+
+The buffer is also what makes a stroke one shape rather than a pile of
+overlapping segments. Segments are rasterized at **full coverage**, and the
+stroke's opacity is applied exactly once, when the buffer composites
+(`strokeOpacity(brush, pressures)`):
+
+- a stroke is one shape, so it gets one alpha - a semi-transparent stroke can
+  never darken at the joints where consecutive segments overlap;
+- width still varies per segment with pressure, because coverage is what
+  accumulates, not color;
+- separate strokes on the same layer still build up where they overlap, which is
+  what users expect from "each stroke is a stroke".
+
+`pressureOpacity` therefore contributes through the stroke's **mean pressure**
+rather than per sample: a lighter pass yields a lighter stroke. True per-dab
+opacity needs per-pixel max blending, which Canvas 2D does not expose - that is
+a GPU-backend feature, not a Canvas 2D one.
 
 ### Dirty surfaces
 
@@ -240,6 +257,13 @@ React render. Behaviour:
 
 - **Pointer capture** keeps a stroke alive when the pointer leaves the canvas;
   a lost capture cancels the stroke explicitly rather than leaving it dangling.
+- **Presses outside the paper are ignored.** The canvas is larger than the
+  document, so `beginStroke` rejects a sample that is not on the document
+  rectangle (an inclusive test, so the edge pixel still paints). Without this a
+  press in the grey margin recorded samples nothing could ever display: an undo
+  step that appeared to do nothing and, if it was the only stroke, a blank PNG.
+  A stroke that *starts* on the paper and wanders off it keeps recording; the
+  surface clips the out-of-bounds part at composite time.
 - **One pointer at a time** (`activePointerId`), so a second finger or device
   cannot interleave samples into a single stroke.
 - **Coalesced events** are replayed, so high-frequency pen input is not dropped
@@ -321,11 +345,16 @@ DOM-free by design.
   separate suite injects a recording renderer to pin down surface-invalidation
   policy (layer metadata never re-rasterizes; a stroke undo does). It also
   asserts that no React-facing state is published while drawing.
+- `canvas2dStroke` is tested directly: diameter/opacity curves, and - through the
+  recording context - that rasterization is always **full coverage** (which is
+  what stops semi-transparent overlap from darkening), that width still follows
+  pressure per segment, and that `fromIndex` redraws only the new part.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
-  no-ops) are asserted on the draw-call stream. Real pixel coverage is out of
-  scope for the unit suite.
+  no-ops) are asserted on the draw-call stream, including that a stroke reaches
+  both the display and the layer at its own alpha exactly once. Real pixel
+  coverage is out of scope for the unit suite.
 
 Behaviour that only exists in a browser or a real window is verified manually
 against the running app (composited pixels on the display canvas, layer
@@ -344,12 +373,10 @@ These are real gaps, not footnotes:
   changes no pixels and is deliberately not a history step.
 - **Blend modes**: only `normal`. The field exists so layer data can carry a
   mode, but the compositor maps exactly one value.
-- **Opacity and self-overlap.** A stroke is composited as one shape, but its
-  segments are drawn with per-segment alpha, so a semi-transparent stroke can
-  show slight darkening where segments overlap at sharp direction changes.
-  Fixing it properly means compositing a stroke into its own buffer at full
-  alpha and applying opacity once - the buffer already exists for a different
-  reason, so this is a contained change.
+- **Opacity is per stroke, not per dab.** A stroke gets one alpha, derived from
+  the brush opacity and the stroke's mean pressure. Pressure can taper width
+  within a stroke but not opacity: per-dab opacity without build-up needs
+  per-pixel max blending, which Canvas 2D does not expose.
 - **Rasterization is per-segment and CPU-side.** Long strokes mean many
   `stroke()` calls. It is fine at the sizes tested and is the first thing to
   move behind the renderer abstraction when it is not.

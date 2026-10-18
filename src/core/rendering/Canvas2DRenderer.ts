@@ -17,7 +17,7 @@ import type { DrawingDocument, LayerId, LayerBlendMode, StrokeRecord } from "../
 import type { Viewport } from "../../types/viewport";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
-import { rasterizeStroke } from "./canvas2dStroke";
+import { rasterizeStroke, strokeOpacity } from "./canvas2dStroke";
 import type { DrawingRenderer, RendererKind, StrokeSource } from "./types";
 
 export interface Canvas2DRendererOptions {
@@ -177,7 +177,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     const surface = this.ensureRasterized(stroke.layerId);
-    this.compositeStrokeBuffer(surface);
+    this.compositeStrokeBuffer(surface, strokeOpacity(stroke.brush, stroke.pressures));
     this.clearStrokeBuffer();
     this.activeStroke = null;
     this.requestFrame();
@@ -222,7 +222,10 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.paintDocument(ctx);
 
     if (this.activeStroke) {
+      // The buffer holds full coverage; the stroke's alpha is applied here, once.
+      ctx.globalAlpha = strokeOpacity(this.activeStroke.brush, this.activeStroke.pressures);
       ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+      ctx.globalAlpha = 1;
     }
 
     // Hairline document boundary: exactly one device pixel at any zoom.
@@ -322,7 +325,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.surfaces.prepare(surface);
     for (const stroke of this.strokeSource.listStrokes(surface.layerId)) {
       this.rasterizeStrokeToBuffer(stroke);
-      this.compositeStrokeBuffer(surface);
+      this.compositeStrokeBuffer(surface, strokeOpacity(stroke.brush, stroke.pressures));
     }
     surface.dirty = false;
   }
@@ -333,13 +336,22 @@ export class Canvas2DRenderer implements DrawingRenderer {
     rasterizeStroke(this.strokeCtx, stroke, 0);
   }
 
-  private compositeStrokeBuffer(surface: LayerSurface): void {
+  /**
+   * Paints the stroke buffer onto a layer surface at the stroke's own opacity.
+   *
+   * `prepare` resets the surface context, so the alpha is set after it and
+   * cleared again afterwards: the surface context must not leak state into the
+   * next composite.
+   */
+  private compositeStrokeBuffer(surface: LayerSurface, alpha: number): void {
     const doc = this.doc;
     if (!doc) {
       return;
     }
     this.surfaces.prepare(surface);
+    surface.ctx.globalAlpha = alpha;
     surface.ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+    surface.ctx.globalAlpha = 1;
   }
 
   private prepareStrokeBuffer(): void {

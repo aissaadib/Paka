@@ -32,10 +32,11 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Pointer-down, clipping and coordinate edge cases: document/screen
       transform is isolated and tested; pointer capture, `pointercancel` and
       lost capture end a stroke cleanly.
-- [ ] Reject a press **outside the document rectangle** instead of recording an
-      invisible out-of-bounds stroke. *(Reproduces today.)*
-- [ ] Remove self-overlap darkening for semi-transparent strokes (opacity is
-      applied per segment, not once per stroke). *(Reproduces today.)*
+- [x] Reject a press **outside the document rectangle** instead of recording an
+      invisible out-of-bounds stroke.
+- [x] Remove self-overlap darkening for semi-transparent strokes: segments are
+      rasterized at full coverage and the stroke's opacity is applied once, when
+      its buffer composites.
 - [x] Transactional document/layer mutations: every layer edit is a reversible
       command; deleting a layer no longer discards its strokes irrecoverably.
 - [x] Reject invalid or unsupported project files before touching the live
@@ -53,9 +54,9 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Undoable layer operations and undoable layer visibility/opacity changes.
 - [x] Expected keyboard shortcuts (undo/redo, zoom, brush size, tool switch,
       save/save-as/open, duplicate layer).
-- [x] Pressure-sensitive width; pressure-sensitive opacity.
-- [ ] Stable, predictable compositing for repeated strokes on one layer
-      (depends on the overlap fix in Phase 0).
+- [x] Pressure-sensitive width; pressure-sensitive opacity (applied once per
+      stroke, from the stroke's mean pressure).
+- [x] Stable, predictable compositing for repeated strokes on one layer.
 
 ## Phase 2 - Illustration tools
 
@@ -101,6 +102,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Reject out-of-bounds strokes and fix semi-transparent overlap darkening**
-(the two remaining Phase 0 correctness items), then the **eraser** to complete
-the basic daily loop.
+**The eraser** - a real tool with predictable compositing, pressure support and
+undo/redo - to complete the basic daily loop. Sampling and reverting knock-on
+work: the tool registry/definitions, the tool options panel, the rasterizer
+(an eraser stroke must subtract coverage rather than paint colour), and the
+stroke record (so a saved file reopens with eraser strokes intact).

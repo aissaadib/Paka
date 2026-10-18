@@ -13,7 +13,10 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 ## What works
 
 - **Drawing** with a mouse, pen or touch. Pointer Events, pressure-sensitive
-  width and opacity, round joins and caps.
+  width and opacity, round joins and caps. Each stroke is composited as one
+  shape at its own opacity, so a semi-transparent stroke never darkens where its
+  segments overlap. A press outside the paper (the grey margin) is ignored
+  instead of recording an invisible stroke.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, colour
   (picker plus an 8-swatch palette), and toggles for pressure-driven size and
   pressure-driven opacity.
@@ -129,8 +132,10 @@ project is heading, phase by phase, is tracked in
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`** blend mode is implemented.
-- A semi-transparent stroke can show slight darkening where its segments
-  overlap, because opacity is applied per segment rather than once per stroke.
+- Opacity is applied **per stroke, not per dab**: a stroke gets one alpha, from
+  the brush opacity and the stroke's mean pressure. Pressure tapers width within
+  a stroke but not opacity - per-dab opacity without build-up needs per-pixel
+  max blending, which Canvas 2D does not expose.
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
@@ -147,10 +152,6 @@ project is heading, phase by phase, is tracked in
   no redo of edits made before the save.
 - There is **no autosave or crash recovery**: unsaved work is lost if the app or
   the machine goes down.
-- A pointer press inside the canvas viewport but **outside the document
-  rectangle** still records a stroke; its samples lie outside the document and
-  therefore do not show up in the composite. Clamping or ignoring such input is
-  not implemented.
 - `Ctrl+N` is not bound; use `File → New Document…`.
 - The React layer has **no automated tests**; it is verified manually in the
   running app. The format, file-service and export orchestration have Vitest

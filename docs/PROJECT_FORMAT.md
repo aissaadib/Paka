@@ -128,10 +128,10 @@ reproduces the stroke exactly.
 | Field | Range | Meaning |
 | --- | --- | --- |
 | `size` | 1-512 | Diameter in document pixels at full pressure. |
-| `opacity` | 0-1 | Stroke alpha. |
+| `opacity` | 0-1 | Alpha for the whole stroke, applied once when it composites. |
 | `color` | non-empty string | CSS colour. |
-| `pressureSize` | 0-1 | How strongly pressure narrows the stroke. |
-| `pressureOpacity` | 0-1 | How strongly pressure fades the stroke. |
+| `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
+| `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 | Sample spacing as a fraction of the diameter (used when smoothing). |
 
