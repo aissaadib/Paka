@@ -270,6 +270,43 @@ describe("Canvas2DRenderer compositing", () => {
     expect(harness.display.drawImages).toHaveLength(1);
   });
 
+  it("redraws the whole stroke once it grows past the initial dab", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+
+    const stroke = createStroke(doc.layers[0].id);
+    stroke.xs.length = 0;
+    stroke.ys.length = 0;
+    stroke.pressures.length = 0;
+    stroke.times.length = 0;
+    stroke.xs.push(5);
+    stroke.ys.push(5);
+    stroke.pressures.push(1);
+    stroke.times.push(0);
+
+    // A press with no movement yet: one sample, rasterized as a dab.
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    expect(harness.strokeBuffer.named("arc")).toHaveLength(1);
+
+    // The pointer moves. The dab is discarded and the stroke redrawn from
+    // scratch, so the live buffer matches a full re-rasterization - undo,
+    // reopen, export - of the same stroke rather than carrying one extra
+    // antialiased pass at the start.
+    stroke.xs.push(40);
+    stroke.ys.push(20);
+    stroke.pressures.push(1);
+    stroke.times.push(16);
+    harness.renderer.extendStroke(stroke, 1);
+
+    const names = harness.strokeBuffer.calls.map((call) => call.name);
+    const afterLastClear = names.slice(names.lastIndexOf("clearRect") + 1);
+    expect(afterLastClear).toContain("stroke");
+    expect(afterLastClear).not.toContain("arc");
+  });
+
   it("composites a semi-transparent stroke once, at the stroke's own opacity", () => {
     const strokes = new Map<LayerId, StrokeRecord[]>();
     const harness = createHarness({ strokes });

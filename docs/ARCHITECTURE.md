@@ -184,6 +184,16 @@ rather than per sample: a lighter pass yields a lighter stroke. True per-dab
 opacity needs per-pixel max blending, which Canvas 2D does not expose - that is
 a GPU-backend feature, not a Canvas 2D one.
 
+A press with no movement is a dab, and a dab alone in the buffer would be
+overdrawn by the first segment's round cap: the same area painted twice, which
+costs a second pass of antialiasing on the start ring and makes the live image
+differ from a re-rasterization of the same stroke. So when a stroke grows past
+its first sample, the buffer is cleared and the stroke redrawn from scratch
+(`extendStroke` with `fromIndex <= 1`); from then on appending segments is
+already identical to a full re-rasterization. Live drawing and the pixels that
+undo, reopen and export produce are therefore the same, which is asserted
+against the real display canvas, not just the draw-call stream.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its stroke list:
@@ -359,8 +369,13 @@ DOM-free by design.
 Behaviour that only exists in a browser or a real window is verified manually
 against the running app (composited pixels on the display canvas, layer
 visibility and opacity effects, brush thickness in device pixels, the new
-document dialog, the native status bar). What has and has not been verified is
-reported separately rather than being implied by the test count.
+document dialog, the native status bar). Stroke compositing is verified that way
+against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
+that retraces itself is pixel-identical in its retraced and single-covered
+parts, two separate strokes that overlap do build up, and the live composite
+matches the one rebuilt from the stroke list after undo/redo exactly. What has
+and has not been verified is reported separately rather than being implied by
+the test count.
 
 ## Known limitations
 

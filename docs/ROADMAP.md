@@ -37,6 +37,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Remove self-overlap darkening for semi-transparent strokes: segments are
       rasterized at full coverage and the stroke's opacity is applied once, when
       its buffer composites.
+- [x] Live rendering and re-rasterization agree pixel for pixel (the starter dab
+      is discarded when a stroke grows past its first sample).
 - [x] Transactional document/layer mutations: every layer edit is a reversible
       command; deleting a layer no longer discards its strokes irrecoverably.
 - [x] Reject invalid or unsupported project files before touching the live

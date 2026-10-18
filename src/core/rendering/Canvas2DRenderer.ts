@@ -162,6 +162,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.clearStrokeBuffer();
       this.prepareStrokeBuffer();
       rasterizeStroke(this.strokeCtx, stroke, 0);
+    } else if (fromIndex <= 1) {
+      // The stroke had a single sample until now, so the buffer holds the dab
+      // that `rasterizeStroke` stamps for a press without movement. Once the
+      // stroke grows, that dab is redundant - the segment caps cover the same
+      // area - but it is a second pass of antialiasing exactly at the start, so
+      // the live buffer would differ (by up to a few levels, on the start ring)
+      // from what undo, reopen and export produce for the same stroke. Redraw
+      // from scratch here; from the next sample on, appending is already
+      // identical to a full re-rasterization of the stroke.
+      this.clearStrokeBuffer();
+      this.prepareStrokeBuffer();
+      rasterizeStroke(this.strokeCtx, stroke, 0);
     } else {
       this.prepareStrokeBuffer();
       rasterizeStroke(this.strokeCtx, stroke, fromIndex);
