@@ -48,6 +48,24 @@ export function createStrokeRecord(layerId: LayerId, brush: BrushSettings): Stro
   };
 }
 
+/**
+ * Deep-copies a stroke, optionally moving it to another layer and always
+ * assigning a fresh id. Used when duplicating a layer so the copy's strokes
+ * cannot collide with the originals in the store, history or project file.
+ */
+export function cloneStroke(stroke: StrokeRecord, layerId: LayerId = stroke.layerId): StrokeRecord {
+  return {
+    id: createId("stroke"),
+    layerId,
+    brush: { ...stroke.brush },
+    xs: [...stroke.xs],
+    ys: [...stroke.ys],
+    pressures: [...stroke.pressures],
+    times: [...stroke.times],
+    startTime: stroke.startTime,
+  };
+}
+
 export class StrokeBuilder {
   readonly stroke: StrokeRecord;
   private lastX = 0;

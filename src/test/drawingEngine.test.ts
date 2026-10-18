@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
+import type { DrawingRenderer } from "../core/rendering/types";
 import type { PointerSample } from "../types/pointer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
@@ -38,6 +39,43 @@ function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
 
 function createEngine() {
   return new DrawingEngine({ document: createDocument({ name: "Test", width: 400, height: 300 }) });
+}
+
+/**
+ * A renderer that records what the engine asks of it. Passing one in keeps the
+ * engine off Canvas 2D, so surface-invalidation policy can be asserted in Node.
+ */
+function createSpyRenderer() {
+  const invalidated: string[] = [];
+  let documents = 0;
+  let renders = 0;
+
+  const renderer: DrawingRenderer = {
+    kind: "canvas2d",
+    setDocument: () => {
+      documents += 1;
+    },
+    setViewport: () => {},
+    setDisplaySize: () => {},
+    setRasterScale: () => {},
+    invalidateLayer: (layerId) => {
+      invalidated.push(layerId);
+    },
+    beginStroke: () => {},
+    extendStroke: () => {},
+    endStroke: () => {},
+    cancelStroke: () => {},
+    composeDocumentImage: () => {
+      throw new Error("composeDocumentImage is not used in these tests.");
+    },
+    render: () => {},
+    requestRender: () => {
+      renders += 1;
+    },
+    destroy: () => {},
+  };
+
+  return { renderer, invalidated, getDocuments: () => documents, getRenders: () => renders };
 }
 
 describe("DrawingEngine state", () => {
@@ -248,5 +286,182 @@ describe("DrawingEngine layers", () => {
     expect(engine.listStrokes(firstLayerId)).toHaveLength(0);
     // Brush settings are a user preference and survive a new document.
     expect(state.brush.size).toBe(30);
+  });
+});
+
+describe("DrawingEngine layer history", () => {
+  it("undoes and redoes a deleted layer together with its strokes", () => {
+    const engine = createEngine();
+    const baseLayerId = engine.getState().document.activeLayerId as string;
+
+    engine.addLayer();
+    const addedLayerId = engine.getState().document.activeLayerId as string;
+    engine.beginStroke(createSample());
+    engine.finishStroke();
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(1);
+
+    engine.removeLayer(addedLayerId);
+    expect(engine.getState().document.layers.map((layer) => layer.id)).not.toContain(addedLayerId);
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(0);
+
+    // Undoing the deletion brings the layer and every stroke on it back.
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers.map((layer) => layer.id)).toContain(addedLayerId);
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(1);
+    expect(engine.getState().document.activeLayerId).toBe(addedLayerId);
+
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(0);
+
+    // Walking back past the deletion also unwinds the stroke and the add.
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(1);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(addedLayerId)).toHaveLength(0);
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers).toHaveLength(1);
+    expect(engine.getState().document.activeLayerId).toBe(baseLayerId);
+    expect(engine.undo()).toBe(false);
+  });
+
+  it("records rename, visibility, opacity and reorder as separate steps", () => {
+    const engine = createEngine();
+    engine.addLayer();
+    const topLayerId = engine.getState().document.activeLayerId as string;
+    const afterAdd = engine.getState().history.depth;
+
+    engine.renameLayer(topLayerId, "Ink");
+    engine.setLayerVisibility(topLayerId, false);
+    engine.setLayerOpacity(topLayerId, 0.5);
+    engine.moveLayer(topLayerId, -1);
+    expect(engine.getState().history.depth).toBe(afterAdd + 4);
+    expect(engine.getState().document.layers[0].id).toBe(topLayerId);
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers[1].id).toBe(topLayerId);
+    engine.undo();
+    expect(engine.getState().document.layers[1].opacity).toBe(1);
+    engine.undo();
+    expect(engine.getState().document.layers[1].visible).toBe(true);
+    engine.undo();
+    expect(engine.getState().document.layers[1].name).toBe("Layer 2");
+  });
+
+  it("collapses an opacity drag into one undo step", () => {
+    const engine = createEngine();
+    engine.addLayer();
+    const topLayerId = engine.getState().document.activeLayerId as string;
+    const afterAdd = engine.getState().history.depth;
+
+    for (let step = 20; step >= 8; step -= 1) {
+      engine.setLayerOpacity(topLayerId, step / 20);
+    }
+    expect(engine.getState().document.layers[1].opacity).toBeCloseTo(0.4, 5);
+    expect(engine.getState().history.depth).toBe(afterAdd + 1);
+
+    // A different kind of step ends the run; only then does a new one start.
+    engine.setLayerVisibility(topLayerId, false);
+    engine.setLayerOpacity(topLayerId, 0.9);
+    expect(engine.getState().history.depth).toBe(afterAdd + 3);
+
+    engine.undo();
+    engine.undo();
+    engine.undo();
+    expect(engine.getState().document.layers[1].opacity).toBe(1);
+    expect(engine.getState().document.layers[1].visible).toBe(true);
+  });
+
+  it("counts layer edits as unsaved work but not layer selection", () => {
+    const engine = createEngine();
+    expect(engine.getState().file.dirty).toBe(false);
+
+    engine.addLayer();
+    expect(engine.getState().file.dirty).toBe(true);
+
+    engine.markSaved("C:\\work\\drawing.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    const bottomLayerId = engine.getState().document.layers[0].id;
+    engine.selectLayer(bottomLayerId);
+    expect(engine.getState().file.dirty).toBe(false);
+    expect(engine.getState().history.depth).toBe(1);
+
+    engine.renameLayer(bottomLayerId, "Base");
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("duplicates a layer with its strokes and undoes the copy", () => {
+    const engine = createEngine();
+    const sourceLayerId = engine.getState().document.activeLayerId as string;
+    engine.beginStroke(createSample({ docX: 20, docY: 20 }));
+    engine.finishStroke();
+
+    engine.duplicateLayer(sourceLayerId);
+    const layers = engine.getState().document.layers;
+    expect(layers).toHaveLength(2);
+
+    const copy = layers[1];
+    expect(copy.name).toBe("Layer 1 copy");
+    expect(engine.getState().document.activeLayerId).toBe(copy.id);
+    expect(engine.listStrokes(copy.id)).toHaveLength(1);
+    // The copy's stroke is a distinct record, not a shared reference.
+    expect(engine.listStrokes(copy.id)[0].id).not.toBe(engine.listStrokes(sourceLayerId)[0].id);
+
+    engine.undo();
+    expect(engine.getState().document.layers).toHaveLength(1);
+    expect(engine.listStrokes(copy.id)).toHaveLength(0);
+    expect(engine.listStrokes(sourceLayerId)).toHaveLength(1);
+
+    engine.redo();
+    expect(engine.getState().document.layers).toHaveLength(2);
+    expect(engine.listStrokes(copy.id)).toHaveLength(1);
+  });
+
+  it("does not re-rasterize layers for metadata-only changes", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+
+    engine.addLayer();
+    const [bottomLayerId, topLayerId] = engine.getState().document.layers.map((layer) => layer.id);
+
+    engine.renameLayer(topLayerId, "Ink");
+    engine.setLayerVisibility(topLayerId, false);
+    engine.setLayerOpacity(topLayerId, 0.5);
+    engine.moveLayer(topLayerId, -1);
+    engine.selectLayer(bottomLayerId);
+
+    // Every surface's pixels are still valid: nothing was invalidated.
+    expect(spy.invalidated).toEqual([]);
+    expect(spy.getDocuments()).toBeGreaterThan(0);
+
+    // Undoing the same operations must not invalidate either.
+    engine.undo();
+    engine.undo();
+    expect(spy.invalidated).toEqual([]);
+  });
+
+  it("invalidates a layer only when history re-rasterizes it", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample());
+    engine.finishStroke();
+    // The stroke was rasterized into the layer surface as it was drawn, so
+    // committing it re-rasterizes nothing.
+    expect(spy.invalidated).toEqual([]);
+
+    engine.undo();
+    expect(spy.invalidated).toContain(layerId);
+
+    spy.invalidated.length = 0;
+    engine.redo();
+    expect(spy.invalidated).toContain(layerId);
   });
 });

@@ -10,6 +10,19 @@
 export interface Command {
   readonly id: string;
   readonly label: string;
+  /**
+   * Optional identity for history coalescing. Consecutive commands pushed with
+   * the same key collapse into a single entry (via {@link Command.mergeWith})
+   * instead of producing one step per drag tick.
+   */
+  readonly mergeKey?: string;
+  /**
+   * Combines this command with the next command that shares its `mergeKey`.
+   * The result must span from this command's earliest revert point to the
+   * other command's latest apply point. Only called when both key and presence
+   * match, so implementations may assume a compatible command.
+   */
+  mergeWith?(next: Command): Command;
   apply(): void;
   revert(): void;
 }

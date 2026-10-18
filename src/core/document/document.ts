@@ -77,6 +77,20 @@ export function nextLayerName(document: DrawingDocument): string {
   }
 }
 
+/** Suffixes `base` with a number until it is unique in the document. */
+export function uniqueLayerName(document: DrawingDocument, base: string): string {
+  const used = new Set(document.layers.map((layer) => layer.name));
+  if (!used.has(base)) {
+    return base;
+  }
+  for (let index = 2; ; index += 1) {
+    const candidate = `${base} ${index}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+}
+
 export function getLayer(document: DrawingDocument, layerId: LayerId): Layer | undefined {
   return document.layers.find((layer) => layer.id === layerId);
 }
@@ -178,4 +192,28 @@ export function setActiveLayer(document: DrawingDocument, layerId: LayerId): Dra
     return document;
   }
   return { ...document, activeLayerId: layerId };
+}
+
+/**
+ * Inserts a copy of `layerId` directly above it and makes the copy active.
+ *
+ * Only layer *metadata* is duplicated here. Strokes live in the `StrokeStore`,
+ * not the document, so the caller (a document command) is responsible for
+ * cloning and moving the pixel-producing data.
+ */
+export function duplicateLayer(document: DrawingDocument, layerId: LayerId): DrawingDocument {
+  const index = document.layers.findIndex((layer) => layer.id === layerId);
+  const source = index === -1 ? undefined : document.layers[index];
+  if (!source) {
+    return document;
+  }
+
+  const copy: Layer = {
+    ...source,
+    id: createId("layer"),
+    name: uniqueLayerName(document, `${source.name} copy`),
+  };
+  const layers = [...document.layers];
+  layers.splice(index + 1, 0, copy);
+  return { ...document, layers, activeLayerId: copy.id };
 }

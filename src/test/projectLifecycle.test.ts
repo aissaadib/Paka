@@ -156,6 +156,37 @@ describe("serialize and loadProject", () => {
     expect(reopened.getState().file.dirty).toBe(true);
   });
 
+  it("round-trips a duplicated layer and its copied strokes", () => {
+    const engine = new DrawingEngine();
+    paintStroke(engine, 0);
+    const sourceLayerId = activeLayerId(engine);
+
+    engine.duplicateLayer(sourceLayerId);
+    const [bottomLayer, copiedLayer] = engine.getState().document.layers;
+    expect(copiedLayer.name).toBe("Layer 1 copy");
+
+    const text = engine.serialize();
+    const parsed = parseProject(text);
+    if (!parsed.ok) {
+      throw new Error(parsed.error);
+    }
+
+    const reopened = new DrawingEngine();
+    reopened.loadProject(parsed.project, null);
+
+    // The copy survives a save/load cycle as a real layer with its own strokes.
+    expect(reopened.getState().document.layers.map((layer) => layer.id)).toEqual([
+      bottomLayer.id,
+      copiedLayer.id,
+    ]);
+    expect(reopened.getState().document.layers[1].name).toBe("Layer 1 copy");
+    expect(reopened.listStrokes(bottomLayer.id)).toHaveLength(1);
+    expect(reopened.listStrokes(copiedLayer.id)).toHaveLength(1);
+    expect(reopened.listStrokes(copiedLayer.id)[0].id).not.toBe(
+      reopened.listStrokes(bottomLayer.id)[0].id,
+    );
+  });
+
   it("has nothing to export without a drawing surface", () => {
     const engine = new DrawingEngine();
 

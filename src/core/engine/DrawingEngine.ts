@@ -24,14 +24,15 @@ import type { Viewport } from "../../types/viewport";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
-import { StrokeBuilder, createStrokeRecord } from "../brushes/strokeBuilder";
+import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
+import { createDocumentCommand, type DocumentCommandHost, type StrokeTransfer } from "../commands/documentCommand";
 import {
   createStrokeCommand,
   createStrokeCommandHost,
   type StrokeCommandHost,
 } from "../commands/strokeCommand";
-import type { CommandStackState } from "../commands/types";
+import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
 import { StrokeStore } from "../document/strokeStore";
 import type { DrawingDocument, LayerId, StrokeRecord } from "../document/types";
@@ -118,6 +119,7 @@ export class DrawingEngine implements StrokeSource {
   private readonly store: Store<EditorSnapshot>;
   private readonly cursorListeners = new Set<(report: CursorReport) => void>();
   private readonly commandHost: StrokeCommandHost;
+  private readonly documentCommandHost: DocumentCommandHost;
   private readonly toolContext: ToolContext;
   private readonly middlePanTool: Tool;
   private readonly maxRasterScale: number;
@@ -159,6 +161,18 @@ export class DrawingEngine implements StrokeSource {
     this.commandHost = createStrokeCommandHost(this.strokes, (layerId) => {
       this.renderer?.invalidateLayer(layerId);
     });
+    this.documentCommandHost = {
+      getDocument: () => engine.doc,
+      applyDocument: (next) => engine.applyDocumentState(next),
+      clearLayerStrokes: (layerId) => engine.strokes.clearLayer(layerId),
+      restoreLayerStrokes: (layerId, strokes) => {
+        // Idempotent: applying the same restore twice cannot duplicate strokes.
+        engine.strokes.clearLayer(layerId);
+        for (const stroke of strokes) {
+          engine.strokes.insert(stroke);
+        }
+      },
+    };
     this.store = createStore(this.buildSnapshot());
 
     const engine = this;
@@ -370,17 +384,47 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /**
+   * Adds a layer above the stack and makes it active.
+   *
+   * Layer operations are history entries, not direct mutations. That matters
+   * most for deletion: a layer's stroke list is real user data, so discarding
+   * and restoring it must be one reversible step.
+   */
   addLayer(): void {
-    this.applyDocument(documentOps.addLayer(this.doc));
+    const before = this.doc;
+    this.commitDocumentChange("Add Layer", before, documentOps.addLayer(before));
+  }
+
+  /** Copies a layer - metadata and strokes - directly above the original. */
+  duplicateLayer(layerId: LayerId): void {
+    const before = this.doc;
+    const after = documentOps.duplicateLayer(before, layerId);
+    if (after === before) {
+      return;
+    }
+    const copy = after.layers.find(
+      (layer) => !before.layers.some((known) => known.id === layer.id),
+    );
+    if (!copy) {
+      return;
+    }
+    const strokes = this.strokes.list(layerId).map((stroke) => cloneStroke(stroke, copy.id));
+    this.commitDocumentChange("Duplicate Layer", before, after, {
+      addedStrokes: { layerId: copy.id, strokes },
+    });
   }
 
   removeLayer(layerId: LayerId): void {
-    const next = documentOps.removeLayer(this.doc, layerId);
-    if (next === this.doc) {
+    const before = this.doc;
+    const after = documentOps.removeLayer(before, layerId);
+    if (after === before) {
       return;
     }
-    this.strokes.clearLayer(layerId);
-    this.applyDocument(next);
+    // `list` returns the live array, which the command clears when it applies,
+    // so the strokes to restore are copied out first.
+    const removedStrokes: StrokeTransfer = { layerId, strokes: [...this.strokes.list(layerId)] };
+    this.commitDocumentChange("Delete Layer", before, after, { removedStrokes });
   }
 
   renameLayer(layerId: LayerId, name: string): void {
@@ -388,11 +432,21 @@ export class DrawingEngine implements StrokeSource {
     if (trimmed === "") {
       return;
     }
-    this.applyDocument(documentOps.updateLayer(this.doc, layerId, { name: trimmed }));
+    const before = this.doc;
+    this.commitDocumentChange(
+      "Rename Layer",
+      before,
+      documentOps.updateLayer(before, layerId, { name: trimmed }),
+    );
   }
 
   setLayerVisibility(layerId: LayerId, visible: boolean): void {
-    this.applyDocument(documentOps.updateLayer(this.doc, layerId, { visible }));
+    const before = this.doc;
+    this.commitDocumentChange(
+      "Layer Visibility",
+      before,
+      documentOps.updateLayer(before, layerId, { visible }),
+    );
   }
 
   toggleLayerVisibility(layerId: LayerId): void {
@@ -403,15 +457,29 @@ export class DrawingEngine implements StrokeSource {
   }
 
   setLayerOpacity(layerId: LayerId, opacity: number): void {
-    this.applyDocument(documentOps.updateLayer(this.doc, layerId, { opacity }));
+    const before = this.doc;
+    // Dragging the opacity slider fires continuously; the merge key collapses
+    // the whole drag into one undo step instead of one per tick.
+    this.commitDocumentChange(
+      "Layer Opacity",
+      before,
+      documentOps.updateLayer(before, layerId, { opacity }),
+      { mergeKey: `layer-opacity:${layerId}` },
+    );
   }
 
   moveLayer(layerId: LayerId, delta: number): void {
-    this.applyDocument(documentOps.moveLayer(this.doc, layerId, delta));
+    const before = this.doc;
+    this.commitDocumentChange("Reorder Layers", before, documentOps.moveLayer(before, layerId, delta));
   }
 
+  /**
+   * Selects the active layer. This changes no pixels and is not an edit, so it
+   * is not undoable and never marks the document dirty - only the renderer and
+   * the UI snapshot are refreshed.
+   */
   selectLayer(layerId: LayerId): void {
-    this.applyDocument(documentOps.setActiveLayer(this.doc, layerId));
+    this.applyDocumentState(documentOps.setActiveLayer(this.doc, layerId));
   }
 
   setBrush(patch: Partial<BrushSettings>): void {
@@ -576,16 +644,54 @@ export class DrawingEngine implements StrokeSource {
     this.setViewport(zoomToAt(this.viewport, centerX, centerY, zoom));
   }
 
-  private applyDocument(next: DrawingDocument): void {
+  /** Runs a layer change and records it as a single undoable history entry. */
+  private commitDocumentChange(
+    label: string,
+    before: DrawingDocument,
+    after: DrawingDocument,
+    options: {
+      readonly mergeKey?: string;
+      readonly removedStrokes?: StrokeTransfer;
+      readonly addedStrokes?: StrokeTransfer;
+    } = {},
+  ): void {
+    if (after === before) {
+      return;
+    }
+    this.executeDocumentCommand(
+      createDocumentCommand({ label, before, after, ...options }, this.documentCommandHost),
+    );
+  }
+
+  /**
+   * Applies a layer operation and records it as one step.
+   *
+   * The revision is bumped before the command runs so the snapshot the command
+   * stack publishes already carries the correct dirty flag.
+   */
+  private executeDocumentCommand(command: Command): void {
+    this.revision += 1;
+    this.commands.execute(command);
+  }
+
+  /**
+   * Publishes a new document state without touching history or the dirty flag.
+   *
+   * Layer metadata and stack order never change a layer's *pixels*: a new layer
+   * gets a dirty surface the first time it is composited, a removed layer has
+   * its surface dropped by `setDocument`, and moving, hiding or renaming one
+   * only changes the composite. Nothing is invalidated here on purpose -
+   * invalidating would re-rasterize every stroke of every layer to service a
+   * rename or a selection. Strokes invalidate their own layer through the
+   * stroke command, and document *replacement* (new/open) invalidates
+   * explicitly, because there a reused layer id can describe different pixels.
+   */
+  private applyDocumentState(next: DrawingDocument): void {
     if (next === this.doc) {
       return;
     }
     this.doc = next;
     this.renderer?.setDocument(next);
-    // A layer added now could reuse the id of a layer removed earlier in the
-    // session, so surfaces are invalidated rather than trusted.
-    this.invalidateLayers(next);
-    this.revision += 1;
     this.publish();
     this.requestRender();
   }

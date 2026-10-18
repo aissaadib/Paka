@@ -38,7 +38,7 @@ DOM pointer events
   │
   └─ core/engine/DrawingEngine      owns document, viewport, tool, brush, history
          ├─ core/brushes/strokeBuilder    samples → StrokeRecord (structure of arrays)
-         ├─ core/commands                 one command per finished stroke
+         ├─ core/commands                 one command per finished stroke or layer change
          ├─ core/document                 pure document + layer metadata
          ├─ core/project                  project format + save/open/export workflow
          │      └─ ProjectFileGateway (port) → Tauri invoke / dialogs
@@ -118,7 +118,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/core/document` | Document and layer metadata, stroke store | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/tools` | Tool registry and per-tool behaviour (brush, pan) | core/document, types |
-| `src/core/commands` | Command stack, stroke command | core/document |
+| `src/core/commands` | Command stack, stroke command, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
 | `src/core/engine` | Integration: stroke lifecycle, history, layers, viewport, cursor stream | all of `core` |
@@ -169,10 +169,17 @@ into the layer surface **once** and cleared.
 
 ### Dirty surfaces
 
-A surface is marked dirty when its pixels no longer match its stroke list: undo,
-redo, layer reorder-invalidations, document resize, raster scale change. `render()`
-re-rasterizes a layer only if it is dirty, then clears the flag. Reordering
-layers, hiding them, or changing opacity therefore costs nothing but a composite.
+A surface is marked dirty only when its pixels no longer match its stroke list:
+undo/redo of a stroke, document *replacement* (new/open, where a reused layer id
+can describe different pixels), document resize and raster-scale change.
+
+Layer metadata and stack order never invalidate anything. A new layer gets a
+dirty surface the first time it is composited, a removed layer's surface is
+dropped when the renderer is handed the shorter layer list, and reordering,
+hiding, renaming or selecting a layer changes only the composite. That is why a
+rename or a layer click costs nothing but a repaint, not a re-rasterization of
+every stroke on every layer. `render()` re-rasterizes a layer only if it is
+dirty, then clears the flag.
 
 ### Frame batching
 
@@ -190,19 +197,37 @@ model: no stamps, no texture, no hardness curve.
 
 ## Undo / redo
 
-An episode of drawing produces exactly one `Command`:
+Two kinds of step share one stack, so undo behaves uniformly whether the last
+action was a stroke or a layer change:
+
+- **`StrokeCommand`** captures no pixels. Undo removes the stroke from the
+  `StrokeStore` and asks the renderer to re-rasterize that layer from the
+  strokes that remain. Redo inserts it back **at its original index**, so the
+  painting order inside the layer is identical to what the user drew.
+- **`DocumentCommand`** captures the two document states around a layer change
+  (`before`/`after`). Documents are pure metadata, so keeping two of them costs
+  two small objects. When the change creates or destroys stroke data - layer
+  duplication, or deletion, which must not lose the deleted layer's strokes -
+  the command also carries that stroke list and restores it on revert.
+
+Stack mechanics:
 
 - `push` records a command whose effect is already visible (the normal case for
   painting - the stroke is rasterized while it is drawn).
 - `execute` applies first, then records. The apply runs *inside* the
   re-entrancy guard, so a command cannot enqueue further commands.
 - `undo`/`redo` never re-enter the stack.
+- **Coalescing**: a command may declare a `mergeKey`. Consecutive commands with
+  the same key collapse into one entry via `mergeWith`, keeping the earliest
+  revert point and the latest apply point. The opacity slider uses this, so a
+  drag is a single undo step instead of one per tick.
+- Layer operations are **transactional**: no layer mutation touches the document
+  directly. Deleting a layer is therefore recoverable, and every edit bumps the
+  revision that drives the dirty flag. Selecting a layer is the one exception -
+  it changes no pixels and is not an edit, so it neither dirties the document
+  nor enters history.
 
-`StrokeCommand` captures no pixels. Undo removes the stroke from the
-`StrokeStore` and asks the renderer to re-rasterize that layer from the strokes
-that remain. Redo inserts it back **at its original index**, so the painting
-order inside the layer is identical to what the user drew. History depth is
-capped (200 commands by default), dropping the oldest entries.
+History depth is capped (200 commands by default), dropping the oldest entries.
 
 This is why no bitmap snapshots exist anywhere in the codebase: the stroke list
 *is* the authoritative record, and pixels are a cache derived from it.
@@ -289,10 +314,12 @@ WebGPU renderer:
 DOM-free by design.
 
 - Document/layer operations, viewport math, stroke interpolation, pointer
-  normalization, the command stack, the stroke command and the stroke store are
-  tested directly.
+  normalization, the command stack, the stroke command, the document command and
+  the stroke store are tested directly.
 - `DrawingEngine` is tested with a `null` renderer, covering stroke commit,
-  cancel, undo/redo granularity, layer operations and new-document reset. It
+  cancel, undo/redo granularity, layer operations, and new-document reset. A
+  separate suite injects a recording renderer to pin down surface-invalidation
+  policy (layer metadata never re-rasterizes; a stroke undo does). It also
   asserts that no React-facing state is published while drawing.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
@@ -312,9 +339,9 @@ These are real gaps, not footnotes:
 
 - **Tools**: only `brush` and `pan`. There is no eraser, selection, transform or
   fill tool.
-- **Layer operations are not undoable.** Add/delete/rename/visibility/opacity/
-  reorder mutate the document directly. Only strokes go through the command
-  stack. Adding layer commands is the obvious next step.
+- **Layer selection is not undoable.** Every layer *edit* is - add, duplicate,
+  delete, rename, reorder, visibility and opacity - but selecting a layer
+  changes no pixels and is deliberately not a history step.
 - **Blend modes**: only `normal`. The field exists so layer data can carry a
   mode, but the compositor maps exactly one value.
 - **Opacity and self-overlap.** A stroke is composited as one shape, but its
@@ -327,8 +354,9 @@ These are real gaps, not footnotes:
   `stroke()` calls. It is fine at the sizes tested and is the first thing to
   move behind the renderer abstraction when it is not.
 - **HiDPI cost**: raising `rasterScale` re-rasterizes every layer.
-- **No file format.** Nothing persists: no save, load, export or document
-  serialization. The document and stroke model were designed to serialize
-  cheaply (metadata plus number arrays), but the code does not exist yet.
+- **Undo history is not persisted.** A project file stores the document and its
+  strokes, not the history: reopening a drawing rebuilds one step per stroke, so
+  the work stays editable, but there is no redo of edits made before the save.
+  See [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 - **No tests for the React layer.** Hooks, components and the input binder are
   exercised manually in the browser, not by automated tests.

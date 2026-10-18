@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import {
   IconArrowDown,
   IconArrowUp,
+  IconCopy,
   IconPlus,
   IconTrash,
 } from "../../components/icons";
@@ -40,6 +41,18 @@ export function LayersPanel() {
         <>
           <IconButton label="Add layer" size="sm" onClick={actions.addLayer}>
             <IconPlus />
+          </IconButton>
+          <IconButton
+            label="Duplicate layer"
+            size="sm"
+            disabled={!activeLayer}
+            onClick={() => {
+              if (activeLayer) {
+                actions.duplicateLayer(activeLayer.id);
+              }
+            }}
+          >
+            <IconCopy />
           </IconButton>
           <IconButton
             label="Delete layer"

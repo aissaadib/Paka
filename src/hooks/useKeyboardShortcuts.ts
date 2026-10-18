@@ -10,6 +10,7 @@
  *   Ctrl+Z         undo
  *   Ctrl+Shift+Z   redo
  *   Ctrl+Y         redo
+ *   Ctrl+J         duplicate the active layer
  *   Ctrl+= / -     zoom in / out
  *   Ctrl+1         actual size
  *   Ctrl+0         fit to window
@@ -78,6 +79,14 @@ export function useKeyboardShortcuts(
         if (key === "o") {
           event.preventDefault();
           onOpen?.();
+          return;
+        }
+        if (key === "j") {
+          event.preventDefault();
+          const activeLayerId = engine.getState().document.activeLayerId;
+          if (activeLayerId !== null) {
+            actions.duplicateLayer(activeLayerId);
+          }
           return;
         }
         if (key === "=" || key === "+") {

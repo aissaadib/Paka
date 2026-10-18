@@ -4,11 +4,13 @@ import {
   MAX_DOCUMENT_SIZE,
   addLayer,
   createDocument,
+  duplicateLayer,
   getActiveLayer,
   moveLayer,
   nextLayerName,
   removeLayer,
   setActiveLayer,
+  uniqueLayerName,
   isValidDocumentSize,
   updateLayer,
 } from "../core/document/document";
@@ -99,5 +101,46 @@ describe("layers", () => {
     const switched = setActiveLayer(two, two.layers[0].id);
     expect(switched.activeLayerId).toBe(two.layers[0].id);
     expect(switched.layers).toBe(two.layers);
+  });
+});
+
+describe("duplicateLayer", () => {
+  it("inserts a uniquely named copy directly above the original", () => {
+    const two = addLayer(base);
+    const sourceId = two.layers[0].id;
+    const copied = duplicateLayer(two, sourceId);
+
+    expect(copied.layers).toHaveLength(3);
+    expect(copied.layers[1].id).not.toBe(sourceId);
+    expect(copied.layers[1].name).toBe("Layer 1 copy");
+    // The copy carries the source's compositing state, not the defaults.
+    expect(copied.layers[1].opacity).toBe(two.layers[0].opacity);
+    expect(copied.layers[1].visible).toBe(two.layers[0].visible);
+    expect(copied.layers[1].blendMode).toBe(two.layers[0].blendMode);
+    expect(copied.activeLayerId).toBe(copied.layers[1].id);
+
+    // Order is preserved around the insertion point.
+    expect(copied.layers[0].id).toBe(sourceId);
+    expect(copied.layers[2].id).toBe(two.layers[1].id);
+    // The original document is untouched.
+    expect(two.layers).toHaveLength(2);
+  });
+
+  it("numbers the copy name when it is already taken", () => {
+    const taken = addLayer(base, "Layer 1 copy");
+    const copied = duplicateLayer(taken, taken.layers[0].id);
+    expect(copied.layers[1].name).toBe("Layer 1 copy 2");
+  });
+
+  it("returns the same document for an unknown layer", () => {
+    expect(duplicateLayer(base, "missing")).toBe(base);
+  });
+});
+
+describe("uniqueLayerName", () => {
+  it("keeps the base name when free and numbers it otherwise", () => {
+    expect(uniqueLayerName(base, "Sketch")).toBe("Sketch");
+    const taken = addLayer(base, "Sketch");
+    expect(uniqueLayerName(taken, "Sketch")).toBe("Sketch 2");
   });
 });

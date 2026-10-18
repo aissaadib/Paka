@@ -48,7 +48,7 @@ export function AppMenuBar({
   onExportPng,
 }: AppMenuBarProps) {
   const { actions } = useEditor();
-  const { history } = useEditorState();
+  const { history, document: drawingDocument } = useEditorState();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -108,6 +108,19 @@ export function AppMenuBar({
           shortcut: "Ctrl+Shift+Z",
           disabled: !history.canRedo,
           onSelect: actions.redo,
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: "Duplicate Layer",
+          shortcut: "Ctrl+J",
+          disabled: drawingDocument.activeLayerId === null,
+          onSelect: () => {
+            const activeLayerId = drawingDocument.activeLayerId;
+            if (activeLayerId !== null) {
+              actions.duplicateLayer(activeLayerId);
+            }
+          },
         },
       ],
     },

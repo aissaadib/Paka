@@ -20,10 +20,14 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
-- **Layers**: add, delete, rename (double-click), reorder, visibility, opacity,
-  and selection. Layer pixels composite bottom-first over the paper colour.
-- **Undo/redo** at stroke granularity, from the toolbar, the Edit menu and
-  `Ctrl+Z` / `Ctrl+Shift+Z`. History is capped at 200 commands.
+- **Layers**: add, duplicate, delete, rename (double-click), reorder,
+  visibility, opacity and selection. Layer pixels composite bottom-first over
+  the paper colour.
+- **Undo/redo** for strokes *and* layer operations: add, duplicate, delete
+  (including the deleted layer's stroke data), rename, reorder, visibility and
+  opacity. Available from the toolbar, the Edit menu and `Ctrl+Z` /
+  `Ctrl+Shift+Z` (`Ctrl+J` duplicates the active layer). Dragging a slider is
+  one step, not one per tick. History is capped at 200 commands.
 - **New document** dialog with size validation (8-8192 px per side).
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`) writing a versioned `.paka` file that stores document
@@ -114,14 +118,16 @@ Module boundaries, coordinate spaces, the rendering and input pipelines, the
 undo model and the path to a WebGL/WebGPU backend are documented in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The `.paka` file format, its
 validation rules, the atomic write strategy and the PNG export contract are
-documented in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md).
+documented in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md). Where the
+project is heading, phase by phase, is tracked in
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Known limitations
 
 - Only the **brush** and **pan** tools exist. No eraser, selection, fill or
   transform.
-- **Layer operations are not undoable** - only strokes are. The command stack
-  supports it; the layer commands are not written yet.
+- Every layer *edit* is one undo step, but layer **selection** is not: it
+  changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`** blend mode is implemented.
 - A semi-transparent stroke can show slight darkening where its segments
   overlap, because opacity is applied per segment rather than once per stroke.

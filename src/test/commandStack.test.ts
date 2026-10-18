@@ -133,3 +133,64 @@ describe("CommandStack", () => {
     expect(stack.getState()).not.toBe(before);
   });
 });
+
+describe("CommandStack history coalescing", () => {
+  /** A command that folds the next same-keyed command into its own label. */
+  function createMergeable(label: string, log: string[], mergeKey = "k"): Command {
+    return {
+      id: label,
+      label,
+      mergeKey,
+      apply: () => log.push(`apply:${label}`),
+      revert: () => log.push(`revert:${label}`),
+      mergeWith(next) {
+        return createMergeable(`${label}+${next.id}`, log, mergeKey);
+      },
+    };
+  }
+
+  it("folds consecutive same-keyed commands into a single entry", () => {
+    const log: string[] = [];
+    const stack = new CommandStack();
+
+    stack.execute(createMergeable("a", log));
+    stack.execute(createMergeable("b", log));
+
+    // Both were applied, but only one history entry exists.
+    expect(log).toEqual(["apply:a", "apply:b"]);
+    expect(stack.getState().depth).toBe(1);
+    expect(stack.getState().undoLabel).toBe("a+b");
+
+    stack.undo();
+    expect(log[log.length - 1]).toBe("revert:a+b");
+    expect(stack.getState().depth).toBe(0);
+  });
+
+  it("does not fold commands with different keys or no merge support", () => {
+    const log: string[] = [];
+    const stack = new CommandStack();
+
+    stack.push(createMergeable("a", log, "one"));
+    stack.push(createMergeable("b", log, "two"));
+    expect(stack.getState().depth).toBe(2);
+
+    // Same key, but this command cannot combine.
+    stack.push(createCommand("c", log));
+    expect(stack.getState().depth).toBe(3);
+  });
+
+  it("drops the redo stack when a command is folded in", () => {
+    const log: string[] = [];
+    const stack = new CommandStack();
+
+    stack.push(createMergeable("a", log));
+    stack.push(createCommand("b", log));
+    stack.undo();
+    expect(stack.getState().canRedo).toBe(true);
+
+    stack.push(createMergeable("c", log));
+    expect(stack.getState().canRedo).toBe(false);
+    expect(stack.getState().depth).toBe(1);
+    expect(stack.getState().undoLabel).toBe("a+c");
+  });
+});

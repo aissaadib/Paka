@@ -52,6 +52,12 @@ export class CommandStack {
     if (this.busy) {
       return;
     }
+    // Consecutive commands that declare the same merge key and know how to
+    // combine collapse into the existing top entry. This is what keeps a
+    // slider drag (many tiny changes) to a single undo step.
+    if (this.mergeIntoTop(command)) {
+      return;
+    }
     this.undoStack.push(command);
     this.redoStack.length = 0;
     if (this.undoStack.length > this.limit) {
@@ -112,6 +118,27 @@ export class CommandStack {
     } finally {
       this.busy = false;
     }
+  }
+
+  /**
+   * Merges `command` into the top of the undo stack when both opt in with the
+   * same key. Records nothing new: the command's effect is already applied, so
+   * replacing the top entry is enough - a later undo reverts the whole span.
+   */
+  private mergeIntoTop(command: Command): boolean {
+    const top = this.undoStack[this.undoStack.length - 1];
+    if (
+      top === undefined ||
+      command.mergeKey === undefined ||
+      top.mergeKey !== command.mergeKey ||
+      typeof top.mergeWith !== "function"
+    ) {
+      return false;
+    }
+    this.undoStack[this.undoStack.length - 1] = top.mergeWith(command);
+    this.redoStack.length = 0;
+    this.publish();
+    return true;
   }
 
   private publish(): void {

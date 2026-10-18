@@ -31,6 +31,7 @@ export interface EditorActions {
   zoomToFit(): void;
   newDocument(options: NewDocumentOptions): void;
   addLayer(): void;
+  duplicateLayer(layerId: LayerId): void;
   removeLayer(layerId: LayerId): void;
   renameLayer(layerId: LayerId, name: string): void;
   toggleLayerVisibility(layerId: LayerId): void;
@@ -75,6 +76,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     zoomToFit: () => engine.zoomToFit(),
     newDocument: (documentOptions) => engine.newDocument(documentOptions),
     addLayer: () => engine.addLayer(),
+    duplicateLayer: (layerId) => engine.duplicateLayer(layerId),
     removeLayer: (layerId) => engine.removeLayer(layerId),
     renameLayer: (layerId, name) => engine.renameLayer(layerId, name),
     toggleLayerVisibility: (layerId) => engine.toggleLayerVisibility(layerId),

@@ -74,6 +74,15 @@ export function IconPlus(props: IconProps) {
   );
 }
 
+export function IconCopy(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5.5 5.5h7v7h-7z" />
+      <path d="M10.5 5.5V3.5h-7v7h2" />
+    </Icon>
+  );
+}
+
 export function IconTrash(props: IconProps) {
   return (
     <Icon {...props}>
