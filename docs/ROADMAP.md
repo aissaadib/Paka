@@ -77,7 +77,15 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       outline, so no new geometry type and no new file field was needed; the
       trade-off is that shapes are unfilled brush outlines with round joins.
       See [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools).
-- [ ] Selection and transform.
+- [x] Selection and transform: a marquee (or a click) selects whole strokes of
+      the active layer - the strokes whose centreline meets the inflated marquee,
+      tested continuously so a sparse stroke cannot slip through - and dragging
+      from inside the frame moves them exactly. Releasing records one undo step
+      built from the strokes' pre-drag copies, `Esc` cancels back to the
+      originals, `Delete` removes the selection as one step and undo restores the
+      original painting order. The overlay (dashed frame plus blue trace) is
+      renderer-only and never reaches a layer or an export. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
 - [ ] Fill and gradient.
 
 ## Phase 3 - Brush feel
@@ -117,12 +125,16 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Selection and transform** (Phase 2). The honest starting point is what a
-selection *is* in a stroke-based engine: pixels are a cache derived from the
-stroke list, so a selection either has to be expressed in terms of strokes
-(a set of strokes, or sub-ranges of samples) or it has to introduce a
-destructive pixel operation - which this architecture has deliberately avoided.
-The slice must therefore begin by deciding the model, not the marquee UI, and it
-must answer the same questions the other slices did: what is the undo step, what
-does cancellation restore, and what does a reopened file reproduce. Tools that
-are *not* part of it stay absent rather than half-wired.
+**Fill and gradient** (Phase 2). This is the first slice that cannot be expressed
+as "more strokes": a bucket fill reads the pixels it is filling and writes a
+region, and a gradient is not stroke geometry at all. The model question comes
+first, exactly as it did for selection: the architecture keeps the stroke list
+authoritative and pixels a cache, so a pixel-writing tool needs a *new kind of
+command* - a bounded pixel patch with a revert image, layered like a stroke - and
+a decision about whether a fill on a layer is an operation on that layer's
+surface or a new stroke-like primitive. The slice also has to define the tolerance
+and anti-aliasing rule (what counts as "the same colour" on 8-bit sRGB surfaces),
+what undo restores, what a reopened project reproduces (a pixel patch has to be
+serialized or regenerated), and how the in-progress preview stays out of the
+layer until the release. Tools that are *not* part of it stay absent rather than
+half-wired.

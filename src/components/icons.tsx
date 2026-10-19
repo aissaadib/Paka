@@ -57,6 +57,15 @@ export function IconPicker(props: IconProps) {
   );
 }
 
+export function IconSelect(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.6 5.5v-3h3M10.4 2.5h3v3M13.4 10.5v3h-3M5.6 13.5h-3v-3" />
+      <path d="M6.4 6.4 12 8.6l-2.2.9-.9 2.2z" />
+    </Icon>
+  );
+}
+
 export function IconLine(props: IconProps) {
   return (
     <Icon {...props}>

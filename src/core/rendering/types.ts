@@ -9,9 +9,26 @@
 
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
 import type { Viewport } from "../../types/viewport";
+import type { Bounds } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
 
 export type RendererKind = "canvas2d" | "webgl" | "webgpu";
+
+/**
+ * What the renderer draws *on top of* the document to show a selection: the
+ * marquee rectangle and the strokes it currently holds.
+ *
+ * This is UI overlay, not document content - it never appears in an export, and
+ * the renderer owns no selection state of its own: the engine decides what is
+ * selected and hands it over. Strokes are passed as data (not ids) so the
+ * renderer can trace them without indexing the stroke store per frame.
+ */
+export interface RendererSelection {
+  /** Rubber-band rectangle in document space, or `null` when none is dragged. */
+  readonly bounds: Bounds | null;
+  /** Strokes to trace as an accent overlay. */
+  readonly strokes: readonly StrokeRecord[];
+}
 
 /**
  * The 8-bit sRGB colour a composite read returns. Re-exported here because it
@@ -52,6 +69,14 @@ export interface DrawingRenderer {
   /** Composites the finished stroke buffer onto its layer surface. */
   endStroke(stroke: StrokeRecord): void;
   cancelStroke(): void;
+  /**
+   * Sets the selection overlay - the marquee rectangle and the traced strokes -
+   * or clears it with `null`.
+   *
+   * Overlay only: it is drawn above the layers on the display canvas and never
+   * reaches a layer surface, the document or `composeDocumentImage`.
+   */
+  setSelection(selection: RendererSelection | null): void;
   /**
    * Composites paper and visible layers into a **new** canvas at document pixel
    * size (no viewport, no border, no in-progress stroke). Used by PNG export, so

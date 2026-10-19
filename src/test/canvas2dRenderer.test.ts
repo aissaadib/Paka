@@ -20,6 +20,7 @@ import { Canvas2DRenderer } from "../core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "../core/rendering/frameScheduler";
 import type { StrokeSource } from "../core/rendering/types";
 import type { BrushSettings } from "../types/brush";
+import type { Bounds } from "../types/geometry";
 import {
   installRecordingDocument,
   RecordingCanvas,
@@ -860,5 +861,67 @@ describe("Canvas2DRenderer colour probe", () => {
     harness.renderer.destroy();
 
     expect(harness.renderer.readCompositePixel(5, 5)).toBeNull();
+  });
+});
+
+describe("Canvas2DRenderer selection overlay", () => {
+  function renderWithSelection(bounds: Bounds | null, strokes: readonly StrokeRecord[]) {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection(strokes.length > 0 || bounds !== null ? { bounds, strokes } : null);
+    harness.renderer.render();
+    return { harness, doc };
+  }
+
+  it("traces the selected strokes and draws the marquee above them", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const stroke = createStroke(doc.layers[0].id);
+    const { harness } = renderWithSelection({ x: 2, y: 3, width: 40, height: 20 }, [stroke]);
+
+    // The trace: one stroked path at a constant device width, in the accent
+    // colour, translucent so the ink underneath stays readable.
+    const traces = harness.display.named("stroke");
+    expect(traces).toHaveLength(1);
+    expect(traces[0].strokeStyle).toBe("#2f7bff");
+    expect(traces[0].alpha).toBeCloseTo(0.85, 6);
+    expect(traces[0].lineWidth).toBeCloseTo(1.5, 6);
+
+    // The marquee is dashed and exactly the requested rectangle; the border is
+    // the solid rectangle after it.
+    const rectangles = harness.display.named("strokeRect");
+    expect(rectangles).toHaveLength(2);
+    expect(rectangles[0].args).toEqual([2, 3, 40, 20]);
+    expect(rectangles[0].strokeStyle).toBe("#2f7bff");
+    expect(rectangles[0].lineDash).not.toEqual([]);
+    expect(rectangles[1].strokeStyle).toBe("rgba(0, 0, 0, 0.35)");
+    expect(rectangles[1].lineDash).toEqual([]);
+    expect(rectangles[1].args).toEqual([0, 0, 100, 80]);
+
+    // Ordering on the display canvas: trace, then marquee, then border.
+    const names = harness.display.calls.map((call) => call.name);
+    expect(names.indexOf("stroke")).toBeLessThan(names.lastIndexOf("strokeRect"));
+    expect(names.indexOf("stroke")).toBeGreaterThan(names.lastIndexOf("clearRect"));
+  });
+
+  it("treats a null selection as no overlay at all", () => {
+    const { harness } = renderWithSelection(null, []);
+    expect(harness.display.named("stroke")).toHaveLength(0);
+    // Only the document border remains.
+    expect(harness.display.named("strokeRect")).toHaveLength(1);
+  });
+
+  it("keeps the overlay out of the exported composite", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const stroke = createStroke(doc.layers[0].id);
+    const harness = createHarness();
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection({ bounds: { x: 2, y: 3, width: 40, height: 20 }, strokes: [stroke] });
+
+    const composed = harness.composeDocument();
+    expect(composed.named("stroke")).toHaveLength(0);
+    expect(composed.named("strokeRect")).toHaveLength(0);
   });
 });

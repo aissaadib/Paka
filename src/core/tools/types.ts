@@ -48,6 +48,34 @@ export interface ToolContext {
   cancelStroke(): void;
   isStrokeActive(): boolean;
   /**
+   * True when a document point lies inside the current selection's rectangle.
+   *
+   * The select tool asks this on press to choose between two gestures: dragging
+   * inside the selection translates the selected strokes, dragging anywhere else
+   * starts a new marquee. A point outside an empty or absent selection is always
+   * `false`, so "no selection" needs no separate query.
+   */
+  isInsideSelection(docX: number, docY: number): boolean;
+  /** Starts a marquee gesture; the selection itself is decided on release. */
+  beginSelection(sample: PointerSample): void;
+  /** Starts translating the current selection, dragging from inside it. */
+  beginSelectionMove(sample: PointerSample): void;
+  /**
+   * Applies the active selection gesture to a sample: a marquee rubber-band
+   * while selecting, or a live translation while moving.
+   */
+  updateSelection(sample: PointerSample): void;
+  /**
+   * Commits the active gesture - the strokes the marquee enclosed become the
+   * selection, or a translation becomes one undoable history step. A gesture
+   * that changed nothing is dropped rather than recorded.
+   */
+  finishSelection(): void;
+  /** Aborts the active gesture, restoring any live translation. */
+  cancelSelection(): void;
+  /** Drops the selection and its overlay. */
+  clearSelection(): void;
+  /**
    * Samples the *composited* document at the sample's document position and
    * makes it the brush colour.
    *

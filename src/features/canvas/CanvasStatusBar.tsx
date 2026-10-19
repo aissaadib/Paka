@@ -49,7 +49,7 @@ export function CanvasStatusBar({
   onDismissFileMessage,
 }: CanvasStatusBarProps) {
   const { engine } = useEditor();
-  const { document, viewport, history, file } = useEditorState();
+  const { document, viewport, history, file, selectedStrokes } = useEditorState();
   const native = useNativeEnvironment();
   const positionRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLSpanElement | null>(null);
@@ -97,6 +97,14 @@ export function CanvasStatusBar({
       </span>
       <span className="status-bar__item">zoom {formatZoom(viewport.zoom)}</span>
       <span className="status-bar__item">history {history.depth}</span>
+      {selectedStrokes === 0 ? null : (
+        <span
+          className="status-bar__item"
+          title="Selected strokes; drag to move them, Delete to remove them"
+        >
+          {selectedStrokes} selected
+        </span>
+      )}
       {fileLabel === "" ? null : (
         <span
           className={[

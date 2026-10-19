@@ -22,6 +22,13 @@ export const ERASER_TOOL: ToolDefinition = {
   description: "Erase with the current brush size and opacity",
 };
 
+export const SELECT_TOOL: ToolDefinition = {
+  id: "select",
+  label: "Select",
+  shortcut: "M",
+  description: "Select strokes with a marquee, then drag to move them",
+};
+
 export const LINE_TOOL: ToolDefinition = {
   id: "line",
   label: "Line",
@@ -61,6 +68,7 @@ export const PAN_TOOL: ToolDefinition = {
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
   ERASER_TOOL,
+  SELECT_TOOL,
   LINE_TOOL,
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,

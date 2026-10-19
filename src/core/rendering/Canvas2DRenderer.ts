@@ -24,7 +24,13 @@ import type { Viewport } from "../../types/viewport";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
 import { rasterizeStroke, strokeOpacity } from "./canvas2dStroke";
-import type { DrawingRenderer, RendererKind, Rgb, StrokeSource } from "./types";
+import type {
+  DrawingRenderer,
+  RendererKind,
+  RendererSelection,
+  Rgb,
+  StrokeSource,
+} from "./types";
 
 export interface Canvas2DRendererOptions {
   readonly canvas: HTMLCanvasElement;
@@ -35,6 +41,13 @@ export interface Canvas2DRendererOptions {
 }
 
 const DOCUMENT_BORDER_COLOR = "rgba(0, 0, 0, 0.35)";
+/** Accent used for the selection marquee and the traced selected strokes. */
+const SELECTION_COLOR = "#2f7bff";
+/** Opaque enough to read over dark ink, translucent enough to see it through. */
+const SELECTION_TRACE_ALPHA = 0.85;
+/** Device pixels; divided by the display scale so it is constant at any zoom. */
+const SELECTION_TRACE_WIDTH = 1.5;
+const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -100,6 +113,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * buffer is still the only canvas the constructor creates.
    */
   private probeCanvas: HTMLCanvasElement | null = null;
+  /** Selection overlay: UI chrome, never composited into a surface or an export. */
+  private selection: RendererSelection | null = null;
   private rasterScale: number;
   private destroyed = false;
 
@@ -300,6 +315,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
+  setSelection(selection: RendererSelection | null): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.selection = selection;
+    this.requestFrame();
+  }
+
   render(): void {
     if (this.destroyed) {
       return;
@@ -341,10 +364,68 @@ export class Canvas2DRenderer implements DrawingRenderer {
       ctx.globalAlpha = 1;
     }
 
+    this.paintSelection(ctx, scale);
+
     // Hairline document boundary: exactly one device pixel at any zoom.
     ctx.lineWidth = 1 / scale;
     ctx.strokeStyle = DOCUMENT_BORDER_COLOR;
     ctx.strokeRect(0, 0, doc.width, doc.height);
+  }
+
+  /**
+   * Draws the selection overlay: the selected strokes traced in the accent
+   * colour, then the rubber-band rectangle.
+   *
+   * Strokes are traced along their centrelines rather than re-rasterized with
+   * their brush, because the overlay answers one question - "what will a
+   * transform move?" - and a thin constant-width trace answers it for a 1px pen
+   * and a 512px brush alike. The trace is not part of the document: it is drawn
+   * on the display canvas only, so an export of a document with a selection is
+   * byte-identical to one without.
+   */
+  private paintSelection(ctx: CanvasRenderingContext2D, scale: number): void {
+    const selection = this.selection;
+    if (!selection) {
+      return;
+    }
+
+    if (selection.strokes.length > 0) {
+      ctx.globalAlpha = SELECTION_TRACE_ALPHA;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = SELECTION_TRACE_WIDTH / scale;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      for (const stroke of selection.strokes) {
+        const count = stroke.xs.length;
+        if (count === 0) {
+          continue;
+        }
+        ctx.beginPath();
+        ctx.moveTo(stroke.xs[0], stroke.ys[0]);
+        if (count === 1) {
+          // A single sample is a dab; a zero-length segment plus a round cap
+          // draws it as a dot, which is what the stroke itself painted.
+          ctx.lineTo(stroke.xs[0], stroke.ys[0]);
+        } else {
+          for (let index = 1; index < count; index += 1) {
+            ctx.lineTo(stroke.xs[index], stroke.ys[index]);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+
+    const bounds = selection.bounds;
+    if (bounds) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
+      ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+      ctx.setLineDash([]);
+    }
+
+    ctx.globalAlpha = 1;
   }
 
   /**

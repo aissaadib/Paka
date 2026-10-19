@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_BRUSH, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
-import type { DrawingRenderer, Rgb } from "../core/rendering/types";
+import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
 import type { PointerSample } from "../types/pointer";
 
@@ -52,6 +52,7 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
   const began: StrokeRecord[] = [];
   const replaced: Array<{ xs: number[]; ys: number[] }> = [];
   const ended: StrokeRecord[] = [];
+  const selections: Array<RendererSelection | null> = [];
   let cancelled = 0;
   let documents = 0;
   let renders = 0;
@@ -82,6 +83,9 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
     cancelStroke: () => {
       cancelled += 1;
     },
+    setSelection: (selection) => {
+      selections.push(selection);
+    },
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
@@ -103,6 +107,7 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
     began,
     replaced,
     ended,
+    selections,
     getCancelled: () => cancelled,
     getDocuments: () => documents,
     getRenders: () => renders,
@@ -843,5 +848,296 @@ describe("DrawingEngine shape tools", () => {
     expect(engine.listStrokes(layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().toolId).toBe("brush");
+  });
+});
+
+/**
+ * Selection and transform.
+ *
+ * Driven through the same pointer entry point the DOM binder uses, so each test
+ * covers the whole path - press, gesture, release, history - with only the
+ * renderer faked out (which is also how the overlay is asserted).
+ */
+describe("DrawingEngine selection", () => {
+  function createSelectingEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Paints one stroke with the brush tool, following the given polyline. */
+  function paint(engine: DrawingEngine, points: ReadonlyArray<readonly [number, number]>): void {
+    engine.setTool("brush");
+    handle(engine, points, "up");
+  }
+
+  function handle(
+    engine: DrawingEngine,
+    points: ReadonlyArray<readonly [number, number]>,
+    phase: PointerSample["phase"],
+  ): void {
+    const first = points[0];
+    engine.handlePointerSample(createSample({ phase: "down", docX: first[0], docY: first[1] }));
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase, docX: last[0], docY: last[1] }));
+  }
+
+  it("selects the strokes a marquee meets, with a frame around their paint", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    const depth = engine.getState().history.depth;
+    engine.setTool("select");
+
+    handle(engine, [
+      [10, 10],
+      [150, 120],
+    ], "up");
+
+    expect(engine.getState().selectedStrokes).toBe(1);
+    const overlay = spy.selections[spy.selections.length - 1];
+    expect(overlay?.strokes).toHaveLength(1);
+    expect(overlay?.strokes[0].id).toBe(engine.listStrokes(layerId)[0].id);
+    // The frame is derived from the stroke's paint, not from the marquee: the
+    // centreline sits at y = 50 and the default brush is 6 wide, so it spans 47.
+    expect(overlay?.bounds?.y).toBeCloseTo(50 - DEFAULT_BRUSH.size / 2, 6);
+    expect(overlay?.bounds?.height).toBeCloseTo(DEFAULT_BRUSH.size, 6);
+    // Selecting is not an edit: no history step, and nothing became dirty.
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("shows the rubber band, and the previous selection, while dragging", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 120, docY: 80 }));
+
+    const overlay = spy.selections[spy.selections.length - 1];
+    expect(overlay?.bounds).toEqual({ x: 10, y: 10, width: 110, height: 70 });
+    expect(overlay?.strokes).toEqual([]);
+
+    engine.handlePointerSample(createSample({ phase: "up", docX: 120, docY: 80 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("selects on a click and clears on a click over empty paper", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+
+    // A press that never moved is a zero-size marquee: it hit-tests the point.
+    handle(engine, [
+      [50, 50],
+      [50, 50],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    handle(engine, [
+      [390, 290],
+      [390, 290],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+  });
+
+  it("translates the selected strokes and records one undoable step", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [10, 10],
+      [150, 120],
+    ], "up");
+    const depth = engine.getState().history.depth;
+
+    const before = engine.listStrokes(layerId)[0];
+    const originalXs = [...before.xs];
+    const originalYs = [...before.ys];
+
+    // Press inside the frame, drag, release: +30 horizontally, +60 vertically.
+    handle(engine, [
+      [60, 50],
+      [80, 70],
+      [90, 110],
+    ], "up");
+
+    const moved = engine.listStrokes(layerId)[0];
+    expect(moved.xs).toHaveLength(originalXs.length);
+    for (let index = 0; index < originalXs.length; index += 1) {
+      expect(moved.xs[index]).toBe(originalXs[index] + 30);
+      expect(moved.ys[index]).toBe(originalYs[index] + 60);
+    }
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs);
+
+    engine.redo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs.map((value) => value + 30));
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((value) => value + 60));
+  });
+
+  it("records nothing for a press inside the selection that never moved", () => {
+    const { engine } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [10, 10],
+      [150, 120],
+    ], "up");
+    const depth = engine.getState().history.depth;
+
+    handle(engine, [
+      [60, 50],
+      [60, 50],
+    ], "up");
+
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("restores the strokes when a move is cancelled", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [10, 10],
+      [150, 120],
+    ], "up");
+    const depth = engine.getState().history.depth;
+    const before = engine.listStrokes(layerId)[0];
+    const originalXs = [...before.xs];
+    const originalYs = [...before.ys];
+
+    handle(engine, [
+      [60, 50],
+      [140, 130],
+    ], "cancel");
+
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs);
+    expect(engine.getState().history.depth).toBe(depth);
+    // The selection survives a cancelled move: only the translation is undone.
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("deletes the selected strokes in one step and restores their order on undo", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [80, 50],
+    ]);
+    paint(engine, [
+      [150, 50],
+      [180, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [330, 250],
+    ]);
+    const ids = engine.listStrokes(layerId).map((stroke) => stroke.id);
+    engine.setTool("select");
+    handle(engine, [
+      [20, 20],
+      [220, 100],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(2);
+    const depth = engine.getState().history.depth;
+
+    expect(engine.deleteSelection()).toBe(true);
+
+    expect(engine.listStrokes(layerId).map((stroke) => stroke.id)).toEqual([ids[2]]);
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId).map((stroke) => stroke.id)).toEqual(ids);
+    expect(engine.getState().history.depth).toBe(depth);
+    // Nothing is selected after deleting, so deleting again is a no-op.
+    expect(engine.deleteSelection()).toBe(false);
+  });
+
+  it("keeps the selection to one layer, and drops it on a layer or tool change", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.addLayer();
+    const secondLayerId = engine.getState().document.activeLayerId as string;
+    paint(engine, [
+      [50, 60],
+      [100, 60],
+    ]);
+    engine.setTool("select");
+
+    handle(engine, [
+      [20, 20],
+      [120, 120],
+    ], "up");
+
+    // Both strokes are inside the marquee; only the active layer's is selected.
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(spy.selections[spy.selections.length - 1]?.strokes[0].layerId).toBe(secondLayerId);
+    expect(layerId).not.toBe(secondLayerId);
+
+    engine.setTool("brush");
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+  });
+
+  it("drops the selection when another layer becomes active", () => {
+    const { engine } = createSelectingEngine();
+    engine.addLayer();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    const drawingLayerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("select");
+    handle(engine, [
+      [20, 20],
+      [120, 120],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    const otherLayerId = engine
+      .getState()
+      .document.layers.map((layer) => layer.id)
+      .find((id) => id !== drawingLayerId) as string;
+    engine.selectLayer(otherLayerId);
+
+    expect(engine.getState().selectedStrokes).toBe(0);
   });
 });

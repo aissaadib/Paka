@@ -38,6 +38,8 @@ export interface EditorActions {
   setLayerOpacity(layerId: LayerId, opacity: number): void;
   moveLayer(layerId: LayerId, delta: number): void;
   selectLayer(layerId: LayerId): void;
+  clearSelection(): void;
+  deleteSelection(): void;
 }
 
 export interface Editor {
@@ -83,6 +85,10 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setLayerOpacity: (layerId, opacity) => engine.setLayerOpacity(layerId, opacity),
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
     selectLayer: (layerId) => engine.selectLayer(layerId),
+    clearSelection: () => engine.clearSelection(),
+    deleteSelection: () => {
+      engine.deleteSelection();
+    },
   };
 
   return {

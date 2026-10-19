@@ -5,9 +5,11 @@
  * an interface concern and live here. Shortcuts are ignored while typing in a
  * text field so renaming a layer or naming a document never triggers tools.
  *
- *   B / E / L / R / O / I / H   brush / eraser / line / rectangle / ellipse /
- *                                colour picker / pan
+ *   B / E / M / L / R / O / I / H   brush / eraser / select / line / rectangle /
+ *                                ellipse / colour picker / pan
  *   [ / ]          decrease / increase brush size
+ *   Escape         clear the selection
+ *   Delete         delete the selected strokes
  *   Ctrl+Z         undo
  *   Ctrl+Shift+Z   redo
  *   Ctrl+Y         redo
@@ -114,6 +116,19 @@ export function useKeyboardShortcuts(
       }
 
       if (event.altKey || event.shiftKey) {
+        return;
+      }
+
+      if (key === "escape") {
+        event.preventDefault();
+        actions.clearSelection();
+        return;
+      }
+
+      if (key === "delete" || key === "backspace") {
+        // Backspace is also the browser's "go back" gesture; the editor owns it.
+        event.preventDefault();
+        actions.deleteSelection();
         return;
       }
 

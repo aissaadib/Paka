@@ -78,6 +78,7 @@ describe("tool definitions", () => {
     expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual([
       "brush",
       "eraser",
+      "select",
       "line",
       "rectangle",
       "ellipse",
@@ -86,6 +87,7 @@ describe("tool definitions", () => {
     ]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
     expect(getToolDefinition("eraser").shortcut).toBe("E");
+    expect(getToolDefinition("select").shortcut).toBe("M");
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
@@ -96,6 +98,7 @@ describe("tool definitions", () => {
   it("resolves shortcuts case-insensitively and ignores unknown keys", () => {
     expect(findToolByShortcut("b")?.id).toBe("brush");
     expect(findToolByShortcut("E")?.id).toBe("eraser");
+    expect(findToolByShortcut("m")?.id).toBe("select");
     expect(findToolByShortcut("l")?.id).toBe("line");
     expect(findToolByShortcut("r")?.id).toBe("rectangle");
     expect(findToolByShortcut("o")?.id).toBe("ellipse");

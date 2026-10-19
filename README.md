@@ -30,6 +30,15 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the centre. Shapes draw with the current brush, so size, colour and opacity
   come from the brush controls; a press outside the paper records nothing, and a
   click that never moved leaves nothing behind.
+- **Selection and transform** (`M`): drag a marquee to select the strokes of the
+  active layer it meets, or click a stroke to select just that one and click
+  empty paper to clear. The selection is shown as a dashed frame around the
+  strokes plus a blue trace over each of them. Dragging from inside the frame
+  moves every selected stroke as one gesture; releasing records **one** undo
+  step, and `Esc` cancels a drag mid-flight. `Delete`/`Backspace` removes the
+  selected strokes as one step, restorable with undo in their original painting
+  order. Selecting is not an edit: it adds no history step and never marks the
+  document dirty.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
   picks the colour actually on screen rather than the colour a stroke was
@@ -59,8 +68,9 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **PNG export** (`File → Export PNG…`) of the full composite at document size,
   including layer visibility and opacity, without touching the editable
   document.
-- **Status bar** reporting document size, zoom, history depth, the live cursor
-  position in document coordinates, the current file name and file messages.
+- **Status bar** reporting document size, zoom, history depth, how many strokes
+  are selected, the live cursor position in document coordinates, the current
+  file name and file messages.
 - **HiDPI** rendering: layer surfaces are rasterized at up to 2x and the display
   canvas follows the device pixel ratio, while document geometry stays fixed.
 
@@ -145,8 +155,20 @@ project is heading, phase by phase, is tracked in
 
 ## Known limitations
 
-- Only the **brush**, **eraser**, **line**, **rectangle**, **ellipse**,
-  **colour picker** and **pan** tools exist. No selection, fill or transform.
+- Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
+  **ellipse**, **colour picker** and **pan** tools exist. No fill or gradient.
+- **Selection is stroke-level and has no boundary yet.** A marquee selects whole
+  strokes (never part of one), only on the **active layer**, and the selection is
+  dropped when you switch layers or switch away from the select tool. It is a
+  convenience, not a mask: painting is **not** clipped to a selection, so a
+  selection never constrains a brush stroke. The frame is the bounding box of the
+  selected strokes rather than the region you dragged.
+- **Dragging a selection re-rasterizes the whole layer on every pointer move**
+  (the stroke list stays authoritative and the pixels are rebuilt from it, so the
+  drag can never drift from the committed result). That is fine at the sizes
+  tested and is the first thing to cache if a heavy layer makes dragging lag.
+- **Transform means translation.** Scaling, rotating, flipping and per-stroke
+  nudging are not implemented, and there is no copy/paste of a selection.
 - Shape tools draw the **outline** of a line, rectangle or ellipse as a stroke
   of the current brush; they do not fill it, and because the stroke rasterizer
   uses round joins a rectangle's corners are very slightly rounded. A shape is

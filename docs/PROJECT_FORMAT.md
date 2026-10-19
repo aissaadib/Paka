@@ -23,6 +23,14 @@ Saving a flattened PNG (or per-layer PNG buffers) would trade all of that away
 for a smaller file. That trade is the reason a v2 binary container is on the
 roadmap rather than a v1 flattening.
 
+What is deliberately **not** in the file is editor state: the undo history, the
+zoom/pan viewport, the current tool and brush, and the current selection. A
+project stores the *drawing*, so reopening restores the strokes and their layers
+rather than the editing session that produced them. (Selection is derived from
+strokes at run time anyway - see
+[ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no field
+and the format version is unchanged.)
+
 **The trade-off is real:** JSON number arrays are verbose. A stroke sample costs
 roughly 40-60 bytes of text on disk (four numbers plus separators), so a heavy
 drawing can reach tens of megabytes. A compressed or binary container is the

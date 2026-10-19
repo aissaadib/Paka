@@ -35,7 +35,10 @@ export interface DrawCall {
   readonly alpha: number;
   readonly composite: string;
   readonly fillStyle: unknown;
+  readonly strokeStyle: unknown;
   readonly lineWidth: number;
+  /** `lineDash` at the moment of the call; `[]` when solid. */
+  readonly lineDash: readonly number[];
 }
 
 /** The 8-byte PNG file signature, used as stand-in encoder output. */
@@ -65,6 +68,7 @@ export class RecordingCanvas {
       lineWidth: 1,
       lineCap: "butt",
       lineJoin: "miter",
+      lineDash: [] as number[],
     };
 
     const record =
@@ -76,13 +80,25 @@ export class RecordingCanvas {
           alpha: ctx.globalAlpha,
           composite: ctx.globalCompositeOperation,
           fillStyle: ctx.fillStyle,
+          strokeStyle: ctx.strokeStyle,
           lineWidth: ctx.lineWidth,
+          lineDash: [...ctx.lineDash],
         });
       };
 
     for (const name of RECORDED_METHODS) {
       (ctx as unknown as Record<string, unknown>)[name] = record(name);
     }
+
+    // `setLineDash` both records a call and updates state, so every later call
+    // reports the dash it was drawn with - which is how a marquee rectangle is
+    // told from the solid document border.
+    (ctx as unknown as Record<string, unknown>).setLineDash = (
+      segments: number[] = [],
+    ): void => {
+      ctx.lineDash = [...segments];
+      record("setLineDash")(segments);
+    };
 
     // Pixel reads are not draw calls, so they are recorded separately: the
     // renderer's colour probe is asserted from the returned value and the

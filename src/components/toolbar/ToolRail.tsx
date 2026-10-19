@@ -4,12 +4,22 @@ import type { ReactNode } from "react";
 import { TOOL_DEFINITIONS } from "../../core/tools/toolDefinitions";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import type { ToolId } from "../../types/tool";
-import { IconBrush, IconEllipse, IconEraser, IconHand, IconLine, IconPicker, IconRectangle } from "../icons";
+import {
+  IconBrush,
+  IconEllipse,
+  IconEraser,
+  IconHand,
+  IconLine,
+  IconPicker,
+  IconRectangle,
+  IconSelect,
+} from "../icons";
 import { IconButton } from "./IconButton";
 
 const TOOL_ICONS: Record<ToolId, ReactNode> = {
   brush: <IconBrush />,
   eraser: <IconEraser />,
+  select: <IconSelect />,
   line: <IconLine />,
   rectangle: <IconRectangle />,
   ellipse: <IconEllipse />,

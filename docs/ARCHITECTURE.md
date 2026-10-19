@@ -331,6 +331,67 @@ leave a dot; a gesture that starts outside the paper records nothing at all
 the pointer was let go: holding `Shift`/`Alt` through the release keeps the
 constraint, releasing the modifier first drops it.
 
+### Selection and transform
+
+A selection holds **whole strokes of one layer**, never part of a stroke and
+never pixels. `core/document/strokeSelection.ts` is the entire hit-test rule and
+is pure: the marquee is a rectangle in document space, and a stroke is selected
+when its centreline meets that rectangle, inflated by half the stroke's painted
+width (`strokeDiameter(brush, 1) / 2`) so a wide stroke whose pixels reach into
+the marquee selects even when its samples stay outside. Segments are tested
+**continuously** (Liang-Barsky), not just sample by sample: a sparse stroke that
+crosses the marquee with both endpoints outside it is still selected. The test is
+against the *active* layer's stroke list only, because a transform writes stroke
+samples and a stroke belongs to exactly one layer.
+
+A press that never moved is a zero-size marquee, so a click runs through exactly
+the same rule: it selects the strokes under the pointer, or clears the selection
+when it meets none. There is no separate click path to keep in step.
+
+Only *which* strokes are selected is stored (`{ layerId, strokeIds }`). The frame
+the user sees is **derived** from those strokes' bounds on every draw, which is
+what makes it follow a move, an undo and a redo without any second piece of state
+that could drift. Selection is editor state, not document state: it is not
+serialized, it adds no history step, and it never marks the document dirty.
+
+The overlay is **display-only**. The engine hands the renderer
+`{ bounds, strokes }` through `setSelection(...)`; the renderer traces the
+centrelines in blue and draws the frame as a dashed rectangle, after the layers
+and the in-progress stroke and before the document border. It never reaches a
+layer surface and `composeDocumentImage` (and therefore PNG export) never sees it.
+
+Two gestures, chosen on press by `isInsideSelection`:
+
+- **Marquee** - drag anywhere outside the frame. The rubber band is live in the
+  overlay; the committed selection is decided on release and re-derived from the
+  strokes. A marquee that meets nothing clears the selection.
+- **Move** - drag from inside the frame. Every selected stroke's samples are
+  written as `original + delta` and the layer is re-rasterized, so the pixels on
+  screen are always exactly what the stroke list would produce; the store stays
+  authoritative throughout the drag. On release one `MoveStrokesCommand` is
+  **pushed** (the effect is already visible) holding the pre-drag copies:
+  `apply` writes `original + offset`, `revert` writes the originals back. Because
+  both directions are computed from the *same* stored originals rather than from
+  the current state, undo and redo are exact and repeatable - there is no
+  accumulation drift. Cancelling (a lost capture, a tool switch, `Esc`) writes
+  the originals back and records nothing, and a press inside the frame that never
+  moved records nothing either.
+
+`DeleteStrokesCommand` removes the selected strokes and, on revert, re-inserts
+each at its **original index**, so undo restores the layer's painting order rather
+than shuffling the deleted strokes to the top.
+
+The selection is cleared when it stops meaning what it says: switching the active
+layer, removing that layer, replacing the document (new/open) and switching away
+from the select tool. It is deliberately *not* a mask - painting is never clipped
+to it - so leaving it visible under another tool would imply a constraint that
+does not exist.
+
+The cost of the live move is honest: one full layer re-rasterization per pointer
+move. That is the price of never showing a preview that could differ from the
+committed result; caching the moved strokes' pixels is the obvious optimisation
+if a heavy layer makes dragging lag.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its stroke list:
@@ -373,6 +434,12 @@ action was a stroke or a layer change:
   two small objects. When the change creates or destroys stroke data - layer
   duplication, or deletion, which must not lose the deleted layer's strokes -
   the command also carries that stroke list and restores it on revert.
+- **`MoveStrokesCommand` / `DeleteStrokesCommand`** edit existing strokes rather
+  than adding or removing a layer's paint. A move keeps each stroke's pre-drag
+  sample arrays and writes `original + offset` on apply and the originals on
+  revert; a delete keeps each stroke together with its index and re-inserts it
+  there on revert. Neither snapshots a bitmap, for the same reason as
+  `StrokeCommand`: the stroke list is the record and pixels are a cache.
 
 Stack mechanics:
 
@@ -508,6 +575,22 @@ DOM-free by design.
   recording context - that rasterization is always **full coverage** (which is
   what stops semi-transparent overlap from darkening), that width still follows
   pressure per segment, and that `fromIndex` redraws only the new part.
+- Selection is tested at three levels. `strokeSelection` is pure geometry:
+  drag-direction normalization, edge-inclusive containment, inflation and
+  translation, and segment-versus-rectangle cases including a segment that
+  crosses with both ends outside, a segment whose bounding box overlaps but whose
+  line misses (the case a bounding-box test gets wrong), a parallel near miss,
+  a zero-length segment, and painted-width padding bridging a near miss. The
+  engine suite drives the select tool through the same `handlePointerSample`
+  entry point as the binder: marquee selection, click-to-select and
+  click-to-clear, the live rubber band, an exact `original + delta` move with one
+  undo step and exact undo/redo, a press that never moved recording nothing, a
+  cancelled move restoring the strokes and recording nothing, deletion as one
+  step with painting order restored on undo, active-layer scoping, and the
+  selection dropping on a layer change, a new document and a tool switch. The
+  renderer suite asserts the overlay stream: the trace and the dashed frame come
+  after the layers and before the solid border, `setSelection(null)` leaves only
+  the border, and the exported composite contains neither.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
@@ -531,7 +614,14 @@ centre stay paper (which is what distinguishes it from a rectangle), a line inks
 its midpoint only, and a `Shift` drag is confirmed to snap by inking the snapped
 axis and leaving the unconstrained one bare. Undo after each shape returns the
 canvas to paper, and the status bar shows the history depth rising by exactly one
-per shape, which is the on-screen proof that a drag is one undo step. Stroke compositing is verified that way
+per shape, which is the on-screen proof that a drag is one undo step. Selection is
+verified the same way: a marquee drag selects the strokes it meets and traces
+them (the dash frame hugs their bounds, and the status bar reads `N selected`),
+dragging from inside the frame moves the ink to the new position and leaves the
+old position as paper while the history depth rises by exactly one, `Esc` clears
+the frame and the trace without moving anything, `Delete` removes the selected
+strokes and undo restores them, and undo/redo of the move returns the ink to the
+exact original and moved positions. Stroke compositing is verified that way
 against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
 that retraces itself is pixel-identical in its retraced and single-covered
 parts, two separate strokes that overlap do build up, and the live composite
@@ -552,8 +642,18 @@ reported separately rather than being implied by the test count.
 
 These are real gaps, not footnotes:
 
-- **Tools**: only `brush`, `eraser`, `line`, `rectangle`, `ellipse`, `picker`
-  and `pan`. There is no selection, transform or fill tool.
+- **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
+  `picker` and `pan`. There is no fill, gradient or text tool.
+- **Selection is stroke-level, layer-scoped and translation-only.** A marquee
+  selects whole strokes (never part of one, so a selection cannot split a stroke
+  or mask a brush stroke), only on the active layer, and it is dropped when the
+  layer or the tool changes. There is no add/subtract modifier, no feathering, no
+  clipping, and no scale, rotate, flip or copy/paste. The frame is the selected
+  strokes' bounding box, not the region that was dragged.
+- **A live selection move re-rasterizes the whole layer per pointer move.** The
+  stroke list stays authoritative and the pixels are rebuilt from it, which is
+  why the drag can never drift from the committed result; caching the moved
+  strokes is the optimisation to reach for if a heavy layer makes dragging lag.
 - **Shapes are stroke outlines, not vectors.** A committed shape is stored as
   ordinary stroke samples and cannot be recognised or edited as a rectangle
   afterwards, it does not fill, and it takes the brush's round joins. Shapes are
