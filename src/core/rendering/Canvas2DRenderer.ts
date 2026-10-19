@@ -235,6 +235,26 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
+  /**
+   * Redraws the whole stroke buffer from the stroke's current samples.
+   *
+   * Shape tools replace their geometry on every move rather than appending, so
+   * the buffer cannot be extended: it is cleared and re-rasterized from index 0
+   * every time. Full coverage is used, exactly as during a brush stroke; the
+   * stroke's opacity is applied when the buffer composites in `render()` and
+   * `endStroke()`. Shapes never erase, so no snapshot handling is involved.
+   */
+  replaceStroke(stroke: StrokeRecord): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.activeStroke = stroke;
+    this.clearStrokeBuffer();
+    this.prepareStrokeBuffer();
+    rasterizeStroke(this.strokeCtx, stroke, 0);
+    this.requestFrame();
+  }
+
   endStroke(stroke: StrokeRecord): void {
     const doc = this.doc;
     if (!doc) {

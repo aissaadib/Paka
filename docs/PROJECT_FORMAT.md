@@ -154,6 +154,15 @@ An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
 re-renderable if the brush model changes.
 
+A shape drawn with the line, rectangle or ellipse tool is an **ordinary stroke**:
+its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
+four corners plus the repeated first point for a rectangle, and a closed run of
+short segments for an ellipse - with `pressures` all `1`, so a shape has the
+brush's constant full width. There is no `kind` or geometry field, which is why
+adding shape tools changed neither the format nor the version: a reader that
+already knows strokes reproduces shapes, and undo, reopen and export treat them
+exactly like any other stroke.
+
 ### `brush`
 
 | Field | Range | Meaning |

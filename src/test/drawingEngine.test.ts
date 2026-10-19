@@ -13,6 +13,7 @@ import { DEFAULT_BRUSH, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/d
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, Rgb } from "../core/rendering/types";
+import type { StrokeRecord } from "../core/document/types";
 import type { PointerSample } from "../types/pointer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
@@ -48,6 +49,10 @@ function createEngine() {
 function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {}) {
   const invalidated: string[] = [];
   const sampled: Array<{ x: number; y: number }> = [];
+  const began: StrokeRecord[] = [];
+  const replaced: Array<{ xs: number[]; ys: number[] }> = [];
+  const ended: StrokeRecord[] = [];
+  let cancelled = 0;
   let documents = 0;
   let renders = 0;
   // `undefined` means "no colour here" (the same answer as an empty document).
@@ -64,10 +69,19 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
     invalidateLayer: (layerId) => {
       invalidated.push(layerId);
     },
-    beginStroke: () => {},
+    beginStroke: (stroke) => {
+      began.push(stroke);
+    },
     extendStroke: () => {},
-    endStroke: () => {},
-    cancelStroke: () => {},
+    replaceStroke: (stroke) => {
+      replaced.push({ xs: [...stroke.xs], ys: [...stroke.ys] });
+    },
+    endStroke: (stroke) => {
+      ended.push(stroke);
+    },
+    cancelStroke: () => {
+      cancelled += 1;
+    },
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
@@ -86,6 +100,10 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
     renderer,
     invalidated,
     sampled,
+    began,
+    replaced,
+    ended,
+    getCancelled: () => cancelled,
     getDocuments: () => documents,
     getRenders: () => renders,
   };
@@ -648,5 +666,182 @@ describe("DrawingEngine colour picker", () => {
     expect(engine.getState().brush.color).toBe("#123456");
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().file.dirty).toBe(false);
+  });
+});
+
+describe("DrawingEngine shape tools", () => {
+  it("previews in the stroke buffer and commits one stroke on release", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 150 }));
+
+    // Mid-drag the shape is only a preview: one full-buffer redraw, no stroke,
+    // no history entry.
+    expect(spy.began).toHaveLength(1);
+    expect(spy.replaced).toHaveLength(1);
+    expect(spy.ended).toHaveLength(0);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 150 }));
+
+    expect(spy.ended).toHaveLength(1);
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // A closed rectangle: four corners plus the repeated first point.
+    expect(strokes[0].xs).toEqual([100, 200, 200, 100, 100]);
+    expect(strokes[0].ys).toEqual([100, 100, 150, 150, 100]);
+    expect(strokes[0].pressures).toEqual([1, 1, 1, 1, 1]);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("snaps a line to 45 degrees under Shift", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("line");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 0, docY: 0 }));
+    const shiftHeld = { shift: true, alt: false, ctrl: false, meta: false };
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 100, docY: 10, modifiers: shiftHeld }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 100, docY: 10, modifiers: shiftHeld }),
+    );
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs).toHaveLength(2);
+    // Snapped to horizontal: the y offset collapses to zero.
+    expect(stroke.ys[1]).toBeCloseTo(0, 10);
+    expect(stroke.xs[1]).toBeCloseTo(Math.hypot(100, 10), 6);
+  });
+
+  it("draws a rectangle from its centre under Alt", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    const altHeld = { shift: false, alt: true, ctrl: false, meta: false };
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 150, docY: 130, modifiers: altHeld }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 150, docY: 130, modifiers: altHeld }),
+    );
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(Math.min(...stroke.xs)).toBe(50);
+    expect(Math.max(...stroke.xs)).toBe(150);
+    expect(Math.min(...stroke.ys)).toBe(70);
+    expect(Math.max(...stroke.ys)).toBe(130);
+  });
+
+  it("commits the geometry of the release point, not the last move", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("line");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 0, docY: 0 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 80 }));
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs).toEqual([0, 60]);
+    expect(stroke.ys).toEqual([0, 80]);
+  });
+
+  it("discards a click that never moved", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("ellipse");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 50, docY: 50 }));
+
+    expect(spy.replaced).toHaveLength(0);
+    expect(spy.ended).toHaveLength(0);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("ignores a shape that starts outside the document", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: -5, docY: 40 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 100 }));
+
+    expect(spy.began).toHaveLength(0);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("discards an in-progress shape on cancellation", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("ellipse");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 120, docY: 90 }));
+    engine.handlePointerSample(createSample({ phase: "cancel", docX: 120, docY: 90 }));
+
+    expect(spy.ended).toHaveLength(0);
+    expect(spy.getCancelled()).toBe(1);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("discards an in-progress shape when the tool changes mid-drag", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 120, docY: 90 }));
+    engine.setTool("brush");
+
+    expect(spy.ended).toHaveLength(0);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().toolId).toBe("brush");
   });
 });

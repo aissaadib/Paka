@@ -22,6 +22,27 @@ export const ERASER_TOOL: ToolDefinition = {
   description: "Erase with the current brush size and opacity",
 };
 
+export const LINE_TOOL: ToolDefinition = {
+  id: "line",
+  label: "Line",
+  shortcut: "L",
+  description: "Draw a straight line with the current brush",
+};
+
+export const RECTANGLE_TOOL: ToolDefinition = {
+  id: "rectangle",
+  label: "Rectangle",
+  shortcut: "R",
+  description: "Draw a rectangle outline with the current brush",
+};
+
+export const ELLIPSE_TOOL: ToolDefinition = {
+  id: "ellipse",
+  label: "Ellipse",
+  shortcut: "O",
+  description: "Draw an ellipse outline with the current brush",
+};
+
 export const PICKER_TOOL: ToolDefinition = {
   id: "picker",
   label: "Colour picker",
@@ -40,6 +61,9 @@ export const PAN_TOOL: ToolDefinition = {
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
   ERASER_TOOL,
+  LINE_TOOL,
+  RECTANGLE_TOOL,
+  ELLIPSE_TOOL,
   PICKER_TOOL,
   PAN_TOOL,
 ];

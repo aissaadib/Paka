@@ -56,6 +56,7 @@ import {
   zoomToAt,
 } from "../rendering/viewport";
 import { createToolRegistry, type ToolRegistry } from "../tools/toolRegistry";
+import type { ShapePoint } from "../tools/shapeGeometry";
 import type { Tool, ToolContext } from "../tools/types";
 
 /** Low-frequency state React is allowed to render from. */
@@ -203,6 +204,10 @@ export class DrawingEngine implements StrokeSource {
       extendStroke: (sample) => engine.extendStroke(sample),
       finishStroke: () => engine.finishStroke(),
       cancelStroke: () => engine.cancelStroke(),
+      beginShape: (sample) => engine.beginShape(sample),
+      setShapeOutline: (points) => engine.setShapeOutline(points),
+      finishShape: () => engine.finishShape(),
+      cancelShape: () => engine.cancelShape(),
       isStrokeActive: () => engine.activeStroke !== null,
       pickColor: (sample) => engine.pickColor(sample),
     };
@@ -633,12 +638,82 @@ export class DrawingEngine implements StrokeSource {
     }
   }
 
+  // ------------------------------------------------------------- shape capture
+
+  /**
+   * Starts a shape gesture.
+   *
+   * Shapes do not trace the pointer: the tool computes a whole outline from the
+   * drag and replaces it on every move (see `setShapeOutline`). The engine holds
+   * the in-flight stroke and the renderer previews it exactly as for a brush
+   * stroke, so committing is the same one-step path.
+   */
+  private beginShape(sample: PointerSample): void {
+    if (this.activeStroke) {
+      return;
+    }
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      return;
+    }
+    // The same guard as `beginStroke`: a press outside the paper starts nothing,
+    // and a non-finite sample never satisfies the bounds check.
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return;
+    }
+    const stroke = createStrokeRecord(layerId, this.brush, this.activeTool().erases === true);
+    stroke.startTime = sample.timeStamp;
+    this.strokeBuilder = null;
+    this.activeStroke = stroke;
+    this.renderer?.beginStroke(stroke);
+  }
+
+  /**
+   * Replaces the in-progress shape's samples with a new outline.
+   *
+   * Pressure is fixed at 1 so a shape has constant width, and `times` are zero
+   * because a shape has no timing - they exist only to keep the sample arrays
+   * parallel. The renderer redraws the whole buffer, so the preview shows the
+   * current geometry and nothing accumulates across moves.
+   */
+  private setShapeOutline(points: readonly ShapePoint[]): void {
+    const stroke = this.activeStroke;
+    if (!stroke) {
+      return;
+    }
+    stroke.xs.length = 0;
+    stroke.ys.length = 0;
+    stroke.pressures.length = 0;
+    stroke.times.length = 0;
+    for (const point of points) {
+      stroke.xs.push(point.x);
+      stroke.ys.push(point.y);
+      stroke.pressures.push(1);
+      stroke.times.push(0);
+    }
+    this.renderer?.replaceStroke(stroke);
+  }
+
+  /** Commits the in-progress shape; an empty outline is discarded, not stored. */
+  private finishShape(): void {
+    const stroke = this.activeStroke;
+    if (!stroke || stroke.xs.length === 0) {
+      this.cancelShape();
+      return;
+    }
+    this.finishStroke();
+  }
+
+  /** Discards the in-progress shape without touching the layer. */
+  private cancelShape(): void {
+    this.cancelStroke();
+  }
+
   finishStroke(): void {
-    const builder = this.strokeBuilder;
     const stroke = this.activeStroke;
     this.strokeBuilder = null;
     this.activeStroke = null;
-    if (!builder || !stroke) {
+    if (!stroke) {
       return;
     }
 

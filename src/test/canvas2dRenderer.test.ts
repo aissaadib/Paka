@@ -408,6 +408,73 @@ describe("Canvas2DRenderer compositing", () => {
   });
 });
 
+describe("Canvas2DRenderer shape preview", () => {
+  it("rebuilds the whole stroke buffer from replaced samples", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+
+    const stroke = createStroke(doc.layers[0].id);
+    const setOutline = (points: ReadonlyArray<readonly [number, number]>): void => {
+      stroke.xs.length = 0;
+      stroke.ys.length = 0;
+      stroke.pressures.length = 0;
+      stroke.times.length = 0;
+      for (const [x, y] of points) {
+        stroke.xs.push(x);
+        stroke.ys.push(y);
+        stroke.pressures.push(1);
+        stroke.times.push(0);
+      }
+    };
+
+    // A line outline: two points, one segment.
+    setOutline([
+      [10, 10],
+      [90, 70],
+    ]);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.replaceStroke(stroke);
+    expect(harness.strokeBuffer.named("stroke")).toHaveLength(1);
+
+    // The drag moves: the outline is replaced, not appended, so the buffer is
+    // cleared and redrawn from the four segments of a rectangle.
+    setOutline([
+      [10, 10],
+      [90, 10],
+      [90, 70],
+      [10, 70],
+      [10, 10],
+    ]);
+    harness.renderer.replaceStroke(stroke);
+
+    const names = harness.strokeBuffer.calls.map((call) => call.name);
+    const afterClear = names.slice(names.lastIndexOf("clearRect") + 1);
+    expect(afterClear.filter((name) => name === "stroke")).toHaveLength(4);
+  });
+
+  it("shows the replaced outline above the layers at the stroke's opacity", () => {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 100, height: 80 });
+    const brush: BrushSettings = { ...BRUSH, opacity: 0.5 };
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+
+    const stroke = createStroke(doc.layers[0].id, brush);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.replaceStroke(stroke);
+    harness.renderer.render();
+
+    const inProgress = harness.display.drawImages.find(
+      (call) => call.args[0] === harness.strokeBuffer,
+    );
+    expect(inProgress?.alpha).toBe(0.5);
+  });
+});
+
 describe("Canvas2DRenderer eraser", () => {
   it("subtracts eraser strokes from the layer when re-rasterizing", () => {
     const strokes = new Map<LayerId, StrokeRecord[]>();

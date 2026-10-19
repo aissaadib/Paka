@@ -117,7 +117,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, stroke store | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, picker, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, picker, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke command, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -175,7 +175,9 @@ Drawing directly into the layer surface would require re-rasterizing the whole
 stroke on every input event. Instead, new samples are rasterized incrementally
 into the buffer (`extendStroke` → `rasterizeStroke(ctx, stroke, fromIndex)`) and
 only the new segments are drawn. When the stroke ends, the buffer is composited
-into the layer surface **once** and cleared.
+into the layer surface **once** and cleared. A shape tool does not append: it
+replaces the whole outline and redraws the buffer (`replaceStroke`, see
+[Shape tools](#shape-tools)).
 
 The buffer is also what makes a stroke one shape rather than a pile of
 overlapping segments. Segments are rasterized at **full coverage**, and the
@@ -289,6 +291,45 @@ Two rules make picking safe:
 The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
 and there is nothing to finish or cancel - and it stays selected afterwards,
 consistent with the eraser. `B` returns to the brush.
+
+### Shape tools
+
+A line, rectangle or ellipse is a **stroke whose samples trace the shape's
+outline** rather than a path the pointer traced. That is the whole trick: a
+committed shape is an ordinary `StrokeRecord` (`ShapeTool` → `shapeOutline` →
+stroke buffer → `StrokeCommand`), so it inherits one-undo-step semantics, the
+project file, re-rasterization after undo or reopen, and layer compositing -
+without a line of shape-specific rendering. The cost is honest and visible:
+shapes are brush strokes, so they are **outlines drawn with round joins** (a
+rectangle's corners are slightly rounded, an ellipse is a polygon of many short
+segments) and they do not fill. Their samples carry pressure `1`, so a shape has
+the brush's full, constant width.
+
+The gesture is a drag from an anchor to the current point.
+`core/tools/shapeGeometry.ts` is pure - it turns
+`{ anchor, current, shift, alt }` into document-space points and touches neither
+the engine nor the renderer: a two-point line, a five-point closed rectangle, an
+ellipse sampled on a multiple of four segments so it touches its bounding box
+exactly. `ShapeTool` owns only the anchor and recomputes the *whole* outline on
+every move, which is what lets `Shift` and `Alt` change the shape mid-drag
+(45-degree lines, squares and circles; drawing from the centre).
+
+Because the outline is **replaced** rather than appended, the renderer contract
+gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
+index 0. The preview therefore lives in the same buffer as a live brush stroke,
+is composited above the layers at the stroke's own opacity, and still commits
+through the same `endStroke` path.
+
+Nothing reaches the layer until the press is released, which is what makes
+cancellation exact: a cancelled gesture, a tool switch mid-drag or a lost capture
+clears the buffer and leaves the layer untouched - unlike a brush stroke, whose
+pixels are already real when it is cancelled. A release that never moved is
+discarded as well, because its outline has no extent, so a stray click cannot
+leave a dot; a gesture that starts outside the paper records nothing at all
+(the same guard as `beginStroke`). The position and the modifier state of the
+**release** sample decide the committed geometry, so the shape settles on where
+the pointer was let go: holding `Shift`/`Alt` through the release keeps the
+constraint, releasing the modifier first drops it.
 
 ### Dirty surfaces
 
@@ -421,7 +462,7 @@ interface the engine uses to touch pixels:
 ```
 setDocument / setViewport / setDisplaySize / setRasterScale
 invalidateLayer
-beginStroke / extendStroke / endStroke / cancelStroke
+beginStroke / extendStroke / replaceStroke / endStroke / cancelStroke
 render / requestRender / destroy
 ```
 
@@ -453,6 +494,16 @@ DOM-free by design.
   separate suite injects a recording renderer to pin down surface-invalidation
   policy (layer metadata never re-rasterizes; a stroke undo does). It also
   asserts that no React-facing state is published while drawing.
+- Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
+  squares and circles, drawing from the centre, the ellipse's bounded and
+  exactly-closed outline, and the degenerate extent. Shape *behaviour* is
+  covered through the recording renderer on the engine: a drag previews with a
+  full-buffer redraw and commits nothing, the release commits exactly one stroke
+  carrying the outline's samples, and cancellation, a mid-drag tool switch, an
+  out-of-bounds start and a click that never moved all leave the document and
+  the history untouched. `replaceStroke` is asserted on the draw-call stream: it
+  clears the buffer and redraws the whole outline, and the preview composites at
+  the stroke's own alpha.
 - `canvas2dStroke` is tested directly: diameter/opacity curves, and - through the
   recording context - that rasterization is always **full coverage** (which is
   what stops semi-transparent overlap from darkening), that width still follows
@@ -472,7 +523,15 @@ DOM-free by design.
 Behaviour that only exists in a browser or a real window is verified manually
 against the running app (composited pixels on the display canvas, layer
 visibility and opacity effects, brush thickness in device pixels, the new
-document dialog, the native status bar). Stroke compositing is verified that way
+document dialog, the native status bar). Shape tools are verified the same way,
+by dispatching real pointer drags at the live canvas and reading the display
+pixels back: a rectangle inks its four edges and leaves its interior as paper, an
+ellipse inks the four points on its axes while its bounding-box corners and
+centre stay paper (which is what distinguishes it from a rectangle), a line inks
+its midpoint only, and a `Shift` drag is confirmed to snap by inking the snapped
+axis and leaving the unconstrained one bare. Undo after each shape returns the
+canvas to paper, and the status bar shows the history depth rising by exactly one
+per shape, which is the on-screen proof that a drag is one undo step. Stroke compositing is verified that way
 against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
 that retraces itself is pixel-identical in its retraced and single-covered
 parts, two separate strokes that overlap do build up, and the live composite
@@ -493,8 +552,13 @@ reported separately rather than being implied by the test count.
 
 These are real gaps, not footnotes:
 
-- **Tools**: only `brush`, `eraser`, `picker` and `pan`. There is no selection,
-  transform or fill tool.
+- **Tools**: only `brush`, `eraser`, `line`, `rectangle`, `ellipse`, `picker`
+  and `pan`. There is no selection, transform or fill tool.
+- **Shapes are stroke outlines, not vectors.** A committed shape is stored as
+  ordinary stroke samples and cannot be recognised or edited as a rectangle
+  afterwards, it does not fill, and it takes the brush's round joins. Shapes are
+  also pressure-blind by construction: their samples carry pressure `1`, so a
+  `Shift` drag gives a constant-width outline rather than a tapered one.
 - **The colour picker samples the composite only.** It always reads paper plus
   visible layers; there is no per-layer sampling, no `Alt`-click temporary
   picker from the brush, no magnifier preview and no colour history or swatches

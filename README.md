@@ -22,6 +22,14 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   use the brush controls, it is one undo step ("Erase"), and a saved file
   reopens with the erasure intact. A cancelled eraser stroke leaves the layer
   exactly as it was.
+- **Shape tools** (`L` line, `R` rectangle, `O` ellipse): drag from one point
+  to another and the shape follows the pointer, previewed in the stroke buffer
+  without touching the layer. Releasing commits it as **one** stroke, so it is
+  one undo step and re-rasterizes identically on undo, reopen and export.
+  `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws from
+  the centre. Shapes draw with the current brush, so size, colour and opacity
+  come from the brush controls; a press outside the paper records nothing, and a
+  click that never moved leaves nothing behind.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
   picks the colour actually on screen rather than the colour a stroke was
@@ -137,8 +145,13 @@ project is heading, phase by phase, is tracked in
 
 ## Known limitations
 
-- Only the **brush**, **eraser**, **colour picker** and **pan** tools exist. No
-  selection, fill or transform.
+- Only the **brush**, **eraser**, **line**, **rectangle**, **ellipse**,
+  **colour picker** and **pan** tools exist. No selection, fill or transform.
+- Shape tools draw the **outline** of a line, rectangle or ellipse as a stroke
+  of the current brush; they do not fill it, and because the stroke rasterizer
+  uses round joins a rectangle's corners are very slightly rounded. A shape is
+  stored as ordinary stroke samples, so it has no separate geometry to edit
+  afterwards and it ignores pen pressure (constant width).
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`** blend mode is implemented.

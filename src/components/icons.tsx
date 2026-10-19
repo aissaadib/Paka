@@ -57,6 +57,31 @@ export function IconPicker(props: IconProps) {
   );
 }
 
+export function IconLine(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 13 13 3" />
+      <path d="M2.4 13.6h1.2v-1.2M12.4 2.4h1.2v1.2" />
+    </Icon>
+  );
+}
+
+export function IconRectangle(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.8" y="4" width="10.4" height="8" rx="0.6" />
+    </Icon>
+  );
+}
+
+export function IconEllipse(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <ellipse cx="8" cy="8" rx="5.4" ry="4" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>

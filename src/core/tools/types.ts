@@ -12,6 +12,7 @@ import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
 import type { LayerId } from "../document/types";
+import type { ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
   readonly viewport: Viewport;
@@ -23,6 +24,24 @@ export interface ToolContext {
   beginStroke(sample: PointerSample): void;
   /** Appends a sample to the active stroke. */
   extendStroke(sample: PointerSample): void;
+  /**
+   * Starts a shape gesture on the active layer with the current brush.
+   *
+   * Like `beginStroke`, but the samples are not a path the pointer traces: the
+   * tool computes the whole outline and replaces it with `setShapeOutline`. The
+   * shape is previewed in the stroke buffer and reaches the layer only when
+   * `finishShape` is called.
+   */
+  beginShape(sample: PointerSample): void;
+  /**
+   * Replaces the in-progress shape's outline with the given document-space
+   * points. A preview only: nothing is committed until `finishShape`.
+   */
+  setShapeOutline(points: readonly ShapePoint[]): void;
+  /** Commits the in-progress shape as one undoable stroke. */
+  finishShape(): void;
+  /** Discards the in-progress shape without touching the layer. */
+  cancelShape(): void;
   /** Commits the active stroke to its layer and to history. */
   finishStroke(): void;
   /** Discards the active stroke without touching the layer. */

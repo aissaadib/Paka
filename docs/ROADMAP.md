@@ -69,7 +69,14 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       It stays selected after a pick, and it is not an edit - no stroke, no
       history entry, no dirty flag. Precision is the surfaces' (8-bit sRGB);
       sampling is composite-only. See [ARCHITECTURE.md](ARCHITECTURE.md#colour-sampling).
-- [ ] Shape tools (line, rectangle, ellipse).
+- [x] Shape tools (line, rectangle, ellipse): a drag draws a live preview that
+      does not touch the layer, and the release commits one stroke - one undo
+      step - that re-rasterizes identically on undo, reopen and export.
+      `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws
+      from the centre. A shape is an ordinary stroke whose samples trace the
+      outline, so no new geometry type and no new file field was needed; the
+      trade-off is that shapes are unfilled brush outlines with round joins.
+      See [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools).
 - [ ] Selection and transform.
 - [ ] Fill and gradient.
 
@@ -110,12 +117,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Shape tools** (Phase 2): line, rectangle and ellipse. Each is a tool whose
-gesture is a drag from an anchor to the current point, with a live preview that
-does *not* touch the layer until the press is released - then a single committed
-shape, so one undo step, re-rasterized exactly like a brush stroke so save,
-reopen and redo agree. The open questions are where the preview lives (a
-transient overlay outside the stroke list, so it never enters history), the
-modifier-key constraints (`Shift` for squares/circles and 45-degree lines,
-`Alt` to draw from the centre), and representing the result as a first-class
-shape the renderer can reproduce rather than a burst of brush samples.
+**Selection and transform** (Phase 2). The honest starting point is what a
+selection *is* in a stroke-based engine: pixels are a cache derived from the
+stroke list, so a selection either has to be expressed in terms of strokes
+(a set of strokes, or sub-ranges of samples) or it has to introduce a
+destructive pixel operation - which this architecture has deliberately avoided.
+The slice must therefore begin by deciding the model, not the marquee UI, and it
+must answer the same questions the other slices did: what is the undo step, what
+does cancellation restore, and what does a reopened file reproduce. Tools that
+are *not* part of it stay absent rather than half-wired.

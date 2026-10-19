@@ -40,6 +40,15 @@ export interface DrawingRenderer {
   beginStroke(stroke: StrokeRecord): void;
   /** Rasterizes new samples appended since `fromIndex` into the stroke buffer. */
   extendStroke(stroke: StrokeRecord, fromIndex: number): void;
+  /**
+   * Redraws the whole stroke buffer from the stroke's current samples.
+   *
+   * Shape tools replace their geometry on every move instead of appending, so
+   * the buffer must be rebuilt rather than extended. Coverage is full, like
+   * every other rasterization; the stroke's opacity is applied when the buffer
+   * composites (`render`/`endStroke`).
+   */
+  replaceStroke(stroke: StrokeRecord): void;
   /** Composites the finished stroke buffer onto its layer surface. */
   endStroke(stroke: StrokeRecord): void;
   cancelStroke(): void;
