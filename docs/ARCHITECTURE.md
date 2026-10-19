@@ -302,8 +302,20 @@ project file, re-rasterization after undo or reopen, and layer compositing -
 without a line of shape-specific rendering. The cost is honest and visible:
 shapes are brush strokes, so they are **outlines drawn with round joins** (a
 rectangle's corners are slightly rounded, an ellipse is a polygon of many short
-segments) and they do not fill. Their samples carry pressure `1`, so a shape has
+segments). Their samples carry pressure `1`, so a shape has
 the brush's full, constant width.
+
+A rectangle or an ellipse can also be **filled**, and that is still not a second
+kind of content: the same stroke carries `fill: true`, and the rasterizer fills
+the polygon its samples trace before tracing the outline on top. So a filled
+shape is one solid silhouette, its edge lands exactly where an unfilled shape's
+edge landed, and it re-rasterizes from the stroke list like everything else (see
+[Rasterization](#rasterization)). A line is never filled - its outline bounds no
+interior - which `ToolDefinition.fillable` states: the *tool* says whether
+filling is meaningful, the engine says whether the user asked for it. The
+setting (`shapeFill`) is editor state, offered in the toolbar only for a
+fillable tool and read when a gesture starts, so a shape keeps the setting it was
+drawn with and toggling it rewrites nothing.
 
 The gesture is a drag from an anchor to the current point.
 `core/tools/shapeGeometry.ts` is pure - it turns
@@ -462,6 +474,14 @@ It works entirely in document coordinates - the caller owns the transform - so
 zoom never affects rasterized pixel data. This is a deliberately small brush
 model: no stamps, no texture, no hardness curve.
 
+A stroke flagged `fill` (a filled rectangle or ellipse) additionally fills the
+closed polygon its samples trace, once, before the outline is traced - and only
+on a full re-rasterization (`fromIndex === 0`), which is the only way a shape is
+ever drawn. Both passes are drawn at full coverage and the stroke's alpha is
+applied once when the buffer composites, so filling and tracing cannot darken
+each other. The default non-zero winding rule is enough: the outline is a single
+simple loop.
+
 ## Undo / redo
 
 Two kinds of step share one stack, so undo behaves uniformly whether the last
@@ -610,13 +630,20 @@ DOM-free by design.
   full-buffer redraw and commits nothing, the release commits exactly one stroke
   carrying the outline's samples, and cancellation, a mid-drag tool switch, an
   out-of-bounds start and a click that never moved all leave the document and
-  the history untouched. `replaceStroke` is asserted on the draw-call stream: it
+  the history untouched. The fill setting is covered the same way: a shape is
+  flagged only while the setting is on, each shape keeps the setting it was
+  drawn with, a line is never filled even with the setting on, and the setting
+  survives a tool switch without becoming an edit. `replaceStroke` is asserted on
+  the draw-call stream: it
   clears the buffer and redraws the whole outline, and the preview composites at
   the stroke's own alpha.
 - `canvas2dStroke` is tested directly: diameter/opacity curves, and - through the
   recording context - that rasterization is always **full coverage** (which is
   what stops semi-transparent overlap from darkening), that width still follows
-  pressure per segment, and that `fromIndex` redraws only the new part.
+  pressure per segment, that `fromIndex` redraws only the new part, and how a
+  `fill` stroke draws: the closed polygon is filled once with the brush colour
+  *before* the outline is traced, an outline that bounds no area is not filled,
+  and a partial redraw never fills.
 - Selection is tested at three levels. `strokeSelection` is pure geometry:
   drag-direction normalization, edge-inclusive containment, inflation and
   translation, and segment-versus-rectangle cases including a segment that
@@ -687,14 +714,18 @@ every sampled pixel. The same harness confirms the format guard in the running
 app: a file from a newer version is refused with a message and the open drawing
 is left untouched, while a version-1 file opens with its strokes painted (a
 version-1 file has no erasures to lose). What has and has not been verified is
-reported separately rather than being implied by the test count.
+reported separately rather than being implied by the test count. The format's
+own round trips are asserted in Vitest: the `erase` and `fill` flags survive a
+save/reopen, an unset flag is absent from the file, and a version-1 or -2 file
+opens with its shapes traced rather than filled.
 
 ## Known limitations
 
 These are real gaps, not footnotes:
 
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
-  `picker` and `pan`. There is no fill, gradient or text tool.
+  `picker` and `pan`. There is no bucket fill, gradient or text tool: the shape
+  tools' fill covers a shape's own outline, not a region of the canvas.
 - **Selection is stroke-level, layer-scoped and limited to translation,
   duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
@@ -709,7 +740,11 @@ These are real gaps, not footnotes:
   strokes is the optimisation to reach for if a heavy layer makes dragging lag.
 - **Shapes are stroke outlines, not vectors.** A committed shape is stored as
   ordinary stroke samples and cannot be recognised or edited as a rectangle
-  afterwards, it does not fill, and it takes the brush's round joins. Shapes are
+  afterwards; a filled shape is the same samples plus a `fill` flag, so there is
+  no separate fill rule, no inner fill, no gradient and no way to turn a fill off
+  after the fact short of undoing it. Shapes take the brush's round joins, and a
+  filled ellipse's interior is as faceted as its outline (sub-pixel, but not a
+  true curve). Shapes are
   also pressure-blind by construction: their samples carry pressure `1`, so a
   `Shift` drag gives a constant-width outline rather than a tapered one.
 - **The colour picker samples the composite only.** It always reads paper plus

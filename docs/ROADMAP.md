@@ -75,7 +75,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws
       from the centre. A shape is an ordinary stroke whose samples trace the
       outline, so no new geometry type and no new file field was needed; the
-      trade-off is that shapes are unfilled brush outlines with round joins.
+      trade-off is that shapes are brush outlines with round joins, filled only
+      over their own area (see the filled-shapes entry below).
       See [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools).
 - [x] Selection and transform: a marquee (or a click) selects whole strokes of
       the active layer - the strokes whose centreline meets the inflated marquee,
@@ -90,7 +91,18 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       (dashed frame plus blue trace) is
       renderer-only and never reaches a layer or an export. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
-- [ ] Fill and gradient.
+- [x] Filled shapes: rectangle and ellipse commit with `fill: true` when the
+      toolbar's **Fill shape** switch is on, so the rasterizer fills the polygon
+      their samples bound before tracing the outline on top - one undo step, one
+      stroke, the same edge as an unfilled shape. A line is never filled (its
+      outline bounds no interior), the setting is read when a gesture starts (so
+      a shape keeps the setting it was drawn with and toggling rewrites nothing)
+      and it is not an edit. The flag is per stroke, so it survived the project
+      format: version 3, because a version-2 reader would trace a filled shape as
+      an empty outline - a different drawing. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools) and
+      [PROJECT_FORMAT.md](PROJECT_FORMAT.md#strokes).
+- [ ] Fill and gradient: a bucket (flood) fill and gradients.
 
 ## Phase 3 - Brush feel
 
@@ -129,16 +141,31 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Fill and gradient** (Phase 2). This is the first slice that cannot be expressed
+**Bucket (flood) fill and gradients** (Phase 2). This is the first slice that
+cannot be expressed
 as "more strokes": a bucket fill reads the pixels it is filling and writes a
 region, and a gradient is not stroke geometry at all. The model question comes
 first, exactly as it did for selection: the architecture keeps the stroke list
 authoritative and pixels a cache, so a pixel-writing tool needs a *new kind of
 command* - a bounded pixel patch with a revert image, layered like a stroke - and
 a decision about whether a fill on a layer is an operation on that layer's
-surface or a new stroke-like primitive. The slice also has to define the tolerance
-and anti-aliasing rule (what counts as "the same colour" on 8-bit sRGB surfaces),
-what undo restores, what a reopened project reproduces (a pixel patch has to be
-serialized or regenerated), and how the in-progress preview stays out of the
-layer until the release. Tools that are *not* part of it stay absent rather than
-half-wired.
+surface or a new stroke-like primitive.
+
+The filled-shape slice narrowed the question without answering it. A fill that
+follows *geometry the document already holds* needs nothing new: the polygon is
+the stroke's own samples, and `fill: true` re-rasterizes from the file, so
+"fill" is still strokes. A bucket fill does not have that property - its region
+is defined by the pixels under the pointer (composite or active layer, and what
+counts as "the same colour" at 8-bit sRGB), and its boundary is a mask, not a
+polyline. The two viable models are therefore (a) a **layer element list** of
+strokes *and* pixel patches, ordered together so re-rasterization reproduces
+both, with the patch serialized (mask + colour) and its revert image held by the
+command, or (b) tracing the flood region's contours and committing *that* as a
+filled shape, which keeps one kind of content but bakes the antialiasing of a
+sampled region into a polyline. (a) is the honest one if fills must be pixel-
+exact; (b) is far less code and keeps the stroke list authoritative. Whichever
+is chosen, the slice also has to define the tolerance and anti-aliasing rule,
+what undo restores, what a reopened project reproduces, and how the in-progress
+preview stays out of the layer until the release. Gradients are separable and
+may land as their own slice (a gradient is a per-pixel function, not a region).
+Tools that are *not* part of it stay absent rather than half-wired.

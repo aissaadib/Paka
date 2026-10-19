@@ -76,6 +76,19 @@ export interface StrokeRecord {
    * keeps brush strokes and older project files free of a redundant field.
    */
   readonly erase?: boolean;
+  /**
+   * True when the stroke's samples are the outline of a region to *fill*, not a
+   * path to trace. Only shape tools set it, and only for kinds whose outline
+   * encloses an area; a line has no interior, so it is never filled. Absent means
+   * an ordinary stroked path, which keeps every other stroke free of a redundant
+   * field.
+   *
+   * A fill is still a stroke: same samples, same brush, same history entry, same
+   * place in the project file. That is what keeps the stroke list authoritative -
+   * the interior is rasterized from the outline every time the layer is rebuilt,
+   * so undo, reopen and export reproduce it without a second kind of content.
+   */
+  readonly fill?: boolean;
   readonly xs: number[];
   readonly ys: number[];
   readonly pressures: number[];

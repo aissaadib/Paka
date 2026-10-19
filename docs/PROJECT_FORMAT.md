@@ -20,29 +20,31 @@ every layer editable after a reload:
 - a future brush model can re-render existing strokes with a new look.
 
 Saving a flattened PNG (or per-layer PNG buffers) would trade all of that away
-for a smaller file. That trade is the reason a v2 binary container is on the
-roadmap rather than a v1 flattening.
+for a smaller file. That trade is the reason a compressed or binary container is
+on the roadmap rather than flattening.
 
 What is deliberately **not** in the file is editor state: the undo history, the
-zoom/pan viewport, the current tool and brush, and the current selection. A
-project stores the *drawing*, so reopening restores the strokes and their layers
+zoom/pan viewport, the current tool, brush and shape-fill setting, and the
+current selection. A project stores the *drawing*, so reopening restores the
+strokes and their layers
 rather than the editing session that produced them. (Selection is derived from
 strokes at run time anyway - see
-[ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no field
-and the format version is unchanged.)
+[ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no field;
+the fill setting is stored per stroke, not per document, so the shapes that were
+filled stay filled without a session-level flag.)
 
 **The trade-off is real:** JSON number arrays are verbose. A stroke sample costs
 roughly 40-60 bytes of text on disk (four numbers plus separators), so a heavy
 drawing can reach tens of megabytes. A compressed or binary container is the
-natural v2; the parser is structured so a new *encoding* can be added without
-changing the model.
+natural next container; the parser is structured so a new *encoding* can be added
+without changing the model.
 
 ## Envelope
 
 ```json
 {
   "format": "paka-project",
-  "version": 2,
+  "version": 3,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -93,6 +95,24 @@ changing the model.
           "ys": [206, 240],
           "pressures": [0.5, 0.5],
           "times": [0, 9.1]
+        },
+        {
+          "id": "stroke-5",
+          "fill": true,
+          "brush": {
+            "size": 6,
+            "opacity": 1,
+            "color": "#16181c",
+            "pressureSize": 0.6,
+            "pressureOpacity": 0,
+            "minSizeRatio": 0.12,
+            "spacing": 0.12
+          },
+          "startTime": 1730000012000,
+          "xs": [300, 500, 500, 300, 300],
+          "ys": [400, 400, 600, 600, 400],
+          "pressures": [1, 1, 1, 1, 1],
+          "times": [0, 60, 120, 180, 240]
         }
       ]
     }
@@ -101,7 +121,9 @@ changing the model.
 ```
 
 The second stroke is an eraser stroke: its `erase` flag makes it subtract coverage
-from the pixels painted before it instead of adding colour.
+from the pixels painted before it instead of adding colour. The third is a filled
+rectangle: its `fill` flag makes a reader fill the area its samples bound before
+tracing them, so the interior is solid rather than empty.
 
 ### `format`, `version`
 
@@ -143,6 +165,7 @@ disagree with its own layer.
 | `id` | string | Stroke id. |
 | `brush` | object | The brush used, captured per stroke so later brush changes do not alter it. |
 | `erase` | boolean? | `true` only for eraser strokes, which subtract coverage from the layer instead of painting. Absent means paint. |
+| `fill` | boolean? | `true` only for filled shapes, whose samples bound the area to fill rather than a path to trace. Absent means trace. |
 | `startTime` | number | Timestamp of the first sample, for diagnostics; not used for rendering. |
 | `xs`, `ys` | number[] | Document-space centre of each sample. |
 | `pressures` | number[] | 0-1 per sample. |
@@ -171,6 +194,16 @@ adding shape tools changed neither the format nor the version: a reader that
 already knows strokes reproduces shapes, and undo, reopen and export treat them
 exactly like any other stroke.
 
+A rectangle or ellipse committed with the fill setting on adds one boolean,
+`fill: true`, to that same stroke: the samples still trace the outline, and a
+reader fills the polygon they bound before tracing it. It is a stroke-level flag
+rather than a document- or layer-level one, so a single layer can mix filled
+shapes, outlines and brush strokes in painting order, and the fill re-rasterizes
+from the file with no extra state. `fill` is why version 3 exists: a version-2
+reader would trace a filled shape's outline and leave the interior empty - a
+visibly different drawing - so it must refuse the file rather than mis-read it
+(see [Versioning](#versioning)).
+
 ### `brush`
 
 | Field | Range | Meaning |
@@ -198,6 +231,7 @@ looks like:
 - a missing/empty layer list, a duplicate layer id, a missing id;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
 - a non-boolean `erase` flag on a stroke;
+- a non-boolean `fill` flag on a stroke;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
 - brush fields outside their ranges;
@@ -211,7 +245,9 @@ looks like:
 - an `activeLayerId` that is not in the file → the bottom layer is selected;
 - a missing/non-numeric `startTime` → `0`;
 - a missing `erase` flag → the stroke paints (which is what every version-1
-  stroke does).
+  stroke does);
+- a missing `fill` flag → the stroke traces its outline (which is what every
+  version-1 and -2 shape does).
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
@@ -232,7 +268,8 @@ Two further guarantees:
 | Version | Reading it | Writing it |
 | --- | --- | --- |
 | 1 | Metadata, layers and brush strokes. | - |
-| 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | The current version; what this build always writes. |
+| 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | - |
+| 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -246,6 +283,13 @@ Two further guarantees:
   reader that skipped it would *paint* an eraser stroke, producing a visibly
   different drawing. Refusing the file is the honest outcome, so the version was
   bumped the moment the field could appear.
+- **`fill` is why version 3 exists**, for the same reason: a version-2 reader
+  would trace a filled shape's outline and leave its interior empty. The flag
+  itself is additive (an outline-only drawing is byte-identical to version 2's
+  output), but *ignoring* it changes the picture, which is what forces the bump.
+- **Both flags are written only when set.** A stroke that paints and traces -
+  every brush, eraser-free, outline-only drawing - produces exactly the file
+  version 2 wrote, so upgrades do not churn otherwise untouched documents.
 
 `PROJECT_VERSION` in `projectFormat.ts` is the single source of truth for the
 version a build writes and the highest it reads.

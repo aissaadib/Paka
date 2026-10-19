@@ -40,14 +40,16 @@ export const RECTANGLE_TOOL: ToolDefinition = {
   id: "rectangle",
   label: "Rectangle",
   shortcut: "R",
-  description: "Draw a rectangle outline with the current brush",
+  description: "Draw a rectangle with the current brush",
+  fillable: true,
 };
 
 export const ELLIPSE_TOOL: ToolDefinition = {
   id: "ellipse",
   label: "Ellipse",
   shortcut: "O",
-  description: "Draw an ellipse outline with the current brush",
+  description: "Draw an ellipse with the current brush",
+  fillable: true,
 };
 
 export const PICKER_TOOL: ToolDefinition = {

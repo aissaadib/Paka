@@ -25,8 +25,9 @@ function makeStroke(
   xs: number[] = [0, 10, 20],
   ys: number[] = [0, 10, 0],
   pressures: number[] = [1, 1, 1],
+  fill = false,
 ) {
-  const stroke = createStrokeRecord("layer-1", brush);
+  const stroke = createStrokeRecord("layer-1", brush, false, fill);
   stroke.xs.push(...xs);
   stroke.ys.push(...ys);
   stroke.pressures.push(...pressures);
@@ -134,6 +135,56 @@ describe("rasterizeStroke", () => {
     );
     // Only segments (1,2) and (2,3) are drawn, not the earlier ones.
     expect(canvas.named("stroke")).toHaveLength(2);
+  });
+
+  it("fills a shape's closed outline before tracing it", () => {
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, color: "#123456" };
+    const { ctx, canvas } = context();
+    // A square, as the shape tools emit it: the last point repeats the first.
+    rasterizeStroke(ctx, makeStroke(brush, [0, 10, 10, 0, 0], [0, 0, 10, 10, 0], [1, 1, 1, 1, 1], true));
+
+    const fills = canvas.named("fill");
+    expect(fills).toHaveLength(1);
+    // The interior takes the brush colour, at full coverage like the outline.
+    expect(fills[0].fillStyle).toBe("#123456");
+    expect(fills[0].alpha).toBe(1);
+
+    // The polygon is traced from the samples and closed back to the start.
+    const names = canvas.calls.map((call) => call.name);
+    expect(names.slice(0, 3)).toEqual(["save", "beginPath", "moveTo"]);
+    expect(canvas.named("closePath")).toHaveLength(1);
+    expect(names.indexOf("fill")).toBeLessThan(names.indexOf("stroke"));
+
+    // The outline is still traced on top, so the edge lands where an unfilled
+    // shape's edge would: one segment per gap between samples.
+    expect(canvas.named("stroke")).toHaveLength(4);
+  });
+
+  it("fills nothing for an outline that bounds no area", () => {
+    const { ctx, canvas } = context();
+    // Two samples are a line, not a region; a fill would be a degenerate sliver.
+    rasterizeStroke(ctx, makeStroke(DEFAULT_BRUSH, [0, 10], [0, 10], [1, 1], true));
+    expect(canvas.named("fill")).toHaveLength(0);
+    expect(canvas.named("stroke")).toHaveLength(1);
+  });
+
+  it("does not fill when only part of a shape is redrawn", () => {
+    const { ctx, canvas } = context();
+    rasterizeStroke(
+      ctx,
+      makeStroke(DEFAULT_BRUSH, [0, 10, 10, 0], [0, 0, 10, 10], [1, 1, 1, 1], true),
+      2,
+    );
+    // Filling is a whole-shape operation: an appended segment cannot fill.
+    expect(canvas.named("fill")).toHaveLength(0);
+    expect(canvas.named("stroke")).toHaveLength(2);
+  });
+
+  it("treats a stroke with no fill flag as an outline", () => {
+    const { ctx, canvas } = context();
+    rasterizeStroke(ctx, makeStroke(DEFAULT_BRUSH, [0, 10, 10, 0, 0], [0, 0, 10, 10, 0], [1, 1, 1, 1, 1]));
+    expect(canvas.named("fill")).toHaveLength(0);
+    expect(canvas.named("closePath")).toHaveLength(0);
   });
 });
 

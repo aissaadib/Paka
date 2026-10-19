@@ -100,6 +100,14 @@ export interface EditorSnapshot {
    * renderable from React (the overlay is drawn by the renderer).
    */
   readonly selectedStrokes: number;
+  /**
+   * Whether the shape tools fill their outline instead of tracing it.
+   *
+   * Editor state rather than document state: it describes the next shape, not
+   * the ones already committed - a committed shape carries its own flag, so
+   * toggling this never rewrites existing strokes.
+   */
+  readonly shapeFill: boolean;
 }
 
 /**
@@ -241,6 +249,11 @@ export class DrawingEngine implements StrokeSource {
   private strokeBuilder: StrokeBuilder | null = null;
   private activeStroke: StrokeRecord | null = null;
   private panGestureActive = false;
+  /**
+   * Whether the next shape is filled. See `EditorSnapshot.shapeFill` for why
+   * this is editor state and not part of the brush or the document.
+   */
+  private shapeFill = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
   /**
@@ -650,6 +663,22 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /**
+   * Sets whether the next shape is filled.
+   *
+   * Not undoable and not dirty: it changes what the *next* shape will be, and
+   * every committed shape keeps the flag it was drawn with. The setting is
+   * consulted when a shape gesture starts, so the shape takes the value that was
+   * active when the user pressed.
+   */
+  setShapeFill(filled: boolean): void {
+    if (this.shapeFill === filled) {
+      return;
+    }
+    this.shapeFill = filled;
+    this.publish();
+  }
+
   setTool(toolId: ToolId): void {
     if (this.currentToolId === toolId) {
       return;
@@ -782,7 +811,15 @@ export class DrawingEngine implements StrokeSource {
     if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
       return;
     }
-    const stroke = createStrokeRecord(layerId, this.brush, this.activeTool().erases === true);
+    const stroke = createStrokeRecord(
+      layerId,
+      this.brush,
+      this.activeTool().erases === true,
+      // Read here, at press time, so the preview and the committed stroke agree:
+      // a shape keeps the fill setting it was started with. A line's definition
+      // is not fillable, so the setting cannot produce a degenerate sliver.
+      this.shapeFill && this.activeTool().definition.fillable === true,
+    );
     stroke.startTime = sample.timeStamp;
     this.strokeBuilder = null;
     this.activeStroke = stroke;
@@ -1615,6 +1652,7 @@ export class DrawingEngine implements StrokeSource {
       // Counted from the store rather than from the selection's id list, so a
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
+      shapeFill: this.shapeFill,
     };
   }
 
@@ -1629,7 +1667,8 @@ export class DrawingEngine implements StrokeSource {
       previous.toolId === next.toolId &&
       previous.history === next.history &&
       previous.file === next.file &&
-      previous.selectedStrokes === next.selectedStrokes
+      previous.selectedStrokes === next.selectedStrokes &&
+      previous.shapeFill === next.shapeFill
     ) {
       return;
     }

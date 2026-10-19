@@ -136,6 +136,22 @@ describe("serializeProject", () => {
     expect("erase" in payload.layers[0].strokes[0]).toBe(false);
     expect(payload.layers[0].strokes[1].erase).toBe(true);
   });
+
+  it("writes the fill flag only for filled shapes", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const outline = strokeFor(layerId);
+    const filled = strokeFor(layerId, { fill: true });
+
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [outline, filled]]])),
+    ) as { layers: { strokes: Record<string, unknown>[] }[] };
+
+    // An outline stroke keeps the version-2 shape, so unfilled drawings diff
+    // cleanly against older saves.
+    expect("fill" in payload.layers[0].strokes[0]).toBe(false);
+    expect(payload.layers[0].strokes[1].fill).toBe(true);
+  });
 });
 
 describe("parseProject round trip", () => {
@@ -200,6 +216,43 @@ describe("parseProject round trip", () => {
     expect("erase" in parsed.project.strokes[0]).toBe(false);
   });
 
+  it("restores filled shapes as fills, not as outlines", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const outline = strokeFor(layerId);
+    const filled = strokeFor(layerId, { fill: true, startTime: 500 });
+    const parsed = parseProject(
+      serializeProject(document, storeOf([[layerId, [outline, filled]]])),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    // Painting order is preserved, and the flag survives the round trip.
+    expect(parsed.project.strokes).toEqual([outline, filled]);
+    expect(parsed.project.strokes[1].fill).toBe(true);
+    expect("fill" in parsed.project.strokes[0]).toBe(false);
+  });
+
+  it("opens version 2 files, whose shapes were all outlines", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const shape = strokeFor(layerId);
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [shape]]])),
+    ) as { version: number };
+    payload.version = 2;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].fill).toBeUndefined();
+  });
+
   it("opens version 1 files, whose strokes all painted", () => {
     const { document, bottom, top, bottomStrokes, topStrokes } = sampleProject();
     const payload = JSON.parse(
@@ -258,6 +311,7 @@ interface RawStroke {
   brush: unknown;
   startTime: number;
   erase?: unknown;
+  fill?: unknown;
   xs: unknown[];
   ys: unknown[];
   pressures: unknown[];
@@ -448,6 +502,15 @@ describe("parseProject rejections", () => {
     expect(
       rejectionOf(mutate((project) => (project.layers[0].strokes[0].erase = 1))),
     ).toContain("erase flag");
+  });
+
+  it("refuses a fill flag that is not a boolean", () => {
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].strokes[0].fill = "yes"))),
+    ).toContain("fill flag");
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].strokes[0].fill = 0))),
+    ).toContain("fill flag");
   });
 
   it("refuses a project with more samples than the ceiling", () => {

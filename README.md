@@ -27,7 +27,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   without touching the layer. Releasing commits it as **one** stroke, so it is
   one undo step and re-rasterizes identically on undo, reopen and export.
   `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws from
-  the centre. Shapes draw with the current brush, so size, colour and opacity
+  the centre. Rectangle and ellipse offer a **Fill shape** switch in the
+  toolbar: with it on the interior takes the brush colour and the outline is
+  still traced on top, so the edge lands exactly where an unfilled shape's edge
+  would. The switch describes the *next* shape - each shape keeps the setting it
+  was drawn with - and a line is never filled, since it bounds no interior.
+  Shapes draw with the current brush, so size, colour and opacity
   come from the brush controls; a press outside the paper records nothing, and a
   click that never moved leaves nothing behind.
 - **Selection and transform** (`M`): drag a marquee to select the strokes of the
@@ -162,7 +167,9 @@ project is heading, phase by phase, is tracked in
 ## Known limitations
 
 - Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
-  **ellipse**, **colour picker** and **pan** tools exist. No fill or gradient.
+  **ellipse**, **colour picker** and **pan** tools exist. There is no bucket
+  (flood) fill and no gradient; the shape tools' fill covers a shape's own
+  outline, not a region of the canvas.
 - **Selection is stroke-level and has no boundary yet.** A marquee selects whole
   strokes (never part of one), only on the **active layer**, and the selection is
   dropped when you switch layers or switch away from the select tool. It is a
@@ -178,10 +185,13 @@ project is heading, phase by phase, is tracked in
   implemented, and a flip is applied to the stroke samples (there is no
   non-destructive transform to edit later).
 - Shape tools draw the **outline** of a line, rectangle or ellipse as a stroke
-  of the current brush; they do not fill it, and because the stroke rasterizer
+  of the current brush, and the rectangle and ellipse can fill it (see the shape
+  tools above). Because the stroke rasterizer
   uses round joins a rectangle's corners are very slightly rounded. A shape is
   stored as ordinary stroke samples, so it has no separate geometry to edit
-  afterwards and it ignores pen pressure (constant width).
+  afterwards and it ignores pen pressure (constant width). A filled ellipse is
+  filled from the same polyline its outline is traced with, so its interior is
+  faceted to the same sub-pixel degree as its outline.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`** blend mode is implemented.
@@ -195,10 +205,11 @@ project is heading, phase by phase, is tracked in
 - **A project file stores stroke samples, not pixels.** That keeps drawings
   editable, but the JSON grows with the number of points: a long, heavily
   sampled drawing can produce a file tens of megabytes in size. A compressed or
-  binary container is the natural v2 (the format is versioned, and the parser
+  binary container is the natural next container (the format is versioned, and
+  the parser
   refuses versions it does not know).
-- **The current project version is `2`** (`version: 1` files, which have no
-  eraser strokes, still open and are written back as 2). Unknown versions, wrong
+- **The current project version is `3`** (`version: 1` and `2` files still open
+  and are written back as 3). Unknown versions, wrong
   formats and unreadable files are rejected with a message instead of being
   partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

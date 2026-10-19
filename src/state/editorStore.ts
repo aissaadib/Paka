@@ -24,6 +24,8 @@ import type { Listener } from "../utils/store";
 export interface EditorActions {
   setTool(toolId: ToolId): void;
   setBrush(patch: Partial<BrushSettings>): void;
+  /** Whether the shape tools fill their outline instead of tracing it. */
+  setShapeFill(filled: boolean): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -73,6 +75,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
   const actions: EditorActions = {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
+    setShapeFill: (filled) => engine.setShapeFill(filled),
     undo: () => {
       engine.undo();
     },

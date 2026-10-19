@@ -79,6 +79,14 @@ export function stampDot(
  * Alpha is fixed at 1 for every call: two opaque segments that overlap stay
  * opaque, which is the whole point. The caller composites the finished buffer
  * with `strokeOpacity(stroke.brush, stroke.pressures)`.
+ *
+ * A stroke flagged `fill` also fills the polygon its samples trace, so a filled
+ * shape is one solid silhouette rather than an outline: the interior takes the
+ * brush colour, and the outline is still traced on top so the edge lands exactly
+ * where an unfilled shape's edge would. Neither pass can darken the other -
+ * both are drawn at full coverage and the stroke's alpha is applied once, when
+ * the buffer composites. Filling only happens on a full re-rasterization
+ * (`fromIndex === 0`), which is the only way a shape is ever drawn.
  */
 export function rasterizeStroke(
   ctx: CanvasRenderingContext2D,
@@ -111,6 +119,19 @@ export function rasterizeStroke(
     }
     ctx.restore();
     return;
+  }
+
+  if (stroke.fill === true && fromIndex === 0 && count > 2) {
+    // The samples are a closed outline (the last point repeats the first), so
+    // the path is filled with the default non-zero rule: no winding can cancel
+    // inside a single simple loop.
+    ctx.beginPath();
+    ctx.moveTo(stroke.xs[0], stroke.ys[0]);
+    for (let index = 1; index < count; index += 1) {
+      ctx.lineTo(stroke.xs[index], stroke.ys[index]);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
 
   for (let index = Math.max(1, fromIndex); index < count; index += 1) {

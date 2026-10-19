@@ -39,12 +39,14 @@ export function createStrokeRecord(
   layerId: LayerId,
   brush: BrushSettings,
   erase = false,
+  fill = false,
 ): StrokeRecord {
   return {
     id: createId("stroke"),
     layerId,
     brush: { ...brush },
     erase,
+    fill,
     xs: [],
     ys: [],
     pressures: [],
@@ -64,6 +66,7 @@ export function cloneStroke(stroke: StrokeRecord, layerId: LayerId = stroke.laye
     layerId,
     brush: { ...stroke.brush },
     erase: stroke.erase,
+    fill: stroke.fill,
     xs: [...stroke.xs],
     ys: [...stroke.ys],
     pressures: [...stroke.pressures],

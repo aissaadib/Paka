@@ -39,10 +39,15 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * coverage). A version-1 reader would paint such a stroke instead of removing
  * it - the drawing would come out different, not merely incomplete - so the
  * version was bumped. Version-1 files still open, and are written back as 2.
+ * Version 3: strokes may carry `fill: true` (a shape's samples are the outline
+ * of a region to fill). A version-2 reader would trace that outline as a line
+ * and leave the interior empty - again a different drawing - so the version was
+ * bumped. Version-1 and -2 files still open; their shapes have no flag, so they
+ * are traced exactly as before.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 2;
+export const PROJECT_VERSION = 3;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -53,6 +58,8 @@ export interface SerializedStroke {
   readonly startTime: number;
   /** Present and true only for eraser strokes; absent means a brush stroke. */
   readonly erase?: boolean;
+  /** Present and true only for filled shapes; absent means a traced outline. */
+  readonly fill?: boolean;
   readonly xs: readonly number[];
   readonly ys: readonly number[];
   readonly pressures: readonly number[];
@@ -181,6 +188,9 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         // Only eraser strokes carry the flag, so brush-only drawings stay
         // byte-identical to what version 2 wrote before erasers existed.
         ...(stroke.erase === true ? { erase: true as const } : {}),
+        // Likewise the fill flag: absent on every stroke that traces its outline,
+        // which keeps an outline-only drawing byte-identical to version 2.
+        ...(stroke.fill === true ? { fill: true as const } : {}),
         xs: stroke.xs,
         ys: stroke.ys,
         pressures: stroke.pressures,
@@ -319,6 +329,8 @@ function readProject(text: string, maxSamples: number): ParsedProject {
 
       const erase =
         stroke.erase === undefined ? false : readBoolean(stroke.erase, `${strokeLabel} erase flag`);
+      const fill =
+        stroke.fill === undefined ? false : readBoolean(stroke.fill, `${strokeLabel} fill flag`);
 
       strokes.push({
         id: readId(stroke.id, "stroke"),
@@ -327,6 +339,8 @@ function readProject(text: string, maxSamples: number): ParsedProject {
         // Only eraser strokes carry the flag: `erase: false` and "no flag" mean
         // the same thing, and old files have no flag at all.
         ...(erase ? { erase: true as const } : {}),
+        // Same for the fill flag, which version-1 and -2 files never carry.
+        ...(fill ? { fill: true as const } : {}),
         xs,
         ys,
         pressures,

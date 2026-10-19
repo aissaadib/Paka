@@ -708,6 +708,74 @@ describe("DrawingEngine shape tools", () => {
     expect(engine.getState().file.dirty).toBe(true);
   });
 
+  it("marks a shape as filled only while the fill setting is on", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+    const rectangle = (x: number): void => {
+      engine.handlePointerSample(createSample({ phase: "down", docX: 0, docY: 0 }));
+      engine.handlePointerSample(createSample({ phase: "move", docX: x, docY: x }));
+      engine.handlePointerSample(createSample({ phase: "up", docX: x, docY: x }));
+    };
+
+    // The default is an outline, and choosing it is not an edit.
+    expect(engine.getState().shapeFill).toBe(false);
+    engine.setTool("rectangle");
+    rectangle(50);
+    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+
+    engine.setShapeFill(true);
+    expect(engine.getState().shapeFill).toBe(true);
+    rectangle(100);
+    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
+
+    // Each stroke keeps the setting it was drawn with: turning the fill off
+    // does not rewrite the shapes already committed.
+    engine.setShapeFill(false);
+    rectangle(150);
+    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
+    expect(engine.listStrokes(layerId)[2].fill).toBe(false);
+
+    // Drawing filled shapes is a change like any other, but the setting itself
+    // is not: it describes the next shape, so it neither dirties the file nor
+    // enters history.
+    expect(engine.getState().history.depth).toBe(3);
+  });
+
+  it("never fills a line, whose outline bounds no area", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setShapeFill(true);
+    engine.setTool("line");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 0, docY: 0 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 0 }));
+
+    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+  });
+
+  it("keeps the fill setting across a tool switch", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+
+    engine.setShapeFill(true);
+    engine.setTool("ellipse");
+    expect(engine.getState().shapeFill).toBe(true);
+    engine.setTool("brush");
+    expect(engine.getState().shapeFill).toBe(true);
+  });
+
   it("snaps a line to 45 degrees under Shift", () => {
     const spy = createSpyRenderer();
     const engine = new DrawingEngine({

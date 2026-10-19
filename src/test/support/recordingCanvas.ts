@@ -23,6 +23,7 @@ export const RECORDED_METHODS = [
   "moveTo",
   "lineTo",
   "arc",
+  "closePath",
   "fill",
   "stroke",
   "strokeRect",
