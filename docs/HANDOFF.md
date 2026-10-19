@@ -5,7 +5,7 @@ briefing that the previous session would have given you: what Paka is, how work
 is done here, what is already shipped, which decisions are settled, how to verify
 anything, and what to do next.
 
-Last verified: **2026-10-19**, at the bucket-fill commit on `main` (the current
+Last verified: **2026-10-20**, at the gradient commit on `main` (the current
 `HEAD` when this file was written; clean and in sync with `origin/main`).
 
 ---
@@ -61,22 +61,24 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 | `pnpm tauri build --no-bundle` | Release executable only → `src-tauri/target/release/paka.exe`. |
 | `pnpm tauri build` | The above plus MSI/NSIS installers (needs WiX/NSIS downloads). |
 
-## 4. Current state (verified 2026-10-19)
+## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, in sync with `origin/main` before this slice.
-- **`pnpm test` → 352 tests in 25 files, all pass.** `pnpm typecheck` clean;
+- Branch `main`, in sync with `origin/main` after the gradient slice.
+- **`pnpm test` → 380 tests in 26 files, all pass.** `pnpm typecheck` clean;
   `pnpm build` succeeds.
-- **Project file format version 4** (`PROJECT_VERSION = 4`).
+- **Project file format version 5** (`PROJECT_VERSION = 5`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
-  non-default manifests` warning (see §8).
+  non-default manifests` warning (see §8). The executable predates the fill and
+  gradient slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Bucket (flood) fill** — `FillPatchRecord` in an ordered per-layer element list; composite sampling, tolerance, cancel/undo/redo; format version 4. |
+| current `main` | **Gradients** — first-class `GradientRecord` (linear/radial, stops, opacity) in the ordered element list; live drag preview, one undo step, format version 5. |
+| `8b7152b` | **Bucket (flood) fill** — `FillPatchRecord` in an ordered per-layer element list; composite sampling, tolerance, cancel/undo/redo; format version 4. |
 | `84af123` | **Filled shapes** — the toolbar **Fill shape** switch (rectangle/ellipse only); `fill: true` on the stroke; format version 3. |
 | `e93c770` | **Bug-hunt round on the transform slice** — three defects each reproduced by a test first (undo/redo mid-drag, no-op flip recording a step, nudge coalescing across a reselect). |
 | `a3f4804` | **Nudge / duplicate / flip** for a selection, plus a Selection menu. |
@@ -123,12 +125,30 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `ImageData`, visited bitmap and mask); a larger document refuses the press with
   a status-bar notice rather than freezing. A small fill stores only its own
   bounding-box mask, not a full-canvas copy.
-- **Project format is version 4.** `layers[].elements` is one ordered list of
-  `kind: "stroke"` and `kind: "fill"` entries; versions 1-3 have only
-  `layers[].strokes`, read as stroke elements in the same order. The version bump
-  is required because a version-3 reader cannot see a fill, and a fill
-  interleaved with strokes cannot be represented in the old per-layer stroke
-  array without losing painting order.
+- **A gradient is a first-class `GradientRecord`, not a pixel snapshot.** It
+  carries `kind: "gradient"`, `type` (`linear`/`radial`), endpoints, colour stops
+  and opacity, and lives in the same ordered element list as strokes and fills.
+  Geometry is the authoritative content: undo/redo and save/reopen rebuild it.
+- **A radial gradient has a fixed centre and radius, not an ellipse or an angle.**
+  `(x1, y1)` is the centre, `(x2, y2)` defines the outer radius by distance, and
+  the inner radius is always `0`. Endpoints are clamped to the document.
+- **Gradient preview is real layer content.** `beginGradient` inserts a
+  zero-length record, every move replaces it at the same index, and a release
+  commits one `GradientCommand`. A drag shorter than `MIN_GRADIENT_LENGTH`, a
+  cancel, lost capture or a tool switch removes it with no history or revision
+  change. Options (`gradientType`, `gradientEndColor`) are read at press time and
+  are not serialized.
+- **The gradient paints the whole layer in element order.** It is content, not an
+  adjustment layer: an opaque gradient covers earlier elements on its layer. The
+  renderer uses a Canvas linear/radial gradient over the full surface, with
+  element opacity in `globalAlpha`; zero-length or fully transparent records draw
+  nothing.
+- **Project format is version 5.** `layers[].elements` is one ordered list of
+  `kind: "stroke"`, `kind: "fill"` and `kind: "gradient"` entries; versions 1-3
+  have only `layers[].strokes`, read as stroke elements in the same order.
+  Version-4 files open unchanged and may contain fills; a gradient in a
+  version-4 file is rejected. The bump is required because a version-4 reader
+  cannot read the new kind.
 - **Selection stores only `{ layerId, strokeIds }`.** The dashed frame plus blue
   centreline trace is an overlay: display-only, never in a layer, never exported,
   never serialized.
@@ -149,33 +169,39 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 ## 6. Key files
 
 - `src/core/engine/DrawingEngine.ts` — snapshot/publish, tools, selection state,
-  gesture guards, `shapeFill`, `fillTolerance` and the begin/finish/cancel fill
-  lifecycle.
+  gesture guards, `shapeFill`, `fillTolerance`, `gradientType`,
+  `gradientEndColor`, and the begin/finish/cancel lifecycles for fills and
+  gradients.
 - `src/core/fill/floodFill.ts` — pure 4-connected scan, tolerance rule,
   transparency rule and `MAX_FILL_SCAN_PIXELS`.
 - `src/core/fill/fillPatch.ts` — `FillPatchRecord` creation and deep cloning.
+- `src/core/gradient/gradientRecord.ts` — gradient creation, endpoint movement,
+  length/degeneracy and cloning.
 - `src/core/document/strokeStore.ts` — ordered `LayerElement` list plus the
-  filtered stroke view.
+  filtered stroke view and in-place `replace` for gradient previews.
 - `src/core/commands/fillCommand.ts` — redo replays the committed patch.
+- `src/core/commands/gradientCommand.ts` — redo re-inserts the committed record.
 - `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke`, including the fill
   branch for filled shapes.
 - `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeFillPatch`,
-  `readCompositeImage`, element-ordered layer rebuilds.
+  `rasterizeGradient`, `readCompositeImage`, element-ordered layer rebuilds.
 - `src/core/document/types.ts` — `StrokeRecord` (incl. `fill?: boolean`),
-  `FillPatchRecord`, `LayerElement`, `Layer`.
+  `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
-  version-history comment, fill validation.
+  version-history comment, fill and gradient validation.
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
 - `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
+- `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
-  `setFillTolerance`, `dismissNotice`.
+  `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
 - Tests: `src/test/floodFill.test.ts`, `src/test/fillCommand.test.ts`,
-  `src/test/canvas2dRenderer.test.ts`, `src/test/drawingEngine.test.ts`,
-  `src/test/projectFormat.test.ts`, `src/test/projectLifecycle.test.ts`, shared
-  fakes in `src/test/support/recordingCanvas.ts` (add new canvas methods to
-  `RECORDED_METHODS` when the rasterizer starts calling them).
+  `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
+  `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
+  `src/test/projectLifecycle.test.ts`, shared fakes in
+  `src/test/support/recordingCanvas.ts` (gradient methods are injected alongside
+  the recorded methods).
 
 ## 7. Toolchain notes for this Windows machine
 
@@ -229,38 +255,48 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   820×731, CSS 656×584, DPR 1.25, paper rect at (40, 64) → backing paper origin
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `g` bucket fill, `i` picker, `p`/middle-drag pan; `Esc` clears a
-  selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D` duplicate;
-  `Ctrl+Shift+H`/`V` flip.
+  `o` ellipse, `f` bucket fill, `g` gradient, `i` picker, `p`/middle-drag pan;
+  `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
+  duplicate; `Ctrl+Shift+H`/`V` flip.
 - **Bucket fill check (verified 2026-10-19).** Override `rAF` first (§8), press
-  `g`, click inside the paper with synthetic pointer events, wait one frame, then
+  `f`, click inside the paper with synthetic pointer events, wait one frame, then
   read the display canvas: the sampled pixel should be the brush colour and the
   status bar `history 1` plus `● unsaved`. `Ctrl+Z` returns the pixel to paper and
   `history 0`; `Ctrl+Shift+Z` restores it. A press followed by `pointercancel`
-  must leave the paper pixel white with history still `0`. Selecting `g` must show
+  must leave the paper pixel white with history still `0`. Selecting `f` must show
   a `Tolerance` number/range input (default 24).
+- **Gradient check (verified 2026-10-20).** Press `g` and confirm the toolbar
+  shows **Radial** and **To**; clicking Radial and changing the colour updates
+  both controls. A synthetic `pointerdown` → `pointermove` → `pointerup` drag
+  raises `history` by one and shows `● unsaved`; `Ctrl+Z` returns it to the previous
+  depth and `Ctrl+Shift+Z` restores it. At history zero, a press followed by
+  `pointercancel` (with a move in between) leaves history at zero. The harness tab
+  suspends `requestAnimationFrame`, so the live display canvas does not repaint:
+  verify actual gradient pixels by importing the modules and rendering a document
+  through `Canvas2DRenderer` into a fresh canvas (100×100, zoom 1, offset 0).
+  A black→white linear gradient along x sampled `[14,14,14,255]` at x=5,
+  `[128,128,128,255]` at x=50 and `[243,243,243,255]` at x=95. A red→blue radial
+  with centre (50,50) and radius 50 sampled `[251,0,3,255]` at the centre and
+  blue at the edges.
 
 ## 9. Next move
 
-**Phase 2's remaining item: gradients.** The bucket fill shipped, so the
-"Next slice" section of [ROADMAP.md](ROADMAP.md) is now about gradients only.
+**Brush hardness** (the first Phase 3 item). The "Next slice" section of
+[ROADMAP.md](ROADMAP.md) is kept current and is the authority; it now describes
+the hardness slice rather than gradients.
 
-- A gradient is **not a region**: it is a per-pixel colour function over a shape
-  (linear/radial), so it needs no flood scan, no composite read and no coverage
-  mask. Do not reuse the fill scan for it.
-- The settled model to extend is the **ordered layer element list** proved by the
-  fill: a gradient should be reproducible from the file (geometry + colour
-  stops), survive undo/redo and save/reopen, and re-rasterize in element order.
-  Decide between a new `kind: "gradient"` element (the honest fit for a non-stroke
-  primitive, with another format-version bump) and a stroke-level mode only if
-  the gradient is genuinely bound to a stroke's outline. Do not store a one-off
-  pixel snapshot for a gradient.
-- The in-progress preview must stay **out** of the layer until release, like a
-  shape; a cancelled gesture records nothing.
-- Range migration: version-4 files must keep opening unchanged, and the new
-  format version must be read by the parser's version gate. Update
-  `PROJECT_FORMAT.md`, `ARCHITECTURE.md`, `README.md` and this file in the same
-  commit, as always.
+The constraints that matter:
+
+- a `hardness` field is editor state for the next stroke, like `shapeFill` and
+  `fillTolerance`, and must be captured per stroke so undo/reopen reproduce it;
+- soft coverage must come from the rasterizer, not from lowering each segment's
+  alpha - stroke opacity is applied once per stroke today, and overlapping
+  translucent dabs would reintroduce self-overlap darkening;
+- decide explicitly whether the brush field is additive (no version bump) or
+  required (version 6), based on whether an older reader ignoring it changes the
+  picture;
+- do not start the stamp-based brush engine until hardness has a verified raster
+  path; they share the coverage question.
 
 Optional polish, deliberately not done yet:
 
@@ -268,11 +304,21 @@ Optional polish, deliberately not done yet:
   selection actually exists.
 - Restore `lineCap`/`lineJoin` after `paintSelection` in `Canvas2DRenderer`
   instead of leaving them set.
-- Consider a selection model for fills (they are currently filtered out of the
-  stroke-only selection view) if moving a fill becomes a user need.
+- Consider a selection model for fills and gradients (they are currently filtered
+  out of the stroke-only selection view) if moving them becomes a user need.
+- A gradient stop editor (the format already allows 2-64 stops) and a
+  transparent-stop control; the current UI writes exactly two stops.
+- A transparency stop would need either an alpha in the colour field or a
+  separate alpha on stops; decide before exposing a stop editor.
 
 ## 10. Open verification gaps and known limitations
 
+- **Gradients were verified in the browser app at the state level, and their
+  pixels through the real `Canvas2DRenderer`** (§8), but the live display canvas
+  was not sampled because the harness tab suspends animation frames. They have
+  **not** been verified in the packaged Tauri window. A native save/reopen of a
+  gradient and high-DPI rendering remain unverified; save/reopen is covered by
+  Vitest at the format and lifecycle level.
 - **Bucket fill was verified in the browser app, but not in the packaged
   Tauri window.** The live display canvas was sampled for the fill, undo, redo
   and cancel paths, and the tolerance control was checked (§8). A real-device /
@@ -286,8 +332,8 @@ Optional polish, deliberately not done yet:
 - Product limitations documented in ROADMAP and not planned yet: undo history is
   not stored in the project file (reopening rebuilds one step per element); no
   autosave or crash recovery; the React layer has no automated tests; `Ctrl+N` is
-  not bound (use `File -> New Document...`); fills are binary/unselectable and
-  gradients are not implemented.
+  not bound (use `File -> New Document...`); fills are binary/unselectable;
+  gradients are two-stop, whole-layer, have no stop editor and are unselectable.
 
 ## 11. First five minutes of a new session
 

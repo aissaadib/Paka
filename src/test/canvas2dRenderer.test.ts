@@ -15,8 +15,14 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addLayer, createDocument, moveLayer, updateLayer } from "../core/document/document";
-import type { FillPatchRecord, LayerElement, LayerId, StrokeRecord } from "../core/document/types";
-import { isFillPatch } from "../core/document/types";
+import type {
+  FillPatchRecord,
+  GradientRecord,
+  LayerElement,
+  LayerId,
+  StrokeRecord,
+} from "../core/document/types";
+import { isStroke } from "../core/document/types";
 import { Canvas2DRenderer } from "../core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "../core/rendering/frameScheduler";
 import type { StrokeSource } from "../core/rendering/types";
@@ -58,10 +64,7 @@ function createHarness(options: HarnessOptions = {}) {
   const display = new RecordingCanvas();
   const strokes = options.strokes ?? new Map<LayerId, LayerElement[]>();
   const strokeSource: StrokeSource = {
-    listStrokes: (layerId) =>
-      (strokes.get(layerId) ?? []).filter(
-        (element): element is StrokeRecord => !isFillPatch(element),
-      ),
+    listStrokes: (layerId) => (strokes.get(layerId) ?? []).filter(isStroke),
     listElements: (layerId) => strokes.get(layerId) ?? [],
   };
 
@@ -121,6 +124,31 @@ function createFill(
     width: 3,
     height: 2,
     mask,
+    ...overrides,
+  };
+}
+
+let gradientCounter = 0;
+
+function createGradient(
+  layerId: LayerId,
+  overrides: Partial<GradientRecord> = {},
+): GradientRecord {
+  gradientCounter += 1;
+  return {
+    id: `gradient-${gradientCounter}`,
+    layerId,
+    kind: "gradient",
+    type: "linear",
+    x1: 10,
+    y1: 20,
+    x2: 90,
+    y2: 60,
+    stops: [
+      { offset: 0, color: "#ff0000" },
+      { offset: 1, color: "#0000ff" },
+    ],
+    opacity: 0.4,
     ...overrides,
   };
 }
@@ -797,6 +825,106 @@ describe("Canvas2DRenderer fill patches", () => {
       (canvas) => canvas.getImageDataCalls.length > 0,
     );
     expect(composed?.getImageDataCalls).toEqual([[0, 0, 100, 80]]);
+  });
+});
+
+describe("Canvas2DRenderer gradients", () => {
+  it("paints a linear gradient over the layer at its element opacity", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    const gradient = createGradient(layerId);
+    harness.strokes.set(layerId, [gradient]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const surface = harness.layerSurfaces()[0];
+    const paint = surface.named("fillRect")[0];
+    expect(paint.args).toEqual([0, 0, 100, 80]);
+    expect(paint.alpha).toBe(0.4);
+    expect(paint.composite).toBe("source-over");
+
+    const fill = paint.fillStyle as {
+      kind: string;
+      args: number[];
+      stops: { offset: number; color: string }[];
+    };
+    expect(fill.kind).toBe("linear");
+    expect(fill.args).toEqual([10, 20, 90, 60]);
+    expect(fill.stops).toEqual([
+      { offset: 0, color: "#ff0000" },
+      { offset: 1, color: "#0000ff" },
+    ]);
+  });
+
+  it("uses the drag length as the outer radius for a radial gradient", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    harness.strokes.set(layerId, [
+      createGradient(layerId, { type: "radial", x1: 30, y1: 40, x2: 33, y2: 44 }),
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const fill = harness.layerSurfaces()[0].named("fillRect")[0]
+      .fillStyle as { kind: string; args: number[] };
+    expect(fill.kind).toBe("radial");
+    expect(fill.args).toEqual([30, 40, 0, 30, 40, 5]);
+  });
+
+  it("keeps gradients in painting order with strokes and fills", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    harness.strokes.set(layerId, [
+      createStroke(layerId),
+      createGradient(layerId),
+      createFill(layerId),
+      createStroke(layerId),
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const surface = harness.layerSurfaces()[0];
+    // Gradients paint in place; strokes and fills are drawImage entries. Their
+    // relative order is visible as: stroke, then gradient fillRect, then patch,
+    // then stroke. The patch upload gives us the second drawImage identity.
+    const patchCanvas = recording.allocated.find(
+      (canvas) => canvas.named("putImageData").length > 0,
+    );
+    expect(surface.drawImages.map((call) => call.args[0])).toEqual([
+      harness.strokeBuffer,
+      patchCanvas,
+      harness.strokeBuffer,
+    ]);
+    expect(
+      surface.calls
+        .filter((call) => call.name === "drawImage" || call.name === "fillRect")
+        .map((call) => call.name),
+    ).toEqual(["drawImage", "fillRect", "drawImage", "drawImage"]);
+  });
+
+  it("draws nothing for a zero-length or fully transparent gradient", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    harness.strokes.set(layerId, [
+      createGradient(layerId, { x2: 10, y2: 20 }),
+      createGradient(layerId, { opacity: 0 }),
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    expect(harness.layerSurfaces()[0].named("fillRect")).toEqual([]);
   });
 });
 

@@ -161,6 +161,23 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+.gradient-controls {
+  gap: 10px;
+}
+
+.gradient-controls__color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--control-height);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.gradient-controls__color:hover {
+  color: var(--text);
+}
+
 /* ---------------------------------------------------------------- tool rail */
 
 .tool-rail {

@@ -14,7 +14,7 @@ import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
-import { isFillPatch } from "../core/document/types";
+import { isFillPatch, isGradient } from "../core/document/types";
 import type { PointerSample } from "../types/pointer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {  return {
@@ -1527,6 +1527,263 @@ function pressBucket(engine: DrawingEngine, docX: number, docY: number): void {
 function releaseBucket(engine: DrawingEngine, docX: number, docY: number): void {
   engine.handlePointerSample(
     createSample({ phase: "up", docX, docY, button: 0, buttons: 0 }),
+  );
+}
+
+describe("DrawingEngine gradients", () => {
+  function createGradientEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 20, height: 20 }),
+      renderer: spy.renderer,
+      brush: { ...DEFAULT_BRUSH, color: "#ff0000", opacity: 0.75 },
+    });
+    engine.setTool("gradient");
+    return { engine, spy };
+  }
+
+  function pressGradient(engine: DrawingEngine, x: number, y: number): void {
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: x, docY: y, button: 0, buttons: 1 }),
+    );
+  }
+
+  function moveGradient(engine: DrawingEngine, x: number, y: number): void {
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: x, docY: y, button: 0, buttons: 1 }),
+    );
+  }
+
+  function releaseGradient(engine: DrawingEngine, x: number, y: number): void {
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: x, docY: y, button: 0, buttons: 0 }),
+    );
+  }
+
+  it("previews on press, follows the pointer, and commits one undo step on release", () => {
+    const { engine, spy } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setGradientEndColor("#0000ff");
+
+    pressGradient(engine, 4, 6);
+    let gradient = engine.listElements(layerId)[0];
+    expect(isGradient(gradient)).toBe(true);
+    expect(gradient).toMatchObject({
+      layerId,
+      kind: "gradient",
+      type: "linear",
+      x1: 4,
+      y1: 6,
+      x2: 4,
+      y2: 6,
+      opacity: 0.75,
+      stops: [
+        { offset: 0, color: "#ff0000" },
+        { offset: 1, color: "#0000ff" },
+      ],
+    });
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+
+    moveGradient(engine, 16, 18);
+    gradient = engine.listElements(layerId)[0];
+    const previewId = gradient.id;
+    expect(gradient).toMatchObject({ x2: 16, y2: 18 });
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(spy.invalidated).toContain(layerId);
+
+    releaseGradient(engine, 18, 20);
+    gradient = engine.listElements(layerId)[0];
+    expect(gradient.id).toBe(previewId);
+    expect(gradient).toMatchObject({ x2: 18, y2: 20 });
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+    expect(engine.listStrokes(layerId)).toEqual([]);
+  });
+
+  it("uses the radial option captured when the drag starts", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setGradientType("radial");
+
+    pressGradient(engine, 10, 10);
+    engine.setGradientType("linear");
+    releaseGradient(engine, 14, 13);
+
+    expect(engine.listElements(layerId)[0]).toMatchObject({
+      type: "radial",
+      x1: 10,
+      y1: 10,
+      x2: 14,
+      y2: 13,
+    });
+  });
+
+  it("undoes and redoes the committed record, not new geometry", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    pressGradient(engine, 2, 3);
+    releaseGradient(engine, 17, 19);
+    const committed = engine.listElements(layerId)[0];
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.canRedo).toBe(true);
+
+    expect(engine.redo()).toBe(true);
+    expect(engine.listElements(layerId)[0]).toBe(committed);
+  });
+
+  it("cancels a preview without dirtying the document", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressGradient(engine, 4, 4);
+    moveGradient(engine, 12, 12);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+
+    engine.handlePointerSample(
+      createSample({ phase: "cancel", docX: 12, docY: 12, button: 0, buttons: 0 }),
+    );
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("cancels a preview when the tool changes", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    pressGradient(engine, 4, 4);
+    moveGradient(engine, 12, 12);
+
+    engine.setTool("brush");
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("does not record an invisible zero-length drag", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressGradient(engine, 8, 8);
+    releaseGradient(engine, 8, 8);
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("ignores presses outside the paper and blocks history during a drag", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    pressGradient(engine, -1, 5);
+    releaseGradient(engine, 10, 10);
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+
+    pressGradient(engine, 4, 4);
+    expect(engine.undo()).toBe(false);
+    expect(engine.redo()).toBe(false);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+  });
+
+  it("clamps coordinates to the document while dragging", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    pressGradient(engine, 4, 4);
+    releaseGradient(engine, 99, -5);
+
+    expect(engine.listElements(layerId)[0]).toMatchObject({ x2: 20, y2: 0 });
+  });
+
+  it("keeps gradient editor options in the snapshot and validates the colour", () => {
+    const { engine } = createGradientEngine();
+    expect(engine.getState().gradientType).toBe("linear");
+    expect(engine.getState().gradientEndColor).toBe("#ffffff");
+
+    engine.setGradientType("radial");
+    engine.setGradientEndColor("#0f0");
+    expect(engine.getState().gradientType).toBe("radial");
+    expect(engine.getState().gradientEndColor).toBe("#00ff00");
+
+    engine.setGradientEndColor("not a colour");
+    expect(engine.getState().gradientEndColor).toBe("#00ff00");
+  });
+
+  it("copies gradients with fresh ids through layer duplication", () => {
+    const { engine } = createGradientEngine();
+    const sourceId = engine.getState().document.activeLayerId as string;
+    pressGradient(engine, 2, 2);
+    releaseGradient(engine, 18, 18);
+    const original = engine.listElements(sourceId)[0];
+
+    engine.duplicateLayer(sourceId);
+    const copyId = engine.getState().document.activeLayerId as string;
+    const copied = engine.listElements(copyId)[0];
+
+    expect(isGradient(copied)).toBe(true);
+    expect(copied.id).not.toBe(original.id);
+    expect(isGradient(copied) && copied.stops).toEqual(
+      isGradient(original) ? original.stops : [],
+    );
+    expect(isGradient(copied) && copied.stops[0]).not.toBe(
+      isGradient(original) ? original.stops[0] : undefined,
+    );
+  });
+});
+
+describe("DrawingEngine fill and gradient ordering", () => {
+  it("keeps strokes, fills and gradients in one ordered element list", () => {
+    const spy = createSpyRenderer({ compositeImage: framedComposite() });
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 20, height: 20 }),
+      renderer: spy.renderer,
+      brush: { ...DEFAULT_BRUSH, color: "#ff0000" },
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("brush");
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 2, docY: 2, button: 0, buttons: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 8, docY: 8, button: 0, buttons: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 8, docY: 8, button: 0, buttons: 0 }),
+    );
+    engine.setTool("gradient");
+    pressGradientHelper(engine, 0, 0);
+    releaseGradientHelper(engine, 19, 19);
+    engine.setTool("bucket");
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+
+    const elements = engine.listElements(layerId);
+    expect(elements).toHaveLength(3);
+    expect(isGradient(elements[1])).toBe(true);
+    expect(isFillPatch(elements[2])).toBe(true);
+
+    engine.undo();
+    expect(isGradient(engine.listElements(layerId)[1])).toBe(true);
+    engine.undo();
+    expect(engine.listElements(layerId)).toHaveLength(1);
+  });
+});
+
+function pressGradientHelper(engine: DrawingEngine, x: number, y: number): void {
+  engine.handlePointerSample(
+    createSample({ phase: "down", docX: x, docY: y, button: 0, buttons: 1 }),
+  );
+}
+
+function releaseGradientHelper(engine: DrawingEngine, x: number, y: number): void {
+  engine.handlePointerSample(
+    createSample({ phase: "up", docX: x, docY: y, button: 0, buttons: 0 }),
   );
 }
 

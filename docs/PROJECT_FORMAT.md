@@ -2,7 +2,8 @@
 
 A project file is **UTF-8 JSON text with a versioned envelope**. It stores the
 document's metadata and the ordered element data that produced its pixels -
-brush strokes and serialized bucket-fill patches - not a flattened image.
+brush strokes, serialized bucket-fill patches and gradient geometry - not a
+flattened image.
 
 Implementation: `src/core/project/projectFormat.ts` (format + parser),
 `src/core/project/projectFiles.ts` (open/save/export workflow),
@@ -14,8 +15,8 @@ In this engine the ordered element list *is* the authoritative record; layer
 pixels are a cache rasterized from it (see `docs/ARCHITECTURE.md`). Saving the
 elements keeps every layer editable after a reload:
 
-- individual elements stay undoable/redoable, one history step per stroke or
-  fill patch;
+- individual elements stay undoable/redoable, one history step per stroke, fill
+  patch or gradient;
 - nothing is resampled, so reopening never degrades a drawing;
 - file size is independent of the display resolution and of `rasterScale`;
 - a future brush model can re-render existing strokes with a new look.
@@ -26,25 +27,33 @@ That is what makes a reopened project show exactly the same pixels: the file
 does not depend on what the composite happens to look like later, and reading it
 never re-runs flood fill.
 
+A gradient takes the opposite approach because its pixels are a function, not a
+region: the file stores the type, endpoints, colour stops and opacity, and the
+renderer rebuilds it deterministically. No gradient pixel snapshot exists.
+
 Saving a flattened PNG (or per-layer PNG buffers) would trade all of that away
 for a smaller file. That trade is the reason a compressed or binary container is
 on the roadmap rather than flattening.
 
 What is deliberately **not** in the file is editor state: the undo history, the
-zoom/pan viewport, the current tool, brush, shape-fill and bucket-tolerance
-settings, and the current selection. A project stores the *drawing*, so
-reopening restores the elements and their layers rather than the editing session
-that produced them. (Selection is derived from strokes at run time anyway - see
+zoom/pan viewport, the current tool, brush, shape-fill, bucket-tolerance and
+gradient-option settings, and the current selection. A project stores the
+*drawing*, so reopening restores the elements and their layers rather than the
+editing session that produced them. (Selection is derived from strokes at run
+time anyway - see
 [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no
 field; the fill setting is stored per stroke, not per document, so the shapes
 that were filled stay filled without a session-level flag; a bucket tolerance
-describes the *next* fill, while a committed patch carries its own pixels.)
+describes the *next* fill and gradient options describe the *next* drag, while a
+committed element carries its own pixels or geometry.)
 
 **The trade-off is real:** JSON number arrays are verbose. A stroke sample costs
 roughly 40-60 bytes of text on disk (four numbers plus separators), so a heavy
 drawing can reach tens of megabytes. A fill mask costs about 1.33 bytes per
 pixel after base64 (4/3 of one coverage byte), and a full-canvas fill can
-therefore be several megabytes by itself. A compressed or binary container is
+therefore be several megabytes by itself. A gradient costs only a handful of
+numbers and stops, so its file cost is negligible. A compressed or binary
+container is
 the natural next container; the parser is structured so a new *encoding* can be
 added without changing the model.
 
@@ -53,7 +62,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 4,
+  "version": 5,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -135,6 +144,20 @@ added without changing the model.
           "width": 4,
           "height": 3,
           "mask": "////////////////"
+        },
+        {
+          "kind": "gradient",
+          "id": "gradient-7",
+          "type": "linear",
+          "x1": 0,
+          "y1": 600,
+          "x2": 1600,
+          "y2": 600,
+          "stops": [
+            { "offset": 0, "color": "#16181c" },
+            { "offset": 1, "color": "#f4f1ea" }
+          ],
+          "opacity": 0.5
         }
       ]
     }
@@ -147,7 +170,9 @@ from the pixels painted before it instead of adding colour. The third is a fille
 rectangle: its `fill` flag makes a reader fill the area its samples bound before
 tracing them, so the interior is solid rather than empty. The fourth element is a
 bucket fill: it paints its opaque colour through the 4x3 coverage mask at
-`(304, 404)` and is ordered after the strokes, so it covers them.
+`(304, 404)` and is ordered after the strokes, so it covers them. The gradient is
+a half-opacity linear ramp across the document, ordered after everything else, so
+it paints over them on that layer.
 
 ### `format`, `version`
 
@@ -176,10 +201,10 @@ compositing order. A file must contain at least one layer.
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
 | `blendMode` | string | `"normal"` only today. |
-| `elements` | array | Strokes and fill patches of this layer, in painting order. |
+| `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
-discriminator: `"stroke"` or `"fill"`. A version-4 reader rejects an unknown
+discriminator: `"stroke"`, `"fill"` or `"gradient"`. A reader rejects an unknown
 kind rather than silently dropping content, and versions 1-3 store the same
 ordered list under `strokes` with no `kind` (every entry there is a stroke).
 
@@ -190,8 +215,8 @@ disagree with its own layer.
 ### `elements[]`
 
 The `kind` field decides the element shape. Painting order is array order:
-strokes and fills interleave exactly as the user made them, and a reader must
-not reorder or drop elements.
+strokes, fills and gradients interleave exactly as the user made them, and a
+reader must not reorder or drop elements.
 
 #### Strokes
 
@@ -270,6 +295,31 @@ but the engine only creates `0`/`255`. This leaves room for a future
 anti-aliased patch without another format version, while a binary mask remains
 the current guarantee.
 
+#### Gradients
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `kind` | `"gradient"` | Element discriminator. Required in version 5. |
+| `id` | string | Gradient id. |
+| `type` | `"linear"` \| `"radial"` | Interpolation shape. |
+| `x1`, `y1` | number | Axis start (linear) or centre (radial), within the document. |
+| `x2`, `y2` | number | Axis end (linear) or radius endpoint (radial), within the document. |
+| `stops` | array | 2-64 `{ offset, color }` objects in strictly ascending `offset` order. |
+| `opacity` | 0-1 | Alpha for the whole gradient, applied once when it paints. |
+
+A linear gradient interpolates along the segment from `(x1, y1)` to `(x2, y2)`.
+A radial gradient centres on `(x1, y1)` and uses the distance to `(x2, y2)` as
+its outer radius (the inner radius is always `0`). Stop `offset` is `0..1` along
+that axis, and its `color` is a `#rrggbb` or `#rgb` hex string. The current engine
+writes exactly two stops (the brush colour at `0`, the toolbar end colour at
+`1`), but the schema allows a future stop editor to write more without another
+version bump.
+
+A gradient element paints over its entire layer, in element order. There is no
+bounding box because the colour function covers the whole surface; an opaque
+gradient therefore covers earlier elements on the same layer. Reopening or redoing
+re-creates it from geometry and stops - there is no pixel snapshot in the file.
+
 ### `brush`
 
 | Field | Range | Meaning |
@@ -296,7 +346,8 @@ looks like:
 - document dimensions outside 8-8192, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
-- a version-4 element whose `kind` is missing or neither `"stroke"` nor `"fill"`;
+- a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"` or
+  `"gradient"`, or a gradient in a version-4 file;
 - a non-boolean `erase` flag on a stroke;
 - a non-boolean `fill` flag on a stroke;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
@@ -309,7 +360,11 @@ looks like:
 - a fill `mask` that is not valid standard base64, or whose decoded length is
   not exactly `width * height`;
 - more than `MAX_PROJECT_FILL_PIXELS` (16,777,216) fill-mask pixels across the
-  whole file, which bounds both parsing memory and the mask work.
+  whole file, which bounds both parsing memory and the mask work;
+- a gradient with an unknown `type`, fewer than two or more than
+  `MAX_PROJECT_GRADIENT_STOPS` (64) stops, a non-hex stop colour, offsets outside
+  `0..1` or not strictly ascending, endpoints outside the document, or opacity
+  outside `0..1`.
 
 **Lenient - repaired with a warning** when only cosmetics are affected:
 
@@ -328,9 +383,9 @@ them and the status bar shows them.
 
 Two further guarantees:
 
-- **Ids are reserved.** Layer, document, stroke and fill ids read from a file
-  advance the id counters, so layers or elements created after opening a project
-  cannot collide with ids that came from the file.
+- **Ids are reserved.** Layer, document, stroke, fill and gradient ids read from
+  a file advance the id counters, so layers or elements created after opening a
+  project cannot collide with ids that came from the file.
 - **A rejected file changes nothing.** Open parses and validates *before* the
   engine is touched, so a corrupt or unsupported file leaves the current drawing
   exactly as it was, unsaved marker included.
@@ -344,7 +399,8 @@ Two further guarantees:
 | 1 | Metadata, layers and brush strokes. | - |
 | 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | - |
 | 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | - |
-| 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | The current version; what this build always writes. |
+| 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | - |
+| 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -368,10 +424,14 @@ Two further guarantees:
   `layers[].elements` is therefore a required new shape, so the version was
   bumped and version-1 to -3 files are read through their `strokes` array as
   stroke-only element lists.
+- **Gradients are why version 5 exists.** A version-4 reader rejects an unknown
+  element kind, so it would refuse the file rather than mis-read it, but the
+  schema still gained a required new element shape. Version-1 to -4 files contain
+  no gradient and open unchanged.
 - **Stroke flags are still written only when set.** A stroke that paints and
   traces carries no `erase` or `fill` field; the only new mandatory stroke field
-  in version 4 is `kind: "stroke"`, which distinguishes it from a fill in the
-  now-shared element list. Version-3 files have no `kind` on their `strokes`
+  in version 4 is `kind: "stroke"`, which distinguishes it from the other element
+  kinds in the shared list. Version-3 files have no `kind` on their `strokes`
   entries and are read as strokes.
 
 `PROJECT_VERSION` in `projectFormat.ts` is the single source of truth for the

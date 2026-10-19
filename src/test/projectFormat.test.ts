@@ -10,8 +10,15 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
-import { isFillPatch } from "../core/document/types";
-import type { FillPatchRecord, LayerElement, StrokeRecord, StrokeSource } from "../core/document/types";import {
+import { isFillPatch, isGradient, isStroke } from "../core/document/types";
+import type {
+  FillPatchRecord,
+  GradientRecord,
+  LayerElement,
+  StrokeRecord,
+  StrokeSource,
+} from "../core/document/types";
+import {
   PROJECT_FORMAT_ID,
   PROJECT_VERSION,
   parseProject,
@@ -37,10 +44,7 @@ function strokeFor(layerId: string, overrides: Partial<StrokeRecord> = {}): Stro
 function storeOf(entries: ReadonlyArray<readonly [string, LayerElement[]]>): StrokeSource {
   const map = new Map(entries);
   return {
-    listStrokes: (layerId) =>
-      (map.get(layerId) ?? []).filter(
-        (element): element is StrokeRecord => !isFillPatch(element),
-      ),
+    listStrokes: (layerId) => (map.get(layerId) ?? []).filter(isStroke),
     listElements: (layerId) => map.get(layerId) ?? [],
   };
 }
@@ -61,6 +65,30 @@ function fillFor(
     width: 3,
     height: 2,
     mask,
+    ...overrides,
+  };
+}
+
+/** A two-stop gradient with non-trivial geometry, used to pin the file shape. */
+function gradientFor(
+  layerId: string,
+  overrides: Partial<GradientRecord> = {},
+): GradientRecord {
+  return {
+    id: createId("gradient"),
+    layerId,
+    kind: "gradient",
+    type: "linear",
+    x1: 1.5,
+    y1: 2,
+    x2: 30.25,
+    y2: 40,
+    stops: [
+      { offset: 0, color: "#123456" },
+      { offset: 0.4, color: "#abcdef" },
+      { offset: 1, color: "#000000" },
+    ],
+    opacity: 0.65,
     ...overrides,
   };
 }
@@ -213,6 +241,44 @@ describe("serializeProject", () => {
       mask: bytesToBase64(mask),
     });
   });
+
+  it("writes a gradient as geometry and stops, with no pixel snapshot", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const gradient = gradientFor(layerId);
+
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [gradient]]])),
+    ) as { layers: { elements: Record<string, unknown>[] }[] };
+
+    const element = payload.layers[0].elements[0];
+    expect(Object.keys(element).sort()).toEqual([
+      "id",
+      "kind",
+      "opacity",
+      "stops",
+      "type",
+      "x1",
+      "x2",
+      "y1",
+      "y2",
+    ]);
+    expect(element).toEqual({
+      kind: "gradient",
+      id: gradient.id,
+      type: "linear",
+      x1: 1.5,
+      y1: 2,
+      x2: 30.25,
+      y2: 40,
+      stops: [
+        { offset: 0, color: "#123456" },
+        { offset: 0.4, color: "#abcdef" },
+        { offset: 1, color: "#000000" },
+      ],
+      opacity: 0.65,
+    });
+  });
 });
 
 describe("parseProject round trip", () => {
@@ -342,6 +408,45 @@ describe("parseProject round trip", () => {
     expect(restored.mask).not.toBe(mask);
   });
 
+  it("round-trips gradient geometry, stops, opacity and order exactly", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const before = strokeFor(layerId);
+    const gradient = gradientFor(layerId, { type: "radial" });
+    const fill = fillFor(layerId);
+    const after = strokeFor(layerId, { startTime: 999 });
+
+    const parsed = parseProject(
+      serializeProject(
+        document,
+        storeOf([[layerId, [before, gradient, fill, after]]]),
+      ),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    expect(parsed.project.elements.map((element) => element.id)).toEqual([
+      before.id,
+      gradient.id,
+      fill.id,
+      after.id,
+    ]);
+    expect(parsed.project.strokes).toEqual([before, after]);
+
+    const restored = parsed.project.elements[1];
+    expect(isGradient(restored)).toBe(true);
+    if (!isGradient(restored)) {
+      return;
+    }
+    expect(restored).toEqual(gradient);
+    // Stops are decoded objects owned by the document, not references into the
+    // parsed JSON.
+    expect(restored.stops[1]).not.toBe(gradient.stops[1]);
+  });
+
   it("opens version 2 files, whose shapes were all outlines", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -399,6 +504,28 @@ describe("parseProject round trip", () => {
     }
     expect(parsed.project.strokes).toEqual([outline, filled]);
     expect(parsed.project.strokes[1].fill).toBe(true);
+  });
+
+  it("opens version 4 files, which may contain strokes and fill patches", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId);
+    const fill = fillFor(layerId);
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [stroke, fill]]])),
+    ) as { version: number };
+    payload.version = 4;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.elements.map((element) => element.id)).toEqual([
+      stroke.id,
+      fill.id,
+    ]);
+    expect(parsed.project.strokes).toEqual([stroke]);
   });
 
   it("accepts a byte order mark", () => {
@@ -687,6 +814,92 @@ describe("parseProject rejections", () => {
     expect(rejectionOf(withFill((fill) => (fill.width = 2.5)))).toContain("whole number");
     expect(rejectionOf(withFill((fill) => (fill.color = " ")))).toContain("colour is empty");
     expect(rejectionOf(withFill((fill) => delete fill.id))).toContain("missing its identifier");
+  });
+
+  it("refuses a malformed gradient", () => {
+    const validGradient = (): Record<string, unknown> => ({
+      kind: "gradient",
+      id: "gradient-1",
+      type: "linear",
+      x1: 1,
+      y1: 2,
+      x2: 30,
+      y2: 40,
+      stops: [
+        { offset: 0, color: "#ff0000" },
+        { offset: 1, color: "#0000ff" },
+      ],
+      opacity: 0.5,
+    });
+    const withGradient = (change: (gradient: Record<string, unknown>) => void): string =>
+      mutate((project) => {
+        const gradient = validGradient();
+        change(gradient);
+        project.layers[0].elements.push(gradient as unknown as RawStroke);
+      });
+
+    expect(parseProject(withGradient(() => {})).ok).toBe(true);
+
+    expect(rejectionOf(withGradient((gradient) => (gradient.type = "conic")))).toContain(
+      "linear",
+    );
+    expect(
+      rejectionOf(withGradient((gradient) => (gradient.stops = [{ offset: 0, color: "#fff" }]))),
+    ).toContain("at least two");
+    expect(
+      rejectionOf(
+        withGradient(
+          (gradient) =>
+            (gradient.stops = Array.from({ length: 65 }, (_, index) => ({
+              offset: index / 64,
+              color: "#000000",
+            }))),
+        ),
+      ),
+    ).toContain("more than 64");
+    expect(
+      rejectionOf(
+        withGradient(
+          (gradient) =>
+            (gradient.stops = [
+              { offset: 1, color: "#fff" },
+              { offset: 0, color: "#000" },
+            ]),
+        ),
+      ),
+    ).toContain("strictly ascending");
+    expect(
+      rejectionOf(
+        withGradient(
+          (gradient) =>
+            (gradient.stops = [
+              { offset: 0, color: "tomato" },
+              { offset: 1, color: "#000" },
+            ]),
+        ),
+      ),
+    ).toContain("hex colour");
+    expect(rejectionOf(withGradient((gradient) => (gradient.x1 = -1)))).toContain(
+      "between 0 and 100",
+    );
+    expect(rejectionOf(withGradient((gradient) => (gradient.y2 = 81)))).toContain(
+      "between 0 and 80",
+    );
+    expect(rejectionOf(withGradient((gradient) => (gradient.opacity = 1.2)))).toContain(
+      "between 0 and 1",
+    );
+  });
+
+  it("refuses a gradient in a version 4 file", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const text = serializeProject(
+      document,
+      storeOf([[layerId, [gradientFor(layerId)]]]),
+    );
+    const payload = JSON.parse(text) as { version: number };
+    payload.version = 4;
+    expect(rejectionOf(JSON.stringify(payload))).toContain("requires file version 5");
   });
 
   it("refuses an unknown element kind but accepts strokes in a version 4 file", () => {

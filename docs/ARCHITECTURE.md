@@ -119,11 +119,12 @@ memory; it never changes document size or stroke coordinates.
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
-| `src/core/document` | Document and layer metadata, ordered stroke/fill element store | types, utils |
+| `src/core/document` | Document and layer metadata, ordered element store | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, picker, pan) | core/document, types |
-| `src/core/commands` | Command stack, stroke/fill commands, document (layer) command | core/document |
+| `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, pan) | core/document, types |
+| `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
 | `src/core/engine` | Integration: stroke lifecycle, history, layers, viewport, cursor stream | all of `core` |
@@ -358,13 +359,13 @@ constraint, releasing the modifier first drops it.
 
 ### Bucket (flood) fill
 
-A bucket fill is the first layer content that is **not a stroke**. Its boundary
+A bucket fill is layer content that is **not a stroke**. Its boundary
 is a set of pixels, so the document stores the pixels it committed rather than a
 traced polygon: a `FillPatchRecord` with an opaque colour, a tight bounding box
-and **one coverage byte per pixel in that box**. Strokes and fill patches share
-one ordered `elements` list per layer, so a stroke drawn after a fill paints
-above it and undo can restore painting order exactly. The project format moved
-to version 4 for that list (see
+and **one coverage byte per pixel in that box**. Strokes, fill patches and
+gradients share one ordered `elements` list per layer, so a stroke drawn after a
+fill paints above it and undo can restore painting order exactly. The project
+format moved to version 4 for that list and version 5 added gradients (see
 [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills)).
 
 The gesture is a press, not a drag:
@@ -420,6 +421,47 @@ Tolerance lives in the editor snapshot (`setFillTolerance`) and describes the
 next fill, like `shapeFill`; it is not serialized. A committed patch carries its
 own pixels, so changing the slider never rewrites one.
 
+### Gradients
+
+A gradient is the opposite trade from a fill: its pixels are a function of
+geometry, so the document stores **the function**, not the pixels. A
+`GradientRecord` carries its type (`linear` or `radial`), two drag points, an
+ordered stop list (`offset` plus hex colour) and one opacity. The record is
+self-describing and immutable; re-rendering it is deterministic, so undo, redo,
+save/reopen, layer duplication and export all rebuild the same content without a
+snapshot. The file format moved to version 5 for the new element kind.
+
+The gesture is a drag, and the live preview is real layer content:
+
+1. On pointer-down `beginGradient` captures the current options - linear/radial,
+   brush colour as stop `0`, toolbar end colour as stop `1`, brush opacity - and
+   inserts a zero-length record at the end of the active layer's element list.
+   Nothing enters history and the revision does not move.
+2. Every move replaces that record (same id, same index) with a new endpoint.
+   The engine invalidates the layer, so the renderer rebuilds it in painting
+   order: content below the gradient stays below, content above stays above.
+   The pointer endpoint is clamped to the document bounds.
+3. On release, a drag shorter than `MIN_GRADIENT_LENGTH` is cancelled: it has no
+   direction and would be an invisible undo step. Otherwise the record stays and
+   `GradientCommand` is pushed, carrying the committed geometry and stops.
+
+`pointercancel`, lost capture, a tool switch or an abort removes the preview
+without history or a dirty revision. Undo removes the element and redo
+re-inserts the *same record* at its original index; no blending is re-run. Layer
+duplication clones the record with a new id and independent stop objects, and
+deleting a layer carries gradients through the same `ElementTransfer` as strokes
+and fills.
+
+The renderer paints a gradient directly onto the layer surface instead of
+allocating a document-sized patch. It creates a Canvas linear gradient from the
+two points, or a radial gradient centred on the first point with the drag length
+as its outer radius, adds the stops, sets `globalAlpha` to the element opacity and
+fills the whole layer through the surface transform. The zero-length preview is
+skipped. Gradients are therefore content, not an adjustment or a mask: an opaque
+gradient covers earlier elements on its layer, which is why painting one on its
+own layer is the normal workflow. The editor options (`setGradientType`,
+`setGradientEndColor`) describe the next drag only and are not serialized.
+
 ### Selection and transform
 
 A selection holds **whole strokes of one layer**, never part of a stroke and
@@ -431,8 +473,8 @@ the marquee selects even when its samples stay outside. Segments are tested
 **continuously** (Liang-Barsky), not just sample by sample: a sparse stroke that
 crosses the marquee with both endpoints outside it is still selected. The test is
 against the *active* layer's stroke-only view only, because a transform writes
-stroke samples and a stroke belongs to exactly one layer. Fill patches are
-content, not paths, and are filtered out of that view.
+stroke samples and a stroke belongs to exactly one layer. Fill patches and
+gradients are content, not paths, and are filtered out of that view.
 
 A press that never moved is a zero-size marquee, so a click runs through exactly
 the same rule: it selects the strokes under the pointer, or clears the selection
@@ -564,7 +606,7 @@ simple loop.
 ## Undo / redo
 
 Two kinds of step share one stack, so undo behaves uniformly whether the last
-action was a stroke, a fill or a layer change:
+action was a stroke, a fill, a gradient or a layer change:
 
 - **`StrokeCommand`** captures no pixels. Undo removes the stroke from the
   `StrokeStore` and asks the renderer to re-rasterize that layer from the
@@ -574,12 +616,16 @@ action was a stroke, a fill or a layer change:
   removes the patch and refreshes the layer; redo re-inserts the **same** patch
   and never reruns the flood scan. The pixels are the command payload because
   the region was defined by composite pixels that may no longer be there.
+- **`GradientCommand`** carries the committed `GradientRecord` and its index.
+  Undo removes it and refreshes the layer; redo re-inserts the same geometry and
+  stops, so the renderer rebuilds the identical gradient without capturing a
+  pixel snapshot.
 - **`DocumentCommand`** captures the two document states around a layer change
   (`before`/`after`). Documents are pure metadata, so keeping two of them costs
   two small objects. When the change creates or destroys layer content - layer
-  duplication, or deletion, which must not lose the deleted layer's strokes
-  and fills - the command also carries that element list and restores it on
-  revert.
+  duplication, or deletion, which must not lose the deleted layer's strokes,
+  fills and gradients - the command also carries that element list and restores
+  it on revert.
 - **`MoveStrokesCommand` / `DeleteStrokesCommand`** edit existing strokes rather
   than adding or removing a layer's paint. A move keeps each stroke's pre-drag
   sample arrays and writes `original + offset` on apply and the originals on
@@ -608,9 +654,9 @@ History depth is capped (200 commands by default), dropping the oldest entries.
 
 This is why no layer bitmap snapshots exist anywhere in the codebase: the
 element list *is* the authoritative record, and layer pixels are a cache derived
-from it. A fill patch is itself content, not a snapshot of a layer: it records
-only the pixels that fill committed, in the same ordered list as strokes, so
-undo and redo move it like any other element.
+from it. A fill patch records only the pixels that fill committed, and a
+gradient records only its colour function; both sit in the same ordered list as
+strokes, so undo and redo move them like any other element.
 
 ## Input pipeline
 
@@ -706,9 +752,9 @@ add a WebGL or WebGPU renderer:
 DOM-free by design.
 
 - Document/layer operations, viewport math, stroke interpolation, pointer
-  normalization, the command stack, the stroke and fill commands, the document
-  command and the ordered element store are tested directly. `floodFill` is a
-  pure module tested against synthetic pixel buffers: enclosed regions,
+  normalization, the command stack, the stroke, fill and gradient commands, the
+  document command and the ordered element store are tested directly. `floodFill`
+  is a pure module tested against synthetic pixel buffers: enclosed regions,
   tolerance levels, boundaries, transparency, 4-connectivity and the oversized
   guard.
 - `DrawingEngine` is tested with a `null` renderer, covering stroke commit,
@@ -723,9 +769,15 @@ DOM-free by design.
   seed is handled, cancel and a mid-gesture tool switch remove the preview with
   no revision or dirty flag, a tolerance-0 no-op records nothing, an oversized
   document refuses the scan with a notice, and duplication/deletion carry fills
-  through their element transfers. The format suite asserts a version-4
-  save/reopen round trip of interleaved strokes and fills, version-1 to -3
-  compatibility, and rejection of bad boxes, masks and the pixel ceiling.
+  through their element transfers. Gradient behaviour is covered the same way:
+  press inserts one record, moves replace it at the same index without history,
+  release commits one step, the radial/colour/opacity options are captured at
+  press, zero-length drags and out-of-bounds presses record nothing, cancel and a
+  tool switch remove the preview, coordinates clamp to the document, and
+  undo/redo replay the identical record. The format suite asserts a version-5
+  round trip of interleaved strokes, fills and gradients, version-1 to -4
+  compatibility, and rejection of bad boxes, masks, stops, geometry, opacity,
+  gradients in a version-4 file, and the fill pixel ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
   exactly-closed outline, and the degenerate extent. Shape *behaviour* is
@@ -784,8 +836,10 @@ DOM-free by design.
   display never paints the eraser buffer. The fill suite asserts that patches are
   rasterized in element order between strokes (colour and mask expanded into a
   bounding-box `ImageData`), and that `readCompositeImage` returns the document
-  composite at document resolution. Real pixel coverage is out of scope for the
-  unit suite.
+  composite at document resolution. The gradient suite asserts the Canvas
+  linear/radial gradients, geometry, stops and element alpha, their position in
+  the painting order, and that zero-length or transparent gradients draw nothing.
+  Real pixel coverage is out of scope for the unit suite.
 
 Behaviour that only exists in a browser or a real window is verified manually
 against the running app (composited pixels on the display canvas, layer
@@ -817,34 +871,48 @@ with no halo, a half-opacity pass reads back as exactly the 50% blend
 stroke removes exactly as much as a single pass, undo restores the covered pixels
 bit-for-bit and redo re-applies them, and a save/reopen round trip reproduces
 every sampled pixel. The bucket fill is verified on the live display canvas:
-selecting `G` shows the Tolerance control, a click on blank paper inks the paper
+selecting `F` shows the Tolerance control, a click on blank paper inks the paper
 with the brush colour and raises the history by one, undo returns the sampled
 pixel to white and redo restores the fill, and a `pointercancel` press leaves the
-paper white with history still zero. The same harness confirms the format guard
+paper white with history still zero. Gradients were verified in the browser app at
+the state level: selecting `G` shows the **Radial** switch and **To** colour,
+changing both updates the controls, a synthetic linear drag raises the history by
+one and marks the document unsaved, `Ctrl+Z` returns it to zero and
+`Ctrl+Shift+Z` restores one step, and a press followed by `pointercancel` at
+history zero leaves it at zero. The harness tab suspends animation frames, so the
+live display canvas did not repaint; the actual **pixels** were verified by
+rendering real documents through `Canvas2DRenderer` with the browser's Canvas 2D:
+a black-to-white linear gradient sampled `14`, `128` and `243` across the axis,
+and a red-to-blue radial gradient sampled red at its centre (`251,0,3`) and blue
+at its outer edge (`28,0,227`/`23,0,232`). That covers the renderer path, while
+the gesture path is covered by the state checks and the engine suite. The same
+harness confirms the format guard
 in the running app: a file from a newer version is refused with a message and the
 open drawing is left untouched, while a version-1 file opens with its strokes
 painted (a version-1 file has no erasures to lose). What has and has not been
 verified is reported separately rather than being implied by the test count. The
 format's own round trips are asserted in Vitest: the `erase` and `fill` flags
-survive a save/reopen, an unset flag is absent from the file, a version-4 file
-preserves an interleaved stroke/fill order and its mask bytes, and a version-1,
--2 or -3 file opens with its shapes traced rather than filled.
+survive a save/reopen, an unset flag is absent from the file, version 5 preserves
+an interleaved stroke/fill/gradient order with its mask bytes and geometry, a
+version-4 file still opens with fills and strokes, and a version-1, -2 or -3 file
+opens with its shapes traced rather than filled.
 
 ## Known limitations
 
 These are real gaps, not footnotes:
 
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
-  `bucket` and `picker`, plus `pan`. There is no gradient or text tool: a bucket
-  fill writes a region, while a gradient would be a per-pixel colour function
-  and is its own slice.
+  `bucket`, `gradient` and `picker`, plus `pan`. There is no text tool. A bucket
+  fill writes a region; a gradient is a two-stop linear/radial colour function,
+  not an editable gradient with draggable stops.
 - **Selection is stroke-level, layer-scoped and limited to translation,
   duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
-  layer or the tool changes. **Fill patches are not selectable** - the stroke-
-  only view deliberately filters them out - so a fill can only be undone, not
-  moved, duplicated or flipped. There is no add/subtract modifier, no feathering,
+  layer or the tool changes. **Fill patches and gradients are not selectable** -
+  the stroke-only view deliberately filters them out - so they can only be
+  undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
+  feathering,
   no clipping, and no scale, rotate or perspective; duplicate stays on the layer
   (there is no cross-layer copy/paste). The frame is the selected strokes'
   bounding box, not the region that was dragged.
@@ -855,8 +923,9 @@ These are real gaps, not footnotes:
 - **Shapes are stroke outlines, not vectors.** A committed shape is stored as
   ordinary stroke samples and cannot be recognised or edited as a rectangle
   afterwards; a filled shape is the same samples plus a `fill` flag, so there is
-  no separate fill rule, no inner fill, no gradient and no way to turn a fill off
-  after the fact short of undoing it. Shapes take the brush's round joins, and a
+  no separate fill rule, no inner fill, no gradient *inside a shape* and no way
+  to turn a fill off after the fact short of undoing it. Shapes take the brush's
+  round joins, and a
   filled ellipse's interior is as faceted as its outline (sub-pixel, but not a
   true curve). Shapes are
   also pressure-blind by construction: their samples carry pressure `1`, so a
@@ -874,6 +943,13 @@ These are real gaps, not footnotes:
   The scan samples the merged visible composite (including the paper), and
   documents above 16,777,216 pixels refuse a fill with a notice rather than
   risking a long freeze.
+- **A gradient is a two-stop whole-layer colour function.** There is no stop
+  editor, no angle or aspect modifier, no transparency stop and no clipping to a
+  selection or shape; opacity applies to the entire element. It is content, not
+  an adjustment layer, so it covers earlier elements on its layer. A drag
+  re-rasterizes the whole layer on every pointer move, the same trade as moving a
+  selection; that is the thing to cache first if a heavy layer makes the preview
+  lag.
 - **An eraser stroke costs one extra surface-sized canvas** while it is in
   flight (its pre-stroke snapshot). It is allocated lazily and released when the
   stroke ends, but on a very large document it is a visible memory spike next to
@@ -894,7 +970,7 @@ These are real gaps, not footnotes:
 - **HiDPI cost**: raising `rasterScale` re-rasterizes every layer.
 - **Undo history is not persisted.** A project file stores the document and its
   elements, not the history: reopening a drawing rebuilds one step per element
-  (stroke or fill patch), so the work stays editable, but there is no redo of
-  edits made before the save. See [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
+  (stroke, fill patch or gradient), so the work stays editable, but there is no
+  redo of edits made before the save. See [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 - **No tests for the React layer.** Hooks, components and the input binder are
   exercised manually in the browser, not by automated tests.

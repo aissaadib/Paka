@@ -67,6 +67,16 @@ export function IconBucket(props: IconProps) {
   );
 }
 
+export function IconGradient(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="2.5" width="11" height="11" rx="1.2" />
+      <path d="M4.2 11.8 11.8 4.2" />
+      <path d="M4.2 8.4 8.4 4.2M7.6 11.8 11.8 7.6" opacity="0.55" />
+    </Icon>
+  );
+}
+
 export function IconSelect(props: IconProps) {
   return (
     <Icon {...props}>

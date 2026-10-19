@@ -2,18 +2,18 @@
  * The Paka project format.
  *
  * A project file is a versioned JSON document. It stores **metadata plus the
- * stroke data that produced the pixels**, never a flattened image:
+ * content that produced the pixels**, never a flattened image:
  *
  * ```
- * { format, version, document: {...}, layers: [ { ...layer, strokes: [...] } ] }
+ * { format, version, document: {...}, layers: [ { ...layer, elements: [...] } ] }
  * ```
  *
- * Why strokes and not pixel buffers: in this engine the stroke list *is* the
- * authoritative record (pixels are a cache rasterized from it). Saving strokes
- * keeps every layer editable after a reload - individual strokes stay
- * undoable, nothing is resampled, and file size does not depend on the display
- * resolution the drawing happened to be made at. Storing a flattened PNG would
- * destroy exactly that.
+ * Why records and not pixel buffers: in this engine the ordered element list
+ * *is* the authoritative record (pixels are a cache rasterized from it). Saving
+ * strokes, fill patches and gradients keeps every layer editable after a reload
+ * - individual elements stay undoable, nothing is resampled, and file size does
+ * not depend on the display resolution the drawing happened to be made at.
+ * Storing a flattened PNG would destroy exactly that.
  *
  * The parser is deliberately strict about anything that could corrupt a
  * drawing (dimensions, layer ids, stroke sample arrays) and forgiving about
@@ -31,16 +31,19 @@ import {
 import type {
   DrawingDocument,
   FillPatchRecord,
+  GradientRecord,
+  GradientStop,
   Layer,
   LayerElement,
   LayerId,
   StrokeRecord,
   StrokeSource,
 } from "../document/types";
-import { isFillPatch } from "../document/types";
+import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import type { BrushSettings } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
+import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
 
 export const PROJECT_FORMAT_ID = "paka-project";
@@ -60,15 +63,20 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * new content entirely (or fail to find `strokes`), so the version was bumped;
  * version-1 to -3 files still open, their `strokes` array read as a list of
  * stroke elements in the same order.
+ * Version 5: elements may be gradients (geometry plus colour stops). A
+ * version-4 reader rejects the unknown `gradient` kind, so the version was
+ * bumped; version-1 to -4 files still open unchanged.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 4;
+export const PROJECT_VERSION = 5;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
 /** Upper bound on the total fill-mask pixels a file may contain. */
 export const MAX_PROJECT_FILL_PIXELS = MAX_FILL_SCAN_PIXELS;
+/** Upper bound on colour stops in one gradient. */
+export const MAX_PROJECT_GRADIENT_STOPS = 64;
 
 export interface SerializedStroke {
   readonly kind: "stroke";
@@ -98,7 +106,20 @@ export interface SerializedFillPatch {
   readonly mask: string;
 }
 
-export type SerializedElement = SerializedStroke | SerializedFillPatch;
+export type SerializedElement = SerializedStroke | SerializedFillPatch | SerializedGradient;
+
+/** A gradient: geometry plus colour stops, not a pixel snapshot. */
+export interface SerializedGradient {
+  readonly kind: "gradient";
+  readonly id: string;
+  readonly type: "linear" | "radial";
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly stops: readonly GradientStop[];
+  readonly opacity: number;
+}
 
 export interface SerializedLayer {
   readonly id: string;
@@ -106,7 +127,7 @@ export interface SerializedLayer {
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: string;
-  /** Painting order: strokes and fills interleave exactly as they were made. */
+  /** Painting order: strokes, fills and gradients interleave exactly as made. */
   readonly elements: readonly SerializedElement[];
 }
 
@@ -135,7 +156,8 @@ export interface ParsedProject {
   readonly elements: readonly LayerElement[];
   /**
    * A filtered stroke view, kept for callers that only care about paths
-   * (selection, transforms and diagnostics). It never includes a fill patch.
+   * (selection, transforms and diagnostics). It never includes a fill patch or
+   * a gradient.
    */
   readonly strokes: readonly StrokeRecord[];
   /** Non-fatal repairs made while reading (missing names, bad background). */
@@ -290,6 +312,60 @@ function readFillPatch(
   return { id, layerId, kind: "fill", color, x, y, width, height, mask };
 }
 
+function readGradient(
+  raw: Record<string, unknown>,
+  label: string,
+  layerId: LayerId,
+  documentWidth: number,
+  documentHeight: number,
+): GradientRecord {
+  const id = readId(raw.id, "gradient");
+  const type = readString(raw.type, `${label} gradient type`);
+  if (type !== "linear" && type !== "radial") {
+    fail(`${label} gradient type must be "linear" or "radial".`);
+  }
+
+  const rawStops = readStrokesOf(raw.stops, `${label} gradient stops`);
+  if (rawStops.length < 2) {
+    fail(`${label} gradient needs at least two colour stops.`);
+  }
+  if (rawStops.length > MAX_PROJECT_GRADIENT_STOPS) {
+    fail(
+      `${label} gradient has more than ${MAX_PROJECT_GRADIENT_STOPS} colour stops.`,
+    );
+  }
+
+  const stops: GradientStop[] = [];
+  let previousOffset = -1;
+  rawStops.forEach((rawStop, index) => {
+    const stopLabel = `${label} gradient stop ${index + 1}`;
+    const stop = asRecord(rawStop, stopLabel);
+    const offset = readNumber(stop.offset, `${stopLabel} offset`, 0, 1);
+    if (offset <= previousOffset) {
+      fail(`${stopLabel} offsets must be strictly ascending.`);
+    }
+    previousOffset = offset;
+    const color = readString(stop.color, `${stopLabel} colour`);
+    if (!hexToRgb(color)) {
+      fail(`${stopLabel} colour must be a hex colour.`);
+    }
+    stops.push({ offset, color });
+  });
+
+  return {
+    id,
+    layerId,
+    kind: "gradient",
+    type,
+    x1: readNumber(raw.x1, `${label} gradient x1`, 0, documentWidth),
+    y1: readNumber(raw.y1, `${label} gradient y1`, 0, documentHeight),
+    x2: readNumber(raw.x2, `${label} gradient x2`, 0, documentWidth),
+    y2: readNumber(raw.y2, `${label} gradient y2`, 0, documentHeight),
+    stops,
+    opacity: readNumber(raw.opacity, `${label} gradient opacity`, 0, 1),
+  };
+}
+
 function readInteger(value: unknown, label: string, min: number, max: number): number {
   const number = readAnyNumber(value, label);
   if (!Number.isInteger(number) || number < min || number > max) {
@@ -298,7 +374,7 @@ function readInteger(value: unknown, label: string, min: number, max: number): n
   return number;
 }
 
-/** Serializes document metadata and stroke data into the project text. */
+/** Serializes document metadata and ordered layer content into the project text. */
 export function serializeProject(document: DrawingDocument, strokes: StrokeSource): string {
   const payload: SerializedProject = {
     format: PROJECT_FORMAT_ID,
@@ -335,6 +411,19 @@ function serializeElement(element: LayerElement): SerializedElement {
       width: element.width,
       height: element.height,
       mask: bytesToBase64(element.mask),
+    };
+  }
+  if (isGradient(element)) {
+    return {
+      kind: "gradient",
+      id: element.id,
+      type: element.type,
+      x1: element.x1,
+      y1: element.y1,
+      x2: element.x2,
+      y2: element.y2,
+      stops: element.stops.map((stop) => ({ offset: stop.offset, color: stop.color })),
+      opacity: element.opacity,
     };
   }
   return {
@@ -477,7 +566,9 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
     // Version 4 uses one ordered `elements` list. Older files have a `strokes`
     // array only, which is exactly a list of stroke elements in the same order.
     const rawElements =
-      version >= 4 ? readElementList(record.elements, `${label} elements`) : readElementList(record.strokes, `${label} strokes`);
+      version >= 4
+        ? readElementList(record.elements, `${label} elements`)
+        : readElementList(record.strokes, `${label} strokes`);
 
     for (const [elementIndex, rawElement] of rawElements.entries()) {
       const elementLabel = `${label}, element ${elementIndex + 1}`;
@@ -497,6 +588,13 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
           );
           fillPixelCount += patch.width * patch.height;
           elements.push(patch);
+          continue;
+        }
+        if (kind === "gradient") {
+          if (version < 5) {
+            fail(`${elementLabel} uses a gradient, which requires file version 5.`);
+          }
+          elements.push(readGradient(element, elementLabel, id, width, height));
           continue;
         }
         if (kind !== "stroke") {

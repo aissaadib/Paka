@@ -119,6 +119,26 @@ export class RecordingCanvas {
         colorSpace: "srgb",
       } as unknown as ImageData;
     };
+    // Gradients are objects with their own `addColorStop`; the surface keeps
+    // the returned value as `fillStyle`, so tests can inspect the geometry and
+    // stops that painted a rectangle.
+    const gradient =
+      (kind: "linear" | "radial") =>
+      (...args: unknown[]): CanvasGradient => {
+        const stops: { offset: number; color: string }[] = [];
+        const object = {
+          kind,
+          args,
+          stops,
+          addColorStop(offset: number, color: string): void {
+            stops.push({ offset, color });
+          },
+        };
+        record(`create${kind === "linear" ? "Linear" : "Radial"}Gradient`)(...args);
+        return object as unknown as CanvasGradient;
+      };
+    (ctx as unknown as Record<string, unknown>).createLinearGradient = gradient("linear");
+    (ctx as unknown as Record<string, unknown>).createRadialGradient = gradient("radial");
     // Fill patches upload their own RGBA pixels before being drawn onto a
     // surface, so the test harness needs both halves of that path.
     (ctx as unknown as Record<string, unknown>).createImageData = (

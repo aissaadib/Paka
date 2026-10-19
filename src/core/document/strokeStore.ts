@@ -7,13 +7,14 @@
  * bitmaps: undoing an element removes it from this store and the renderer
  * re-rasterizes the affected layer.
  *
- * A layer's content is **one ordered element list**: strokes and bucket-fill
- * patches interleave exactly as the user made them. `list` is a filtered view
- * for stroke-only features (selection, transforms); `listElements` is the
- * painting order the renderer and project writer consume.
+ * A layer's content is **one ordered element list**: strokes, bucket-fill
+ * patches and gradients interleave exactly as the user made them. `list` is a
+ * filtered view for stroke-only features (selection, transforms);
+ * `listElements` is the painting order the renderer and project writer consume.
  */
 
 import type { LayerElement, LayerId, StrokeRecord } from "./types";
+import { isStroke } from "./types";
 
 export interface RemoveElementResult {
   readonly element: LayerElement;
@@ -32,10 +33,10 @@ export class StrokeStore {
   }
 
   /**
-   * The layer's strokes, in painting order, without fill patches.
+   * The layer's strokes, in painting order, without fills or gradients.
    *
-   * A filtered copy: stroke-only features must never see a patch as if it were
-   * an editable path.
+   * A filtered copy: stroke-only features must never see a non-stroke element as
+   * if it were an editable path.
    */
   list(layerId: LayerId): readonly StrokeRecord[] {
     const elements = this.byLayer.get(layerId);
@@ -44,8 +45,8 @@ export class StrokeStore {
     }
     const strokes: StrokeRecord[] = [];
     for (const element of elements) {
-      if ((element as { kind?: string }).kind !== "fill") {
-        strokes.push(element as StrokeRecord);
+      if (isStroke(element)) {
+        strokes.push(element);
       }
     }
     return strokes;
@@ -56,7 +57,7 @@ export class StrokeStore {
     return this.list(layerId).length;
   }
 
-  /** Number of elements (strokes and fills) on a layer. */
+  /** Number of elements (strokes, fills and gradients) on a layer. */
   elementCount(layerId: LayerId): number {
     return this.listElements(layerId).length;
   }
@@ -78,6 +79,26 @@ export class StrokeStore {
     }
     const at = index === undefined ? elements.length : Math.max(0, Math.min(index, elements.length));
     elements.splice(at, 0, element);
+  }
+
+  /**
+   * Swaps an element for a new version with the same id, keeping its position.
+   *
+   * This is how an in-progress gradient is edited without touching history: the
+   * preview stays one element in painting order while its endpoint moves.
+   */
+  replace(element: LayerElement): void {
+    const elements = this.byLayer.get(element.layerId);
+    if (!elements) {
+      this.byLayer.set(element.layerId, [element]);
+      return;
+    }
+    const index = elements.findIndex((candidate) => candidate.id === element.id);
+    if (index === -1) {
+      elements.push(element);
+      return;
+    }
+    elements[index] = element;
   }
 
   /** Index of an element in its layer's painting order, or `-1`. */

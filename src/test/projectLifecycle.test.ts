@@ -12,8 +12,14 @@ import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
 import { serializeProject } from "../core/project/projectFormat";
-import { isFillPatch } from "../core/document/types";
-import type { FillPatchRecord, LayerElement, StrokeRecord, StrokeSource } from "../core/document/types";
+import { isFillPatch, isGradient } from "../core/document/types";
+import type {
+  FillPatchRecord,
+  GradientRecord,
+  LayerElement,
+  StrokeRecord,
+  StrokeSource,
+} from "../core/document/types";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import type { PointerSample } from "../types/pointer";
 
@@ -298,6 +304,71 @@ describe("serialize and loadProject", () => {
     }
     const savedFill = savedAgain.project.elements[0];
     expect(isFillPatch(savedFill) && [...savedFill.mask]).toEqual([...mask]);
+  });
+
+  it("round-trips a committed gradient as geometry, with one undo step", () => {
+    const document = createDocument({ width: 32, height: 24 });
+    const layerId = document.layers[0].id;
+    const gradient: GradientRecord = {
+      id: "gradient-loaded",
+      layerId,
+      kind: "gradient",
+      type: "radial",
+      x1: 8,
+      y1: 9,
+      x2: 20,
+      y2: 21,
+      stops: [
+        { offset: 0, color: "#ff0000" },
+        { offset: 1, color: "#0000ff" },
+      ],
+      opacity: 0.6,
+    };
+    const stroke: StrokeRecord = {
+      id: "stroke-after-gradient",
+      layerId,
+      brush: { ...DEFAULT_BRUSH },
+      xs: [1, 2],
+      ys: [3, 4],
+      pressures: [1, 1],
+      times: [0, 16],
+      startTime: 0,
+    };
+    const source: StrokeSource = {
+      listStrokes: (id) => (id === layerId ? [stroke] : []),
+      listElements: (id) => (id === layerId ? [gradient, stroke] : []),
+    };
+
+    const parsed = parseProject(serializeProject(document, source));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    const reopened = new DrawingEngine();
+    reopened.loadProject(parsed.project, "C:\\art\\gradient.paka");
+
+    expect(reopened.listElements(layerId).map((element) => element.id)).toEqual([
+      gradient.id,
+      stroke.id,
+    ]);
+    const restored = reopened.listElements(layerId)[0];
+    expect(isGradient(restored)).toBe(true);
+    if (!isGradient(restored)) {
+      return;
+    }
+    expect(restored).toEqual(gradient);
+    expect(reopened.getState().history.depth).toBe(2);
+
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.listElements(layerId).map((element) => element.id)).toEqual([
+      gradient.id,
+    ]);
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.listElements(layerId)).toEqual([]);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listElements(layerId)[0]).toBe(restored);
   });
 
   it("does not pretend a loaded project is unsaved", () => {    const engine = new DrawingEngine({ document: createDocument({ width: 40, height: 40 }) });

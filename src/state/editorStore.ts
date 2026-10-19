@@ -28,6 +28,10 @@ export interface EditorActions {
   setShapeFill(filled: boolean): void;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   setFillTolerance(tolerance: number): void;
+  /** Chooses linear or radial for the next gradient drag. */
+  setGradientType(type: "linear" | "radial"): void;
+  /** Sets the end colour of the next gradient. */
+  setGradientEndColor(color: string): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
   undo(): void;
@@ -81,6 +85,8 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setBrush: (patch) => engine.setBrush(patch),
     setShapeFill: (filled) => engine.setShapeFill(filled),
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
+    setGradientType: (type) => engine.setGradientType(type),
+    setGradientEndColor: (color) => engine.setGradientEndColor(color),
     dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();

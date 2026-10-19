@@ -62,8 +62,15 @@ export const PICKER_TOOL: ToolDefinition = {
 export const BUCKET_TOOL: ToolDefinition = {
   id: "bucket",
   label: "Bucket fill",
-  shortcut: "G",
+  shortcut: "F",
   description: "Fill a contiguous region with the current colour",
+};
+
+export const GRADIENT_TOOL: ToolDefinition = {
+  id: "gradient",
+  label: "Gradient",
+  shortcut: "G",
+  description: "Drag a linear or radial colour gradient",
 };
 
 export const PAN_TOOL: ToolDefinition = {
@@ -82,6 +89,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,
   BUCKET_TOOL,
+  GRADIENT_TOOL,
   PICKER_TOOL,
   PAN_TOOL,
 ];

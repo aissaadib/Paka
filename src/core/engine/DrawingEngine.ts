@@ -35,6 +35,7 @@ import {
   type ElementTransfer,
 } from "../commands/documentCommand";
 import { createFillCommand } from "../commands/fillCommand";
+import { createGradientCommand } from "../commands/gradientCommand";
 import {
   createStrokeCommand,
   createStrokeCommandHost,
@@ -65,10 +66,24 @@ import {
   boundsFromCorners,
   strokeIntersectsBounds,
 } from "../document/strokeSelection";
-import type { DrawingDocument, FillPatchRecord, LayerElement, LayerId, StrokeRecord } from "../document/types";
-import { isFillPatch } from "../document/types";
+import type {
+  DrawingDocument,
+  FillPatchRecord,
+  GradientRecord,
+  LayerElement,
+  LayerId,
+  StrokeRecord,
+} from "../document/types";
+import { isFillPatch, isGradient, isStroke } from "../document/types";
 import { cloneFillPatch, createFillPatch } from "../fill/fillPatch";
 import { MAX_FILL_SCAN_PIXELS, floodFill } from "../fill/floodFill";
+import {
+  DEFAULT_GRADIENT_END_COLOR,
+  cloneGradient,
+  createGradientRecord,
+  gradientIsDegenerate,
+  moveGradientEnd,
+} from "../gradient/gradientRecord";
 import {
   CanvasInputBinder,
   type CanvasInputHandlers,
@@ -122,6 +137,13 @@ export interface EditorSnapshot {
    * fills already committed, which carry their own pixels.
    */
   readonly fillTolerance: number;
+  /**
+   * Gradient shape the next drag commits. Editor state: it describes the next
+   * gradient, while a committed gradient carries its own geometry.
+   */
+  readonly gradientType: "linear" | "radial";
+  /** End colour of the next gradient; its start is the current brush colour. */
+  readonly gradientEndColor: string;
   /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
@@ -261,6 +283,34 @@ interface ActiveFill {
   readonly index: number;
 }
 
+/**
+ * A gradient that is already painted on the layer but has not entered history.
+ *
+ * Moving the pointer replaces the record in place, so the user sees the real
+ * gradient at its layer position. Releasing commits it; cancelling removes it
+ * with no history entry and no revision change.
+ */
+interface ActiveGradient {
+  gradient: GradientRecord;
+  readonly index: number;
+}
+
+/**
+ * Copies one element into a layer, generating a fresh id.
+ *
+ * Used when a layer is duplicated. Fills keep their raster mask and gradients
+ * keep their geometry and stops; only identity and destination layer change.
+ */
+function cloneElement(element: LayerElement, layerId: LayerId): LayerElement {
+  if (isFillPatch(element)) {
+    return cloneFillPatch(element, layerId);
+  }
+  if (isGradient(element)) {
+    return cloneGradient(element, layerId);
+  }
+  return cloneStroke(element, layerId);
+}
+
 export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
@@ -290,6 +340,10 @@ export class DrawingEngine implements StrokeSource {
   /** Bucket-fill tolerance in 8-bit channel units. */
   private fillTolerance = 24;
   private activeFill: ActiveFill | null = null;
+  /** Gradient options for the next drag, captured when the gesture starts. */
+  private gradientType: "linear" | "radial" = "linear";
+  private gradientEndColor = DEFAULT_GRADIENT_END_COLOR;
+  private activeGradient: ActiveGradient | null = null;
   private notice: string | null = null;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
@@ -373,6 +427,11 @@ export class DrawingEngine implements StrokeSource {
       finishFill: () => engine.finishFill(),
       cancelFill: () => engine.cancelFill(),
       isFillActive: () => engine.activeFill !== null,
+      beginGradient: (sample) => engine.beginGradient(sample),
+      updateGradient: (sample) => engine.updateGradient(sample),
+      finishGradient: (sample) => engine.finishGradient(sample),
+      cancelGradient: () => engine.cancelGradient(),
+      isGradientActive: () => engine.activeGradient !== null,
     };
 
     this.commands.subscribe(() => this.publish());
@@ -529,12 +588,14 @@ export class DrawingEngine implements StrokeSource {
       const index = nextIndex.get(element.layerId) ?? 0;
       this.strokes.insert(element);
       // A reopened drawing keeps its history shape: one undo step per element,
-      // including fills, which replay their committed pixels rather than
-      // re-scanning whatever the composite looks like now.
+      // including fills and gradients. Fills replay committed pixels; gradients
+      // replay their committed geometry and stops.
       this.commands.push(
         isFillPatch(element)
           ? createFillCommand(element, index, this.commandHost)
-          : createStrokeCommand(element, index, this.commandHost),
+          : isGradient(element)
+            ? createGradientCommand(element, index, this.commandHost)
+            : createStrokeCommand(element, index, this.commandHost),
       );
       nextIndex.set(element.layerId, index + 1);
     }
@@ -611,9 +672,7 @@ export class DrawingEngine implements StrokeSource {
     }
     const elements = this.strokes
       .listElements(layerId)
-      .map((element) =>
-        isFillPatch(element) ? cloneFillPatch(element, copy.id) : cloneStroke(element, copy.id),
-      );
+      .map((element) => cloneElement(element, copy.id));
     this.commitDocumentChange("Duplicate Layer", before, after, {
       addedElements: { layerId: copy.id, elements },
     });
@@ -755,6 +814,32 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /** Chooses linear or radial for the next gradient drag. */
+  setGradientType(type: "linear" | "radial"): void {
+    if (type !== "linear" && type !== "radial") {
+      return;
+    }
+    if (this.gradientType === type) {
+      return;
+    }
+    this.gradientType = type;
+    this.publish();
+  }
+
+  /** Sets the end colour of the next gradient, as a hex string. */
+  setGradientEndColor(color: string): void {
+    const normalized = hexToRgb(color);
+    if (!normalized) {
+      return;
+    }
+    const next = rgbToHex(normalized);
+    if (this.gradientEndColor === next) {
+      return;
+    }
+    this.gradientEndColor = next;
+    this.publish();
+  }
+
   /** Clears a user-facing notice raised by an editor action. */
   dismissNotice(): void {
     if (this.notice === null) {
@@ -819,14 +904,14 @@ export class DrawingEngine implements StrokeSource {
   // ------------------------------------------------------------------ history
 
   undo(): boolean {
-    if (this.activeStroke || this.activeFill || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.undo());
   }
 
   redo(): boolean {
-    if (this.activeStroke || this.activeFill || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.redo());
@@ -835,7 +920,7 @@ export class DrawingEngine implements StrokeSource {
   // ----------------------------------------------------------- stroke capture
 
   beginStroke(sample: PointerSample): void {
-    if (this.activeStroke) {
+    if (this.activeStroke || this.activeFill || this.activeGradient) {
       return;
     }
     const layerId = this.doc.activeLayerId;
@@ -969,7 +1054,7 @@ export class DrawingEngine implements StrokeSource {
    * renderer is a no-op with no history entry and no dirty flag.
    */
   private beginFill(sample: PointerSample): boolean {
-    if (this.activeStroke || this.activeFill) {
+    if (this.activeStroke || this.activeFill || this.activeGradient) {
       return false;
     }
     const layerId = this.doc.activeLayerId;
@@ -1072,6 +1157,100 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  // ---------------------------------------------------------------- gradient
+
+  /**
+   * Starts a gradient gesture and paints the first preview on the active layer.
+   *
+   * The press point is the start (linear) or centre (radial); movement updates
+   * the record in place. Like a bucket fill, the preview is real layer content
+   * but not yet history, so cancelling can remove it exactly.
+   */
+  private beginGradient(sample: PointerSample): boolean {
+    if (this.activeStroke || this.activeFill || this.activeGradient) {
+      return false;
+    }
+    const layerId = this.doc.activeLayerId;
+    if (!layerId || !isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return false;
+    }
+
+    const x = clamp(sample.docX, 0, this.doc.width);
+    const y = clamp(sample.docY, 0, this.doc.height);
+    const gradient = createGradientRecord(
+      layerId,
+      { type: this.gradientType, x1: x, y1: y, x2: x, y2: y },
+      this.brush.color,
+      this.gradientEndColor,
+      this.brush.opacity,
+    );
+    const index = this.strokes.elementCount(layerId);
+    this.strokes.insert(gradient);
+    this.activeGradient = { gradient, index };
+    this.renderer?.invalidateLayer(layerId);
+    this.notice = null;
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /** Moves the free end of the in-progress gradient and repaints its layer. */
+  private updateGradient(sample: PointerSample): void {
+    const active = this.activeGradient;
+    if (!active) {
+      return;
+    }
+    const next = moveGradientEnd(
+      active.gradient,
+      clamp(sample.docX, 0, this.doc.width),
+      clamp(sample.docY, 0, this.doc.height),
+    );
+    if (next === active.gradient) {
+      return;
+    }
+    this.strokes.replace(next);
+    active.gradient = next;
+    this.renderer?.invalidateLayer(next.layerId);
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Commits the preview as one undoable step. A drag shorter than
+   * `MIN_GRADIENT_LENGTH` has no direction, so it is cancelled rather than
+   * recorded as an invisible history entry.
+   */
+  private finishGradient(sample: PointerSample): void {
+    this.updateGradient(sample);
+    const active = this.activeGradient;
+    if (!active) {
+      return;
+    }
+    if (gradientIsDegenerate(active.gradient)) {
+      this.cancelGradient();
+      return;
+    }
+    this.activeGradient = null;
+    this.revision += 1;
+    this.commands.push(
+      createGradientCommand(active.gradient, active.index, this.commandHost),
+    );
+    this.publish();
+  }
+
+  /** Removes an uncommitted gradient without history or a dirty revision. */
+  private cancelGradient(): void {
+    const active = this.activeGradient;
+    if (!active) {
+      return;
+    }
+    this.activeGradient = null;
+    this.strokes.remove(active.gradient.layerId, active.gradient.id);
+    this.renderer?.invalidateLayer(active.gradient.layerId);
+    this.publish();
+    this.requestRender();
+  }
+
   finishStroke(): void {
     const stroke = this.activeStroke;
     this.strokeBuilder = null;
@@ -1151,7 +1330,7 @@ export class DrawingEngine implements StrokeSource {
     const layer = this.strokes.listElements(selection.layerId);
     for (let index = 0; index < layer.length; index += 1) {
       const element = layer[index];
-      if (!isFillPatch(element) && wanted.has(element.id)) {
+      if (isStroke(element) && wanted.has(element.id)) {
         entries.push({ stroke: element, index });
       }
     }
@@ -1223,7 +1402,7 @@ export class DrawingEngine implements StrokeSource {
    * undo/redo re-inserts the very same strokes instead of minting new ids.
    */
   duplicateSelection(): boolean {
-    if (this.activeStroke || this.activeFill || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
       return false;
     }
     const selection = this.selection;
@@ -1235,7 +1414,7 @@ export class DrawingEngine implements StrokeSource {
     const entries: DuplicateEntry[] = [];
     for (let index = 0; index < layer.length; index += 1) {
       const source = layer[index];
-      if (!isFillPatch(source) && wanted.has(source.id)) {
+      if (isStroke(source) && wanted.has(source.id)) {
         entries.push({ source, index, clone: cloneStroke(source) });
       }
     }
@@ -1516,7 +1695,7 @@ export class DrawingEngine implements StrokeSource {
    * same coordinates.
    */
   private beginSelectionEdit(): MoveEntry[] | null {
-    if (this.activeStroke || this.activeFill || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
       return null;
     }
     const entries: MoveEntry[] = this.selectedStrokes().map((stroke) => ({
@@ -1840,6 +2019,9 @@ export class DrawingEngine implements StrokeSource {
   }
 
   private abortStroke(): void {
+    if (this.activeGradient) {
+      this.cancelGradient();
+    }
     if (this.activeFill) {
       this.cancelFill();
     }
@@ -1862,6 +2044,8 @@ export class DrawingEngine implements StrokeSource {
       selectedStrokes: this.selectedStrokes().length,
       shapeFill: this.shapeFill,
       fillTolerance: this.fillTolerance,
+      gradientType: this.gradientType,
+      gradientEndColor: this.gradientEndColor,
       notice: this.notice,
     };
   }
@@ -1880,6 +2064,8 @@ export class DrawingEngine implements StrokeSource {
       previous.selectedStrokes === next.selectedStrokes &&
       previous.shapeFill === next.shapeFill &&
       previous.fillTolerance === next.fillTolerance &&
+      previous.gradientType === next.gradientType &&
+      previous.gradientEndColor === next.gradientEndColor &&
       previous.notice === next.notice
     ) {
       return;

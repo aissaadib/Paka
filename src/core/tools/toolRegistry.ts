@@ -3,6 +3,7 @@
 import type { ToolId } from "../../types/tool";
 import { BrushTool } from "./brushTool";
 import { BucketTool } from "./bucketTool";
+import { GradientTool } from "./gradientTool";
 import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
 import { SelectTool } from "./selectTool";
@@ -32,6 +33,8 @@ export function createToolRegistry(): ToolRegistry {
     ellipse: new ShapeTool("ellipse", ELLIPSE_TOOL),
     // Flood fill: a press applies a pixel patch, a release commits it.
     bucket: new BucketTool(),
+    // Gradient: a drag previews geometry and the release commits it.
+    gradient: new GradientTool(),
     picker: new PickerTool(),
     pan: new PanTool(),
   };

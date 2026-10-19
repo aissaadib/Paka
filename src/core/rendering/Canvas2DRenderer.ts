@@ -16,12 +16,13 @@
 import type {
   DrawingDocument,
   FillPatchRecord,
+  GradientRecord,
   Layer,
   LayerId,
   LayerBlendMode,
   StrokeRecord,
 } from "../document/types";
-import { isFillPatch } from "../document/types";
+import { isFillPatch, isGradient } from "../document/types";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
@@ -602,6 +603,10 @@ export class Canvas2DRenderer implements DrawingRenderer {
         this.rasterizeFillPatch(surface, element);
         continue;
       }
+      if (isGradient(element)) {
+        this.rasterizeGradient(surface, element);
+        continue;
+      }
       this.rasterizeStrokeToBuffer(element);
       this.compositeStrokeBuffer(
         surface,
@@ -643,6 +648,57 @@ export class Canvas2DRenderer implements DrawingRenderer {
     surface.ctx.globalCompositeOperation = "source-over";
     surface.ctx.globalAlpha = 1;
     surface.ctx.drawImage(canvas, patch.x, patch.y, patch.width, patch.height);
+  }
+
+  /**
+   * Paints a committed gradient across the whole layer.
+   *
+   * Gradients are continuous content, so this runs the Canvas gradient shader
+   * over the layer's full extent rather than allocating a document-sized patch.
+   * Geometry is in document coordinates and the surface transform scales it, so
+   * live preview, undo/redo and a reopened project share one rasterization path.
+   * Element opacity is applied once through `globalAlpha`.
+   */
+  private rasterizeGradient(surface: LayerSurface, gradient: GradientRecord): void {
+    if (gradient.stops.length === 0 || gradient.opacity <= 0) {
+      return;
+    }
+    const length = Math.hypot(gradient.x2 - gradient.x1, gradient.y2 - gradient.y1);
+    if (length <= 0) {
+      return;
+    }
+
+    this.surfaces.prepare(surface);
+    const ctx = surface.ctx;
+    const canvasGradient =
+      gradient.type === "radial"
+        ? ctx.createRadialGradient(
+            gradient.x1,
+            gradient.y1,
+            0,
+            gradient.x1,
+            gradient.y1,
+            length,
+          )
+        : ctx.createLinearGradient(gradient.x1, gradient.y1, gradient.x2, gradient.y2);
+
+    for (const stop of gradient.stops) {
+      if (!hexToRgb(stop.color)) {
+        continue;
+      }
+      canvasGradient.addColorStop(Math.min(1, Math.max(0, stop.offset)), stop.color);
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = Math.min(1, Math.max(0, gradient.opacity));
+    ctx.fillStyle = canvasGradient;
+    ctx.fillRect(
+      0,
+      0,
+      this.doc?.width ?? surface.canvas.width,
+      this.doc?.height ?? surface.canvas.height,
+    );
+    ctx.globalAlpha = 1;
   }
 
   private rasterizeStrokeToBuffer(stroke: StrokeRecord): void {

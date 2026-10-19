@@ -102,7 +102,7 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       an empty outline - a different drawing. See
       [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#strokes).
-- [x] Bucket (flood) fill (`G`): a press flood-fills the contiguous region under
+- [x] Bucket (flood) fill (`F`): a press flood-fills the contiguous region under
       the pointer and writes it to the active layer as a bounded, pixel-exact
       patch. The scan samples the **merged visible composite** (paper plus every
       visible layer at its opacity), so line art on another layer defines the
@@ -119,9 +119,18 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       message instead of attempting it. See
       [ARCHITECTURE.md](ARCHITECTURE.md#bucket-flood-fill) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills).
-- [ ] Gradients: a per-pixel colour function (linear and radial) as its own
-      slice. Deliberately separate from the bucket fill: a gradient is not a
-      region and does not need a flood scan or a coverage mask.
+- [x] Gradients (`G`): a drag paints a **linear** or **radial** gradient on the
+      active layer, from the current brush colour to the toolbar's **To**
+      colour, at the brush opacity. The press inserts a real preview element and
+      each move replaces its endpoint, so the user sees the result in painting
+      order; the release commits exactly one undo step, while cancel and a tool
+      switch remove the preview with no history or dirty flag. A gradient is a
+      first-class `GradientRecord` (type, endpoints, stops, opacity), not a pixel
+      snapshot: undo/redo and save/reopen rebuild it from the record, and layer
+      duplication copies stops independently. The project format moved to version
+      5 for the new element kind. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#gradients) and
+      [PROJECT_FORMAT.md](PROJECT_FORMAT.md#gradients).
 
 ## Phase 3 - Brush feel
 
@@ -136,8 +145,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 5 - Import/export and colour workflows
 
-- [x] Versioned `.paka` project file (metadata + ordered strokes and fill
-      patches).
+- [x] Versioned `.paka` project file (metadata + ordered strokes, fill patches
+      and gradients).
 - [x] PNG export with an honest encoder.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
@@ -154,40 +163,35 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 ## Documented limitations that are not planned yet
 
 - Undo history is not stored in the project file (reopening rebuilds one step
-  per stored element: one per stroke or fill patch).
+  per stored element: one per stroke, fill patch or gradient).
 - There is no autosave or crash recovery.
 - The React layer has no automated tests; it is verified in the running app.
 - `Ctrl+N` is not bound; use `File -> New Document...`.
 
 ## Next slice
 
-**Gradients** (the remaining part of Phase 2's illustration tools). The bucket
-fill shipped as the first slice that is **not "more strokes"**, and its model is
-now settled: layer content is one ordered `elements` list, a fill is a bounded
-`FillPatchRecord` (colour + binary coverage mask), and its command replays the
-committed pixels. That answered the questions the previous "Next slice" section
-listed:
+**Brush hardness** (the first item of Phase 3's brush-feel work). Phase 2 is
+complete: the bucket fill and gradients both ship as first-class elements in the
+ordered list, and the format has moved to version 5.
 
-- the flood samples the **merged visible composite**, while the patch is written
-  to the **active layer**;
-- tolerance is the largest absolute per-channel difference in 8-bit units,
-  compared against the seed; fully transparent pixels match each other;
-- the mask is **binary**, so anti-aliased boundary pixels either match and are
-  filled or do not - no invented feathering that a save/reopen could not
-  reproduce;
-- a press previews a real patch on the layer, and the release records exactly
-  one `FillCommand`; cancel removes the patch with no history entry or revision
-  bump;
-- redo re-inserts the stored patch; it never re-runs the scan;
-- version 4 writes `layers[].elements`, and versions 1-3 still read through
-  their `strokes` array.
+The next slice should add a **soft edge** to the brush without breaking the rules
+the existing renderer depends on:
 
-A gradient is separable because it is a **per-pixel colour function**, not a
-region: no flood scan, no coverage mask, and no composite read. The next slice
-should decide whether a gradient is (a) another first-class layer element with
-`kind: "gradient"` (geometry + colour stops, rasterized in element order, which
-is the same model the bucket fill proved) or (b) a stroke-level fill mode. The
-element model is the honest fit for a non-stroke primitive; a gradient that has
-to survive undo/redo and save/reopen must be reproducible from the file, not
-from a one-off pixel snapshot. Gradients are not half-wired today: there is no
-button or tool for them.
+- a hardness setting (`0`-`1`) surfaced beside size and opacity, with the same
+  "editor state describes the next stroke" rule as `shapeFill`, `fillTolerance`
+  and `gradientType`;
+- soft coverage produced by the rasterizer, not by lowering every segment's
+  alpha: segments are currently drawn at full coverage and opacity is applied
+  once per stroke, so building a soft edge by overlapping translucent dabs would
+  reintroduce darkening where a stroke crosses itself;
+- a stroke remains one undo step and one self-describing record, so it must
+  rasterize identically live, after undo/redo and after save/reopen;
+- an explicit decision on whether `hardness` is an additive brush field (no
+  version bump if a reader can ignore it and still see the same drawing) or a
+  required field (version 6). The answer depends on the falloff implementation,
+  not on convenience.
+
+Spacing and stabilizers follow after hardness has a verified raster path. A
+stamp-based brush engine remains a later slice behind the existing stroke
+interface; it should not be started until hardness is settled, because the two
+share the same coverage question.

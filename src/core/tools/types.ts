@@ -99,6 +99,23 @@ export interface ToolContext {
   cancelFill(): void;
   /** True while a fill is applied but not yet recorded in history. */
   isFillActive(): boolean;
+  /**
+   * Starts a gradient gesture at the sample: the press point is the axis start
+   * (linear) or centre (radial). The gradient is previewed on the active layer
+   * immediately but is not yet an undo step.
+   *
+   * Returns whether a gradient was started; an out-of-bounds press, an active
+   * gesture or a missing active layer leaves the document unchanged.
+   */
+  beginGradient(sample: PointerSample): boolean;
+  /** Moves the in-progress gradient's free end, previewing the result. */
+  updateGradient(sample: PointerSample): void;
+  /** Commits the in-progress gradient as one undoable step. */
+  finishGradient(sample: PointerSample): void;
+  /** Removes an uncommitted gradient, leaving the document untouched. */
+  cancelGradient(): void;
+  /** True while a gradient is previewed but not yet recorded in history. */
+  isGradientActive(): boolean;
 }
 
 export interface Tool {
