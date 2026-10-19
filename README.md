@@ -162,7 +162,9 @@ undo model and the path to a WebGL/WebGPU backend are documented in
 validation rules, the atomic write strategy and the PNG export contract are
 documented in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md). Where the
 project is heading, phase by phase, is tracked in
-[docs/ROADMAP.md](docs/ROADMAP.md).
+[docs/ROADMAP.md](docs/ROADMAP.md). A briefing for picking the work up in a fresh
+session - settled decisions, verification recipes, the Windows toolchain caveats
+and the next slice - is in [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Known limitations
 
