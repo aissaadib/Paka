@@ -8,6 +8,10 @@ anything, and what to do next.
 Last verified: **2026-10-20**, at the gradient commit on `main` (the current
 `HEAD` when this file was written; clean and in sync with `origin/main`).
 
+A condensed, paste-ready version of this briefing lives in
+[SESSION-BRIEF.md](SESSION-BRIEF.md); use it to start a fresh session quickly,
+and this file for the detail.
+
 ---
 
 ## 1. What this is

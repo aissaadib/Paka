@@ -191,7 +191,9 @@ documented in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md). Where the
 project is heading, phase by phase, is tracked in
 [docs/ROADMAP.md](docs/ROADMAP.md). A briefing for picking the work up in a fresh
 session - settled decisions, verification recipes, the Windows toolchain caveats
-and the next slice - is in [docs/HANDOFF.md](docs/HANDOFF.md).
+and the next slice - is in [docs/HANDOFF.md](docs/HANDOFF.md). A condensed,
+paste-ready version of the same briefing is in
+[docs/SESSION-BRIEF.md](docs/SESSION-BRIEF.md).
 
 ## Known limitations
 
