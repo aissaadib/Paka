@@ -100,7 +100,7 @@ export function CanvasStatusBar({
       {selectedStrokes === 0 ? null : (
         <span
           className="status-bar__item"
-          title="Selected strokes; drag to move them, Delete to remove them"
+          title="Selected strokes: drag or nudge with the arrow keys, Ctrl+D duplicates, Delete removes"
         >
           {selectedStrokes} selected
         </span>

@@ -1140,4 +1140,140 @@ describe("DrawingEngine selection", () => {
 
     expect(engine.getState().selectedStrokes).toBe(0);
   });
+
+  it("nudges the selection and coalesces a run into one step", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 150],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 200],
+    ], "up");
+    const depth = engine.getState().history.depth;
+    const stroke = engine.listStrokes(layerId)[0];
+    const originalXs = [...stroke.xs];
+    const originalYs = [...stroke.ys];
+
+    expect(engine.nudgeSelection(1, 0)).toBe(true);
+    expect(engine.nudgeSelection(0, 1)).toBe(true);
+
+    const nudged = engine.listStrokes(layerId)[0];
+    expect(nudged.xs).toEqual(originalXs.map((x) => x + 1));
+    expect(nudged.ys).toEqual(originalYs.map((y) => y + 1));
+    // A run of nudges is one history step, like a slider drag.
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs);
+    expect(engine.getState().history.depth).toBe(depth);
+
+    engine.redo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs.map((x) => x + 1));
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => y + 1));
+  });
+
+  it("duplicates the selection above its originals and selects the copies", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    const ids = engine.listStrokes(layerId).map((stroke) => stroke.id);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    const depth = engine.getState().history.depth;
+
+    expect(engine.duplicateSelection()).toBe(true);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(3);
+    // The copy sits directly above its source, not at the top of the layer.
+    expect(strokes[0].id).toBe(ids[0]);
+    expect(strokes[1].id).not.toBe(ids[0]);
+    expect(strokes[1].xs).toEqual(strokes[0].xs);
+    expect(strokes[1].ys).toEqual(strokes[0].ys);
+    expect(strokes[2].id).toBe(ids[1]);
+    // The copies are selected, so the next transform acts on them.
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    const originalXs = [...strokes[0].xs];
+    expect(engine.nudgeSelection(5, 0)).toBe(true);
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs);
+    expect(engine.listStrokes(layerId)[1].xs).toEqual(originalXs.map((x) => x + 5));
+
+    engine.undo();
+    engine.undo();
+    expect(engine.listStrokes(layerId).map((stroke) => stroke.id)).toEqual(ids);
+
+    // Redo re-inserts the same copies rather than minting new ones.
+    engine.redo();
+    expect(engine.listStrokes(layerId)).toHaveLength(3);
+    expect(engine.listStrokes(layerId)[1].xs).toEqual(originalXs);
+  });
+
+  it("flips the selection about its own centre", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 150],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 200],
+    ], "up");
+    const stroke = engine.listStrokes(layerId)[0];
+    const originalXs = [...stroke.xs];
+    const originalYs = [...stroke.ys];
+
+    expect(engine.flipSelection("horizontal")).toBe(true);
+    // The centre line is x = 150, so x becomes 300 - x and y is untouched.
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs.map((x) => 300 - x));
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(originalXs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs);
+
+    // Two flips are the identity (to within floating-point rounding, since the
+    // reflection is recomputed from the centre each time).
+    const expectClose = (actual: readonly number[], expected: readonly number[]): void => {
+      expect(actual).toHaveLength(expected.length);
+      actual.forEach((value, index) => expect(value).toBeCloseTo(expected[index], 9));
+    };
+    engine.flipSelection("horizontal");
+    engine.flipSelection("horizontal");
+    expectClose(engine.listStrokes(layerId)[0].xs, originalXs);
+
+    expect(engine.flipSelection("vertical")).toBe(true);
+    // The centre line is y = 125, so y becomes 250 - y and x is untouched.
+    expectClose(engine.listStrokes(layerId)[0].xs, originalXs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => 250 - y));
+  });
+
+  it("refuses transforms with nothing selected", () => {
+    const { engine } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 150],
+    ]);
+    const depth = engine.getState().history.depth;
+
+    expect(engine.nudgeSelection(1, 0)).toBe(false);
+    expect(engine.duplicateSelection()).toBe(false);
+    expect(engine.flipSelection("horizontal")).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
 });

@@ -35,10 +35,13 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   empty paper to clear. The selection is shown as a dashed frame around the
   strokes plus a blue trace over each of them. Dragging from inside the frame
   moves every selected stroke as one gesture; releasing records **one** undo
-  step, and `Esc` cancels a drag mid-flight. `Delete`/`Backspace` removes the
-  selected strokes as one step, restorable with undo in their original painting
-  order. Selecting is not an edit: it adds no history step and never marks the
-  document dirty.
+  step, and `Esc` cancels a drag mid-flight. The arrow keys nudge the selection
+  by 1 px (`Shift`: 10 px) and a run of nudges is one step, `Ctrl+D` duplicates
+  it in place and selects the copies, `Ctrl+Shift+H`/`Ctrl+Shift+V` flips it
+  about its own centre, and `Delete`/`Backspace` removes it - each as one step,
+  restorable with undo (deleted strokes come back in their original painting
+  order). The same actions live in the **Selection** menu. Selecting is not an
+  edit: it adds no history step and never marks the document dirty.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
   picks the colour actually on screen rather than the colour a stroke was
@@ -167,8 +170,10 @@ project is heading, phase by phase, is tracked in
   (the stroke list stays authoritative and the pixels are rebuilt from it, so the
   drag can never drift from the committed result). That is fine at the sizes
   tested and is the first thing to cache if a heavy layer makes dragging lag.
-- **Transform means translation.** Scaling, rotating, flipping and per-stroke
-  nudging are not implemented, and there is no copy/paste of a selection.
+- **Transform means translation, duplication and reflection.** Scaling, rotating,
+  perspective, per-stroke nudging and copy/paste across layers are not
+  implemented, and a flip is applied to the stroke samples (there is no
+  non-destructive transform to edit later).
 - Shape tools draw the **outline** of a line, rectangle or ellipse as a stroke
   of the current brush; they do not fill it, and because the stroke rasterizer
   uses round joins a rectangle's corners are very slightly rounded. A shape is

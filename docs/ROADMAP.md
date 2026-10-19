@@ -83,7 +83,11 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       from inside the frame moves them exactly. Releasing records one undo step
       built from the strokes' pre-drag copies, `Esc` cancels back to the
       originals, `Delete` removes the selection as one step and undo restores the
-      original painting order. The overlay (dashed frame plus blue trace) is
+      original painting order. Arrow keys nudge (a run of presses coalesces into
+      one step), `Ctrl+D` duplicates in place and selects the copies, and
+      `Ctrl+Shift+H`/`Ctrl+Shift+V` flips about the selection's own centre - each
+      one undo step, all also available from the Selection menu. The overlay
+      (dashed frame plus blue trace) is
       renderer-only and never reaches a layer or an export. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
 - [ ] Fill and gradient.

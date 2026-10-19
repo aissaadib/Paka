@@ -377,6 +377,33 @@ Two gestures, chosen on press by `isInsideSelection`:
   the originals back and records nothing, and a press inside the frame that never
   moved records nothing either.
 
+Three menu/keyboard transforms reuse the same "copy the originals, edit stroke
+data, push one command" machinery:
+
+- **Nudge** (arrow keys, `Shift` for 10 px) writes `original + delta`.
+  Consecutive nudges **coalesce** into one history entry: the command carries the
+  running total plus the copies taken before the first nudge, and a merge sums
+  the deltas over those copies. Summing - rather than chaining commands - is
+  what makes redo after an undo re-apply the whole run in one step instead of
+  only the last press. It is the same rule the opacity slider follows.
+- **Duplicate** (`Ctrl+D`) inserts a copy of each selected stroke directly above
+  its source, preserving painting order, and then selects the copies so the next
+  nudge or drag acts on what is visibly on top. The clone objects are created
+  once, which is why redo re-inserts the same strokes (and ids) rather than
+  minting new ones; undo removes them.
+- **Flip** (`Ctrl+Shift+H`/`V`) is a coordinate map about the selection's own
+  centre: `x -> 2cx - x`, or `y -> 2cy - y`. Brush and pressure data are
+  untouched, and because the map is applied to the stored originals rather than
+  to the current state, undo and redo never compound error. Two flips are the
+  identity up to floating-point rounding, which is what composing a reflection
+  with itself should be.
+
+A transform is refused while a pointer gesture is in flight - a keyboard edit and
+a drag would be writing the same sample arrays - and when nothing is selected.
+Undoing a duplicate or a delete can leave the selection pointing at strokes that
+no longer exist, so every history change re-derives the overlay from the store: a
+frame that outlives the strokes it describes would be a lie the user can see.
+
 `DeleteStrokesCommand` removes the selected strokes and, on revert, re-inserts
 each at its **original index**, so undo restores the layer's painting order rather
 than shuffling the deleted strokes to the top.
@@ -587,7 +614,13 @@ DOM-free by design.
   undo step and exact undo/redo, a press that never moved recording nothing, a
   cancelled move restoring the strokes and recording nothing, deletion as one
   step with painting order restored on undo, active-layer scoping, and the
-  selection dropping on a layer change, a new document and a tool switch. The
+  selection dropping on a layer change, a new document and a tool switch. It also
+  covers the keyboard transforms: a nudge run coalescing into a single step with
+  exact undo and redo, duplicate inserting above its source and selecting the
+  copies (so a following nudge moves only the copy), redo re-inserting the same
+  clones, flips about the selection's centre with exact undo and the
+  two-flips-are-the-identity property, and every transform refusing to run with
+  nothing selected. The
   renderer suite asserts the overlay stream: the trace and the dashed frame come
   after the layers and before the solid border, `setSelection(null)` leaves only
   the border, and the exported composite contains neither.
@@ -644,11 +677,13 @@ These are real gaps, not footnotes:
 
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
   `picker` and `pan`. There is no fill, gradient or text tool.
-- **Selection is stroke-level, layer-scoped and translation-only.** A marquee
+- **Selection is stroke-level, layer-scoped and limited to translation,
+  duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
   layer or the tool changes. There is no add/subtract modifier, no feathering, no
-  clipping, and no scale, rotate, flip or copy/paste. The frame is the selected
+  clipping, and no scale, rotate or perspective; duplicate stays on the layer
+  (there is no cross-layer copy/paste). The frame is the selected
   strokes' bounding box, not the region that was dragged.
 - **A live selection move re-rasterizes the whole layer per pointer move.** The
   stroke list stays authoritative and the pixels are rebuilt from it, which is

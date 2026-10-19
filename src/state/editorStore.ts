@@ -18,6 +18,7 @@ import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
 import type { BrushSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
+import type { FlipAxis } from "../types/transform";
 import type { Listener } from "../utils/store";
 
 export interface EditorActions {
@@ -40,6 +41,12 @@ export interface EditorActions {
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
   deleteSelection(): void;
+  /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
+  nudgeSelection(dx: number, dy: number): void;
+  /** Copies the selected strokes above the originals and selects the copies. */
+  duplicateSelection(): void;
+  /** Reflects the selected strokes about their own centre line. */
+  flipSelection(axis: FlipAxis): void;
 }
 
 export interface Editor {
@@ -88,6 +95,15 @@ export function createEditor(options: EditorOptions = {}): Editor {
     clearSelection: () => engine.clearSelection(),
     deleteSelection: () => {
       engine.deleteSelection();
+    },
+    nudgeSelection: (dx, dy) => {
+      engine.nudgeSelection(dx, dy);
+    },
+    duplicateSelection: () => {
+      engine.duplicateSelection();
+    },
+    flipSelection: (axis) => {
+      engine.flipSelection(axis);
     },
   };
 

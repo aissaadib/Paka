@@ -8,6 +8,10 @@
  *   B / E / M / L / R / O / I / H   brush / eraser / select / line / rectangle /
  *                                ellipse / colour picker / pan
  *   [ / ]          decrease / increase brush size
+ *   Arrows         nudge the selection by 1 px (Shift: 10 px)
+ *   Ctrl+D         duplicate the selection
+ *   Ctrl+Shift+H   flip the selection horizontally
+ *   Ctrl+Shift+V   flip the selection vertically
  *   Escape         clear the selection
  *   Delete         delete the selected strokes
  *   Ctrl+Z         undo
@@ -30,6 +34,10 @@ import { useEffect } from "react";
 import { stepBrushSize } from "../core/brushes/defaults";
 import { findToolByShortcut } from "../core/tools/toolDefinitions";
 import { useEditor } from "./useEditor";
+
+/** Arrow-key nudge distances, in document pixels. */
+const NUDGE_STEP = 1;
+const NUDGE_LARGE_STEP = 10;
 
 function isTextEntry(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
@@ -92,6 +100,21 @@ export function useKeyboardShortcuts(
           }
           return;
         }
+        if (key === "d") {
+          event.preventDefault();
+          actions.duplicateSelection();
+          return;
+        }
+        if (event.shiftKey && key === "h") {
+          event.preventDefault();
+          actions.flipSelection("horizontal");
+          return;
+        }
+        if (event.shiftKey && key === "v") {
+          event.preventDefault();
+          actions.flipSelection("vertical");
+          return;
+        }
         if (key === "=" || key === "+") {
           event.preventDefault();
           actions.zoomIn();
@@ -115,7 +138,26 @@ export function useKeyboardShortcuts(
         return;
       }
 
-      if (event.altKey || event.shiftKey) {
+      if (event.altKey) {
+        return;
+      }
+
+      if (key.startsWith("arrow")) {
+        // Nudge only makes sense with a selection, and only then does the editor
+        // claim the keys - otherwise they keep their scrolling behaviour.
+        if (engine.getState().selectedStrokes === 0) {
+          return;
+        }
+        event.preventDefault();
+        const step = event.shiftKey ? NUDGE_LARGE_STEP : NUDGE_STEP;
+        actions.nudgeSelection(
+          key === "arrowleft" ? -step : key === "arrowright" ? step : 0,
+          key === "arrowup" ? -step : key === "arrowdown" ? step : 0,
+        );
+        return;
+      }
+
+      if (event.shiftKey) {
         return;
       }
 

@@ -21,6 +21,7 @@ import type { BrushSettings } from "../../types/brush";
 import type { Bounds, Point } from "../../types/geometry";
 import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
+import type { FlipAxis } from "../../types/transform";
 import type { Viewport } from "../../types/viewport";
 import { rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
@@ -37,11 +38,18 @@ import {
 import {
   copyStrokeSamples,
   createDeleteStrokesCommand,
+  createDuplicateStrokesCommand,
   createMoveStrokesCommand,
+  createNudgeStrokesCommand,
+  createTransformStrokesCommand,
   offsetStrokeSamples,
+  planDuplicateInsertions,
+  transformStrokeSamples,
   writeStrokeSamples,
   type DeleteEntry,
+  type DuplicateEntry,
   type MoveEntry,
+  type StrokeTransform,
 } from "../commands/strokeEditCommand";
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
@@ -916,6 +924,128 @@ export class DrawingEngine implements StrokeSource {
     return true;
   }
 
+  /**
+   * Moves the selection by a fixed delta, as one undo step (arrow-key nudge).
+   *
+   * Repeated nudges of the same selection coalesce in the command stack, so a
+   * held arrow key is one history step rather than one per repeat - the same
+   * rule the opacity slider follows. The offset is summed over the copies taken
+   * before the first nudge, which is what makes undo restore the run and redo
+   * re-apply all of it exactly.
+   */
+  nudgeSelection(dx: number, dy: number): boolean {
+    if (dx === 0 && dy === 0) {
+      return false;
+    }
+    const selection = this.selection;
+    const entries = this.beginSelectionEdit();
+    if (!selection || !entries) {
+      return false;
+    }
+    for (const entry of entries) {
+      offsetStrokeSamples(entry.stroke, entry.original, dx, dy);
+    }
+    this.commitSelectionEdit(
+      entries,
+      createNudgeStrokesCommand(
+        entries,
+        dx,
+        dy,
+        this.commandHost,
+        `nudge:${selection.layerId}:${selection.strokeIds.join(",")}`,
+      ),
+    );
+    return true;
+  }
+
+  /**
+   * Copies the selected strokes directly above their originals, as one step, and
+   * selects the copies.
+   *
+   * Selecting the copies (rather than keeping the originals selected) is what
+   * makes duplicate-then-nudge behave the way the user expects: the thing that
+   * moves is the copy that is visibly on top. Clone objects are created once, so
+   * undo/redo re-inserts the very same strokes instead of minting new ids.
+   */
+  duplicateSelection(): boolean {
+    if (this.activeStroke || this.selectionGesture) {
+      return false;
+    }
+    const selection = this.selection;
+    if (!selection) {
+      return false;
+    }
+    const wanted = new Set(selection.strokeIds);
+    const layer = this.strokes.list(selection.layerId);
+    const entries: DuplicateEntry[] = [];
+    for (let index = 0; index < layer.length; index += 1) {
+      const source = layer[index];
+      if (wanted.has(source.id)) {
+        entries.push({ source, index, clone: cloneStroke(source) });
+      }
+    }
+    if (entries.length === 0) {
+      return false;
+    }
+
+    const insertions = planDuplicateInsertions(entries);
+    for (const insertion of insertions) {
+      this.strokes.insert(insertion.stroke, insertion.index);
+    }
+    this.selection = {
+      layerId: selection.layerId,
+      strokeIds: insertions.map((insertion) => insertion.stroke.id),
+    };
+    this.renderer?.invalidateLayer(selection.layerId);
+    this.revision += 1;
+    this.commands.push(createDuplicateStrokesCommand(entries, this.commandHost));
+    this.publish();
+    this.syncSelectionOverlay();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * Reflects the selection about its own vertical or horizontal centre line.
+   *
+   * A flip is a coordinate map, not a new stroke: sample positions move, brush
+   * and pressure data do not, so the result re-rasterizes and reopens exactly
+   * like any other stroke. The map is applied to the copies taken before the
+   * edit, so undo restores the originals and redo reproduces the flip.
+   */
+  flipSelection(axis: FlipAxis): boolean {
+    const entries = this.beginSelectionEdit();
+    if (!entries) {
+      return false;
+    }
+    const bounds = boundsOfStrokes(entries.map((entry) => entry.stroke));
+    if (!bounds) {
+      return false;
+    }
+    const centreX = bounds.x + bounds.width / 2;
+    const centreY = bounds.y + bounds.height / 2;
+    const transform: StrokeTransform =
+      axis === "horizontal"
+        ? {
+            label: "Flip Horizontal",
+            mapX: (x) => centreX * 2 - x,
+            mapY: (_x, y) => y,
+          }
+        : {
+            label: "Flip Vertical",
+            mapX: (x) => x,
+            mapY: (_x, y) => centreY * 2 - y,
+          };
+    for (const entry of entries) {
+      transformStrokeSamples(entry.stroke, entry.original, transform);
+    }
+    this.commitSelectionEdit(
+      entries,
+      createTransformStrokesCommand(entries, transform, this.commandHost),
+    );
+    return true;
+  }
+
   /** Starts a marquee gesture at the sample; the selection is decided on release. */
   private beginSelection(sample: PointerSample): void {
     if (!this.usableSelectionPoint(sample)) {
@@ -1103,6 +1233,42 @@ export class DrawingEngine implements StrokeSource {
     this.selection = strokeIds.length > 0 ? { layerId, strokeIds } : null;
   }
 
+  /**
+   * Copies the selection's sample coordinates as the reference for an edit that
+   * is not a drag (nudge, flip).
+   *
+   * Returns `null` when there is nothing to edit or a pointer gesture is in
+   * flight: a keyboard transform during a drag would fight the gesture for the
+   * same coordinates.
+   */
+  private beginSelectionEdit(): MoveEntry[] | null {
+    if (this.activeStroke || this.selectionGesture) {
+      return null;
+    }
+    const entries: MoveEntry[] = this.selectedStrokes().map((stroke) => ({
+      stroke,
+      original: copyStrokeSamples(stroke),
+    }));
+    return entries.length > 0 ? entries : null;
+  }
+
+  /**
+   * Records a selection edit whose coordinates are already written.
+   *
+   * Re-rasterizes the touched layers, bumps the revision (so the document is
+   * dirty and the status bar reflects the step), pushes the command and
+   * republishes. `push`, not `execute`: the edit is on screen before the command
+   * exists, exactly like a stroke or a drag.
+   */
+  private commitSelectionEdit(entries: readonly MoveEntry[], command: Command): void {
+    this.refreshStrokeLayers(entries);
+    this.revision += 1;
+    this.commands.push(command);
+    this.publish();
+    this.syncSelectionOverlay();
+    this.requestRender();
+  }
+
   /** The selected strokes that still exist, in painting order. */
   private selectedStrokes(): readonly StrokeRecord[] {
     const selection = this.selection;
@@ -1268,6 +1434,10 @@ export class DrawingEngine implements StrokeSource {
     const changed = step();
     if (changed) {
       this.revision += 1;
+      // Undo can remove the strokes a selection points at (undone duplicate and
+      // delete) or move them (undone move): re-derive the overlay from the store
+      // so the frame never outlives what it describes.
+      this.syncSelectionOverlay();
       this.publish();
     }
     return changed;

@@ -2,8 +2,9 @@
  * Top menu bar.
  *
  * Only entries backed by real functionality are present: the file operations,
- * undo, redo and the view actions. Disabled states come from the command stack,
- * so the menu never offers an action that cannot run. The file entries are
+ * undo, redo, the selection transforms and the view actions. Disabled states
+ * come from the command stack and the selection, so the menu never offers an
+ * action that cannot run. The file entries are
  * callbacks rather than direct service calls because discarding unsaved work
  * needs a confirmation the workspace owns.
  */
@@ -48,7 +49,7 @@ export function AppMenuBar({
   onExportPng,
 }: AppMenuBarProps) {
   const { actions } = useEditor();
-  const { history, document: drawingDocument } = useEditorState();
+  const { history, document: drawingDocument, selectedStrokes } = useEditorState();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -121,6 +122,78 @@ export function AppMenuBar({
               actions.duplicateLayer(activeLayerId);
             }
           },
+        },
+      ],
+    },
+    {
+      id: "selection",
+      label: "Selection",
+      entries: [
+        {
+          type: "item",
+          label: "Duplicate",
+          shortcut: "Ctrl+D",
+          disabled: selectedStrokes === 0,
+          onSelect: actions.duplicateSelection,
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: "Nudge Left",
+          shortcut: "←",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.nudgeSelection(-1, 0),
+        },
+        {
+          type: "item",
+          label: "Nudge Right",
+          shortcut: "→",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.nudgeSelection(1, 0),
+        },
+        {
+          type: "item",
+          label: "Nudge Up",
+          shortcut: "↑",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.nudgeSelection(0, -1),
+        },
+        {
+          type: "item",
+          label: "Nudge Down",
+          shortcut: "↓",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.nudgeSelection(0, 1),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: "Flip Horizontal",
+          shortcut: "Ctrl+Shift+H",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.flipSelection("horizontal"),
+        },
+        {
+          type: "item",
+          label: "Flip Vertical",
+          shortcut: "Ctrl+Shift+V",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.flipSelection("vertical"),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: "Delete Selected",
+          shortcut: "Delete",
+          disabled: selectedStrokes === 0,
+          onSelect: actions.deleteSelection,
+        },
+        {
+          type: "item",
+          label: "Clear Selection",
+          shortcut: "Esc",
+          disabled: selectedStrokes === 0,
+          onSelect: actions.clearSelection,
         },
       ],
     },
