@@ -11,6 +11,9 @@ import { describe, expect, it } from "vitest";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
+import { serializeProject } from "../core/project/projectFormat";
+import { isFillPatch } from "../core/document/types";
+import type { FillPatchRecord, LayerElement, StrokeRecord, StrokeSource } from "../core/document/types";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import type { PointerSample } from "../types/pointer";
 
@@ -221,8 +224,83 @@ describe("serialize and loadProject", () => {
     expect(() => engine.renderDocumentImage()).toThrow(/not attached/);
   });
 
-  it("does not pretend a loaded project is unsaved", () => {
-    const engine = new DrawingEngine({ document: createDocument({ width: 40, height: 40 }) });
+  it("round-trips committed fills as pixels, with one undo step each", () => {
+    const document = createDocument({ width: 40, height: 30 });
+    const layerId = document.layers[0].id;
+    const stroke: StrokeRecord = {
+      id: "stroke-loaded",
+      layerId,
+      brush: { ...DEFAULT_BRUSH },
+      xs: [1, 2],
+      ys: [1, 2],
+      pressures: [1, 1],
+      times: [0, 16],
+      startTime: 0,
+    };
+    const mask = new Uint8Array([255, 0, 0, 255]);
+    const fill: FillPatchRecord = {
+      id: "fill-loaded",
+      layerId,
+      kind: "fill",
+      color: "#336699",
+      x: 5,
+      y: 6,
+      width: 2,
+      height: 2,
+      mask,
+    };
+    const elements: LayerElement[] = [fill, stroke];
+    const source: StrokeSource = {
+      listStrokes: () => [stroke],
+      listElements: () => elements,
+    };
+    const text = serializeProject(document, source);
+
+    const parsed = parseProject(text);
+    if (!parsed.ok) {
+      throw new Error(parsed.error);
+    }
+    const reopened = new DrawingEngine();
+    reopened.loadProject(parsed.project, "C:\\art\\filled.paka");
+
+    // Painting order survives, and the fill is content, not a stroke.
+    expect(reopened.listElements(layerId).map((element) => element.id)).toEqual([
+      fill.id,
+      stroke.id,
+    ]);
+    expect(reopened.listStrokes(layerId).map((entry) => entry.id)).toEqual([stroke.id]);
+    expect(reopened.getState().history.depth).toBe(2);
+
+    const reopenedFill = reopened.listElements(layerId)[0];
+    expect(isFillPatch(reopenedFill)).toBe(true);
+    if (!isFillPatch(reopenedFill)) {
+      return;
+    }
+    expect([...reopenedFill.mask]).toEqual([...mask]);
+
+    // Both kinds replay through history after a reopen.
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.listElements(layerId).map((element) => element.id)).toEqual([fill.id]);
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.listElements(layerId)).toEqual([]);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+
+    const replay = reopened.listElements(layerId)[0];
+    expect(replay).toBe(reopenedFill);
+    expect(isFillPatch(replay) && replay.mask).toBe(reopenedFill.mask);
+
+    // Saving again writes the same patch, byte for byte.
+    const savedAgain = parseProject(reopened.serialize());
+    expect(savedAgain.ok).toBe(true);
+    if (!savedAgain.ok) {
+      return;
+    }
+    const savedFill = savedAgain.project.elements[0];
+    expect(isFillPatch(savedFill) && [...savedFill.mask]).toEqual([...mask]);
+  });
+
+  it("does not pretend a loaded project is unsaved", () => {    const engine = new DrawingEngine({ document: createDocument({ width: 40, height: 40 }) });
     const text = engine.serialize();
 
     const reopened = new DrawingEngine();

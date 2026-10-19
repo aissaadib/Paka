@@ -1,14 +1,14 @@
 /**
- * Base64 encoder tests.
+ * Base64 tests.
  *
- * The encoder is hand-written because `btoa` needs a binary string, so it is
- * checked against the canonical vectors and against `btoa` for an input that
- * spans the internal chunk boundary - the only place a hand-rolled encoder can
- * plausibly go wrong.
+ * The codec is hand-written because `btoa` needs a binary string, so it is
+ * checked against the canonical vectors, against `btoa` for an input that spans
+ * the internal chunk boundary - the only place a hand-rolled encoder can
+ * plausibly go wrong - and by decoding every padding width.
  */
 
 import { describe, expect, it } from "vitest";
-import { bytesToBase64 } from "../utils/base64";
+import { base64ToBytes, bytesToBase64 } from "../utils/base64";
 
 const encoder = new TextEncoder();
 
@@ -53,5 +53,33 @@ describe("bytesToBase64", () => {
     expect(encoded).toBe(referenceBase64(bytes));
     expect(encoded.endsWith("=")).toBe(true);
     expect(encoded.length % 4).toBe(0);
+  });
+});
+
+describe("base64ToBytes", () => {
+  it("decodes every canonical vector back to its bytes", () => {
+    expect(base64ToBytes("")).toEqual(new Uint8Array(0));
+    expect([...(base64ToBytes("Zg==") ?? [])]).toEqual([0x66]);
+    expect([...(base64ToBytes("Zm8=") ?? [])]).toEqual([0x66, 0x6f]);
+    expect([...(base64ToBytes("Zm9v") ?? [])]).toEqual([0x66, 0x6f, 0x6f]);
+    expect([...(base64ToBytes("Zm9vYmE=") ?? [])]).toEqual([0x66, 0x6f, 0x6f, 0x62, 0x61]);
+  });
+
+  it("round-trips masks of every remainder length", () => {
+    for (let length = 0; length < 20; length += 1) {
+      const bytes = new Uint8Array(length);
+      for (let index = 0; index < length; index += 1) {
+        bytes[index] = (length * 31 + index * 7) & 0xff;
+      }
+      expect(base64ToBytes(bytesToBase64(bytes))).toEqual(bytes);
+    }
+  });
+
+  it("ignores whitespace and refuses malformed input", () => {
+    expect([...(base64ToBytes(" Zg =\n=") ?? [])]).toEqual([0x66]);
+    expect(base64ToBytes("Zg=")).toBeNull();
+    expect(base64ToBytes("Z===")).toBeNull();
+    expect(base64ToBytes("AAAA====")).toBeNull();
+    expect(base64ToBytes("not base64!")).toBeNull();
   });
 });

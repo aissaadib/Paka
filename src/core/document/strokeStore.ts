@@ -1,76 +1,113 @@
 /**
- * Stroke storage.
+ * Layer content storage.
  *
- * Layer metadata lives in the document, the pixels produced by strokes live in
- * renderer surfaces, and the stroke data that produced those pixels lives here.
- * Keeping the data around is what makes stroke-level undo possible without
- * snapshotting bitmaps: undoing a stroke removes it from this store and the
- * renderer re-rasterizes the affected layer.
+ * Layer metadata lives in the document, the pixels produced by the content live
+ * in renderer surfaces, and the content that produced those pixels lives here.
+ * Keeping the records around is what makes undo possible without snapshotting
+ * bitmaps: undoing an element removes it from this store and the renderer
+ * re-rasterizes the affected layer.
+ *
+ * A layer's content is **one ordered element list**: strokes and bucket-fill
+ * patches interleave exactly as the user made them. `list` is a filtered view
+ * for stroke-only features (selection, transforms); `listElements` is the
+ * painting order the renderer and project writer consume.
  */
 
-import type { LayerId, StrokeRecord } from "./types";
+import type { LayerElement, LayerId, StrokeRecord } from "./types";
 
-export interface RemoveStrokeResult {
-  readonly stroke: StrokeRecord;
+export interface RemoveElementResult {
+  readonly element: LayerElement;
   readonly index: number;
 }
 
 export class StrokeStore {
-  private readonly byLayer = new Map<LayerId, StrokeRecord[]>();
+  private readonly byLayer = new Map<LayerId, LayerElement[]>();
 
   /**
-   * Live array of strokes for a layer, bottom-most first. Callers must not
-   * mutate it; it is returned directly to keep rendering allocation-free.
+   * Live element list for a layer, bottom-most first. Callers must not mutate
+   * it; it is returned directly to keep rendering allocation-free.
    */
-  list(layerId: LayerId): readonly StrokeRecord[] {
-    return this.byLayer.get(layerId) ?? EMPTY;
+  listElements(layerId: LayerId): readonly LayerElement[] {
+    return this.byLayer.get(layerId) ?? EMPTY_ELEMENTS;
   }
 
+  /**
+   * The layer's strokes, in painting order, without fill patches.
+   *
+   * A filtered copy: stroke-only features must never see a patch as if it were
+   * an editable path.
+   */
+  list(layerId: LayerId): readonly StrokeRecord[] {
+    const elements = this.byLayer.get(layerId);
+    if (!elements) {
+      return EMPTY_STROKES;
+    }
+    const strokes: StrokeRecord[] = [];
+    for (const element of elements) {
+      if ((element as { kind?: string }).kind !== "fill") {
+        strokes.push(element as StrokeRecord);
+      }
+    }
+    return strokes;
+  }
+
+  /** Number of strokes on a layer. */
   count(layerId: LayerId): number {
     return this.list(layerId).length;
   }
 
+  /** Number of elements (strokes and fills) on a layer. */
+  elementCount(layerId: LayerId): number {
+    return this.listElements(layerId).length;
+  }
+
   get totalCount(): number {
     let total = 0;
-    for (const strokes of this.byLayer.values()) {
-      total += strokes.length;
+    for (const elements of this.byLayer.values()) {
+      total += elements.length;
     }
     return total;
   }
 
-  /** Appends a stroke, or inserts it at `index` to restore history order. */
-  insert(stroke: StrokeRecord, index?: number): void {
-    const strokes = this.byLayer.get(stroke.layerId);
-    if (!strokes) {
-      this.byLayer.set(stroke.layerId, [stroke]);
+  /** Appends an element, or inserts it at `index` to restore history order. */
+  insert(element: LayerElement, index?: number): void {
+    const elements = this.byLayer.get(element.layerId);
+    if (!elements) {
+      this.byLayer.set(element.layerId, [element]);
       return;
     }
-    const at = index === undefined ? strokes.length : Math.max(0, Math.min(index, strokes.length));
-    strokes.splice(at, 0, stroke);
+    const at = index === undefined ? elements.length : Math.max(0, Math.min(index, elements.length));
+    elements.splice(at, 0, element);
   }
 
-  indexOf(layerId: LayerId, strokeId: string): number {
-    return this.list(layerId).findIndex((stroke) => stroke.id === strokeId);
+  /** Index of an element in its layer's painting order, or `-1`. */
+  indexOf(layerId: LayerId, elementId: string): number {
+    return this.listElements(layerId).findIndex((element) => element.id === elementId);
   }
 
-  remove(layerId: LayerId, strokeId: string): RemoveStrokeResult | null {
-    const strokes = this.byLayer.get(layerId);
-    if (!strokes) {
+  remove(layerId: LayerId, elementId: string): RemoveElementResult | null {
+    const elements = this.byLayer.get(layerId);
+    if (!elements) {
       return null;
     }
-    const index = strokes.findIndex((stroke) => stroke.id === strokeId);
+    const index = elements.findIndex((element) => element.id === elementId);
     if (index === -1) {
       return null;
     }
-    const [stroke] = strokes.splice(index, 1);
-    if (!stroke) {
+    const [element] = elements.splice(index, 1);
+    if (!element) {
       return null;
     }
-    return { stroke, index };
+    return { element, index };
   }
 
   clearLayer(layerId: LayerId): void {
     this.byLayer.delete(layerId);
+  }
+
+  /** Replaces a layer's element list, used by layer commands on undo/redo. */
+  restore(layerId: LayerId, elements: readonly LayerElement[]): void {
+    this.byLayer.set(layerId, [...elements]);
   }
 
   clear(): void {
@@ -78,4 +115,5 @@ export class StrokeStore {
   }
 }
 
-const EMPTY: readonly StrokeRecord[] = [];
+const EMPTY_ELEMENTS: readonly LayerElement[] = [];
+const EMPTY_STROKES: readonly StrokeRecord[] = [];

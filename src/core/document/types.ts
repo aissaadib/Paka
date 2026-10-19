@@ -46,14 +46,19 @@ export interface DrawingDocument {
 }
 
 /**
- * Read-only access to the stroke data stored for the document.
+ * Read-only access to the content stored for the document.
  *
- * Anything that needs strokes without needing to change them - the renderer
+ * Anything that needs layer content without needing to change it - the renderer
  * when it re-rasterizes a layer, the project writer when it serializes - takes
  * this interface rather than the `StrokeStore` itself.
+ *
+ * `listElements` is the authoritative painting order: strokes and pixel fills
+ * interleave exactly as the user made them. `listStrokes` is a filtered view for
+ * stroke-only features (selection, transforms) and never includes a fill.
  */
 export interface StrokeSource {
   listStrokes(layerId: LayerId): readonly StrokeRecord[];
+  listElements(layerId: LayerId): readonly LayerElement[];
 }
 
 /**
@@ -95,4 +100,48 @@ export interface StrokeRecord {
   readonly times: number[];
   /** Timestamp of the first sample; used for future velocity/stabilizer work. */
   startTime: number;
+}
+
+/**
+ * A committed bucket fill: a bounded, pixel-accurate raster patch.
+ *
+ * This is deliberately **not** a traced polygon. The fill's boundary is the set
+ * of pixels the flood selected, so the stored mask is the result itself; a
+ * reopened project and a redo reproduce those exact pixels instead of
+ * re-deriving a region from whatever the composite happens to look like later.
+ *
+ * The patch is bounded to the filled pixels' bounding box (`width * height`
+ * coverage bytes, never a full-canvas copy for a small fill). Byte `i` is the
+ * coverage of pixel `(x + i % width, y + floor(i / width))`: `0` leaves the
+ * layer alone, `255` paints the patch colour at full coverage. The mask is
+ * binary in this first implementation - anti-aliased boundary pixels either
+ * match the tolerance and are filled, or they do not - which is what keeps a
+ * save/reopen and an undo/redo byte-identical.
+ *
+ * Patches and strokes share one ordered list on a layer (`LayerElement`), so a
+ * stroke drawn after a fill paints above it and undo can restore painting order
+ * exactly.
+ */
+export interface FillPatchRecord {
+  readonly id: string;
+  readonly layerId: LayerId;
+  /** Discriminator for the `StrokeRecord | FillPatchRecord` union. */
+  readonly kind: "fill";
+  /** Opaque colour the flood wrote, as a CSS colour string. */
+  readonly color: string;
+  /** Bounding-box origin and size in document pixels. */
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** `width * height` coverage bytes. */
+  readonly mask: Uint8Array;
+}
+
+/** One item of a layer's authoritative content, in painting order. */
+export type LayerElement = StrokeRecord | FillPatchRecord;
+
+/** Narrows a layer element to a bucket-fill patch. */
+export function isFillPatch(element: LayerElement): element is FillPatchRecord {
+  return (element as FillPatchRecord).kind === "fill";
 }

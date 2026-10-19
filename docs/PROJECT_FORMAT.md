@@ -1,50 +1,59 @@
 # Paka project format (`.paka`)
 
 A project file is **UTF-8 JSON text with a versioned envelope**. It stores the
-document's metadata and the stroke data that produced its pixels - not a
-flattened image.
+document's metadata and the ordered element data that produced its pixels -
+brush strokes and serialized bucket-fill patches - not a flattened image.
 
 Implementation: `src/core/project/projectFormat.ts` (format + parser),
 `src/core/project/projectFiles.ts` (open/save/export workflow),
 `src-tauri/src/project_io.rs` (the actual disk access).
 
-## Why strokes and not pixels
+## Why records and not a flattened image
 
-In this engine the stroke list *is* the authoritative record; layer pixels are a
-cache rasterized from it (see `docs/ARCHITECTURE.md`). Saving the strokes keeps
-every layer editable after a reload:
+In this engine the ordered element list *is* the authoritative record; layer
+pixels are a cache rasterized from it (see `docs/ARCHITECTURE.md`). Saving the
+elements keeps every layer editable after a reload:
 
-- individual strokes stay undoable/redoable, one history step per stroke;
+- individual elements stay undoable/redoable, one history step per stroke or
+  fill patch;
 - nothing is resampled, so reopening never degrades a drawing;
 - file size is independent of the display resolution and of `rasterScale`;
 - a future brush model can re-render existing strokes with a new look.
+
+A fill is stored as the pixels it committed - colour, bounding box and a
+coverage mask - rather than as the seed point and tolerance that found them.
+That is what makes a reopened project show exactly the same pixels: the file
+does not depend on what the composite happens to look like later, and reading it
+never re-runs flood fill.
 
 Saving a flattened PNG (or per-layer PNG buffers) would trade all of that away
 for a smaller file. That trade is the reason a compressed or binary container is
 on the roadmap rather than flattening.
 
 What is deliberately **not** in the file is editor state: the undo history, the
-zoom/pan viewport, the current tool, brush and shape-fill setting, and the
-current selection. A project stores the *drawing*, so reopening restores the
-strokes and their layers
-rather than the editing session that produced them. (Selection is derived from
-strokes at run time anyway - see
-[ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no field;
-the fill setting is stored per stroke, not per document, so the shapes that were
-filled stay filled without a session-level flag.)
+zoom/pan viewport, the current tool, brush, shape-fill and bucket-tolerance
+settings, and the current selection. A project stores the *drawing*, so
+reopening restores the elements and their layers rather than the editing session
+that produced them. (Selection is derived from strokes at run time anyway - see
+[ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no
+field; the fill setting is stored per stroke, not per document, so the shapes
+that were filled stay filled without a session-level flag; a bucket tolerance
+describes the *next* fill, while a committed patch carries its own pixels.)
 
 **The trade-off is real:** JSON number arrays are verbose. A stroke sample costs
 roughly 40-60 bytes of text on disk (four numbers plus separators), so a heavy
-drawing can reach tens of megabytes. A compressed or binary container is the
-natural next container; the parser is structured so a new *encoding* can be added
-without changing the model.
+drawing can reach tens of megabytes. A fill mask costs about 1.33 bytes per
+pixel after base64 (4/3 of one coverage byte), and a full-canvas fill can
+therefore be several megabytes by itself. A compressed or binary container is
+the natural next container; the parser is structured so a new *encoding* can be
+added without changing the model.
 
 ## Envelope
 
 ```json
 {
   "format": "paka-project",
-  "version": 3,
+  "version": 4,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -60,8 +69,9 @@ without changing the model.
       "visible": true,
       "opacity": 1,
       "blendMode": "normal",
-      "strokes": [
+      "elements": [
         {
+          "kind": "stroke",
           "id": "stroke-3",
           "brush": {
             "size": 6,
@@ -79,6 +89,7 @@ without changing the model.
           "times": [0, 8.3, 16.9]
         },
         {
+          "kind": "stroke",
           "id": "stroke-4",
           "erase": true,
           "brush": {
@@ -97,6 +108,7 @@ without changing the model.
           "times": [0, 9.1]
         },
         {
+          "kind": "stroke",
           "id": "stroke-5",
           "fill": true,
           "brush": {
@@ -113,6 +125,16 @@ without changing the model.
           "ys": [400, 400, 600, 600, 400],
           "pressures": [1, 1, 1, 1, 1],
           "times": [0, 60, 120, 180, 240]
+        },
+        {
+          "kind": "fill",
+          "id": "fill-6",
+          "color": "#e5484d",
+          "x": 304,
+          "y": 404,
+          "width": 4,
+          "height": 3,
+          "mask": "////////////////"
         }
       ]
     }
@@ -123,7 +145,9 @@ without changing the model.
 The second stroke is an eraser stroke: its `erase` flag makes it subtract coverage
 from the pixels painted before it instead of adding colour. The third is a filled
 rectangle: its `fill` flag makes a reader fill the area its samples bound before
-tracing them, so the interior is solid rather than empty.
+tracing them, so the interior is solid rather than empty. The fourth element is a
+bucket fill: it paints its opaque colour through the 4x3 coverage mask at
+`(304, 404)` and is ordered after the strokes, so it covers them.
 
 ### `format`, `version`
 
@@ -152,16 +176,28 @@ compositing order. A file must contain at least one layer.
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
 | `blendMode` | string | `"normal"` only today. |
-| `strokes` | array | Strokes of this layer, in painting order. |
+| `elements` | array | Strokes and fill patches of this layer, in painting order. |
 
-A stroke's layer is implied by the layer that contains it; there is no
-`layerId` field inside a stroke, which makes it impossible for a stroke to
+A layer's content is one ordered `elements` list. Each element has a `kind`
+discriminator: `"stroke"` or `"fill"`. A version-4 reader rejects an unknown
+kind rather than silently dropping content, and versions 1-3 store the same
+ordered list under `strokes` with no `kind` (every entry there is a stroke).
+
+An element's layer is implied by the layer that contains it; there is no
+`layerId` field inside an element, which makes it impossible for content to
 disagree with its own layer.
 
-### `strokes[]`
+### `elements[]`
+
+The `kind` field decides the element shape. Painting order is array order:
+strokes and fills interleave exactly as the user made them, and a reader must
+not reorder or drop elements.
+
+#### Strokes
 
 | Field | Type | Notes |
 | --- | --- | --- |
+| `kind` | `"stroke"` | Element discriminator. Required in version 4. |
 | `id` | string | Stroke id. |
 | `brush` | object | The brush used, captured per stroke so later brush changes do not alter it. |
 | `erase` | boolean? | `true` only for eraser strokes, which subtract coverage from the layer instead of painting. Absent means paint. |
@@ -179,7 +215,7 @@ reproduces the stroke exactly.
 Strokes are applied in array order: a paint stroke composites its coverage at
 the brush's opacity, an eraser stroke subtracts its coverage at the same
 opacity. The order is therefore part of the drawing, and a reader must not
-reorder or drop strokes.
+reorder or drop elements.
 
 An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
@@ -189,10 +225,10 @@ A shape drawn with the line, rectangle or ellipse tool is an **ordinary stroke**
 its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
 four corners plus the repeated first point for a rectangle, and a closed run of
 short segments for an ellipse - with `pressures` all `1`, so a shape has the
-brush's constant full width. There is no `kind` or geometry field, which is why
-adding shape tools changed neither the format nor the version: a reader that
-already knows strokes reproduces shapes, and undo, reopen and export treat them
-exactly like any other stroke.
+brush's constant full width. There is no geometry field, which is why
+adding shape tools needed no new element kind: a reader that already knows
+strokes reproduces shapes, and undo, reopen and export treat them exactly like
+any other stroke.
 
 A rectangle or ellipse committed with the fill setting on adds one boolean,
 `fill: true`, to that same stroke: the samples still trace the outline, and a
@@ -203,6 +239,36 @@ from the file with no extra state. `fill` is why version 3 exists: a version-2
 reader would trace a filled shape's outline and leave the interior empty - a
 visibly different drawing - so it must refuse the file rather than mis-read it
 (see [Versioning](#versioning)).
+
+#### Fills
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `kind` | `"fill"` | Element discriminator. Required in version 4. |
+| `id` | string | Fill-patch id. |
+| `color` | string | Non-empty CSS colour. The patch paints this colour. |
+| `x`, `y` | number | Bounding-box origin in document pixels (`0 <= x < width`, same for `y`). |
+| `width`, `height` | number | Bounding-box size in pixels; must fit inside the document. |
+| `mask` | string | Standard base64 of exactly `width * height` coverage bytes. |
+
+Byte `i` of the decoded mask is the coverage of pixel
+`(x + i % width, y + floor(i / width))`. `0` leaves the layer alone and `255`
+paints the colour at full coverage; the current engine writes only those two
+values (a binary mask), so a region's anti-aliased boundary is either selected
+or not - no invented feathering. The mask is cropped to the filled pixels'
+bounding box, so a small fill on a large canvas stores only its own pixels.
+
+A fill's pixels are the result, not a seed and tolerance. Reopening or redoing
+replays the mask; it does not re-scan the composite. That is what makes a
+committed fill identical after save/reopen and undo/redo even if the artwork
+under it changes later. A fill element is opaque in the file's model (its
+`color` has no alpha field), and its patch is painted in element order like a
+stroke.
+
+The parser accepts any byte value in the mask (the renderer uses it as alpha)
+but the engine only creates `0`/`255`. This leaves room for a future
+anti-aliased patch without another format version, while a binary mask remains
+the current guarantee.
 
 ### `brush`
 
@@ -230,12 +296,20 @@ looks like:
 - document dimensions outside 8-8192, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
+- a version-4 element whose `kind` is missing or neither `"stroke"` nor `"fill"`;
 - a non-boolean `erase` flag on a stroke;
 - a non-boolean `fill` flag on a stroke;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
 - brush fields outside their ranges;
-- more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points.
+- more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
+- a fill's `color` that is missing or empty;
+- fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
+  whose box leaves the document;
+- a fill `mask` that is not valid standard base64, or whose decoded length is
+  not exactly `width * height`;
+- more than `MAX_PROJECT_FILL_PIXELS` (16,777,216) fill-mask pixels across the
+  whole file, which bounds both parsing memory and the mask work.
 
 **Lenient - repaired with a warning** when only cosmetics are affected:
 
@@ -254,9 +328,9 @@ them and the status bar shows them.
 
 Two further guarantees:
 
-- **Ids are reserved.** Layer, document and stroke ids read from a file advance
-  the id counters, so layers created after opening a project cannot collide with
-  ids that came from the file.
+- **Ids are reserved.** Layer, document, stroke and fill ids read from a file
+  advance the id counters, so layers or elements created after opening a project
+  cannot collide with ids that came from the file.
 - **A rejected file changes nothing.** Open parses and validates *before* the
   engine is touched, so a corrupt or unsupported file leaves the current drawing
   exactly as it was, unsaved marker included.
@@ -269,7 +343,8 @@ Two further guarantees:
 | --- | --- | --- |
 | 1 | Metadata, layers and brush strokes. | - |
 | 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | - |
-| 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | The current version; what this build always writes. |
+| 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | - |
+| 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -287,9 +362,17 @@ Two further guarantees:
   would trace a filled shape's outline and leave its interior empty. The flag
   itself is additive (an outline-only drawing is byte-identical to version 2's
   output), but *ignoring* it changes the picture, which is what forces the bump.
-- **Both flags are written only when set.** A stroke that paints and traces -
-  every brush, eraser-free, outline-only drawing - produces exactly the file
-  version 2 wrote, so upgrades do not churn otherwise untouched documents.
+- **Ordered elements are why version 4 exists.** A version-3 reader looks for
+  `layers[].strokes`; it cannot read a fill, and a fill interleaved with strokes
+  cannot be expressed as the old array without losing painting order. Moving to
+  `layers[].elements` is therefore a required new shape, so the version was
+  bumped and version-1 to -3 files are read through their `strokes` array as
+  stroke-only element lists.
+- **Stroke flags are still written only when set.** A stroke that paints and
+  traces carries no `erase` or `fill` field; the only new mandatory stroke field
+  in version 4 is `kind: "stroke"`, which distinguishes it from a fill in the
+  now-shared element list. Version-3 files have no `kind` on their `strokes`
+  entries and are read as strokes.
 
 `PROJECT_VERSION` in `projectFormat.ts` is the single source of truth for the
 version a build writes and the highest it reads.
@@ -339,7 +422,11 @@ The output has no border, no zoom and no surrounding UI.
 
 ## Known gaps
 
-- **No compression.** Text JSON, so files are large for heavy drawings.
+- **No compression.** Text JSON, so files are large for heavy drawings. Fill
+  masks are base64, about 1.33 bytes per covered bounding-box pixel.
+- **A fill mask is bounded but not compressed.** A full-canvas fill on a large
+  document is a multi-megabyte base64 string; the parse ceiling is 16,777,216
+  mask pixels per file.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
 - **The format has one blend mode**, so `blendMode` carries no information yet.

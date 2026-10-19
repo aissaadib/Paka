@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { createStrokeRecord } from "../core/brushes/strokeBuilder";
 import { StrokeStore } from "../core/document/strokeStore";
-import type { StrokeRecord } from "../core/document/types";
+import type { FillPatchRecord, StrokeRecord } from "../core/document/types";
 
 function stroke(layerId: string, id: number): StrokeRecord {
   const record = createStrokeRecord(layerId, DEFAULT_BRUSH);
@@ -57,7 +57,7 @@ describe("StrokeStore", () => {
 
     const removed = store.remove("layer-a", second.id);
     expect(removed?.index).toBe(1);
-    expect(removed?.stroke).toBe(second);
+    expect(removed?.element).toBe(second);
     expect(store.list("layer-a")).toEqual([first]);
     expect(store.remove("layer-a", second.id)).toBeNull();
     expect(store.remove("missing", second.id)).toBeNull();
@@ -75,15 +75,66 @@ describe("StrokeStore", () => {
     expect(store.totalCount).toBe(0);
   });
 
-  it("returns the live array so rendering can iterate without copying", () => {
+  it("keeps element count and the live element array so rendering can iterate without copying", () => {
     const store = new StrokeStore();
-    const empty = store.list("layer-a");
+    const empty = store.listElements("layer-a");
     store.insert(stroke("layer-a", 1));
-    expect(store.list("layer-a")).not.toBe(empty);
+    expect(store.listElements("layer-a")).not.toBe(empty);
 
-    const live = store.list("layer-a");
+    const live = store.listElements("layer-a");
     store.insert(stroke("layer-a", 2));
-    expect(store.list("layer-a")).toBe(live);
+    expect(store.listElements("layer-a")).toBe(live);
     expect(live).toHaveLength(2);
+    expect(store.elementCount("layer-a")).toBe(2);
+  });
+
+  it("interleaves strokes and fills in painting order while filtering stroke-only views", () => {
+    const store = new StrokeStore();
+    const first = stroke("layer-a", 1);
+    const fill: FillPatchRecord = {
+      id: "fill-1",
+      layerId: "layer-a",
+      kind: "fill",
+      color: "#ff0000",
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      mask: new Uint8Array([255]),
+    };
+    const last = stroke("layer-a", 2);
+
+    store.insert(first);
+    store.insert(fill);
+    store.insert(last);
+
+    expect(store.listElements("layer-a")).toEqual([first, fill, last]);
+    // Selection and transforms must never see the patch as a path.
+    expect(store.list("layer-a")).toEqual([first, last]);
+    expect(store.count("layer-a")).toBe(2);
+    expect(store.elementCount("layer-a")).toBe(3);
+    expect(store.totalCount).toBe(3);
+    expect(store.indexOf("layer-a", fill.id)).toBe(1);
+  });
+
+  it("restores a complete element list without duplicating content", () => {
+    const store = new StrokeStore();
+    const first = stroke("layer-a", 1);
+    const fill: FillPatchRecord = {
+      id: "fill-1",
+      layerId: "layer-a",
+      kind: "fill",
+      color: "#ff0000",
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      mask: new Uint8Array([255]),
+    };
+
+    store.restore("layer-a", [first, fill]);
+    store.restore("layer-a", [first, fill]);
+
+    expect(store.listElements("layer-a")).toEqual([first, fill]);
   });
 });

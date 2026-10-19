@@ -10,14 +10,15 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
-import type { StrokeRecord, StrokeSource } from "../core/document/types";
-import {
+import { isFillPatch } from "../core/document/types";
+import type { FillPatchRecord, LayerElement, StrokeRecord, StrokeSource } from "../core/document/types";import {
   PROJECT_FORMAT_ID,
   PROJECT_VERSION,
   parseProject,
   serializeProject,
 } from "../core/project/projectFormat";
 import { createId, resetIdCounters } from "../utils/id";
+import { bytesToBase64 } from "../utils/base64";
 
 function strokeFor(layerId: string, overrides: Partial<StrokeRecord> = {}): StrokeRecord {
   return {
@@ -33,9 +34,35 @@ function strokeFor(layerId: string, overrides: Partial<StrokeRecord> = {}): Stro
   };
 }
 
-function storeOf(entries: ReadonlyArray<readonly [string, StrokeRecord[]]>): StrokeSource {
+function storeOf(entries: ReadonlyArray<readonly [string, LayerElement[]]>): StrokeSource {
   const map = new Map(entries);
-  return { listStrokes: (layerId) => map.get(layerId) ?? [] };
+  return {
+    listStrokes: (layerId) =>
+      (map.get(layerId) ?? []).filter(
+        (element): element is StrokeRecord => !isFillPatch(element),
+      ),
+    listElements: (layerId) => map.get(layerId) ?? [],
+  };
+}
+
+/** A small committed fill with a non-trivial mask, used to pin the file shape. */
+function fillFor(
+  layerId: string,
+  mask: Uint8Array = new Uint8Array([255, 0, 0, 255, 255, 0]),
+  overrides: Partial<FillPatchRecord> = {},
+): FillPatchRecord {
+  return {
+    id: createId("fill"),
+    layerId,
+    kind: "fill",
+    color: "#123456",
+    x: 2,
+    y: 3,
+    width: 3,
+    height: 2,
+    mask,
+    ...overrides,
+  };
 }
 
 /** Two layers, strokes on both, the top one hidden and semi-transparent. */
@@ -92,17 +119,18 @@ describe("serializeProject", () => {
     const [layer] = payload.layers as Record<string, unknown>[];
     expect(Object.keys(layer).sort()).toEqual([
       "blendMode",
+      "elements",
       "id",
       "name",
       "opacity",
-      "strokes",
       "visible",
     ]);
 
-    const [stroke] = layer.strokes as Record<string, unknown>[];
+    const [stroke] = layer.elements as Record<string, unknown>[];
     expect(Object.keys(stroke).sort()).toEqual([
       "brush",
       "id",
+      "kind",
       "pressures",
       "startTime",
       "times",
@@ -129,12 +157,12 @@ describe("serializeProject", () => {
 
     const payload = JSON.parse(
       serializeProject(document, storeOf([[layerId, [paint, erase]]])),
-    ) as { layers: { strokes: Record<string, unknown>[] }[] };
+    ) as { layers: { elements: Record<string, unknown>[] }[] };
 
     // A brush stroke stays exactly as version 2 wrote it before erasers existed,
     // so brush-only drawings diff cleanly against older saves.
-    expect("erase" in payload.layers[0].strokes[0]).toBe(false);
-    expect(payload.layers[0].strokes[1].erase).toBe(true);
+    expect("erase" in payload.layers[0].elements[0]).toBe(false);
+    expect(payload.layers[0].elements[1].erase).toBe(true);
   });
 
   it("writes the fill flag only for filled shapes", () => {
@@ -145,12 +173,45 @@ describe("serializeProject", () => {
 
     const payload = JSON.parse(
       serializeProject(document, storeOf([[layerId, [outline, filled]]])),
-    ) as { layers: { strokes: Record<string, unknown>[] }[] };
+    ) as { layers: { elements: Record<string, unknown>[] }[] };
 
     // An outline stroke keeps the version-2 shape, so unfilled drawings diff
     // cleanly against older saves.
-    expect("fill" in payload.layers[0].strokes[0]).toBe(false);
-    expect(payload.layers[0].strokes[1].fill).toBe(true);
+    expect("fill" in payload.layers[0].elements[0]).toBe(false);
+    expect(payload.layers[0].elements[1].fill).toBe(true);
+  });
+
+  it("writes a fill patch as colour, box and base64 mask only", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const mask = new Uint8Array([255, 0, 0, 255, 255, 0]);
+    const patch = fillFor(layerId, mask);
+
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [patch]]])),
+    ) as { layers: { elements: Record<string, unknown>[] }[] };
+
+    const element = payload.layers[0].elements[0];
+    expect(Object.keys(element).sort()).toEqual([
+      "color",
+      "height",
+      "id",
+      "kind",
+      "mask",
+      "width",
+      "x",
+      "y",
+    ]);
+    expect(element).toMatchObject({
+      kind: "fill",
+      id: patch.id,
+      color: "#123456",
+      x: 2,
+      y: 3,
+      width: 3,
+      height: 2,
+      mask: bytesToBase64(mask),
+    });
   });
 });
 
@@ -236,26 +297,72 @@ describe("parseProject round trip", () => {
     expect("fill" in parsed.project.strokes[0]).toBe(false);
   });
 
+  it("round-trips fill pixels, boxes and painting order exactly", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const before = strokeFor(layerId);
+    const mask = new Uint8Array([255, 0, 0, 255, 255, 0]);
+    const fill = fillFor(layerId, mask);
+    const after = strokeFor(layerId, { startTime: 999 });
+
+    const parsed = parseProject(
+      serializeProject(document, storeOf([[layerId, [before, fill, after]]])),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    // The authoritative list keeps drawing order across kinds.
+    expect(parsed.project.elements.map((element) => element.id)).toEqual([
+      before.id,
+      fill.id,
+      after.id,
+    ]);
+    // The stroke-only view used by selection never sees the patch.
+    expect(parsed.project.strokes).toEqual([before, after]);
+
+    const restored = parsed.project.elements[1];
+    expect(isFillPatch(restored)).toBe(true);
+    if (!isFillPatch(restored)) {
+      return;
+    }
+    expect(restored).toMatchObject({
+      id: fill.id,
+      layerId,
+      color: "#123456",
+      x: 2,
+      y: 3,
+      width: 3,
+      height: 2,
+    });
+    expect([...restored.mask]).toEqual([...mask]);
+    // A fresh array, not a view into the payload.
+    expect(restored.mask).not.toBe(mask);
+  });
+
   it("opens version 2 files, whose shapes were all outlines", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const shape = strokeFor(layerId);
-    const payload = JSON.parse(
+    const text = asLegacyVersion(
       serializeProject(document, storeOf([[layerId, [shape]]])),
-    ) as { version: number };
-    payload.version = 2;
+      2,
+    );
 
-    const parsed = parseProject(JSON.stringify(payload));
+    const parsed = parseProject(text);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) {
       return;
     }
     expect(parsed.project.strokes[0].fill).toBeUndefined();
+    expect(parsed.project.elements).toEqual(parsed.project.strokes);
   });
 
   it("opens version 1 files, whose strokes all painted", () => {
     const { document, bottom, top, bottomStrokes, topStrokes } = sampleProject();
-    const payload = JSON.parse(
+    const text = asLegacyVersion(
       serializeProject(
         document,
         storeOf([
@@ -263,16 +370,35 @@ describe("parseProject round trip", () => {
           [top.id, topStrokes],
         ]),
       ),
-    ) as { version: number };
-    payload.version = 1;
+      1,
+    );
 
-    const parsed = parseProject(JSON.stringify(payload));
+    const parsed = parseProject(text);
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) {
       return;
     }
     expect(parsed.project.strokes).toEqual([...bottomStrokes, ...topStrokes]);
     expect(parsed.project.strokes.every((stroke) => stroke.erase === undefined)).toBe(true);
+  });
+
+  it("opens version 3 files and keeps their filled-shape flags", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const outline = strokeFor(layerId);
+    const filled = strokeFor(layerId, { fill: true });
+    const text = asLegacyVersion(
+      serializeProject(document, storeOf([[layerId, [outline, filled]]])),
+      3,
+    );
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes).toEqual([outline, filled]);
+    expect(parsed.project.strokes[1].fill).toBe(true);
   });
 
   it("accepts a byte order mark", () => {
@@ -307,6 +433,7 @@ describe("parseProject round trip", () => {
 });
 
 interface RawStroke {
+  kind: "stroke";
   id: string;
   brush: unknown;
   startTime: number;
@@ -324,7 +451,7 @@ interface RawLayer {
   visible: boolean;
   opacity: number;
   blendMode: string;
-  strokes: RawStroke[];
+  elements: RawStroke[];
 }
 
 interface RawProject {
@@ -362,8 +489,9 @@ function rawProject(): RawProject {
         visible: true,
         opacity: 1,
         blendMode: "normal",
-        strokes: [
+        elements: [
           {
+            kind: "stroke",
             id: "stroke-1",
             brush: { ...DEFAULT_BRUSH },
             startTime: 0,
@@ -376,6 +504,20 @@ function rawProject(): RawProject {
       },
     ],
   };
+}
+
+/** Rewrites a version-4 payload into the older `strokes`-only shape. */
+function asLegacyVersion(text: string, version: number): string {
+  const payload = JSON.parse(text) as {
+    version: number;
+    layers: Array<{ elements: RawStroke[]; strokes?: Array<Omit<RawStroke, "kind">> }>;
+  };
+  payload.version = version;
+  for (const layer of payload.layers) {
+    layer.strokes = layer.elements.map(({ kind: _kind, ...stroke }) => stroke);
+    delete (layer as { elements?: RawStroke[] }).elements;
+  }
+  return JSON.stringify(payload);
 }
 
 /** Serializes a mutated payload, so each case differs from a valid file by one thing. */
@@ -439,7 +581,7 @@ describe("parseProject rejections", () => {
     expect(rejectionOf(mutate((project) => (project.layers = [])))).toContain("no layers");
 
     const duplicated = mutate((project) => {
-      project.layers.push({ ...project.layers[0], strokes: [] });
+      project.layers.push({ ...project.layers[0], elements: [] });
     });
     expect(rejectionOf(duplicated)).toContain("share the id");
   });
@@ -461,64 +603,132 @@ describe("parseProject rejections", () => {
 
   it("refuses stroke sample arrays that disagree or contain non-numbers", () => {
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].ys = [1, 2, 3]))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].ys = [1, 2, 3]))),
     ).toContain("mismatched sample arrays");
 
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].xs = [1, null]))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].xs = [1, null]))),
     ).toContain("x sample 2 is not a finite number");
 
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].times = [0, "16" as unknown as number]))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].times = [0, "16" as unknown as number]))),
     ).toContain("time sample 2 is not a finite number");
 
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].pressures = "0.5" as unknown as number[]))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].pressures = "0.5" as unknown as number[]))),
     ).toContain("must be an array");
   });
 
   it("refuses a stroke without an id or with a broken brush", () => {
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].id = ""))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].id = ""))),
     ).toContain("missing its identifier");
 
     expect(
       rejectionOf(
         mutate((project) => {
-          project.layers[0].strokes[0].brush = { ...DEFAULT_BRUSH, size: 0 };
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, size: 0 };
         }),
       ),
     ).toContain("brush size");
 
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].brush = undefined))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = undefined))),
     ).toContain("must be an object");
   });
 
   it("refuses an erase flag that is not a boolean", () => {
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].erase = "yes"))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].erase = "yes"))),
     ).toContain("erase flag");
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].erase = 1))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].erase = 1))),
     ).toContain("erase flag");
   });
 
   it("refuses a fill flag that is not a boolean", () => {
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].fill = "yes"))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].fill = "yes"))),
     ).toContain("fill flag");
     expect(
-      rejectionOf(mutate((project) => (project.layers[0].strokes[0].fill = 0))),
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].fill = 0))),
     ).toContain("fill flag");
+  });
+
+  it("refuses a fill patch with a broken box or mask", () => {
+    const validFill = (): Record<string, unknown> => ({
+      kind: "fill",
+      id: "fill-1",
+      color: "#ff0000",
+      x: 2,
+      y: 2,
+      width: 3,
+      height: 2,
+      mask: bytesToBase64(new Uint8Array(6).fill(255)),
+    });
+    const withFill = (change: (fill: Record<string, unknown>) => void): string =>
+      mutate((project) => {
+        const fill = validFill();
+        change(fill);
+        project.layers[0].elements.push(fill as unknown as RawStroke);
+      });
+
+    expect(parseProject(withFill(() => {})).ok).toBe(true);
+
+    expect(rejectionOf(withFill((fill) => (fill.mask = "not base64!")))).toContain(
+      "not valid base64",
+    );
+    expect(
+      rejectionOf(withFill((fill) => (fill.mask = bytesToBase64(new Uint8Array(5))))),
+    ).toContain("needs 6");
+    expect(rejectionOf(withFill((fill) => (fill.x = 100)))).toContain("between 0 and 99");
+    expect(rejectionOf(withFill((fill) => (fill.y = 80)))).toContain("between 0 and 79");
+    expect(rejectionOf(withFill((fill) => (fill.width = 0)))).toContain("between 1 and 98");
+    expect(rejectionOf(withFill((fill) => (fill.width = 2.5)))).toContain("whole number");
+    expect(rejectionOf(withFill((fill) => (fill.color = " ")))).toContain("colour is empty");
+    expect(rejectionOf(withFill((fill) => delete fill.id))).toContain("missing its identifier");
+  });
+
+  it("refuses an unknown element kind but accepts strokes in a version 4 file", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].kind = "spline" as unknown as "stroke";
+        }),
+      ),
+    ).toContain('unknown kind "spline"');
+
+    expect(
+      rejectionOf(mutate((project) => delete (project.layers[0].elements[0] as { kind?: string }).kind)),
+    ).toContain("kind must be a string");
+  });
+
+  it("refuses a project with more fill pixels than the ceiling", () => {
+    const text = mutate((project) => {
+      project.layers[0].elements.push({
+        kind: "fill",
+        id: "fill-1",
+        color: "#ff0000",
+        x: 0,
+        y: 0,
+        width: 3,
+        height: 2,
+        mask: bytesToBase64(new Uint8Array(6).fill(255)),
+      } as unknown as RawStroke);
+    });
+
+    expect(parseProject(text, { maxFillPixels: 6 }).ok).toBe(true);
+    expect(parseProject(text, { maxFillPixels: 5 }).ok).toBe(false);
+    const parsed = parseProject(text, { maxFillPixels: 5 });
+    expect(parsed.ok ? "" : parsed.error).toContain("more than 5 fill pixels");
   });
 
   it("refuses a project with more samples than the ceiling", () => {
     const text = mutate((project) => {
-      project.layers[0].strokes[0].xs = [1, 2, 3, 4];
-      project.layers[0].strokes[0].ys = [1, 2, 3, 4];
-      project.layers[0].strokes[0].pressures = [1, 1, 1, 1];
-      project.layers[0].strokes[0].times = [0, 1, 2, 3];
+      project.layers[0].elements[0].xs = [1, 2, 3, 4];
+      project.layers[0].elements[0].ys = [1, 2, 3, 4];
+      project.layers[0].elements[0].pressures = [1, 1, 1, 1];
+      project.layers[0].elements[0].times = [0, 1, 2, 3];
     });
 
     expect(parseProject(text, { maxSamples: 4 }).ok).toBe(true);

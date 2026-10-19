@@ -15,7 +15,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addLayer, createDocument, moveLayer, updateLayer } from "../core/document/document";
-import type { LayerId, StrokeRecord } from "../core/document/types";
+import type { FillPatchRecord, LayerElement, LayerId, StrokeRecord } from "../core/document/types";
+import { isFillPatch } from "../core/document/types";
 import { Canvas2DRenderer } from "../core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "../core/rendering/frameScheduler";
 import type { StrokeSource } from "../core/rendering/types";
@@ -48,16 +49,20 @@ afterEach(() => {
 });
 
 interface HarnessOptions {
-  readonly strokes?: Map<LayerId, StrokeRecord[]>;
+  readonly strokes?: Map<LayerId, LayerElement[]>;
   readonly rasterScale?: number;
 }
 
 function createHarness(options: HarnessOptions = {}) {
   const firstAllocation = recording.allocated.length;
   const display = new RecordingCanvas();
-  const strokes = options.strokes ?? new Map<LayerId, StrokeRecord[]>();
+  const strokes = options.strokes ?? new Map<LayerId, LayerElement[]>();
   const strokeSource: StrokeSource = {
-    listStrokes: (layerId) => strokes.get(layerId) ?? [],
+    listStrokes: (layerId) =>
+      (strokes.get(layerId) ?? []).filter(
+        (element): element is StrokeRecord => !isFillPatch(element),
+      ),
+    listElements: (layerId) => strokes.get(layerId) ?? [],
   };
 
   const renderer = new Canvas2DRenderer({
@@ -95,6 +100,28 @@ function createStroke(layerId: LayerId, brush: BrushSettings = BRUSH, erase = fa
     pressures: [0.5, 1, 0.5],
     times: [0, 16, 32],
     startTime: 0,
+  };
+}
+
+let fillCounter = 0;
+
+function createFill(
+  layerId: LayerId,
+  mask: Uint8Array = new Uint8Array([255, 128, 0, 0, 255, 0]),
+  overrides: Partial<FillPatchRecord> = {},
+): FillPatchRecord {
+  fillCounter += 1;
+  return {
+    id: `fill-${fillCounter}`,
+    layerId,
+    kind: "fill",
+    color: "#336699",
+    x: 4,
+    y: 6,
+    width: 3,
+    height: 2,
+    mask,
+    ...overrides,
   };
 }
 
@@ -690,6 +717,86 @@ describe("Canvas2DRenderer eraser", () => {
     // The buffer itself still carries full coverage: the eraser's opacity is
     // applied once, when the stroke is subtracted, not per segment.
     expect(harness.strokeBuffer.named("stroke").every((call) => call.alpha === 1)).toBe(true);
+  });
+});
+
+describe("Canvas2DRenderer fill patches", () => {
+  it("uploads the base64-decoded mask as RGBA and draws it at its document box", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    const mask = new Uint8Array([255, 128, 0, 0, 255, 0]);
+    harness.strokes.set(layerId, [createFill(layerId, mask)]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const patchCanvas = recording.allocated.find(
+      (canvas) => canvas.named("putImageData").length > 0,
+    );
+    expect(patchCanvas).toBeDefined();
+    const upload = patchCanvas?.named("putImageData")[0];
+    const image = upload?.args[0] as ImageData;
+    expect(upload?.args.slice(1)).toEqual([0, 0]);
+    expect(image.width).toBe(3);
+    expect(image.height).toBe(2);
+
+    // "#336699" = 51, 102, 153, with the mask byte as alpha.
+    expect([...image.data]).toEqual([
+      51, 102, 153, 255,
+      51, 102, 153, 128,
+      51, 102, 153, 0,
+      51, 102, 153, 0,
+      51, 102, 153, 255,
+      51, 102, 153, 0,
+    ]);
+
+    const surface = harness.layerSurfaces()[0];
+    const paint = surface.drawImages.find((call) => call.args[0] === patchCanvas);
+    expect(paint?.args).toEqual([patchCanvas, 4, 6, 3, 2]);
+    expect(paint?.composite).toBe("source-over");
+    expect(paint?.alpha).toBe(1);
+  });
+
+  it("keeps the painting order when strokes and fills interleave", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 80 });
+    const layerId = doc.layers[0].id;
+    harness.strokes.set(layerId, [
+      createStroke(layerId),
+      createFill(layerId),
+      createStroke(layerId),
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const patchCanvas = recording.allocated.find(
+      (canvas) => canvas.named("putImageData").length > 0,
+    );
+    const surface = harness.layerSurfaces()[0];
+    expect(surface.drawImages.map((call) => call.args[0])).toEqual([
+      harness.strokeBuffer,
+      patchCanvas,
+      harness.strokeBuffer,
+    ]);
+  });
+
+  it("reads the composite at document resolution for the bucket fill", () => {
+    const harness = createHarness();
+    expect(harness.renderer.readCompositeImage()).toBeNull();
+
+    harness.renderer.setDocument(createDocument({ width: 100, height: 80 }));
+    const image = harness.renderer.readCompositeImage();
+
+    expect(image?.width).toBe(100);
+    expect(image?.height).toBe(80);
+    const composed = recording.allocated.find(
+      (canvas) => canvas.getImageDataCalls.length > 0,
+    );
+    expect(composed?.getImageDataCalls).toEqual([[0, 0, 100, 80]]);
   });
 });
 

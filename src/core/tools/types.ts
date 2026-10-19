@@ -84,6 +84,21 @@ export interface ToolContext {
    * pipeline applies the viewport transform.
    */
   pickColor(sample: PointerSample): void;
+  /**
+   * Flood-fills the region under the sample on the active layer.
+   *
+   * The region is sampled from the visible composite, the result is written to
+   * the active layer, and the patch is previewed immediately. Returns whether a
+   * patch was applied; a no-op, an out-of-bounds press or an oversized document
+   * leaves the document unchanged.
+   */
+  beginFill(sample: PointerSample): boolean;
+  /** Commits the applied fill as one undoable step. */
+  finishFill(): void;
+  /** Removes an uncommitted fill, leaving the document untouched. */
+  cancelFill(): void;
+  /** True while a fill is applied but not yet recorded in history. */
+  isFillActive(): boolean;
 }
 
 export interface Tool {

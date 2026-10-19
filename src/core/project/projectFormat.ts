@@ -28,8 +28,19 @@ import {
   MAX_DOCUMENT_SIZE,
   MIN_DOCUMENT_SIZE,
 } from "../document/document";
-import type { DrawingDocument, Layer, LayerId, StrokeRecord, StrokeSource } from "../document/types";
+import type {
+  DrawingDocument,
+  FillPatchRecord,
+  Layer,
+  LayerElement,
+  LayerId,
+  StrokeRecord,
+  StrokeSource,
+} from "../document/types";
+import { isFillPatch } from "../document/types";
+import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import type { BrushSettings } from "../../types/brush";
+import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { reserveId } from "../../utils/id";
 
 export const PROJECT_FORMAT_ID = "paka-project";
@@ -44,15 +55,23 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * and leave the interior empty - again a different drawing - so the version was
  * bumped. Version-1 and -2 files still open; their shapes have no flag, so they
  * are traced exactly as before.
+ * Version 4: a layer holds an ordered `elements` list of strokes **and**
+ * serialized bucket-fill raster patches. A version-3 reader would ignore the
+ * new content entirely (or fail to find `strokes`), so the version was bumped;
+ * version-1 to -3 files still open, their `strokes` array read as a list of
+ * stroke elements in the same order.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
+/** Upper bound on the total fill-mask pixels a file may contain. */
+export const MAX_PROJECT_FILL_PIXELS = MAX_FILL_SCAN_PIXELS;
 
 export interface SerializedStroke {
+  readonly kind: "stroke";
   readonly id: string;
   readonly brush: BrushSettings;
   readonly startTime: number;
@@ -66,13 +85,29 @@ export interface SerializedStroke {
   readonly times: readonly number[];
 }
 
+/** A bucket fill: opaque colour plus a base64 coverage mask, tightly cropped. */
+export interface SerializedFillPatch {
+  readonly kind: "fill";
+  readonly id: string;
+  readonly color: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** `width * height` coverage bytes, standard base64. */
+  readonly mask: string;
+}
+
+export type SerializedElement = SerializedStroke | SerializedFillPatch;
+
 export interface SerializedLayer {
   readonly id: string;
   readonly name: string;
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: string;
-  readonly strokes: readonly SerializedStroke[];
+  /** Painting order: strokes and fills interleave exactly as they were made. */
+  readonly elements: readonly SerializedElement[];
 }
 
 export interface SerializedProject {
@@ -91,9 +126,17 @@ export interface SerializedProject {
 }
 
 export interface ParsedProject {
-  /** Layer metadata with pixel-independent fields only; strokes are separate. */
+  /** Layer metadata with pixel-independent fields only; content is separate. */
   readonly document: DrawingDocument;
-  /** Every stroke of every layer, in document order, each tagged with its layer. */
+  /**
+   * Every element of every layer, in document order, each tagged with its
+   * layer. This is the authoritative list a reopened document is built from.
+   */
+  readonly elements: readonly LayerElement[];
+  /**
+   * A filtered stroke view, kept for callers that only care about paths
+   * (selection, transforms and diagnostics). It never includes a fill patch.
+   */
   readonly strokes: readonly StrokeRecord[];
   /** Non-fatal repairs made while reading (missing names, bad background). */
   readonly warnings: readonly string[];
@@ -106,6 +149,8 @@ export type ProjectParseResult =
 export interface ParseProjectOptions {
   /** Sample ceiling; overridable so the guard itself can be tested cheaply. */
   readonly maxSamples?: number;
+  /** Fill-mask pixel ceiling; overridable so the guard itself can be tested cheaply. */
+  readonly maxFillPixels?: number;
 }
 
 /** Thrown internally so validation reads as a sequence of assertions. */
@@ -162,6 +207,97 @@ function readStrokesOf(value: unknown, label: string): unknown[] {
   return value;
 }
 
+/** Version 4's ordered content list; older files use the same shape for strokes. */
+function readElementList(value: unknown, label: string): unknown[] {
+  return readStrokesOf(value, label);
+}
+
+function readStroke(
+  raw: Record<string, unknown>,
+  label: string,
+  layerId: LayerId,
+  sampleCount: number,
+  maxSamples: number,
+): StrokeRecord {
+  const xs = readSampleArray(raw.xs, `${label} x`, sampleCount, maxSamples);
+  const ys = readSampleArray(raw.ys, `${label} y`, sampleCount, maxSamples);
+  const pressures = readSampleArray(raw.pressures, `${label} pressure`, sampleCount, maxSamples);
+  const times = readSampleArray(raw.times, `${label} time`, sampleCount, maxSamples);
+
+  if (ys.length !== xs.length || pressures.length !== xs.length || times.length !== xs.length) {
+    fail(
+      `${label} has mismatched sample arrays (${xs.length}/${ys.length}/${pressures.length}/${times.length}).`,
+    );
+  }
+
+  const erase = raw.erase === undefined ? false : readBoolean(raw.erase, `${label} erase flag`);
+  const fill = raw.fill === undefined ? false : readBoolean(raw.fill, `${label} fill flag`);
+
+  return {
+    id: readId(raw.id, "stroke"),
+    layerId,
+    brush: readBrush(raw.brush, label),
+    // Only eraser strokes carry the flag: `erase: false` and "no flag" mean the
+    // same thing, and old files have no flag at all.
+    ...(erase ? { erase: true as const } : {}),
+    // Same for the fill flag, which version-1 and -2 files never carry.
+    ...(fill ? { fill: true as const } : {}),
+    xs,
+    ys,
+    pressures,
+    times,
+    startTime:
+      typeof raw.startTime === "number" && Number.isFinite(raw.startTime) ? raw.startTime : 0,
+  };
+}
+
+function readFillPatch(
+  raw: Record<string, unknown>,
+  label: string,
+  layerId: LayerId,
+  documentWidth: number,
+  documentHeight: number,
+  fillPixelsSoFar: number,
+  maxFillPixels: number,
+): FillPatchRecord {
+  const id = readId(raw.id, "fill");
+  const color = readString(raw.color, `${label} colour`);
+  if (color.trim() === "") {
+    fail(`${label} colour is empty.`);
+  }
+
+  const x = readInteger(raw.x, `${label} x`, 0, documentWidth - 1);
+  const y = readInteger(raw.y, `${label} y`, 0, documentHeight - 1);
+  const width = readInteger(raw.width, `${label} width`, 1, documentWidth - x);
+  const height = readInteger(raw.height, `${label} height`, 1, documentHeight - y);
+  const pixels = width * height;
+
+  if (fillPixelsSoFar + pixels > maxFillPixels) {
+    fail(`This project contains more than ${maxFillPixels} fill pixels and cannot be opened.`);
+  }
+
+  const encoded = readString(raw.mask, `${label} mask`);
+  const mask = base64ToBytes(encoded);
+  if (mask === null) {
+    fail(`${label} mask is not valid base64.`);
+  }
+  if (mask.length !== pixels) {
+    fail(
+      `${label} mask is ${mask.length} bytes but its ${width}x${height} box needs ${pixels}.`,
+    );
+  }
+
+  return { id, layerId, kind: "fill", color, x, y, width, height, mask };
+}
+
+function readInteger(value: unknown, label: string, min: number, max: number): number {
+  const number = readAnyNumber(value, label);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    fail(`${label} must be a whole number between ${min} and ${max}.`);
+  }
+  return number;
+}
+
 /** Serializes document metadata and stroke data into the project text. */
 export function serializeProject(document: DrawingDocument, strokes: StrokeSource): string {
   const payload: SerializedProject = {
@@ -181,25 +317,41 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
       visible: layer.visible,
       opacity: layer.opacity,
       blendMode: layer.blendMode,
-      strokes: strokes.listStrokes(layer.id).map((stroke) => ({
-        id: stroke.id,
-        brush: stroke.brush,
-        startTime: stroke.startTime,
-        // Only eraser strokes carry the flag, so brush-only drawings stay
-        // byte-identical to what version 2 wrote before erasers existed.
-        ...(stroke.erase === true ? { erase: true as const } : {}),
-        // Likewise the fill flag: absent on every stroke that traces its outline,
-        // which keeps an outline-only drawing byte-identical to version 2.
-        ...(stroke.fill === true ? { fill: true as const } : {}),
-        xs: stroke.xs,
-        ys: stroke.ys,
-        pressures: stroke.pressures,
-        times: stroke.times,
-      })),
+      elements: strokes.listElements(layer.id).map(serializeElement),
     })),
   };
 
   return JSON.stringify(payload);
+}
+
+function serializeElement(element: LayerElement): SerializedElement {
+  if (isFillPatch(element)) {
+    return {
+      kind: "fill",
+      id: element.id,
+      color: element.color,
+      x: element.x,
+      y: element.y,
+      width: element.width,
+      height: element.height,
+      mask: bytesToBase64(element.mask),
+    };
+  }
+  return {
+    kind: "stroke",
+    id: element.id,
+    brush: element.brush,
+    startTime: element.startTime,
+    // Only eraser strokes carry the flag, so brush-only drawings stay
+    // byte-identical to what earlier versions wrote.
+    ...(element.erase === true ? { erase: true as const } : {}),
+    // Likewise the fill flag: absent on every stroke that traces its outline.
+    ...(element.fill === true ? { fill: true as const } : {}),
+    xs: element.xs,
+    ys: element.ys,
+    pressures: element.pressures,
+    times: element.times,
+  };
 }
 
 /**
@@ -208,7 +360,14 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
  */
 export function parseProject(text: string, options: ParseProjectOptions = {}): ProjectParseResult {
   try {
-    return { ok: true, project: readProject(text, options.maxSamples ?? MAX_PROJECT_SAMPLES) };
+    return {
+      ok: true,
+      project: readProject(
+        text,
+        options.maxSamples ?? MAX_PROJECT_SAMPLES,
+        options.maxFillPixels ?? MAX_PROJECT_FILL_PIXELS,
+      ),
+    };
   } catch (error) {
     if (error instanceof ProjectFormatError) {
       return { ok: false, error: error.message };
@@ -218,7 +377,7 @@ export function parseProject(text: string, options: ParseProjectOptions = {}): P
   }
 }
 
-function readProject(text: string, maxSamples: number): ParsedProject {
+function readProject(text: string, maxSamples: number, maxFillPixels: number): ParsedProject {
   const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
   let raw: unknown;
@@ -236,14 +395,15 @@ function readProject(text: string, maxSamples: number): ParsedProject {
   if (typeof root.version !== "number" || !Number.isInteger(root.version)) {
     fail("The project file is missing a version number.");
   }
-  if (root.version > PROJECT_VERSION) {
+  const version = root.version;
+  if (version > PROJECT_VERSION) {
     fail(
-      `This project was created by a newer version of Paka (file version ${root.version}, ` +
+      `This project was created by a newer version of Paka (file version ${version}, ` +
         `this build reads up to ${PROJECT_VERSION}).`,
     );
   }
-  if (root.version < 1) {
-    fail(`Unsupported project file version ${root.version}.`);
+  if (version < 1) {
+    fail(`Unsupported project file version ${version}.`);
   }
 
   const warnings: string[] = [];
@@ -282,9 +442,11 @@ function readProject(text: string, maxSamples: number): ParsedProject {
   }
 
   const layers: Layer[] = [];
+  const elements: LayerElement[] = [];
   const strokes: StrokeRecord[] = [];
   const seenLayerIds = new Set<string>();
   let sampleCount = 0;
+  let fillPixelCount = 0;
 
   root.layers.forEach((rawLayer, layerIndex) => {
     const label = `Layer ${layerIndex + 1}`;
@@ -312,42 +474,46 @@ function readProject(text: string, maxSamples: number): ParsedProject {
 
     layers.push({ id, name: layerName, visible, opacity, blendMode: "normal" });
 
-    const layerStrokes = readStrokesOf(record.strokes, `${label} strokes`);
-    for (const [strokeIndex, rawStroke] of layerStrokes.entries()) {
-      const strokeLabel = `${label}, stroke ${strokeIndex + 1}`;
-      const stroke = asRecord(rawStroke, strokeLabel);
-      const xs = readSampleArray(stroke.xs, `${strokeLabel} x`, sampleCount, maxSamples);
-      const ys = readSampleArray(stroke.ys, `${strokeLabel} y`, sampleCount, maxSamples);
-      const pressures = readSampleArray(stroke.pressures, `${strokeLabel} pressure`, sampleCount, maxSamples);
-      const times = readSampleArray(stroke.times, `${strokeLabel} time`, sampleCount, maxSamples);
+    // Version 4 uses one ordered `elements` list. Older files have a `strokes`
+    // array only, which is exactly a list of stroke elements in the same order.
+    const rawElements =
+      version >= 4 ? readElementList(record.elements, `${label} elements`) : readElementList(record.strokes, `${label} strokes`);
 
-      if (ys.length !== xs.length || pressures.length !== xs.length || times.length !== xs.length) {
-        fail(`${strokeLabel} has mismatched sample arrays (${xs.length}/${ys.length}/${pressures.length}/${times.length}).`);
+    for (const [elementIndex, rawElement] of rawElements.entries()) {
+      const elementLabel = `${label}, element ${elementIndex + 1}`;
+      const element = asRecord(rawElement, elementLabel);
+
+      if (version >= 4) {
+        const kind = readString(element.kind, `${elementLabel} kind`);
+        if (kind === "fill") {
+          const patch = readFillPatch(
+            element,
+            elementLabel,
+            id,
+            width,
+            height,
+            fillPixelCount,
+            maxFillPixels,
+          );
+          fillPixelCount += patch.width * patch.height;
+          elements.push(patch);
+          continue;
+        }
+        if (kind !== "stroke") {
+          fail(`${elementLabel} has the unknown kind "${kind}".`);
+        }
       }
 
-      sampleCount += xs.length;
-
-      const erase =
-        stroke.erase === undefined ? false : readBoolean(stroke.erase, `${strokeLabel} erase flag`);
-      const fill =
-        stroke.fill === undefined ? false : readBoolean(stroke.fill, `${strokeLabel} fill flag`);
-
-      strokes.push({
-        id: readId(stroke.id, "stroke"),
-        layerId: id,
-        brush: readBrush(stroke.brush, strokeLabel),
-        // Only eraser strokes carry the flag: `erase: false` and "no flag" mean
-        // the same thing, and old files have no flag at all.
-        ...(erase ? { erase: true as const } : {}),
-        // Same for the fill flag, which version-1 and -2 files never carry.
-        ...(fill ? { fill: true as const } : {}),
-        xs,
-        ys,
-        pressures,
-        times,
-        startTime:
-          typeof stroke.startTime === "number" && Number.isFinite(stroke.startTime) ? stroke.startTime : 0,
-      });
+      const stroke = readStroke(
+        element,
+        elementLabel,
+        id,
+        sampleCount,
+        maxSamples,
+      );
+      sampleCount += stroke.xs.length;
+      elements.push(stroke);
+      strokes.push(stroke);
     }
   });
 
@@ -363,7 +529,7 @@ function readProject(text: string, maxSamples: number): ParsedProject {
     activeLayerId,
   };
 
-  return { document, strokes, warnings };
+  return { document, elements, strokes, warnings };
 }
 
 /** Keeps generated ids from colliding with ids that came out of a file. */

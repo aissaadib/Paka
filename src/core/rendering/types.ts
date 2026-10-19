@@ -93,6 +93,16 @@ export interface DrawingRenderer {
    * one on screen, not a value that was mathematically authored.
    */
   readCompositePixel(docX: number, docY: number): Rgb | null;
+  /**
+   * Reads the whole composite the user sees at document resolution, for tools
+   * that need a region rather than one pixel (the bucket fill).
+   *
+   * Same rules as `readCompositePixel`: paper plus visible layers at their
+   * opacity, no viewport, no border, no in-progress stroke. Returns `null` when
+   * there is no document. This is a read: it changes no pixels and enters no
+   * history.
+   */
+  readCompositeImage(): ImageData | null;
   render(): void;
   requestRender(): void;
   destroy(): void;

@@ -19,7 +19,7 @@ import {
   removeLayer,
   updateLayer,
 } from "../core/document/document";
-import type { DrawingDocument, LayerId, StrokeRecord } from "../core/document/types";
+import type { DrawingDocument, LayerElement, LayerId, StrokeRecord } from "../core/document/types";
 
 function makeStroke(layerId: LayerId, x: number): StrokeRecord {
   const stroke = createStrokeRecord(layerId, DEFAULT_BRUSH);
@@ -36,25 +36,25 @@ function makeStroke(layerId: LayerId, x: number): StrokeRecord {
  */
 function createHost(initial: DrawingDocument) {
   let document = initial;
-  const strokes = new Map<LayerId, StrokeRecord[]>();
+  const elements = new Map<LayerId, LayerElement[]>();
 
   const host: DocumentCommandHost = {
     getDocument: () => document,
     applyDocument: (next) => {
       document = next;
     },
-    clearLayerStrokes: (layerId) => {
-      strokes.delete(layerId);
+    clearLayerElements: (layerId) => {
+      elements.delete(layerId);
     },
-    restoreLayerStrokes: (layerId, list) => {
-      strokes.set(layerId, [...list]);
+    restoreLayerElements: (layerId, list) => {
+      elements.set(layerId, [...list]);
     },
   };
 
   return {
     host,
     getDocument: () => document,
-    list: (layerId: LayerId): readonly StrokeRecord[] => strokes.get(layerId) ?? [],
+    list: (layerId: LayerId): readonly LayerElement[] => elements.get(layerId) ?? [],
   };
 }
 
@@ -81,8 +81,8 @@ describe("createDocumentCommand", () => {
     const doomed = [makeStroke(removedLayerId, 10), makeStroke(removedLayerId, 20)];
 
     const harness = createHost(before);
-    harness.host.restoreLayerStrokes(kept.layerId, [kept]);
-    harness.host.restoreLayerStrokes(removedLayerId, doomed);
+    harness.host.restoreLayerElements(kept.layerId, [kept]);
+    harness.host.restoreLayerElements(removedLayerId, doomed);
 
     const after = removeLayer(before, removedLayerId);
     const command = createDocumentCommand(
@@ -90,7 +90,7 @@ describe("createDocumentCommand", () => {
         label: "Delete Layer",
         before,
         after,
-        removedStrokes: { layerId: removedLayerId, strokes: doomed },
+        removedElements: { layerId: removedLayerId, elements: doomed },
       },
       harness.host,
     );
@@ -103,7 +103,7 @@ describe("createDocumentCommand", () => {
 
     command.revert();
     expect(harness.getDocument().layers.map((layer) => layer.id)).toContain(removedLayerId);
-    expect(harness.list(removedLayerId).map((stroke) => stroke.xs[0])).toEqual([10, 20]);
+    expect(harness.list(removedLayerId).map((element) => ("xs" in element ? element.xs[0] : -1))).toEqual([10, 20]);
   });
 
   it("removes a duplicated layer's copied strokes when reverted", () => {
@@ -124,7 +124,7 @@ describe("createDocumentCommand", () => {
         label: "Duplicate Layer",
         before,
         after,
-        addedStrokes: { layerId: copyId, strokes: [copied] },
+        addedElements: { layerId: copyId, elements: [copied] },
       },
       harness.host,
     );
@@ -156,7 +156,7 @@ describe("createDocumentCommand", () => {
         before,
         after,
         mergeKey: "layer-opacity:layer-1",
-        removedStrokes: { layerId: before.layers[0].id, strokes: [] },
+        removedElements: { layerId: before.layers[0].id, elements: [] },
       },
       harness.host,
     );

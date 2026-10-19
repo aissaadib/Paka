@@ -6,6 +6,7 @@ import { useEditor, useEditorState } from "../../hooks/useEditor";
 import type { ToolId } from "../../types/tool";
 import {
   IconBrush,
+  IconBucket,
   IconEllipse,
   IconEraser,
   IconHand,
@@ -23,6 +24,7 @@ const TOOL_ICONS: Record<ToolId, ReactNode> = {
   line: <IconLine />,
   rectangle: <IconRectangle />,
   ellipse: <IconEllipse />,
+  bucket: <IconBucket />,
   picker: <IconPicker />,
   pan: <IconHand />,
 };

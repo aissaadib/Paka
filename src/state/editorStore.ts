@@ -26,6 +26,10 @@ export interface EditorActions {
   setBrush(patch: Partial<BrushSettings>): void;
   /** Whether the shape tools fill their outline instead of tracing it. */
   setShapeFill(filled: boolean): void;
+  /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
+  setFillTolerance(tolerance: number): void;
+  /** Clears a status-bar notice raised by an editor action. */
+  dismissNotice(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -76,6 +80,8 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
     setShapeFill: (filled) => engine.setShapeFill(filled),
+    setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
+    dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();
     },

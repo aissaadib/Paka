@@ -59,6 +59,13 @@ export const PICKER_TOOL: ToolDefinition = {
   description: "Pick a colour from the canvas",
 };
 
+export const BUCKET_TOOL: ToolDefinition = {
+  id: "bucket",
+  label: "Bucket fill",
+  shortcut: "G",
+  description: "Fill a contiguous region with the current colour",
+};
+
 export const PAN_TOOL: ToolDefinition = {
   id: "pan",
   label: "Pan",
@@ -74,6 +81,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   LINE_TOOL,
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,
+  BUCKET_TOOL,
   PICKER_TOOL,
   PAN_TOOL,
 ];

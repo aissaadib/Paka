@@ -15,12 +15,15 @@
 
 import type {
   DrawingDocument,
+  FillPatchRecord,
   Layer,
   LayerId,
   LayerBlendMode,
   StrokeRecord,
 } from "../document/types";
+import { isFillPatch } from "../document/types";
 import type { Viewport } from "../../types/viewport";
+import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
 import { rasterizeStroke, strokeOpacity } from "./canvas2dStroke";
@@ -516,6 +519,20 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
+  /** Reads the whole composite at document resolution for the bucket fill. */
+  readCompositeImage(): ImageData | null {
+    const doc = this.doc;
+    if (this.destroyed || !doc) {
+      return null;
+    }
+    const canvas = this.composeDocumentImage();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  }
+
   destroy(): void {
     if (this.destroyed) {
       return;
@@ -580,15 +597,52 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private rasterizeLayer(surface: LayerSurface): void {
     this.surfaces.clear(surface);
     this.surfaces.prepare(surface);
-    for (const stroke of this.strokeSource.listStrokes(surface.layerId)) {
-      this.rasterizeStrokeToBuffer(stroke);
+    for (const element of this.strokeSource.listElements(surface.layerId)) {
+      if (isFillPatch(element)) {
+        this.rasterizeFillPatch(surface, element);
+        continue;
+      }
+      this.rasterizeStrokeToBuffer(element);
       this.compositeStrokeBuffer(
         surface,
-        strokeOpacity(stroke.brush, stroke.pressures),
-        stroke.erase === true ? "destination-out" : "source-over",
+        strokeOpacity(element.brush, element.pressures),
+        element.erase === true ? "destination-out" : "source-over",
       );
     }
     surface.dirty = false;
+  }
+
+  /**
+   * Paints a committed bucket fill onto a layer surface.
+   *
+   * The mask is document-resolution (one coverage byte per pixel); the surface
+   * may be supersampled. Drawing the patch through the surface transform keeps
+   * it consistent with every stroke around it - live drawing, undo/redo and a
+   * reopened project all go through this one function, so they cannot disagree.
+   */
+  private rasterizeFillPatch(surface: LayerSurface, patch: FillPatchRecord): void {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, patch.width);
+    canvas.height = Math.max(1, patch.height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    const image = ctx.createImageData(canvas.width, canvas.height);
+    const colour = hexToRgb(patch.color) ?? { r: 0, g: 0, b: 0 };
+    for (let index = 0; index < patch.mask.length; index += 1) {
+      const offset = index * 4;
+      image.data[offset] = colour.r;
+      image.data[offset + 1] = colour.g;
+      image.data[offset + 2] = colour.b;
+      image.data[offset + 3] = patch.mask[index];
+    }
+    ctx.putImageData(image, 0, 0);
+
+    this.surfaces.prepare(surface);
+    surface.ctx.globalCompositeOperation = "source-over";
+    surface.ctx.globalAlpha = 1;
+    surface.ctx.drawImage(canvas, patch.x, patch.y, patch.width, patch.height);
   }
 
   private rasterizeStrokeToBuffer(stroke: StrokeRecord): void {

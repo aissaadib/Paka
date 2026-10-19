@@ -27,6 +27,7 @@ export const RECORDED_METHODS = [
   "fill",
   "stroke",
   "strokeRect",
+  "putImageData",
 ] as const;
 
 export interface DrawCall {
@@ -118,6 +119,18 @@ export class RecordingCanvas {
         colorSpace: "srgb",
       } as unknown as ImageData;
     };
+    // Fill patches upload their own RGBA pixels before being drawn onto a
+    // surface, so the test harness needs both halves of that path.
+    (ctx as unknown as Record<string, unknown>).createImageData = (
+      width: number,
+      height: number,
+    ): ImageData =>
+      ({
+        data: new Uint8ClampedArray(width * height * 4),
+        width,
+        height,
+        colorSpace: "srgb",
+      }) as unknown as ImageData;
     this.ctx = ctx as unknown as CanvasRenderingContext2D;
   }
 

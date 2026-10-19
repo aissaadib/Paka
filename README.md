@@ -5,10 +5,10 @@ drawing engine written in React + TypeScript, with HTML Canvas 2D as the current
 raster backend.
 
 This is the **foundation** of the app, not a finished product. You can draw
-pressure-sensitive strokes, change brush size and colour, pan and zoom, manage
-layers with working undo/redo for strokes, and **save, reopen and export your
-work as a project file or a PNG**. Several things are explicitly missing; see
-[Known limitations](#known-limitations).
+pressure-sensitive strokes, change brush size and colour, flood-fill regions,
+pan and zoom, manage layers with working undo/redo for strokes and fills, and
+**save, reopen and export your work as a project file or a PNG**. Several things
+are explicitly missing; see [Known limitations](#known-limitations).
 
 ## What works
 
@@ -35,6 +35,17 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   Shapes draw with the current brush, so size, colour and opacity
   come from the brush controls; a press outside the paper records nothing, and a
   click that never moved leaves nothing behind.
+- **Bucket fill** (`G`): click a region to flood-fill it with the current colour.
+  The scan reads the **merged visible composite** - paper plus all visible layers
+  - so line art on another layer bounds the fill, while the committed pixels go
+  to the **active layer**. The toolbar's **Tolerance** slider (0-255, max
+  per-channel difference) widens what counts as the same region; fully
+  transparent pixels always match each other. The result is a bounded,
+  pixel-exact patch with a binary coverage mask, not a traced contour, so it is
+  identical after undo/redo and save/reopen. One successful fill is one undo
+  step; cancelling the press (lost capture, tool switch, `pointercancel`)
+  removes the preview and records nothing. A document over 16,777,216 pixels
+  refuses the scan with a status-bar message instead of freezing.
 - **Selection and transform** (`M`): drag a marquee to select the strokes of the
   active layer it meets, or click a stroke to select just that one and click
   empty paper to clear. The selection is shown as a dashed frame around the
@@ -64,18 +75,20 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Layers**: add, duplicate, delete, rename (double-click), reorder,
   visibility, opacity and selection. Layer pixels composite bottom-first over
   the paper colour.
-- **Undo/redo** for strokes *and* layer operations: add, duplicate, delete
-  (including the deleted layer's stroke data), rename, reorder, visibility and
-  opacity. Available from the toolbar, the Edit menu and `Ctrl+Z` /
+- **Undo/redo** for strokes, fills *and* layer operations: add, duplicate, delete
+  (including the deleted layer's strokes and fills), rename, reorder, visibility
+  and opacity. Available from the toolbar, the Edit menu and `Ctrl+Z` /
   `Ctrl+Shift+Z` (`Ctrl+J` duplicates the active layer). Dragging a slider is
   one step, not one per tick. History is capped at 200 commands.
 - **New document** dialog with size validation (8-8192 px per side).
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`) writing a versioned `.paka` file that stores document
-  metadata and **stroke data**, so reopening a file restores an editable
-  drawing rather than a flattened picture. Native open/save dialogs, an unsaved
-  changes indicator in the title and status bar, a discard warning before new,
-  open or close, and atomic writes that never leave a half-written file.
+  metadata and **ordered layer content** - stroke samples and fill patches - so
+  reopening a file restores an editable drawing rather than a flattened
+  picture, with fills landing on exactly the pixels that were committed. Native
+  open/save dialogs, an unsaved changes indicator in the title and status bar, a
+  discard warning before new, open or close, and atomic writes that never leave a
+  half-written file.
 - **PNG export** (`File → Export PNG…`) of the full composite at document size,
   including layer visibility and opacity, without touching the editable
   document.
@@ -141,10 +154,11 @@ src/
   hooks/        React bindings for the engine
   state/        the editor store and context holding the engine instance
   core/
-    document/   document + layer metadata, stroke store
+    document/   document + layer metadata, ordered stroke/fill store
     brushes/    brush defaults, stroke sample processing
+    fill/       pure flood-fill scan and fill-patch records
     tools/      tool registry and per-tool behaviour
-    commands/   command stack and the stroke command
+    commands/   command stack, stroke/fill commands, layer commands
     input/      pointer normalization and DOM binding
     rendering/  viewport math, frame scheduler, Canvas 2D renderer
     engine/     integration of all of the above
@@ -169,9 +183,14 @@ and the next slice - is in [docs/HANDOFF.md](docs/HANDOFF.md).
 ## Known limitations
 
 - Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
-  **ellipse**, **colour picker** and **pan** tools exist. There is no bucket
-  (flood) fill and no gradient; the shape tools' fill covers a shape's own
-  outline, not a region of the canvas.
+  **ellipse**, **bucket** and **colour picker** tools exist, plus pan. There is
+  no gradient or text tool.
+- **A bucket fill is a committed raster patch, not an editable region.** The
+  mask is binary, so there is no feathering and no gap-closing; the slider only
+  affects the next fill, and the fill is scanned at click time (no pre-commit
+  region preview). Fills are not selectable, so they can be undone but not
+  moved, duplicated or flipped. The scan samples the merged composite including
+  the paper, and documents above 16,777,216 pixels refuse a fill with a notice.
 - **Selection is stroke-level and has no boundary yet.** A marquee selects whole
   strokes (never part of one), only on the **active layer**, and the selection is
   dropped when you switch layers or switch away from the select tool. It is a
@@ -204,19 +223,18 @@ and the next slice - is in [docs/HANDOFF.md](docs/HANDOFF.md).
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
-- **A project file stores stroke samples, not pixels.** That keeps drawings
-  editable, but the JSON grows with the number of points: a long, heavily
-  sampled drawing can produce a file tens of megabytes in size. A compressed or
+- **A project file stores stroke samples and fill masks, not pixels.** That
+  keeps drawings editable, but the JSON grows with the number of points and
+  masked pixels: a long, heavily sampled drawing can produce a file tens of
+  megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
-  the parser
-  refuses versions it does not know).
-- **The current project version is `3`** (`version: 1` and `2` files still open
-  and are written back as 3). Unknown versions, wrong
-  formats and unreadable files are rejected with a message instead of being
-  partially loaded.
+  the parser refuses versions it does not know).
+- **The current project version is `4`** (`version: 1`, `2` and `3` files still
+  open and are written back as 4). Unknown versions, wrong formats and unreadable
+  files are rejected with a message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one
-  undoable step per stored stroke, so the drawing stays editable, but there is
-  no redo of edits made before the save.
+  undoable step per stored element (stroke or fill patch), so the drawing stays
+  editable, but there is no redo of edits made before the save.
 - There is **no autosave or crash recovery**: unsaved work is lost if the app or
   the machine goes down.
 - `Ctrl+N` is not bound; use `File → New Document…`.

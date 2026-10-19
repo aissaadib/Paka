@@ -57,6 +57,16 @@ export function IconPicker(props: IconProps) {
   );
 }
 
+export function IconBucket(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6.1 2.9 2.8 6.2a1 1 0 0 0 0 1.4l4.1 4.1a1 1 0 0 0 1.4 0l3.3-3.3a1 1 0 0 0 0-1.4L7.5 2.9a1 1 0 0 0-1.4 0z" />
+      <path d="M3.9 7.4 10 13.5" />
+      <path d="M13 9.2c.7 1 1.2 1.9 1.2 2.5a1.2 1.2 0 0 1-2.4 0c0-.6.5-1.5 1.2-2.5z" />
+    </Icon>
+  );
+}
+
 export function IconSelect(props: IconProps) {
   return (
     <Icon {...props}>

@@ -15,28 +15,28 @@
  */
 
 import { createId } from "../../utils/id";
-import type { DrawingDocument, LayerId, StrokeRecord } from "../document/types";
+import type { DrawingDocument, LayerElement, LayerId } from "../document/types";
 import type { Command } from "./types";
 
 /**
  * The engine side of a document command: read the current document, publish a
- * new one, and move stroke data in and out of the store.
+ * new one, and move layer content in and out of the store.
  */
 export interface DocumentCommandHost {
   /** The document as it stands right now. */
   getDocument(): DrawingDocument;
   /** Publishes `next`: renderer sync, surface retention and a UI snapshot. */
   applyDocument(next: DrawingDocument): void;
-  /** Removes every stroke of a layer. */
-  clearLayerStrokes(layerId: LayerId): void;
-  /** Replaces a layer's strokes (idempotent: clears first, then inserts). */
-  restoreLayerStrokes(layerId: LayerId, strokes: readonly StrokeRecord[]): void;
+  /** Removes every element of a layer. */
+  clearLayerElements(layerId: LayerId): void;
+  /** Replaces a layer's elements (idempotent: clears first, then inserts). */
+  restoreLayerElements(layerId: LayerId, elements: readonly LayerElement[]): void;
 }
 
-/** A layer's stroke data carried across a command boundary. */
-export interface StrokeTransfer {
+/** A layer's content carried across a command boundary. */
+export interface ElementTransfer {
   readonly layerId: LayerId;
-  readonly strokes: readonly StrokeRecord[];
+  readonly elements: readonly LayerElement[];
 }
 
 export interface DocumentCommandSpec {
@@ -45,14 +45,14 @@ export interface DocumentCommandSpec {
   readonly before: DrawingDocument;
   /** Document after the change; `apply()` restores exactly this. */
   readonly after: DrawingDocument;
-  /** Strokes this command deletes; restored on revert (layer deletion). */
-  readonly removedStrokes?: StrokeTransfer;
-  /** Strokes this command creates; removed on revert (layer duplication). */
-  readonly addedStrokes?: StrokeTransfer;
+  /** Elements this command deletes; restored on revert (layer deletion). */
+  readonly removedElements?: ElementTransfer;
+  /** Elements this command creates; removed on revert (layer duplication). */
+  readonly addedElements?: ElementTransfer;
   /**
    * Opt-in history coalescing key. Commands sharing a key collapse into one
    * entry, which is how a slider drag becomes a single undo step. Keys are only
-   * used for metadata-only changes (no stroke transfers).
+   * used for metadata-only changes (no element transfers).
    */
   readonly mergeKey?: string;
 }
@@ -73,29 +73,29 @@ export function createDocumentCommand(
   host: DocumentCommandHost,
 ): Command {
   const apply = (): void => {
-    if (spec.removedStrokes) {
-      host.clearLayerStrokes(spec.removedStrokes.layerId);
+    if (spec.removedElements) {
+      host.clearLayerElements(spec.removedElements.layerId);
     }
-    if (spec.addedStrokes) {
-      host.restoreLayerStrokes(spec.addedStrokes.layerId, spec.addedStrokes.strokes);
+    if (spec.addedElements) {
+      host.restoreLayerElements(spec.addedElements.layerId, spec.addedElements.elements);
     }
     host.applyDocument(spec.after);
   };
 
   const revert = (): void => {
-    if (spec.addedStrokes) {
-      host.clearLayerStrokes(spec.addedStrokes.layerId);
+    if (spec.addedElements) {
+      host.clearLayerElements(spec.addedElements.layerId);
     }
-    if (spec.removedStrokes) {
-      host.restoreLayerStrokes(spec.removedStrokes.layerId, spec.removedStrokes.strokes);
+    if (spec.removedElements) {
+      host.restoreLayerElements(spec.removedElements.layerId, spec.removedElements.elements);
     }
     host.applyDocument(spec.before);
   };
 
-  // Metadata-only changes are safe to coalesce; anything that moves strokes is
-  // never merged, because combining two stroke transfers is ambiguous.
+  // Metadata-only changes are safe to coalesce; anything that moves content is
+  // never merged, because combining two element transfers is ambiguous.
   const mergeKey =
-    spec.mergeKey !== undefined && !spec.removedStrokes && !spec.addedStrokes
+    spec.mergeKey !== undefined && !spec.removedElements && !spec.addedElements
       ? spec.mergeKey
       : undefined;
 

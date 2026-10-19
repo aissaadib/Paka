@@ -102,7 +102,26 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       an empty outline - a different drawing. See
       [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#strokes).
-- [ ] Fill and gradient: a bucket (flood) fill and gradients.
+- [x] Bucket (flood) fill (`G`): a press flood-fills the contiguous region under
+      the pointer and writes it to the active layer as a bounded, pixel-exact
+      patch. The scan samples the **merged visible composite** (paper plus every
+      visible layer at its opacity), so line art on another layer defines the
+      boundary the user sees; the committed pixels go to the active layer. The
+      toolbar's **Tolerance** slider (`0`-`255`, max per-channel `R`/`G`/`B`/`A`
+      difference) widens what counts as the same region; fully transparent pixels
+      always match one another. The patch stores an ordered, tightly cropped
+      coverage mask - not a traced contour - so save/reopen, undo and redo
+      reproduce exactly the pixels the user saw. Undo removes the patch; redo
+      replays the committed mask instead of re-running the scan. One successful
+      fill is one undo step; a cancelled press (lost capture, tool switch,
+      `pointercancel`) removes the preview and records nothing. A document above
+      the scan ceiling (16,777,216 pixels) refuses the fill with a status-bar
+      message instead of attempting it. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#bucket-flood-fill) and
+      [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills).
+- [ ] Gradients: a per-pixel colour function (linear and radial) as its own
+      slice. Deliberately separate from the bucket fill: a gradient is not a
+      region and does not need a flood scan or a coverage mask.
 
 ## Phase 3 - Brush feel
 
@@ -117,7 +136,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 5 - Import/export and colour workflows
 
-- [x] Versioned `.paka` project file (metadata + strokes).
+- [x] Versioned `.paka` project file (metadata + ordered strokes and fill
+      patches).
 - [x] PNG export with an honest encoder.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
@@ -134,38 +154,40 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 ## Documented limitations that are not planned yet
 
 - Undo history is not stored in the project file (reopening rebuilds one step
-  per stroke).
+  per stored element: one per stroke or fill patch).
 - There is no autosave or crash recovery.
 - The React layer has no automated tests; it is verified in the running app.
 - `Ctrl+N` is not bound; use `File -> New Document...`.
 
 ## Next slice
 
-**Bucket (flood) fill and gradients** (Phase 2). This is the first slice that
-cannot be expressed
-as "more strokes": a bucket fill reads the pixels it is filling and writes a
-region, and a gradient is not stroke geometry at all. The model question comes
-first, exactly as it did for selection: the architecture keeps the stroke list
-authoritative and pixels a cache, so a pixel-writing tool needs a *new kind of
-command* - a bounded pixel patch with a revert image, layered like a stroke - and
-a decision about whether a fill on a layer is an operation on that layer's
-surface or a new stroke-like primitive.
+**Gradients** (the remaining part of Phase 2's illustration tools). The bucket
+fill shipped as the first slice that is **not "more strokes"**, and its model is
+now settled: layer content is one ordered `elements` list, a fill is a bounded
+`FillPatchRecord` (colour + binary coverage mask), and its command replays the
+committed pixels. That answered the questions the previous "Next slice" section
+listed:
 
-The filled-shape slice narrowed the question without answering it. A fill that
-follows *geometry the document already holds* needs nothing new: the polygon is
-the stroke's own samples, and `fill: true` re-rasterizes from the file, so
-"fill" is still strokes. A bucket fill does not have that property - its region
-is defined by the pixels under the pointer (composite or active layer, and what
-counts as "the same colour" at 8-bit sRGB), and its boundary is a mask, not a
-polyline. The two viable models are therefore (a) a **layer element list** of
-strokes *and* pixel patches, ordered together so re-rasterization reproduces
-both, with the patch serialized (mask + colour) and its revert image held by the
-command, or (b) tracing the flood region's contours and committing *that* as a
-filled shape, which keeps one kind of content but bakes the antialiasing of a
-sampled region into a polyline. (a) is the honest one if fills must be pixel-
-exact; (b) is far less code and keeps the stroke list authoritative. Whichever
-is chosen, the slice also has to define the tolerance and anti-aliasing rule,
-what undo restores, what a reopened project reproduces, and how the in-progress
-preview stays out of the layer until the release. Gradients are separable and
-may land as their own slice (a gradient is a per-pixel function, not a region).
-Tools that are *not* part of it stay absent rather than half-wired.
+- the flood samples the **merged visible composite**, while the patch is written
+  to the **active layer**;
+- tolerance is the largest absolute per-channel difference in 8-bit units,
+  compared against the seed; fully transparent pixels match each other;
+- the mask is **binary**, so anti-aliased boundary pixels either match and are
+  filled or do not - no invented feathering that a save/reopen could not
+  reproduce;
+- a press previews a real patch on the layer, and the release records exactly
+  one `FillCommand`; cancel removes the patch with no history entry or revision
+  bump;
+- redo re-inserts the stored patch; it never re-runs the scan;
+- version 4 writes `layers[].elements`, and versions 1-3 still read through
+  their `strokes` array.
+
+A gradient is separable because it is a **per-pixel colour function**, not a
+region: no flood scan, no coverage mask, and no composite read. The next slice
+should decide whether a gradient is (a) another first-class layer element with
+`kind: "gradient"` (geometry + colour stops, rasterized in element order, which
+is the same model the bucket fill proved) or (b) a stroke-level fill mode. The
+element model is the honest fit for a non-stroke primitive; a gradient that has
+to survive undo/redo and save/reopen must be reproducible from the file, not
+from a one-off pixel snapshot. Gradients are not half-wired today: there is no
+button or tool for them.

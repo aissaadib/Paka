@@ -48,8 +48,8 @@ export function CanvasStatusBar({
   fileBusy = false,
   onDismissFileMessage,
 }: CanvasStatusBarProps) {
-  const { engine } = useEditor();
-  const { document, viewport, history, file, selectedStrokes } = useEditorState();
+  const { engine, actions } = useEditor();
+  const { document, viewport, history, file, selectedStrokes, notice } = useEditorState();
   const native = useNativeEnvironment();
   const positionRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLSpanElement | null>(null);
@@ -74,7 +74,16 @@ export function CanvasStatusBar({
         ? "native …"
         : "native unavailable";
 
-  const fileLabel = fileBusy ? "working…" : (fileMessage?.text ?? "");
+  const hasFileMessage = fileMessage !== null && fileMessage !== undefined;
+  const noticeVisible = !hasFileMessage && notice !== null;
+  const fileLabel = fileBusy ? "working…" : (fileMessage?.text ?? notice ?? "");
+  const isError =
+    !fileBusy && (fileMessage?.tone === "error" || noticeVisible);
+  const dismiss = hasFileMessage
+    ? onDismissFileMessage
+    : noticeVisible
+      ? actions.dismissNotice
+      : undefined;
 
   return (
     <footer className="status-bar">
@@ -110,7 +119,7 @@ export function CanvasStatusBar({
           className={[
             "status-bar__item",
             "status-bar__message",
-            fileMessage?.tone === "error" && !fileBusy ? "is-error" : "",
+            isError ? "is-error" : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -118,12 +127,12 @@ export function CanvasStatusBar({
           aria-live="polite"
         >
           {fileLabel}
-          {onDismissFileMessage ? (
+          {dismiss ? (
             <button
               type="button"
               className="status-bar__dismiss"
               aria-label="Dismiss message"
-              onClick={onDismissFileMessage}
+              onClick={dismiss}
             >
               ✕
             </button>

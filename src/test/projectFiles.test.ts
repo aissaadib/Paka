@@ -72,7 +72,7 @@ function createHarness(options: { readonly withRenderer?: boolean } = {}): Harne
 
   // The renderer reads strokes through a source that is pointed at the engine
   // once it exists; the renderer only ever calls it lazily.
-  const source: { listStrokes: StrokeSource["listStrokes"] } = { listStrokes: () => [] };
+  const source: StrokeSource = { listStrokes: () => [], listElements: () => [] };
   const renderer =
     options.withRenderer === false
       ? undefined
@@ -85,6 +85,7 @@ function createHarness(options: { readonly withRenderer?: boolean } = {}): Harne
 
   const engine = new DrawingEngine({ document: drawingDocument, renderer });
   source.listStrokes = (layerId) => engine.listStrokes(layerId);
+  source.listElements = (layerId) => engine.listElements(layerId);
 
   const gateway = new MemoryProjectGateway();
   return { engine, files: new ProjectFiles(engine, gateway), gateway, recording, display };

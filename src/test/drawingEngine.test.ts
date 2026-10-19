@@ -14,10 +14,10 @@ import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
+import { isFillPatch } from "../core/document/types";
 import type { PointerSample } from "../types/pointer";
 
-function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
-  return {
+function createSample(overrides: Partial<PointerSample> = {}): PointerSample {  return {
     phase: "move",
     pointerId: 1,
     kind: "pen",
@@ -46,7 +46,12 @@ function createEngine() {
  * A renderer that records what the engine asks of it. Passing one in keeps the
  * engine off Canvas 2D, so surface-invalidation policy can be asserted in Node.
  */
-function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {}) {
+function createSpyRenderer(
+  options: {
+    readonly compositePixel?: Rgb | null;
+    readonly compositeImage?: ImageData | null;
+  } = {},
+) {
   const invalidated: string[] = [];
   const sampled: Array<{ x: number; y: number }> = [];
   const began: StrokeRecord[] = [];
@@ -56,6 +61,7 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
   let cancelled = 0;
   let documents = 0;
   let renders = 0;
+  let compositeReads = 0;
   // `undefined` means "no colour here" (the same answer as an empty document).
   const compositePixel = options.compositePixel ?? null;
 
@@ -93,6 +99,10 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
       sampled.push({ x: docX, y: docY });
       return compositePixel;
     },
+    readCompositeImage: () => {
+      compositeReads += 1;
+      return options.compositeImage ?? null;
+    },
     render: () => {},
     requestRender: () => {
       renders += 1;
@@ -111,6 +121,7 @@ function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {
     getCancelled: () => cancelled,
     getDocuments: () => documents,
     getRenders: () => renders,
+    getCompositeReads: () => compositeReads,
   };
 }
 
@@ -1477,5 +1488,309 @@ describe("DrawingEngine selection", () => {
     expect(engine.duplicateSelection()).toBe(false);
     expect(engine.flipSelection("horizontal")).toBe(false);
     expect(engine.getState().history.depth).toBe(depth);
+  });
+});
+
+/** White RGBA image with a one-pixel black frame around the edge. */
+function framedComposite(width = 20, height = 20): ImageData {
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) {
+        const offset = (y * width + x) * 4;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+      }
+    }
+  }
+  return { data, width, height, colorSpace: "srgb" } as ImageData;
+}
+
+function createBucketEngine(options: { readonly compositeImage?: ImageData | null } = {}) {
+  const spy = createSpyRenderer({ compositeImage: options.compositeImage ?? null });
+  const engine = new DrawingEngine({
+    document: createDocument({ name: "Test", width: 20, height: 20 }),
+    renderer: spy.renderer,
+    brush: { ...DEFAULT_BRUSH, color: "#ff0000" },
+  });
+  engine.setTool("bucket");
+  return { engine, spy };
+}
+
+function pressBucket(engine: DrawingEngine, docX: number, docY: number): void {
+  engine.handlePointerSample(
+    createSample({ phase: "down", docX, docY, button: 0, buttons: 1 }),
+  );
+}
+
+function releaseBucket(engine: DrawingEngine, docX: number, docY: number): void {
+  engine.handlePointerSample(
+    createSample({ phase: "up", docX, docY, button: 0, buttons: 0 }),
+  );
+}
+
+describe("DrawingEngine bucket fill", () => {
+  it("applies a pixel patch on press and records one undo step on release", () => {
+    const { engine, spy } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+
+    // The patch is already on the layer, so the user sees the real result.
+    const applied = engine.listElements(layerId);
+    expect(applied).toHaveLength(1);
+    const patch = applied[0];
+    expect(isFillPatch(patch)).toBe(true);
+    if (!isFillPatch(patch)) {
+      return;
+    }
+    expect(patch).toMatchObject({
+      layerId,
+      kind: "fill",
+      color: "#ff0000",
+      x: 1,
+      y: 1,
+      width: 18,
+      height: 18,
+    });
+    expect(patch.mask).toHaveLength(18 * 18);
+    expect(patch.mask.every((value) => value === 255)).toBe(true);
+    expect(spy.getCompositeReads()).toBe(1);
+    expect(spy.invalidated).toContain(layerId);
+    // Not committed yet: no history entry, and the drawing is not dirty.
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+
+    releaseBucket(engine, 10, 10);
+
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+    expect(engine.listStrokes(layerId)).toEqual([]);
+  });
+
+  it("undoes and redoes the committed pixels without scanning again", () => {
+    const { engine, spy } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+    const patch = engine.listElements(layerId)[0];
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.canRedo).toBe(true);
+
+    const readsBeforeRedo = spy.getCompositeReads();
+    expect(engine.redo()).toBe(true);
+    expect(engine.listElements(layerId)[0]).toBe(patch);
+    // Redo replays the stored patch; it must not sample the composite again.
+    expect(spy.getCompositeReads()).toBe(readsBeforeRedo);
+  });
+
+  it("samples the visible composite, not just the active layer", () => {
+    // The fake composite has a black frame the engine's layer does not contain;
+    // the resulting box proves the boundary came from the merged image.
+    const { engine } = createBucketEngine({ compositeImage: framedComposite(30, 20) });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 15, 10);
+    releaseBucket(engine, 15, 10);
+
+    const patch = engine.listElements(layerId)[0];
+    expect(isFillPatch(patch) && patch.width).toBe(28);
+    expect(isFillPatch(patch) && patch.height).toBe(18);
+  });
+
+  it("honours the tolerance setting for the next fill", () => {
+    const width = 6;
+    const shades = [100, 104, 108, 120, 124, 200];
+    const data = new Uint8ClampedArray(width * 4);
+    shades.forEach((shade, x) => {
+      const offset = x * 4;
+      data[offset] = shade;
+      data[offset + 1] = shade;
+      data[offset + 2] = shade;
+      data[offset + 3] = 255;
+    });
+    const composite = { data, width, height: 1, colorSpace: "srgb" } as ImageData;
+
+    const tight = createBucketEngine({ compositeImage: composite });
+    tight.engine.setFillTolerance(4);
+    expect(tight.engine.getState().fillTolerance).toBe(4);
+    pressBucket(tight.engine, 0, 0);
+    releaseBucket(tight.engine, 0, 0);
+    const tightPatch = tight.engine.listElements(
+      tight.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(tightPatch) && tightPatch.width).toBe(2);
+
+    const wide = createBucketEngine({ compositeImage: composite });
+    wide.engine.setFillTolerance(40);
+    pressBucket(wide.engine, 0, 0);
+    releaseBucket(wide.engine, 0, 0);
+    const widePatch = wide.engine.listElements(
+      wide.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(widePatch) && widePatch.width).toBe(5);
+  });
+
+  it("clamps and rounds the tolerance editor value", () => {
+    const { engine } = createBucketEngine();
+    expect(engine.getState().fillTolerance).toBe(24);
+    engine.setFillTolerance(300);
+    expect(engine.getState().fillTolerance).toBe(255);
+    engine.setFillTolerance(-4);
+    expect(engine.getState().fillTolerance).toBe(0);
+    engine.setFillTolerance(12.6);
+    expect(engine.getState().fillTolerance).toBe(13);
+    engine.setFillTolerance(Number.NaN);
+    expect(engine.getState().fillTolerance).toBe(13);
+  });
+
+  it("leaves the document untouched for an out-of-bounds press", () => {
+    const { engine, spy } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    for (const [x, y] of [
+      [-1, 5],
+      [5, -1],
+      [21, 5],
+      [5, 21],
+      [Number.NaN, 5],
+    ] as const) {
+      pressBucket(engine, x, y);
+      releaseBucket(engine, x, y);
+    }
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+    // The composite is not even read for a press outside the paper.
+    expect(spy.getCompositeReads()).toBe(0);
+  });
+
+  it("does nothing when the renderer cannot supply a composite", () => {
+    const { engine } = createBucketEngine({ compositeImage: null });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("avoids an invisible undo step when the fill colour is already there", () => {
+    // White composite, white brush, zero tolerance: nothing would change.
+    const { engine } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setBrush({ color: "#ffffff" });
+    engine.setFillTolerance(0);
+
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("cancels an uncommitted fill without dirtying the document", () => {
+    const { engine, spy } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+
+    engine.handlePointerSample(
+      createSample({ phase: "cancel", docX: 10, docY: 10, button: 0, buttons: 0 }),
+    );
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+    // Cancelling repaints the layer without leaving the patch in history.
+    expect(spy.invalidated.filter((id) => id === layerId).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("cancels an uncommitted fill when the tool changes", () => {
+    const { engine } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+
+    engine.setTool("brush");
+
+    expect(engine.listElements(layerId)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("keeps two separate fills as two undo steps", () => {
+    const { engine } = createBucketEngine({ compositeImage: framedComposite() });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+
+    expect(engine.listElements(layerId)).toHaveLength(2);
+    expect(engine.getState().history.depth).toBe(2);
+    engine.undo();
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    engine.undo();
+    expect(engine.listElements(layerId)).toHaveLength(0);
+  });
+
+  it("keeps fills intact through layer duplication and deletion", () => {
+    const { engine } = createBucketEngine({ compositeImage: framedComposite() });
+    const sourceId = engine.getState().document.activeLayerId as string;
+
+    pressBucket(engine, 10, 10);
+    releaseBucket(engine, 10, 10);
+    const original = engine.listElements(sourceId)[0];
+
+    engine.duplicateLayer(sourceId);
+    const copyId = engine.getState().document.activeLayerId as string;
+    const copied = engine.listElements(copyId)[0];
+    expect(isFillPatch(copied)).toBe(true);
+    expect(copied.id).not.toBe(original.id);
+    expect(isFillPatch(copied) && [...copied.mask]).toEqual(
+      isFillPatch(original) ? [...original.mask] : [],
+    );
+
+    // Undoing the duplicate removes the copied fill, not the original.
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(copyId)).toEqual([]);
+    expect(engine.listElements(sourceId)).toEqual([original]);
+
+    // Deleting the source layer and undoing restores its fill content. A
+    // document always keeps one layer, so duplicate again to allow removal.
+    engine.duplicateLayer(sourceId);
+    engine.removeLayer(sourceId);
+    expect(engine.listElements(sourceId)).toEqual([]);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(sourceId)).toEqual([original]);
+  });
+
+  it("refuses a document too large to scan and explains why", () => {
+    const spy = createSpyRenderer({ compositeImage: framedComposite() });
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Huge", width: 8192, height: 8192 }),
+      renderer: spy.renderer,
+    });
+    engine.setTool("bucket");
+
+    pressBucket(engine, 4000, 4000);
+
+    expect(engine.getState().notice).toContain("Bucket fill is limited to");
+    expect(engine.listElements(engine.getState().document.activeLayerId as string)).toEqual([]);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(spy.getCompositeReads()).toBe(0);
+
+    engine.dismissNotice();
+    expect(engine.getState().notice).toBeNull();
   });
 });

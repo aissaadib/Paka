@@ -23,13 +23,18 @@ import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
 import type { FlipAxis } from "../../types/transform";
 import type { Viewport } from "../../types/viewport";
-import { rgbToHex } from "../../utils/color";
+import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
 import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
-import { createDocumentCommand, type DocumentCommandHost, type StrokeTransfer } from "../commands/documentCommand";
+import {
+  createDocumentCommand,
+  type DocumentCommandHost,
+  type ElementTransfer,
+} from "../commands/documentCommand";
+import { createFillCommand } from "../commands/fillCommand";
 import {
   createStrokeCommand,
   createStrokeCommandHost,
@@ -60,7 +65,10 @@ import {
   boundsFromCorners,
   strokeIntersectsBounds,
 } from "../document/strokeSelection";
-import type { DrawingDocument, LayerId, StrokeRecord } from "../document/types";
+import type { DrawingDocument, FillPatchRecord, LayerElement, LayerId, StrokeRecord } from "../document/types";
+import { isFillPatch } from "../document/types";
+import { cloneFillPatch, createFillPatch } from "../fill/fillPatch";
+import { MAX_FILL_SCAN_PIXELS, floodFill } from "../fill/floodFill";
 import {
   CanvasInputBinder,
   type CanvasInputHandlers,
@@ -108,6 +116,18 @@ export interface EditorSnapshot {
    * toggling this never rewrites existing strokes.
    */
   readonly shapeFill: boolean;
+  /**
+   * Colour distance the bucket treats as "the same region", in 8-bit sRGB
+   * channel units (`0..255`). Editor state: it describes the next fill, not the
+   * fills already committed, which carry their own pixels.
+   */
+  readonly fillTolerance: number;
+  /**
+   * A user-facing message from an editor action that could not complete, or
+   * `null`. The status bar shows it; it is not a file message and is not
+   * persisted.
+   */
+  readonly notice: string | null;
 }
 
 /**
@@ -228,6 +248,19 @@ interface SelectionGesture {
   dy: number;
 }
 
+/**
+ * A fill whose pixels are already on the layer but whose history step has not
+ * been recorded yet.
+ *
+ * The press applies the patch so the user sees the real result immediately; the
+ * release commits it as one undo step. Until then the patch is not part of the
+ * saved drawing's history and cancelling removes it exactly.
+ */
+interface ActiveFill {
+  readonly patch: FillPatchRecord;
+  readonly index: number;
+}
+
 export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
@@ -254,6 +287,10 @@ export class DrawingEngine implements StrokeSource {
    * this is editor state and not part of the brush or the document.
    */
   private shapeFill = false;
+  /** Bucket-fill tolerance in 8-bit channel units. */
+  private fillTolerance = 24;
+  private activeFill: ActiveFill | null = null;
+  private notice: string | null = null;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
   /**
@@ -298,13 +335,10 @@ export class DrawingEngine implements StrokeSource {
     this.documentCommandHost = {
       getDocument: () => engine.doc,
       applyDocument: (next) => engine.applyDocumentState(next),
-      clearLayerStrokes: (layerId) => engine.strokes.clearLayer(layerId),
-      restoreLayerStrokes: (layerId, strokes) => {
-        // Idempotent: applying the same restore twice cannot duplicate strokes.
-        engine.strokes.clearLayer(layerId);
-        for (const stroke of strokes) {
-          engine.strokes.insert(stroke);
-        }
+      clearLayerElements: (layerId) => engine.strokes.clearLayer(layerId),
+      restoreLayerElements: (layerId, elements) => {
+        // Idempotent: applying the same restore twice cannot duplicate content.
+        engine.strokes.restore(layerId, elements);
       },
     };
     this.store = createStore(this.buildSnapshot());
@@ -335,6 +369,10 @@ export class DrawingEngine implements StrokeSource {
       cancelSelection: () => engine.cancelSelection(),
       clearSelection: () => engine.clearSelection(),
       pickColor: (sample) => engine.pickColor(sample),
+      beginFill: (sample) => engine.beginFill(sample),
+      finishFill: () => engine.finishFill(),
+      cancelFill: () => engine.cancelFill(),
+      isFillActive: () => engine.activeFill !== null,
     };
 
     this.commands.subscribe(() => this.publish());
@@ -442,6 +480,10 @@ export class DrawingEngine implements StrokeSource {
     return this.strokes.list(layerId);
   }
 
+  listElements(layerId: LayerId): readonly LayerElement[] {
+    return this.strokes.listElements(layerId);
+  }
+
   // ---------------------------------------------------------- document / view
 
   newDocument(options: NewDocumentOptions): void {
@@ -450,6 +492,7 @@ export class DrawingEngine implements StrokeSource {
     this.doc = documentOps.createDocument(options);
     this.strokes.clear();
     this.commands.clear();
+    this.notice = null;
     this.filePath = null;
     this.revision = 0;
     this.savedRevision = 0;
@@ -479,13 +522,21 @@ export class DrawingEngine implements StrokeSource {
     this.doc = project.document;
     this.strokes.clear();
     this.commands.clear();
+    this.notice = null;
 
     const nextIndex = new Map<LayerId, number>();
-    for (const stroke of project.strokes) {
-      const index = nextIndex.get(stroke.layerId) ?? 0;
-      this.strokes.insert(stroke);
-      this.commands.push(createStrokeCommand(stroke, index, this.commandHost));
-      nextIndex.set(stroke.layerId, index + 1);
+    for (const element of project.elements) {
+      const index = nextIndex.get(element.layerId) ?? 0;
+      this.strokes.insert(element);
+      // A reopened drawing keeps its history shape: one undo step per element,
+      // including fills, which replay their committed pixels rather than
+      // re-scanning whatever the composite looks like now.
+      this.commands.push(
+        isFillPatch(element)
+          ? createFillCommand(element, index, this.commandHost)
+          : createStrokeCommand(element, index, this.commandHost),
+      );
+      nextIndex.set(element.layerId, index + 1);
     }
 
     this.filePath = path;
@@ -558,9 +609,13 @@ export class DrawingEngine implements StrokeSource {
     if (!copy) {
       return;
     }
-    const strokes = this.strokes.list(layerId).map((stroke) => cloneStroke(stroke, copy.id));
+    const elements = this.strokes
+      .listElements(layerId)
+      .map((element) =>
+        isFillPatch(element) ? cloneFillPatch(element, copy.id) : cloneStroke(element, copy.id),
+      );
     this.commitDocumentChange("Duplicate Layer", before, after, {
-      addedStrokes: { layerId: copy.id, strokes },
+      addedElements: { layerId: copy.id, elements },
     });
   }
 
@@ -570,10 +625,13 @@ export class DrawingEngine implements StrokeSource {
     if (after === before) {
       return;
     }
-    // `list` returns the live array, which the command clears when it applies,
-    // so the strokes to restore are copied out first.
-    const removedStrokes: StrokeTransfer = { layerId, strokes: [...this.strokes.list(layerId)] };
-    this.commitDocumentChange("Delete Layer", before, after, { removedStrokes });
+    // `listElements` returns the live array, which the command clears when it
+    // applies, so the elements to restore are copied out first.
+    const removedElements: ElementTransfer = {
+      layerId,
+      elements: [...this.strokes.listElements(layerId)],
+    };
+    this.commitDocumentChange("Delete Layer", before, after, { removedElements });
   }
 
   renameLayer(layerId: LayerId, name: string): void {
@@ -679,6 +737,33 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /**
+   * Sets the bucket fill's colour tolerance (`0..255`, 8-bit sRGB units).
+   *
+   * Editor state, like `shapeFill`: it describes the next fill. A committed
+   * fill stores its pixels, so changing the tolerance never rewrites one.
+   */
+  setFillTolerance(tolerance: number): void {
+    if (!Number.isFinite(tolerance)) {
+      return;
+    }
+    const next = Math.round(clamp(tolerance, 0, 255));
+    if (next === this.fillTolerance) {
+      return;
+    }
+    this.fillTolerance = next;
+    this.publish();
+  }
+
+  /** Clears a user-facing notice raised by an editor action. */
+  dismissNotice(): void {
+    if (this.notice === null) {
+      return;
+    }
+    this.notice = null;
+    this.publish();
+  }
+
   setTool(toolId: ToolId): void {
     if (this.currentToolId === toolId) {
       return;
@@ -734,14 +819,14 @@ export class DrawingEngine implements StrokeSource {
   // ------------------------------------------------------------------ history
 
   undo(): boolean {
-    if (this.activeStroke || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.undo());
   }
 
   redo(): boolean {
-    if (this.activeStroke || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.redo());
@@ -867,6 +952,126 @@ export class DrawingEngine implements StrokeSource {
     this.cancelStroke();
   }
 
+  // -------------------------------------------------------------- bucket fill
+
+  /**
+   * Runs a contiguous flood fill at the press point.
+   *
+   * The region is sampled from the **merged visible composite** - paper plus
+   * every visible layer at its opacity - so line art on another layer defines
+   * the boundary the user sees. The committed patch is written to the **active
+   * layer**, exactly like a stroke. The patch enters the layer immediately so
+   * the visible pixels are the real result; `finishFill` records the history
+   * step on release and `cancelFill` removes it cleanly.
+   *
+   * Returns whether a patch was applied. A press outside the paper, a fill that
+   * would change nothing, a document too large to scan safely or an unavailable
+   * renderer is a no-op with no history entry and no dirty flag.
+   */
+  private beginFill(sample: PointerSample): boolean {
+    if (this.activeStroke || this.activeFill) {
+      return false;
+    }
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      return false;
+    }
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return false;
+    }
+
+    const documentPixels = this.doc.width * this.doc.height;
+    if (documentPixels > MAX_FILL_SCAN_PIXELS) {
+      this.raiseNotice(
+        `Bucket fill is limited to ${MAX_FILL_SCAN_PIXELS.toLocaleString("en-US")} document pixels; ` +
+          `this document is ${this.doc.width} x ${this.doc.height}.`,
+      );
+      return false;
+    }
+
+    const image = this.renderer?.readCompositeImage();
+    if (!image) {
+      return false;
+    }
+
+    const seedX = Math.min(this.doc.width - 1, Math.max(0, Math.floor(sample.docX)));
+    const seedY = Math.min(this.doc.height - 1, Math.max(0, Math.floor(sample.docY)));
+    const region = floodFill(image, seedX, seedY, this.fillTolerance);
+    if (!region) {
+      return false;
+    }
+
+    // At tolerance 0 every selected pixel is exactly the seed colour. Painting
+    // that colour back is a no-op, and recording an invisible undo step would
+    // make the history button look broken.
+    if (this.fillTolerance === 0) {
+      const offset = (seedY * image.width + seedX) * 4;
+      const colour = hexToRgb(this.brush.color);
+      if (
+        colour &&
+        colour.r === image.data[offset] &&
+        colour.g === image.data[offset + 1] &&
+        colour.b === image.data[offset + 2] &&
+        image.data[offset + 3] === 255
+      ) {
+        return false;
+      }
+    }
+
+    const patch = createFillPatch(layerId, this.brush.color, region);
+    const index = this.strokes.elementCount(layerId);
+    this.strokes.insert(patch);
+    this.activeFill = { patch, index };
+    this.renderer?.invalidateLayer(layerId);
+    this.notice = null;
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * Commits the patch applied by the press as exactly one undo step.
+   *
+   * The command carries the patch itself, so redo replays these pixels; it does
+   * not run flood fill again against a composite that may have changed.
+   */
+  private finishFill(): void {
+    const active = this.activeFill;
+    if (!active) {
+      return;
+    }
+    this.activeFill = null;
+    // Bumped before the command is recorded so the snapshot the stack publishes
+    // already carries the dirty flag.
+    this.revision += 1;
+    this.commands.push(createFillCommand(active.patch, active.index, this.commandHost));
+    this.publish();
+  }
+
+  /**
+   * Removes an uncommitted fill, leaving the document exactly as it was.
+   *
+   * Used by a lost pointer capture, a tool switch and `Esc`-style aborts. No
+   * history entry is recorded and the revision does not move, so a cancelled
+   * fill cannot make the document dirty.
+   */
+  private cancelFill(): void {
+    const active = this.activeFill;
+    if (!active) {
+      return;
+    }
+    this.activeFill = null;
+    this.strokes.remove(active.patch.layerId, active.patch.id);
+    this.renderer?.invalidateLayer(active.patch.layerId);
+    this.publish();
+    this.requestRender();
+  }
+
+  private raiseNotice(message: string): void {
+    this.notice = message;
+    this.publish();
+  }
+
   finishStroke(): void {
     const stroke = this.activeStroke;
     this.strokeBuilder = null;
@@ -876,7 +1081,7 @@ export class DrawingEngine implements StrokeSource {
     }
 
     this.renderer?.endStroke(stroke);
-    const index = this.strokes.count(stroke.layerId);
+    const index = this.strokes.elementCount(stroke.layerId);
     this.strokes.insert(stroke);
     // The revision is bumped before the command is recorded, so the single
     // snapshot the command stack publishes already carries the dirty flag.
@@ -943,11 +1148,11 @@ export class DrawingEngine implements StrokeSource {
 
     const wanted = new Set(selection.strokeIds);
     const entries: DeleteEntry[] = [];
-    const layer = this.strokes.list(selection.layerId);
+    const layer = this.strokes.listElements(selection.layerId);
     for (let index = 0; index < layer.length; index += 1) {
-      const stroke = layer[index];
-      if (wanted.has(stroke.id)) {
-        entries.push({ stroke, index });
+      const element = layer[index];
+      if (!isFillPatch(element) && wanted.has(element.id)) {
+        entries.push({ stroke: element, index });
       }
     }
     if (entries.length === 0) {
@@ -1018,7 +1223,7 @@ export class DrawingEngine implements StrokeSource {
    * undo/redo re-inserts the very same strokes instead of minting new ids.
    */
   duplicateSelection(): boolean {
-    if (this.activeStroke || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.selectionGesture) {
       return false;
     }
     const selection = this.selection;
@@ -1026,11 +1231,11 @@ export class DrawingEngine implements StrokeSource {
       return false;
     }
     const wanted = new Set(selection.strokeIds);
-    const layer = this.strokes.list(selection.layerId);
+    const layer = this.strokes.listElements(selection.layerId);
     const entries: DuplicateEntry[] = [];
     for (let index = 0; index < layer.length; index += 1) {
       const source = layer[index];
-      if (wanted.has(source.id)) {
+      if (!isFillPatch(source) && wanted.has(source.id)) {
         entries.push({ source, index, clone: cloneStroke(source) });
       }
     }
@@ -1311,7 +1516,7 @@ export class DrawingEngine implements StrokeSource {
    * same coordinates.
    */
   private beginSelectionEdit(): MoveEntry[] | null {
-    if (this.activeStroke || this.selectionGesture) {
+    if (this.activeStroke || this.activeFill || this.selectionGesture) {
       return null;
     }
     const entries: MoveEntry[] = this.selectedStrokes().map((stroke) => ({
@@ -1433,8 +1638,8 @@ export class DrawingEngine implements StrokeSource {
     after: DrawingDocument,
     options: {
       readonly mergeKey?: string;
-      readonly removedStrokes?: StrokeTransfer;
-      readonly addedStrokes?: StrokeTransfer;
+      readonly removedElements?: ElementTransfer;
+      readonly addedElements?: ElementTransfer;
     } = {},
   ): void {
     if (after === before) {
@@ -1635,6 +1840,9 @@ export class DrawingEngine implements StrokeSource {
   }
 
   private abortStroke(): void {
+    if (this.activeFill) {
+      this.cancelFill();
+    }
     if (this.activeStroke) {
       this.cancelStroke();
     }
@@ -1653,6 +1861,8 @@ export class DrawingEngine implements StrokeSource {
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
       shapeFill: this.shapeFill,
+      fillTolerance: this.fillTolerance,
+      notice: this.notice,
     };
   }
 
@@ -1668,7 +1878,9 @@ export class DrawingEngine implements StrokeSource {
       previous.history === next.history &&
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
-      previous.shapeFill === next.shapeFill
+      previous.shapeFill === next.shapeFill &&
+      previous.fillTolerance === next.fillTolerance &&
+      previous.notice === next.notice
     ) {
       return;
     }

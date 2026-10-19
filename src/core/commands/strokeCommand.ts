@@ -1,22 +1,26 @@
 /**
- * Stroke command: stroke-level undo without bitmap snapshots.
+ * Element command host and stroke command.
+ *
+ * Layer content is one ordered list of strokes and fill patches. Removing a
+ * stroke and re-inserting a fill patch are the same operation on that list, so
+ * both commands share this host contract and the same re-rasterization path.
  *
  * The stroke data is retained while drawing, so undoing means removing it from
- * the stroke store and letting the renderer re-rasterize the layer from the
- * strokes that remain. Redo inserts it back at its original index, which keeps
- * the painting order inside the layer identical to what the user drew.
+ * the store and letting the renderer re-rasterize the layer from what remains.
+ * Redo inserts it back at its original element index, which keeps the painting
+ * order inside the layer identical to what the user drew.
  */
 
 import { createId } from "../../utils/id";
 import type { StrokeStore } from "../document/strokeStore";
-import type { LayerId, StrokeRecord } from "../document/types";
+import type { LayerElement, LayerId, StrokeRecord } from "../document/types";
 import type { Command } from "./types";
 
 export interface StrokeCommandHost {
-  /** Inserts a stroke, optionally at a specific index in the layer. */
-  insert(stroke: StrokeRecord, index?: number): void;
-  remove(stroke: StrokeRecord): void;
-  /** Re-rasterizes a layer after its stroke list changed. */
+  /** Inserts an element, optionally at a specific index in the layer. */
+  insert(element: LayerElement, index?: number): void;
+  remove(element: LayerElement): void;
+  /** Re-rasterizes a layer after its element list changed. */
   refresh(layerId: LayerId): void;
 }
 
@@ -26,11 +30,11 @@ export function createStrokeCommandHost(
   refresh: (layerId: LayerId) => void,
 ): StrokeCommandHost {
   return {
-    insert(stroke, index) {
-      store.insert(stroke, index);
+    insert(element, index) {
+      store.insert(element, index);
     },
-    remove(stroke) {
-      store.remove(stroke.layerId, stroke.id);
+    remove(element) {
+      store.remove(element.layerId, element.id);
     },
     refresh,
   };

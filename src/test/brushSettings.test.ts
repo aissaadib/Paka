@@ -82,6 +82,7 @@ describe("tool definitions", () => {
       "line",
       "rectangle",
       "ellipse",
+      "bucket",
       "picker",
       "pan",
     ]);
@@ -91,6 +92,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
+    expect(getToolDefinition("bucket").shortcut).toBe("G");
     expect(getToolDefinition("picker").shortcut).toBe("I");
     expect(getToolDefinition("pan").shortcut).toBe("H");
   });
@@ -102,6 +104,7 @@ describe("tool definitions", () => {
     expect(findToolByShortcut("l")?.id).toBe("line");
     expect(findToolByShortcut("r")?.id).toBe("rectangle");
     expect(findToolByShortcut("o")?.id).toBe("ellipse");
+    expect(findToolByShortcut("g")?.id).toBe("bucket");
     expect(findToolByShortcut("i")?.id).toBe("picker");
     expect(findToolByShortcut("h")?.id).toBe("pan");
     expect(findToolByShortcut("x")).toBeUndefined();
