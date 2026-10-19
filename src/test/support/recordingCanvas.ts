@@ -50,6 +50,10 @@ export class RecordingCanvas {
   blobBytes: Uint8Array | null = PNG_SIGNATURE;
   /** MIME types `toBlob` was asked for, in order. */
   readonly blobTypes: string[] = [];
+  /** What `getImageData` returns; a transparent black pixel by default. */
+  imageData: Uint8ClampedArray = new Uint8ClampedArray(4);
+  /** Arguments of every `getImageData` call, in order. */
+  readonly getImageDataCalls: [number, number, number, number][] = [];
 
   constructor() {
     const ctx = {
@@ -79,6 +83,24 @@ export class RecordingCanvas {
     for (const name of RECORDED_METHODS) {
       (ctx as unknown as Record<string, unknown>)[name] = record(name);
     }
+
+    // Pixel reads are not draw calls, so they are recorded separately: the
+    // renderer's colour probe is asserted from the returned value and the
+    // sampled rectangle rather than from the draw stream.
+    (ctx as unknown as Record<string, unknown>).getImageData = (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): ImageData => {
+      this.getImageDataCalls.push([x, y, width, height]);
+      return {
+        data: this.imageData,
+        width,
+        height,
+        colorSpace: "srgb",
+      } as unknown as ImageData;
+    };
     this.ctx = ctx as unknown as CanvasRenderingContext2D;
   }
 

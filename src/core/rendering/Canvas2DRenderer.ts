@@ -13,12 +13,18 @@
  * WebGL/WebGPU implementation does not require touching the rest of the app.
  */
 
-import type { DrawingDocument, LayerId, LayerBlendMode, StrokeRecord } from "../document/types";
+import type {
+  DrawingDocument,
+  Layer,
+  LayerId,
+  LayerBlendMode,
+  StrokeRecord,
+} from "../document/types";
 import type { Viewport } from "../../types/viewport";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
 import { rasterizeStroke, strokeOpacity } from "./canvas2dStroke";
-import type { DrawingRenderer, RendererKind, StrokeSource } from "./types";
+import type { DrawingRenderer, RendererKind, Rgb, StrokeSource } from "./types";
 
 export interface Canvas2DRendererOptions {
   readonly canvas: HTMLCanvasElement;
@@ -36,6 +42,16 @@ function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
     case "normal":
       return "source-over";
   }
+}
+
+/**
+ * True when a layer contributes to the composite at all.
+ *
+ * Shared by the display/export painter and the colour probe so the two cannot
+ * disagree about which layers a pick can see.
+ */
+function isComposited(layer: Layer): boolean {
+  return layer.visible && layer.opacity > 0;
 }
 
 function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number): void {
@@ -76,6 +92,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
    */
   private eraseBase: HTMLCanvasElement | null = null;
   private eraseLayerId: LayerId | null = null;
+  /**
+   * A 1x1 scratch canvas for `readCompositePixel`, allocated on first use.
+   *
+   * One pixel is all a colour probe needs, and allocating it lazily keeps the
+   * "first canvas created is the stroke buffer" assumption intact - the stroke
+   * buffer is still the only canvas the constructor creates.
+   */
+  private probeCanvas: HTMLCanvasElement | null = null;
   private rasterScale: number;
   private destroyed = false;
 
@@ -339,6 +363,54 @@ export class Canvas2DRenderer implements DrawingRenderer {
     return canvas;
   }
 
+  /**
+   * Reads the composite the user sees at a document point.
+   *
+   * A 1x1 scratch is filled with the paper, then every visible layer is drawn
+   * offset so that the sampled document pixel lands exactly on `(0, 0)`. The
+   * offset is floored so the probe stays pixel-aligned with what is on screen:
+   * nothing is interpolated, so the read is the pixel under the eye rather than
+   * a blend of its neighbours. The paper is opaque, so the returned colour
+   * needs no alpha; the precision is the surfaces' - 8 bits per channel.
+   */
+  readCompositePixel(docX: number, docY: number): Rgb | null {
+    const doc = this.doc;
+    if (this.destroyed || !doc) {
+      return null;
+    }
+
+    const probe = this.ensureProbeCanvas();
+    const ctx = probe.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = doc.background;
+    ctx.fillRect(0, 0, 1, 1);
+
+    const offsetX = -Math.floor(docX * this.rasterScale);
+    const offsetY = -Math.floor(docY * this.rasterScale);
+    for (const layer of doc.layers) {
+      if (!isComposited(layer)) {
+        continue;
+      }
+      const surface = this.ensureRasterized(layer.id);
+      ctx.globalAlpha = layer.opacity;
+      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+      ctx.drawImage(surface.canvas, offsetX, offsetY);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    const pixel = ctx.getImageData(0, 0, 1, 1).data;
+    return { r: pixel[0], g: pixel[1], b: pixel[2] };
+  }
+
   requestRender(): void {
     this.requestFrame();
   }
@@ -352,6 +424,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.surfaces.dispose();
     this.activeStroke = null;
     this.dropEraseBase();
+    this.probeCanvas = null;
   }
 
   /**
@@ -368,7 +441,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillRect(0, 0, doc.width, doc.height);
 
     for (const layer of doc.layers) {
-      if (!layer.visible || layer.opacity <= 0) {
+      if (!isComposited(layer)) {
         continue;
       }
       const surface = this.ensureRasterized(layer.id);
@@ -379,6 +452,19 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  /** The 1x1 colour-probe canvas, allocated on first use and reused after. */
+  private ensureProbeCanvas(): HTMLCanvasElement {
+    const existing = this.probeCanvas;
+    if (existing) {
+      return existing;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    this.probeCanvas = canvas;
+    return canvas;
   }
 
   /** Rasterizes a layer from its stroke list when its pixels are invalid. */

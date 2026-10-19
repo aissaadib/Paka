@@ -75,14 +75,16 @@ describe("brush configuration", () => {
 
 describe("tool definitions", () => {
   it("lists the implemented tools only", () => {
-    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual(["brush", "eraser", "pan"]);
+    expect(TOOL_DEFINITIONS.map((tool) => tool.id)).toEqual(["brush", "eraser", "picker", "pan"]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
     expect(getToolDefinition("eraser").shortcut).toBe("E");
+    expect(getToolDefinition("picker").shortcut).toBe("I");
   });
 
   it("resolves shortcuts case-insensitively and ignores unknown keys", () => {
     expect(findToolByShortcut("b")?.id).toBe("brush");
     expect(findToolByShortcut("E")?.id).toBe("eraser");
+    expect(findToolByShortcut("i")?.id).toBe("picker");
     expect(findToolByShortcut("h")?.id).toBe("pan");
     expect(findToolByShortcut("x")).toBeUndefined();
   });

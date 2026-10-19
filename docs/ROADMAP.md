@@ -64,7 +64,11 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 2 - Illustration tools
 
-- [ ] Colour picker from the canvas.
+- [x] Colour picker from the canvas: samples the composited document (paper plus
+      visible layers at their opacity) at the pointer and sets the brush colour.
+      It stays selected after a pick, and it is not an edit - no stroke, no
+      history entry, no dirty flag. Precision is the surfaces' (8-bit sRGB);
+      sampling is composite-only. See [ARCHITECTURE.md](ARCHITECTURE.md#colour-sampling).
 - [ ] Shape tools (line, rectangle, ellipse).
 - [ ] Selection and transform.
 - [ ] Fill and gradient.
@@ -106,10 +110,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**The colour picker** (Phase 2, first item): a real eyedropper that samples the
-composited document or the active layer and sets the brush colour. The pieces it
-needs are known: a renderer read that returns pixels for a document point
-(today the renderer only writes), a hit-test-safe "pick while the canvas is
-transparent" rule, the tool definition/tool-options wiring, and an honest
-account of colour precision (the surfaces are `sRGB` `8-bit` per channel, so a
-picked colour is what is on screen, not what was mathematically authored).
+**Shape tools** (Phase 2): line, rectangle and ellipse. Each is a tool whose
+gesture is a drag from an anchor to the current point, with a live preview that
+does *not* touch the layer until the press is released - then a single committed
+shape, so one undo step, re-rasterized exactly like a brush stroke so save,
+reopen and redo agree. The open questions are where the preview lives (a
+transient overlay outside the stroke list, so it never enters history), the
+modifier-key constraints (`Shift` for squares/circles and 45-degree lines,
+`Alt` to draw from the centre), and representing the result as a first-class
+shape the renderer can reproduce rather than a burst of brush samples.

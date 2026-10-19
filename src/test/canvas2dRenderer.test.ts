@@ -708,3 +708,90 @@ describe("Canvas2DRenderer document export", () => {
     expect(exported.calls).toHaveLength(0);
   });
 });
+
+describe("Canvas2DRenderer colour probe", () => {
+  it("samples paper then visible layers at a pixel-aligned document point", () => {
+    const harness = createHarness({ rasterScale: 2 });
+    let doc = createDocument({ width: 100, height: 80, background: "#101010" });
+    doc = addLayer(doc);
+    const [bottomId, topId] = doc.layers.map((layer) => layer.id);
+    doc = updateLayer(doc, bottomId, { opacity: 0.5 });
+    doc = updateLayer(doc, topId, { opacity: 0.25 });
+    harness.renderer.setDocument(doc);
+
+    // Default recording pixel is transparent black, so the probe returns black;
+    // the draw stream below is what proves the composite was built.
+    expect(harness.renderer.readCompositePixel(30.9, 12.4)).toEqual({ r: 0, g: 0, b: 0 });
+
+    const probe = recording.allocated.find((canvas) => canvas.getImageDataCalls.length > 0);
+    expect(probe).toBeDefined();
+    // The 1x1 probe is not the stroke buffer, so the "first canvas allocated is
+    // the stroke buffer" assumption used by the harness still holds.
+    expect(probe).not.toBe(harness.strokeBuffer);
+    expect(probe?.width).toBe(1);
+    expect(probe?.height).toBe(1);
+
+    const paper = probe?.named("fillRect") ?? [];
+    expect(paper).toHaveLength(1);
+    expect(paper[0].fillStyle).toBe("#101010");
+    expect(paper[0].args).toEqual([0, 0, 1, 1]);
+
+    // Bottom-first, each at its own alpha, offset so that the sampled document
+    // pixel lands on (0, 0). Flooring keeps the probe pixel-aligned:
+    // floor(30.9 * 2) = 61, floor(12.4 * 2) = 24.
+    const images = probe?.named("drawImage") ?? [];
+    expect(images.map((call) => call.alpha)).toEqual([0.5, 0.25]);
+    expect(images.map((call) => call.args.slice(1))).toEqual([
+      [-61, -24],
+      [-61, -24],
+    ]);
+    expect(probe?.getImageDataCalls).toEqual([[0, 0, 1, 1]]);
+
+    // The returned colour is exactly what the 1x1 read produced.
+    const probeCanvas = probe as RecordingCanvas;
+    probeCanvas.imageData = new Uint8ClampedArray([204, 51, 102, 255]);
+    const allocations = recording.allocated.length;
+    expect(harness.renderer.readCompositePixel(30.9, 12.4)).toEqual({
+      r: 204,
+      g: 51,
+      b: 102,
+    });
+    // The probe is reused rather than allocated per pick.
+    expect(recording.allocated.length).toBe(allocations);
+  });
+
+  it("skips hidden layers and layers whose opacity is zero", () => {
+    const harness = createHarness();
+    let doc = createDocument({ width: 20, height: 20 });
+    doc = addLayer(doc);
+    doc = addLayer(doc);
+    const [, hiddenId, transparentId] = doc.layers.map((layer) => layer.id);
+    doc = updateLayer(doc, hiddenId, { visible: false });
+    doc = updateLayer(doc, transparentId, { opacity: 0 });
+    harness.renderer.setDocument(doc);
+
+    harness.renderer.readCompositePixel(5, 5);
+
+    // Only the visible, non-transparent bottom layer reaches the probe.
+    const probe = recording.allocated.find((canvas) => canvas.getImageDataCalls.length > 0);
+    const images = probe?.named("drawImage") ?? [];
+    expect(images).toHaveLength(1);
+    expect(images[0].alpha).toBe(1);
+  });
+
+  it("returns null and allocates nothing when there is no document", () => {
+    const harness = createHarness();
+    const allocations = recording.allocated.length;
+
+    expect(harness.renderer.readCompositePixel(0, 0)).toBeNull();
+    expect(recording.allocated.length).toBe(allocations);
+  });
+
+  it("returns null after destroy()", () => {
+    const harness = createHarness();
+    harness.renderer.setDocument(createDocument({ width: 20, height: 20 }));
+    harness.renderer.destroy();
+
+    expect(harness.renderer.readCompositePixel(5, 5)).toBeNull();
+  });
+});

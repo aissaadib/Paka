@@ -21,6 +21,7 @@ import type { BrushSettings } from "../../types/brush";
 import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
+import { rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
@@ -203,6 +204,7 @@ export class DrawingEngine implements StrokeSource {
       finishStroke: () => engine.finishStroke(),
       cancelStroke: () => engine.cancelStroke(),
       isStrokeActive: () => engine.activeStroke !== null,
+      pickColor: (sample) => engine.pickColor(sample),
     };
 
     this.commands.subscribe(() => this.publish());
@@ -496,6 +498,29 @@ export class DrawingEngine implements StrokeSource {
     this.applyDocumentState(documentOps.setActiveLayer(this.doc, layerId));
   }
 
+  /**
+   * Samples the composite for the colour picker.
+   *
+   * Like selecting a layer, this is not an edit. It reads what the user sees
+   * through the renderer and sets the brush colour through `setBrush` - the same
+   * path the colour control uses, so colour has one source of truth. It touches
+   * no stroke, pushes no history entry and never bumps the revision, so picking
+   * cannot make the document dirty.
+   *
+   * A press outside the paper is ignored, exactly like `beginStroke`: there is
+   * no composite there to sample.
+   */
+  private pickColor(sample: PointerSample): void {
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return;
+    }
+    const color = this.renderer?.readCompositePixel(sample.docX, sample.docY);
+    if (!color) {
+      return;
+    }
+    this.setBrush({ color: rgbToHex(color) });
+  }
+
   setBrush(patch: Partial<BrushSettings>): void {
     const next = updateBrushSettings(this.brush, patch);
     if (brushSettingsEqual(this.brush, next)) {
@@ -751,7 +776,14 @@ export class DrawingEngine implements StrokeSource {
     return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
   }
 
-  private handlePointerSample(sample: PointerSample): void {
+  /**
+   * Feeds one normalized pointer sample to the active tool.
+   *
+   * This is the engine's single pointer-input entry point; the DOM binder calls
+   * it. It is public so tool behaviour can be driven end to end without a DOM,
+   * but it is not a UI-facing action.
+   */
+  handlePointerSample(sample: PointerSample): void {
     this.reportCursor(sample);
 
     if (sample.phase === "down") {

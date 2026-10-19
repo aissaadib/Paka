@@ -22,6 +22,11 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   use the brush controls, it is one undo step ("Erase"), and a saved file
   reopens with the erasure intact. A cancelled eraser stroke leaves the layer
   exactly as it was.
+- **Colour picker** (`I`): samples the composited canvas - paper plus visible
+  layers at their opacity - at the pointer and makes it the brush colour, so it
+  picks the colour actually on screen rather than the colour a stroke was
+  authored with. It samples on click (no drag), stays selected afterwards, and
+  is not an edit: it adds no history step and never marks the document dirty.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, colour
   (picker plus an 8-swatch palette), and toggles for pressure-driven size and
   pressure-driven opacity.
@@ -132,8 +137,8 @@ project is heading, phase by phase, is tracked in
 
 ## Known limitations
 
-- Only the **brush**, **eraser** and **pan** tools exist. No selection, fill or
-  transform.
+- Only the **brush**, **eraser**, **colour picker** and **pan** tools exist. No
+  selection, fill or transform.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`** blend mode is implemented.

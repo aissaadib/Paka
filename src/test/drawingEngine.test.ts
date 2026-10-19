@@ -9,10 +9,10 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
+import { DEFAULT_BRUSH, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
-import type { DrawingRenderer } from "../core/rendering/types";
+import type { DrawingRenderer, Rgb } from "../core/rendering/types";
 import type { PointerSample } from "../types/pointer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
@@ -45,10 +45,13 @@ function createEngine() {
  * A renderer that records what the engine asks of it. Passing one in keeps the
  * engine off Canvas 2D, so surface-invalidation policy can be asserted in Node.
  */
-function createSpyRenderer() {
+function createSpyRenderer(options: { readonly compositePixel?: Rgb | null } = {}) {
   const invalidated: string[] = [];
+  const sampled: Array<{ x: number; y: number }> = [];
   let documents = 0;
   let renders = 0;
+  // `undefined` means "no colour here" (the same answer as an empty document).
+  const compositePixel = options.compositePixel ?? null;
 
   const renderer: DrawingRenderer = {
     kind: "canvas2d",
@@ -68,6 +71,10 @@ function createSpyRenderer() {
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
+    readCompositePixel: (docX, docY) => {
+      sampled.push({ x: docX, y: docY });
+      return compositePixel;
+    },
     render: () => {},
     requestRender: () => {
       renders += 1;
@@ -75,7 +82,13 @@ function createSpyRenderer() {
     destroy: () => {},
   };
 
-  return { renderer, invalidated, getDocuments: () => documents, getRenders: () => renders };
+  return {
+    renderer,
+    invalidated,
+    sampled,
+    getDocuments: () => documents,
+    getRenders: () => renders,
+  };
 }
 
 describe("DrawingEngine state", () => {
@@ -566,5 +579,74 @@ describe("DrawingEngine layer history", () => {
     spy.invalidated.length = 0;
     engine.redo();
     expect(spy.invalidated).toContain(layerId);
+  });
+});
+
+describe("DrawingEngine colour picker", () => {
+  it("sets the brush colour from the composite without editing the document", () => {
+    const spy = createSpyRenderer({ compositePixel: { r: 204, g: 51, b: 102 } });
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTool("picker");
+    expect(engine.getCursor()).toBe("crosshair");
+
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 100, docY: 40, button: 0, buttons: 1 }),
+    );
+
+    // The renderer is asked at the document position the input pipeline
+    // produced, and its colour becomes the brush colour.
+    expect(spy.sampled).toEqual([{ x: 100, y: 40 }]);
+    expect(engine.getState().brush.color).toBe("#cc3366");
+
+    // Picking is not an edit: no stroke, no history entry, no dirty marker.
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().history.canUndo).toBe(false);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("ignores a pick outside the document rectangle", () => {
+    const spy = createSpyRenderer({ compositePixel: { r: 255, g: 255, b: 255 } });
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    const before = engine.getState().brush.color;
+
+    engine.setTool("picker");
+    for (const [x, y] of [
+      [-1, 150],
+      [200, -1],
+      [401, 150],
+      [200, 301],
+    ]) {
+      engine.handlePointerSample(createSample({ phase: "down", docX: x, docY: y }));
+    }
+
+    expect(spy.sampled).toEqual([]);
+    expect(engine.getState().brush.color).toBe(before);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("leaves the brush colour alone when the renderer reports no pixel", () => {
+    const spy = createSpyRenderer({ compositePixel: null });
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+      brush: { ...DEFAULT_BRUSH, color: "#123456" },
+    });
+
+    engine.setTool("picker");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 40 }));
+
+    expect(spy.sampled).toEqual([{ x: 100, y: 40 }]);
+    expect(engine.getState().brush.color).toBe("#123456");
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
   });
 });

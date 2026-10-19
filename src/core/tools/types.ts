@@ -28,6 +28,15 @@ export interface ToolContext {
   /** Discards the active stroke without touching the layer. */
   cancelStroke(): void;
   isStrokeActive(): boolean;
+  /**
+   * Samples the *composited* document at the sample's document position and
+   * makes it the brush colour.
+   *
+   * This is not an edit: no pixels change, no stroke is recorded and nothing
+   * enters history. The sample is already in document space because the input
+   * pipeline applies the viewport transform.
+   */
+  pickColor(sample: PointerSample): void;
 }
 
 export interface Tool {

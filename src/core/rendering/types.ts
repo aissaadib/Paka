@@ -9,8 +9,16 @@
 
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
 import type { Viewport } from "../../types/viewport";
+import type { Rgb } from "../../utils/color";
 
 export type RendererKind = "canvas2d" | "webgl" | "webgpu";
+
+/**
+ * The 8-bit sRGB colour a composite read returns. Re-exported here because it
+ * is part of the renderer contract; the canonical definition lives in
+ * `utils/color` with the conversions.
+ */
+export type { Rgb };
 
 /**
  * Read-only access to the stroke data a renderer needs to re-rasterize.
@@ -41,6 +49,16 @@ export interface DrawingRenderer {
    * it must not disturb the display, the document or the layer surfaces.
    */
   composeDocumentImage(): HTMLCanvasElement;
+  /**
+   * Samples the composite the user sees - paper plus visible layers at their
+   * opacity, bottom-first - at a document point, returning its 8-bit sRGB
+   * colour or `null` when there is no document.
+   *
+   * This is a read, not an edit: no pixel changes and nothing enters history.
+   * The precision is the surfaces' - 8 bits per channel - so the colour is the
+   * one on screen, not a value that was mathematically authored.
+   */
+  readCompositePixel(docX: number, docY: number): Rgb | null;
   render(): void;
   requestRender(): void;
   destroy(): void;

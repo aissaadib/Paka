@@ -117,7 +117,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, stroke store | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, picker, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke command, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -134,7 +134,7 @@ touch Canvas 2D.
 
 ## Rendering pipeline
 
-`Canvas2DRenderer` owns three kinds of canvas, plus one temporary:
+`Canvas2DRenderer` owns three kinds of canvas, plus two temporary:
 
 1. **The display canvas** - the element in the DOM. Its backing store is
    `CSS size * devicePixelRatio`.
@@ -145,6 +145,10 @@ touch Canvas 2D.
 4. **An erase snapshot** - a copy of the active layer taken when an *erasing*
    stroke begins, allocated only while one is in flight (see
    [Eraser strokes](#eraser-strokes)).
+5. **A 1x1 colour probe** - a scratch canvas the colour picker samples through,
+   allocated lazily on the first pick and reused after (see
+   [Colour sampling](#colour-sampling)). It is kept off the constructor so the
+   stroke buffer stays the first canvas created.
 
 A frame (`render()`) does, in order:
 
@@ -252,6 +256,39 @@ live drawing produced - the same guarantee the starter-dab rule enforces for
 painting. The cost of the snapshot is one extra surface-sized canvas while an
 erasing stroke is in flight; it is allocated lazily, reused across strokes, and
 dropped when the stroke ends, is cancelled, or the document is replaced.
+
+### Colour sampling
+
+The colour picker reads the *composited* document - paper plus every visible
+layer at its own opacity, bottom-first - because that is what the user sees.
+Sampling the active layer instead would return the colour a pixel was authored
+with, not the colour on screen: a 50%-opacity stroke over white looks like the
+blend, not the stored colour, and a picker that ignored the paper and the layers
+below would contradict the pixels under the eye.
+
+`DrawingRenderer.readCompositePixel(docX, docY)` performs the read through a
+lazily allocated **1x1 probe canvas**, not through the display canvas or the
+export composite. The probe is filled with the paper colour, then each visible
+layer is drawn with an integer offset of `-floor(docX * rasterScale)`, so the
+surface texel under the sample lands exactly on pixel `(0, 0)` with **no
+interpolation** - the read is the pixel under the pointer rather than a blend of
+its neighbours, at any `rasterScale`. The paper is opaque, so the returned
+colour needs no alpha, and the precision is the surfaces': 8 bits per channel in
+sRGB. A pick is therefore the colour on screen, not a value that was
+mathematically authored.
+
+Two rules make picking safe:
+
+- **It is a read, not an edit.** Like selecting a layer, a pick changes no
+  pixels. It sets the brush colour through the same `setBrush` path the colour
+  control uses, so colour has one source of truth, and it pushes no history
+  entry, bumps no revision and never marks the document dirty.
+- **A press outside the paper is ignored**, exactly like `beginStroke`: there is
+  no composite there to sample.
+
+The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
+and there is nothing to finish or cancel - and it stays selected afterwards,
+consistent with the eraser. `B` returns to the brush.
 
 ### Dirty surfaces
 
@@ -456,8 +493,13 @@ reported separately rather than being implied by the test count.
 
 These are real gaps, not footnotes:
 
-- **Tools**: only `brush`, `eraser` and `pan`. There is no selection, transform
-  or fill tool.
+- **Tools**: only `brush`, `eraser`, `picker` and `pan`. There is no selection,
+  transform or fill tool.
+- **The colour picker samples the composite only.** It always reads paper plus
+  visible layers; there is no per-layer sampling, no `Alt`-click temporary
+  picker from the brush, no magnifier preview and no colour history or swatches
+  from picks. Precision is the surfaces' - 8-bit sRGB - so sampling a
+  semi-transparent area yields the blended screen colour by design.
 - **An eraser stroke costs one extra surface-sized canvas** while it is in
   flight (its pre-stroke snapshot). It is allocated lazily and released when the
   stroke ends, but on a very large document it is a visible memory spike next to

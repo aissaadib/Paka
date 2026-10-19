@@ -1,6 +1,6 @@
 /** Tool identity and metadata for the tool rail. */
 
-export type ToolId = "brush" | "eraser" | "pan";
+export type ToolId = "brush" | "eraser" | "picker" | "pan";
 
 export interface ToolDefinition {
   readonly id: ToolId;

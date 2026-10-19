@@ -22,6 +22,13 @@ export const ERASER_TOOL: ToolDefinition = {
   description: "Erase with the current brush size and opacity",
 };
 
+export const PICKER_TOOL: ToolDefinition = {
+  id: "picker",
+  label: "Colour picker",
+  shortcut: "I",
+  description: "Pick a colour from the canvas",
+};
+
 export const PAN_TOOL: ToolDefinition = {
   id: "pan",
   label: "Pan",
@@ -30,7 +37,12 @@ export const PAN_TOOL: ToolDefinition = {
 };
 
 /** Tools offered by the application, in tool rail order. */
-export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [BRUSH_TOOL, ERASER_TOOL, PAN_TOOL];
+export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
+  BRUSH_TOOL,
+  ERASER_TOOL,
+  PICKER_TOOL,
+  PAN_TOOL,
+];
 
 export function findToolByShortcut(key: string): ToolDefinition | undefined {
   const normalized = key.toLowerCase();

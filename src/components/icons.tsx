@@ -48,6 +48,15 @@ export function IconEraser(props: IconProps) {
   );
 }
 
+export function IconPicker(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M11.5 2.5a1.8 1.8 0 0 0-2.6 0L7.4 4l-.9-.9-1.3 1.3 5.4 5.4 1.3-1.3-.9-.9 1.5-1.5a1.8 1.8 0 0 0 0-2.6z" />
+      <path d="M8.2 5.6 3.1 10.7 2.4 13.6l2.9-.7 5.1-5.1z" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>
