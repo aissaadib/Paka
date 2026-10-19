@@ -16,6 +16,15 @@ import type { StrokeRecord } from "../document/types";
 import type { StrokeCommandHost } from "./strokeCommand";
 import type { Command } from "./types";
 
+/**
+ * How far a transformed sample may move and still count as "did not move".
+ *
+ * Coordinates are document pixels, so a tenth of a pixel is far below anything
+ * a brush can paint; it only absorbs the rounding of a reflection about a
+ * half-pixel centre.
+ */
+const TRANSFORM_EPSILON = 1e-6;
+
 /** A stroke's sample coordinates, copied so an edit can be reverted exactly. */
 export interface StrokeSamples {
   readonly xs: readonly number[];
@@ -170,6 +179,36 @@ export function transformStrokeSamples(
     stroke.xs[index] = transform.mapX(x, y);
     stroke.ys[index] = transform.mapY(x, y);
   }
+}
+
+/**
+ * True when `transform` would move at least one sample of the given strokes.
+ *
+ * Used to refuse a transform that is a no-op - a horizontal flip of a perfectly
+ * symmetric stroke, or of a single dab, maps every point onto itself. Recording
+ * that would put a history entry on the stack whose undo changes nothing, which
+ * reads to the user as a broken undo button. The check runs on the *original*
+ * copies, so it answers for the command that would be pushed.
+ */
+export function transformChangesSamples(
+  entries: readonly MoveEntry[],
+  transform: StrokeTransform,
+): boolean {
+  for (const entry of entries) {
+    const { xs, ys } = entry.original;
+    for (let index = 0; index < xs.length; index += 1) {
+      // A tolerance, not strict equality: a reflection about a half-pixel centre
+      // can leave a mathematically-identical point a few ulps away, and that is
+      // still a no-op the user did not ask for.
+      if (
+        Math.abs(transform.mapX(xs[index], ys[index]) - xs[index]) > TRANSFORM_EPSILON ||
+        Math.abs(transform.mapY(xs[index], ys[index]) - ys[index]) > TRANSFORM_EPSILON
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** Applies a coordinate map to strokes; `push`ed after the live edit. */

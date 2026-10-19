@@ -36,11 +36,14 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   strokes plus a blue trace over each of them. Dragging from inside the frame
   moves every selected stroke as one gesture; releasing records **one** undo
   step, and `Esc` cancels a drag mid-flight. The arrow keys nudge the selection
-  by 1 px (`Shift`: 10 px) and a run of nudges is one step, `Ctrl+D` duplicates
+  by 1 px (`Shift`: 10 px) and a continuous run of nudges is one step (reselecting
+  starts a new one), `Ctrl+D` duplicates
   it in place and selects the copies, `Ctrl+Shift+H`/`Ctrl+Shift+V` flips it
   about its own centre, and `Delete`/`Backspace` removes it - each as one step,
   restorable with undo (deleted strokes come back in their original painting
-  order). The same actions live in the **Selection** menu. Selecting is not an
+  order). A transform that would move nothing - flipping a single dab - records
+  nothing, and neither undo nor redo runs while a drag is in flight. The same
+  actions live in the **Selection** menu. Selecting is not an
   edit: it adds no history step and never marks the document dirty.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it

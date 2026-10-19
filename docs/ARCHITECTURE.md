@@ -385,7 +385,11 @@ data, push one command" machinery:
   running total plus the copies taken before the first nudge, and a merge sums
   the deltas over those copies. Summing - rather than chaining commands - is
   what makes redo after an undo re-apply the whole run in one step instead of
-  only the last press. It is the same rule the opacity slider follows.
+  only the last press. It is the same rule the opacity slider follows. The merge
+  key is scoped to one *selection instance* (a counter that moves whenever the
+  selection is replaced), so nudging a stroke, deselecting and reselecting the
+  same stroke lands as two undo steps - the user's undo steps follow the gestures
+  they made, not the identity of the strokes.
 - **Duplicate** (`Ctrl+D`) inserts a copy of each selected stroke directly above
   its source, preserving painting order, and then selects the copies so the next
   nudge or drag acts on what is visibly on top. The clone objects are created
@@ -398,11 +402,22 @@ data, push one command" machinery:
   identity up to floating-point rounding, which is what composing a reflection
   with itself should be.
 
+A transform that would move nothing is **refused** rather than recorded: flipping
+a single dab, or a stroke that is already symmetric about the axis, maps every
+sample onto itself, and an undo step whose undo does nothing reads as a broken
+undo button. The check runs on the stored originals before anything is written,
+with a tolerance far below one painted pixel so that a reflection about a
+half-pixel centre still counts as a no-op.
+
 A transform is refused while a pointer gesture is in flight - a keyboard edit and
 a drag would be writing the same sample arrays - and when nothing is selected.
-Undoing a duplicate or a delete can leave the selection pointing at strokes that
-no longer exist, so every history change re-derives the overlay from the store: a
-frame that outlives the strokes it describes would be a lie the user can see.
+`undo`/`redo` are held off for the same reason: reversing a command while a drag
+is mid-flight would leave the drag applying its delta to strokes the undo just
+changed. Undoing a duplicate or a delete can leave the selection pointing at
+strokes that no longer exist, so every history change re-derives the overlay from
+the store: a frame that outlives the strokes it describes would be a lie the user
+can see. The id list is kept through that state on purpose, so redoing the
+duplicate re-selects the copies it brings back.
 
 `DeleteStrokesCommand` removes the selected strokes and, on revert, re-inserts
 each at its **original index**, so undo restores the layer's painting order rather
@@ -616,10 +631,13 @@ DOM-free by design.
   step with painting order restored on undo, active-layer scoping, and the
   selection dropping on a layer change, a new document and a tool switch. It also
   covers the keyboard transforms: a nudge run coalescing into a single step with
-  exact undo and redo, duplicate inserting above its source and selecting the
+  exact undo and redo, a re-made selection starting a new run, duplicate
+  inserting above its source and selecting the
   copies (so a following nudge moves only the copy), redo re-inserting the same
   clones, flips about the selection's centre with exact undo and the
-  two-flips-are-the-identity property, and every transform refusing to run with
+  two-flips-are-the-identity property, a flip that would change nothing being
+  refused instead of recorded, undo and redo refusing to run mid-drag, and every
+  transform refusing to run with
   nothing selected. The
   renderer suite asserts the overlay stream: the trace and the dashed frame come
   after the layers and before the solid border, `setSelection(null)` leaves only

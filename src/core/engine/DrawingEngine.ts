@@ -44,6 +44,7 @@ import {
   createTransformStrokesCommand,
   offsetStrokeSamples,
   planDuplicateInsertions,
+  transformChangesSamples,
   transformStrokeSamples,
   writeStrokeSamples,
   type DeleteEntry,
@@ -242,6 +243,13 @@ export class DrawingEngine implements StrokeSource {
   private panGestureActive = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
+  /**
+   * Identity counter for the current selection, restarted whenever the
+   * selection is replaced. It is what scopes nudge coalescing to *one* run: two
+   * nudges of the same strokes merge only while nothing re-made the selection in
+   * between (see `setSelection`).
+   */
+  private selectionRun = 0;
   private cursor: CursorReport | null = null;
   private viewportSize = { width: 0, height: 0 };
   private laidOut = false;
@@ -697,14 +705,14 @@ export class DrawingEngine implements StrokeSource {
   // ------------------------------------------------------------------ history
 
   undo(): boolean {
-    if (this.activeStroke) {
+    if (this.activeStroke || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.undo());
   }
 
   redo(): boolean {
-    if (this.activeStroke) {
+    if (this.activeStroke || this.selectionGesture) {
       return false;
     }
     return this.recordHistoryChange(() => this.commands.redo());
@@ -871,7 +879,7 @@ export class DrawingEngine implements StrokeSource {
       this.syncSelectionOverlay();
       return;
     }
-    this.selection = null;
+    this.setSelection(null);
     this.syncSelectionOverlay();
     this.publish();
     this.requestRender();
@@ -906,13 +914,16 @@ export class DrawingEngine implements StrokeSource {
       }
     }
     if (entries.length === 0) {
+      // The selection names strokes that an undo removed. Nothing to delete, and
+      // the id list is kept on purpose: redo re-inserts those strokes, and the
+      // selection then resolves again.
       return false;
     }
 
     for (const entry of entries) {
       this.strokes.remove(entry.stroke.layerId, entry.stroke.id);
     }
-    this.selection = null;
+    this.setSelection(null);
     this.syncSelectionOverlay();
     this.renderer?.invalidateLayer(selection.layerId);
     // Bumped before the command is recorded so the snapshot the command stack
@@ -952,7 +963,9 @@ export class DrawingEngine implements StrokeSource {
         dx,
         dy,
         this.commandHost,
-        `nudge:${selection.layerId}:${selection.strokeIds.join(",")}`,
+        // Scoped to this selection *instance*: a deselect and reselect of the
+        // same strokes is a new run, so undo steps land where the user put them.
+        `nudge:${this.selectionRun}:${selection.layerId}`,
       ),
     );
     return true;
@@ -985,6 +998,8 @@ export class DrawingEngine implements StrokeSource {
       }
     }
     if (entries.length === 0) {
+      // Stale ids (an undone duplicate): report a no-op. The ids are deliberately
+      // kept, so a redo that brings the strokes back restores the selection too.
       return false;
     }
 
@@ -992,10 +1007,10 @@ export class DrawingEngine implements StrokeSource {
     for (const insertion of insertions) {
       this.strokes.insert(insertion.stroke, insertion.index);
     }
-    this.selection = {
+    this.setSelection({
       layerId: selection.layerId,
       strokeIds: insertions.map((insertion) => insertion.stroke.id),
-    };
+    });
     this.renderer?.invalidateLayer(selection.layerId);
     this.revision += 1;
     this.commands.push(createDuplicateStrokesCommand(entries, this.commandHost));
@@ -1036,6 +1051,10 @@ export class DrawingEngine implements StrokeSource {
             mapX: (x) => x,
             mapY: (_x, y) => centreY * 2 - y,
           };
+    // A symmetric stroke (or a single dab) maps onto itself: nothing to record.
+    if (!transformChangesSamples(entries, transform)) {
+      return false;
+    }
     for (const entry of entries) {
       transformStrokeSamples(entry.stroke, entry.original, transform);
     }
@@ -1211,15 +1230,28 @@ export class DrawingEngine implements StrokeSource {
    */
   private resetSelection(): void {
     this.selectionGesture = null;
-    this.selection = null;
+    this.setSelection(null);
     this.syncSelectionOverlay();
+  }
+
+  /**
+   * Replaces the selection, starting a new nudge run.
+   *
+   * Every selection change goes through here so the run counter always moves
+   * with the selection identity. Without it, nudging a stroke, deselecting and
+   * reselecting the *same* stroke would fold both nudges into one history step:
+   * the merge key names the strokes, and the strokes did not change.
+   */
+  private setSelection(next: Selection | null): void {
+    this.selectionRun += 1;
+    this.selection = next;
   }
 
   /** Selects the strokes of the active layer that the marquee meets. */
   private selectInBounds(bounds: Bounds): void {
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
-      this.selection = null;
+      this.setSelection(null);
       return;
     }
     const strokeIds: string[] = [];
@@ -1230,7 +1262,7 @@ export class DrawingEngine implements StrokeSource {
         strokeIds.push(stroke.id);
       }
     }
-    this.selection = strokeIds.length > 0 ? { layerId, strokeIds } : null;
+    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
   }
 
   /**

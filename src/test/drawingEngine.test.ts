@@ -1176,6 +1176,40 @@ describe("DrawingEngine selection", () => {
     expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => y + 1));
   });
 
+  it("starts a new nudge run when the selection is made again", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    const depth = engine.getState().history.depth;
+
+    engine.nudgeSelection(1, 0);
+    engine.nudgeSelection(1, 0);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    // Deselecting and reselecting the same stroke is a new run, not a
+    // continuation of the last one: the user's undo steps must match the
+    // gestures they made.
+    engine.clearSelection();
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    engine.nudgeSelection(1, 0);
+    expect(engine.getState().history.depth).toBe(depth + 2);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(102, 6);
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(100, 6);
+  });
+
   it("duplicates the selection above its originals and selects the copies", () => {
     const { engine, layerId } = createSelectingEngine();
     paint(engine, [
@@ -1261,6 +1295,106 @@ describe("DrawingEngine selection", () => {
     // The centre line is y = 125, so y becomes 250 - y and x is untouched.
     expectClose(engine.listStrokes(layerId)[0].xs, originalXs);
     expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => 250 - y));
+  });
+
+  it("refuses undo and redo while a selection drag is in flight", () => {
+    const { engine, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    const depth = engine.getState().history.depth;
+
+    // Start a move but do not release it.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 150, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 170, docY: 100 }));
+    const moved = [...engine.listStrokes(layerId)[0].xs];
+
+    expect(engine.undo()).toBe(false);
+    expect(engine.redo()).toBe(false);
+    // Still mid-drag, still one stroke, and nothing was recorded.
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(moved);
+
+    // Releasing still records exactly one step for the drag.
+    engine.handlePointerSample(createSample({ phase: "up", docX: 170, docY: 100 }));
+    expect(engine.getState().history.depth).toBe(depth + 1);
+  });
+
+  it("records no step for a flip that changes nothing", () => {
+    const { engine, layerId } = createSelectingEngine();
+    // A single dab: its bounds centre is the dab itself, so a reflection maps
+    // every sample to where it already is.
+    handle(engine, [[100, 100]], "up");
+    engine.setTool("select");
+    handle(engine, [
+      [90, 90],
+      [110, 110],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(1);
+    const depth = engine.getState().history.depth;
+
+    expect(engine.flipSelection("horizontal")).toBe(false);
+    expect(engine.flipSelection("vertical")).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.listStrokes(layerId)[0].xs.every((x) => x === 100)).toBe(true);
+    expect(engine.listStrokes(layerId)[0].ys.every((y) => y === 100)).toBe(true);
+  });
+
+  it("does not record a step when the selection is already gone", () => {
+    const { engine } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    engine.duplicateSelection();
+    // Undo the duplicate: the selection still names the copies, which are gone.
+    engine.undo();
+    const depth = engine.getState().history.depth;
+
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(engine.deleteSelection()).toBe(false);
+    expect(engine.nudgeSelection(1, 0)).toBe(false);
+    expect(engine.flipSelection("horizontal")).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("drops a selection whose strokes an undo removed", () => {
+    const { engine } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    expect(engine.duplicateSelection()).toBe(true);
+    // The copies are selected; undo takes them away.
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(0);
+
+    // The next transform must not report success on a selection that resolves
+    // to nothing, and must not record an empty step.
+    const depth = engine.getState().history.depth;
+    expect(engine.duplicateSelection()).toBe(false);
+    expect(engine.deleteSelection()).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+    // A redo of the duplicate still restores exactly one copy.
+    expect(engine.redo()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(1);
   });
 
   it("refuses transforms with nothing selected", () => {
