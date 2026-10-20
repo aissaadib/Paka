@@ -24,11 +24,11 @@ was empty), so the numbers describe the renderer as committed.
 
 | Question | Verdict |
 | --- | --- |
-| Rebuild/undo scales with element count | **Confirmed.** Cost is `O(elements x surface pixels)`, and it is the *document-sized* surface, not the stroke geometry, that dominates. |
-| Rebuild clears/draws document-sized buffers | **Confirmed, deterministically.** One full-buffer `clearRect` + one full-surface `drawImage` **per element**. |
-| Soft/textured strokes re-feather full surfaces at 2x | **Confirmed.** Every frame re-blurs the whole stroke bounding box; the cost grows with the stroke and with `rasterScale^2`. |
+| Rebuild/undo scales with element count | **Confirmed.** Cost is `O(elements x surface pixels)`, and it is the *document-sized* surface, not the stroke geometry, that dominates. **Fixed since:** R1 shipped as `4ac040b` — the rebuild is now bounded by each element's inked rectangle (see F1c). |
+| Rebuild clears/draws document-sized buffers | **Confirmed, deterministically.** One full-buffer `clearRect` + one full-surface `drawImage` **per element**. **Fixed since:** `4ac040b` (same measurement, before/after in F1c). |
+| Soft/textured strokes re-feather full surfaces at 2x | **Confirmed.** Every frame re-blurs the whole stroke bounding box; the cost grows with the stroke and with `rasterScale^2`. Still open (R2). |
 | Composite cost rises sharply with layer count at 2x | **Not confirmed at the tested scale.** Cost is linear in the number of *visible* layers with a small constant (~0.15 ms/layer at 1280x800 CSS, DPR 2). The 2x penalty comes from destination pixels (4x), not from the layer count. |
-| Huge layer surfaces | **Confirmed by arithmetic; now bounded by the 16,777,216 px document cap** already merged by Agent 4 (`isValidDocumentSize`). |
+| Huge layer surfaces | **Confirmed by arithmetic; now bounded by the 16,777,216 px document cap** already merged by Agent 4 (`isValidDocumentSize`), and the peak is now stated honestly (58 bytes per document pixel) and the over-budget case is closed by the scratch release (`520aa77`). |
 
 ---
 
@@ -174,6 +174,65 @@ are limited to the inked rectangle, a 32 px stroke at 2048^2 / 2x touches
 ~64x64 px instead of 16.8 Mpx — about 4,000x less per element (a calculation
 from the geometry, not a measurement), which would take the 100-element undo
 from 3.37 Gpx to well under 1 Mpx.
+
+#### F1c — R1 implemented and measured before/after (2026-10-20, after `4ac040b`)
+
+Recommendation R1 was implemented as `4ac040b` "perf: bound layer rasterization
+by the inked rectangle": a layer rebuild now clears and blends each element
+over the rectangle that element inks, one to one. To make the comparison
+immune to machine drift, the pre-fix rebuild (commit `520aa77`) was emulated
+in the same page and the two paths were interleaved (3 rounds each, medians).
+The emulation reproduced the earlier area numbers exactly, so it is faithful.
+
+Area touched per rebuild (device pixels):
+
+| Document | Scale | Elements | Before | After | Factor |
+| --- | --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 25 short | 53.5 Mpx | 1.13 Mpx | 47x |
+| 1024x1024 | 1 | 100 short | 210.8 Mpx | 1.37 Mpx | 154x |
+| 1024x1024 | 2 | 100 short | 843.1 Mpx | 5.47 Mpx | 154x |
+| 2048x2048 | 2 | 25 short | 855.6 Mpx | 17.1 Mpx | 50x |
+| 2048x2048 | 2 | 100 short | 3372.2 Mpx | 18.1 Mpx | 187x |
+| 2048x2048 | 2 | 25 dense (document-wide) | 855.6 Mpx | 772.6 Mpx | 1.11x |
+
+Wall clock in the same session (medians, ms):
+
+| Document | Scale | Elements | Before | After |
+| --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 25 short | 84.0 | 62.1 |
+| 1024x1024 | 1 | 100 short | 347.8 | 244.9 |
+| 1024x1024 | 2 | 100 short | 1233.2 | 766.0 |
+| 2048x2048 | 2 | 25 short | 650.4 | 12.6 |
+| 2048x2048 | 2 | 100 short | 2532.7 | 18.6 |
+| 2048x2048 | 2 | 25 dense (document-wide) | 1061.3 | 1306.8 |
+
+Three things this says, including the parts that are not flattering:
+
+1. **The win is real and large** where strokes ink a small part of the
+   document: the 100-element undo at 2048^2 / 2x goes from 3.37 Gpx to 18 Mpx,
+   and from 2.53 s to 19 ms in this harness.
+2. **A layer of strokes that together cover the document got ~23 % slower**
+   (1061 -> 1307 ms). There the inked rectangle is nearly the whole document,
+   so the area barely shrinks (1.11x) while the new path adds a per-element
+   region computation and a 1:1 blit in place of one large blend.
+3. **At small surfaces the rebuild is now bounded by a per-element overhead**,
+   not by area: 100 elements cost ~2.4 ms each on a 1024^2 surface but
+   ~0.19 ms each on a 4096^2 surface, although the area is now negligible in
+   both. The measured difference is ~12x; the explanation (small canvases
+   falling back to a CPU-backed surface in this Chromium) is a **hypothesis**,
+   not a proven cause. If it holds, the next lever for small documents is the
+   *number* of elements — a per-layer cache of the last rasterization — not
+   the area.
+
+Pixel invariants were re-checked in the browser at five sample points for a
+hard, a soft, a grained and a soft+grained brush: live == post-commit display,
+committed == rebuilt, and export == export after a rebuild, all hold.
+
+*Timing caveat:* the wall-clock numbers in F2 (measured hours earlier) are
+**not** comparable with the table above — the machine is much slower now
+because three other agents are running work on it. The area numbers are pure
+geometry and are stable across sessions; the same-session A/B above is the
+valid timing comparison.
 
 ### F2 — Measured rebuild cost (wall clock, indicative)
 
@@ -370,29 +429,33 @@ frame-rate number could be obtained in this environment.
 
 ## 4. Recommended order
 
-1. **R1 — dirty bounds for the stroke buffer.** It targets the measured
-   mechanism (one full-surface clear + one full-surface blend *per element*),
-   it is the difference between "undo is instant" and "undo takes 0.4-2.6 s
-   on a busy layer", and it is a local change in
-   `Canvas2DRenderer` (`rasterizeStrokeToBuffer`, `paintStrokeCoverage`) plus
-   a rect on the stroke buffer. It also directly reduces the *live* commit
-   cost, because the same `paintStrokeCoverage` path is used for commit,
-   rebuild and eraser.
-   Acceptance: a 25-element rebuild at 2048^2 must cost less than 5 ms in the
-   harness; existing pixel-equality tests (live vs commit vs rebuild vs
-   export) must stay green, and the eraser path must be proven unchanged.
-2. **R2 — incremental feathering**, but only after R1, and only if the soft
-   brush is still visibly slow in the packaged app. The safest first version
-   is *viewport-limited* feathering (blur only what is visible while a stroke
-   is in flight, blur the full bbox at commit) — but that breaks the
+0. **DONE — R1 shipped.** `4ac040b` bounds the layer rebuild by each element's
+   inked rectangle. Measured before/after (F1c): the 100-element rebuild at
+   2048^2 / 2x went from 3.37 Gpx to 18 Mpx, and from 2.53 s to 19 ms in the
+   harness; the pixel invariants (live == commit == rebuild == export) hold for
+   hard, soft, grained and soft+grained brushes. The one case that did not
+   improve is a layer whose strokes together cover the whole document (~23 %
+   slower) — see F1c.
+1. **R1 follow-up — the per-element overhead at small surfaces.** With the
+   area term gone, the rebuild cost at small documents is dominated by a
+   per-element cost (~2.4 ms per element on a 1024^2 surface in this harness,
+   versus ~0.19 ms on a 4096^2 surface). The next lever there is the *number*
+   of elements — e.g. a per-layer cache of the last rasterization, so an undo
+   that only changes one stroke does not re-rasterize its neighbours — not
+   the area. Worth a profile before any work.
+2. **R2 — incremental feathering**, but only if the soft brush is still
+   visibly slow in the packaged app. The safest first version is
+   *viewport-limited* feathering (blur only what is visible while a stroke is
+   in flight, blur the full bbox at commit) — but that breaks the
    "live == commit" invariant for strokes whose edge is off-screen, so it
    needs the banded/incremental variant or an explicit product decision.
 3. **R3 — composite cache.** Cheap to prototype, and the measurement says the
    payoff is modest at 1280x800 but grows with display size and layer count.
-   Do it after R1/R2, when the remaining per-frame cost is dominated by the
+   Do it after R2, when the remaining per-frame cost is dominated by the
    composite rather than by rebuilds.
-4. **R4 — keep the shipped document budget** (Agent 4) and treat the
-   per-layer surface growth as a separate, explicit policy item: either a
+4. **R4 — keep the shipped document budget** (Agent 4, `fae138c`: the peak is
+   58 bytes per document pixel, 928 MiB at the cap) and treat the per-layer
+   surface growth as a separate, explicit policy item: either a
    layer-count/surface budget, or lazy surface allocation for layers that are
    hidden or never drawn.
 5. **R5 — do not start.** Nothing in this audit justifies a tile-based
