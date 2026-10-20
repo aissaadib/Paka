@@ -4,7 +4,7 @@ This records the provenance of the stamp (dab) brush engine: that it is Paka's
 own implementation, written from Paka's own written specification, and not
 derived from any third-party brush engine.
 
-It is required by the licence gate (`reuse-decision.md` §2.5, condition **C2**)
+It is required by the licence gate (`docs/g1/reuse-decision.md` §2.5, condition **C2**)
 and by the acceptance criteria the slice was planned against.
 
 | Field | Value |
@@ -100,5 +100,5 @@ above, from the specification named above.
 
 ---
 
-_See `reuse-decision.md` §2.5 and `provenance-record.json` →
+_See `docs/g1/reuse-decision.md` §2.5 and `docs/g1/provenance-record.json` →
 `cleanroom.implementerAttestation` for the gate's side of this record._

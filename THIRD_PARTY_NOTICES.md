@@ -25,7 +25,7 @@ non-dependency material listed in the last section.
   MIT does not. Paka's own licence is MIT and carries no express patent grant
   either, so electing MIT changes nothing about the patent position of the
   product as a whole; it only keeps the notice obligations minimal. This is
-  recorded as an open decision in `docs/RELEASE-READINESS.md` (item R5).
+  recorded as an open decision in `docs/RELEASE-READINESS.md` (item R6).
 * The data comes from `licenses/dependency-inventory.json`, which is generated
   from the two lockfiles and the licence file each package ships. Regenerate
   both with:
@@ -686,6 +686,7 @@ Licence text: `licenses/MPL-2.0.txt`. Include the licence text and inform recipi
 | Vendored agent skill | `.agents/skills/frontend-ui-engineering/SKILL.md` | MIT ("Copyright (c) 2025 Addy Osmani") | The MIT permission notice is `licenses/MIT.txt` |
 | Vendored agent skills | `.agents/skills/{code-review-and-quality,debugging-and-error-recovery,git-workflow-and-versioning,incremental-implementation,performance-optimization,source-driven-development,test-driven-development}/` | MIT ("Copyright (c) 2025 Addy Osmani") | The MIT permission notice is `licenses/MIT.txt` |
 | Vendored agent skill | `.agents/skills/vercel-react-best-practices/` (76 files) | MIT — Vercel, Inc. | The MIT permission notice is `licenses/MIT.txt`. See the note below. |
+| Stamp engine's provenance record | `docs/CLEAN-ROOM-ATTESTATION.md`, `docs/g1/reuse-decision.md`, `docs/g1/provenance-record.json` | MIT, original to this repository | See the note below. |
 
 ### The `vercel-react-best-practices` skill
 
@@ -708,6 +709,18 @@ Neither caveat prevents redistribution under MIT. The obligations that do
 apply are the MIT ones, and they are met by shipping `licenses/MIT.txt` and
 recording the copyright holder in this table.
 
+### The stamp engine's clean-room attestation
+
+The stamp (dab) brush engine was written from Paka's own written
+specification, without reading, copying or adapting any third-party brush
+engine's source. `docs/CLEAN-ROOM-ATTESTATION.md` records that: which
+sources were **not** consulted, and under which protocol the work was done.
+Its owner countersignature is still outstanding, and it is tracked as an open
+item in `docs/RELEASE-READINESS.md` (item R3).
+
+The licence decision behind it is `docs/g1/reuse-decision.md`, with the
+machine-readable companion `docs/g1/provenance-record.json`. Both are
+Paka-authored and carry no third-party obligation.
 ## Review required
 
 Every dependency in the inventory matched a licence family above.

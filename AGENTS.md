@@ -94,7 +94,7 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
-| Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `reuse-decision.md`, `provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
+| Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `docs/g1/reuse-decision.md`, `docs/g1/provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
 
 ## 5. Symbol → file (grep the symbol)
 

@@ -4,8 +4,8 @@ This file tracks the work that has to happen **before a build of Paka is
 distributed**. It is deliberately separate from the feature work: none of it
 blocks a feature, and none of the feature work is blocked by it.
 
-The licence gate that produced this list is `reuse-decision.md`; the
-machine-readable record is `provenance-record.json`. Every item below names
+The licence gate that produced this list is `docs/g1/reuse-decision.md`; the
+machine-readable record is `docs/g1/provenance-record.json`. Every item below names
 the finding it closes.
 
 | ID | Item | Finding | Status |
@@ -77,7 +77,7 @@ independently, do not copy - was correct and is unchanged.
 
 The plan also said "there is no separate licence-gate document because there is
 nothing to gate". That was written before the gate ran; the gate is
-`reuse-decision.md` and it reached the same conclusion for the chosen path
+`docs/g1/reuse-decision.md` and it reached the same conclusion for the chosen path
 while finding two things the plan did not: **B-1** and **B-4**.
 
 ## R3 - Clean-room attestation and provenance records

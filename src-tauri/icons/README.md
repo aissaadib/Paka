@@ -10,7 +10,7 @@ Commons Conservancy. The TAURI copyright licence (MIT OR Apache-2.0) grants
 from the trademark holder before the logo is used for a third-party product.
 Shipping Paka under the TAURI logo therefore implied an endorsement that does
 not exist. See `docs/RELEASE-READINESS.md` (item R1) and the `B-1` finding in
-`reuse-decision.md`.
+`docs/g1/reuse-decision.md`.
 
 ## What the mark is
 
