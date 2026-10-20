@@ -19,18 +19,40 @@ export const DEFAULT_DOCUMENT_BACKGROUND = "#ffffff";
  *
  * Canvas backing stores are RGBA, so one document-resolution surface costs
  * `width * height * 4` bytes at raster scale 1 and four times that at the
- * app's maximum display scale of 2. The renderer can hold several of those at
- * once: one surface per layer, the live stroke buffer, a full-resolution erase
- * snapshot while an eraser is down, and a temporary 1x composite for export or
- * a bucket scan.
+ * app's maximum display scale of 2. The peak for a **one-layer** document is
+ * therefore:
  *
- * The model below covers a one-layer document plus those working buffers (one
- * budgeted surface is spare headroom for the 1x composite); every additional
- * layer adds one more full-resolution surface. Budgeting four 2x RGBA surfaces
- * against 1 GiB gives
- * `floor(1 GiB / (4 bytes * 2^2 * 4 surfaces)) = 16,777,216` document pixels
- * (4096x4096). That keeps one 2x surface at 256 MiB instead of the roughly
- * 1.07 GB an 8192x8192 document would need for a single surface.
+ * - **Two** full-resolution 2x surfaces that are always resident: the layer
+ *   surface and the live stroke buffer.
+ * - **At most one** further full-resolution 2x surface: the erase snapshot
+ *   (alive only while an eraser is in flight) *or* the grouped live-preview
+ *   scratch (used only for a non-erasing preview on a layer whose opacity is
+ *   below 1 or whose blend mode is not `normal`). They are mutually exclusive
+ *   by construction: an eraser previews by mutating its own layer surface, so
+ *   the renderer passes no preview for it and never builds the group scratch
+ *   while the erase snapshot exists.
+ * - **One** transient scan buffer: a bucket scan (composite + `ImageData` +
+ *   visited bitmap + mask) costs about 10 bytes per document pixel (~170 MB at
+ *   the cap); the PNG export composite is 4 bytes per document pixel at 1x, so
+ *   the scan allowance covers it.
+ *
+ * That is `3 * 4 * 2^2 + 10 = 58` bytes per document pixel of peak surface,
+ * i.e. 973,078,528 bytes (928 MiB) at the cap below, inside the 1 GiB budget.
+ * The cap of 16,777,216 document pixels (4096x4096) keeps a single 2x surface
+ * at 256 MiB, instead of the roughly 1.07 GB an 8192x8192 document would need
+ * for one surface.
+ *
+ * The one-surface rule is a **requirement of the renderer**, not a hope: the
+ * grouped-preview scratch must be released when no preview is active, or a
+ * preview followed by an eraser keeps both it and the erase snapshot alive and
+ * the peak becomes `4 * 4 * 2^2 + 10 = 74` bytes per document pixel
+ * (1,241,213,984 bytes, 1.16 GiB) - over the 1 GiB budget below.
+ *
+ * Every additional layer adds one more full-resolution surface: the model
+ * covers a one-layer document plus its working buffers, not an unbounded layer
+ * stack. The display canvas is sized by the viewport, not the document, and
+ * the soft-edge feather scratch is sized by the stroke's own bounding box, so
+ * neither is counted here.
  *
  * This is a guard on calculable backing-store pixels, not a promise about
  * browser, GPU or compositor overhead. The per-side 8192 ceiling stays for
@@ -38,15 +60,38 @@ export const DEFAULT_DOCUMENT_BACKGROUND = "#ffffff";
  */
 export const RASTER_SURFACE_BYTES_PER_PIXEL = 4;
 export const BUDGETED_RASTER_SCALE = 2;
-export const BUDGETED_RASTER_SURFACES = 4;
+/** Layer surface + stroke buffer + one of {erase snapshot, preview scratch}. */
+export const BUDGETED_FULL_RES_SURFACES = 3;
+/** A bucket scan's composite + ImageData + visited bitmap + mask. */
+export const BUDGETED_SCAN_BYTES_PER_PIXEL = 10;
 export const DOCUMENT_RASTER_BUDGET_BYTES = 1024 * 1024 * 1024;
-export const MAX_DOCUMENT_PIXELS = Math.floor(
-  DOCUMENT_RASTER_BUDGET_BYTES /
-    (RASTER_SURFACE_BYTES_PER_PIXEL *
-      BUDGETED_RASTER_SCALE *
-      BUDGETED_RASTER_SCALE *
-      BUDGETED_RASTER_SURFACES),
-);
+/** Peak bytes per document pixel: three 2x surfaces plus one scan buffer. */
+export const PEAK_BYTES_PER_DOCUMENT_PIXEL =
+  BUDGETED_FULL_RES_SURFACES *
+    RASTER_SURFACE_BYTES_PER_PIXEL *
+    BUDGETED_RASTER_SCALE *
+    BUDGETED_RASTER_SCALE +
+  BUDGETED_SCAN_BYTES_PER_PIXEL;
+/**
+ * The peak if the grouped-preview scratch is retained after a preview and an
+ * eraser then runs: four 2x surfaces plus the scan buffer. It exceeds the
+ * 1 GiB budget, which is why the renderer has to release that scratch when no
+ * preview is active.
+ */
+export const RETAINED_SCRATCH_BYTES_PER_DOCUMENT_PIXEL =
+  (BUDGETED_FULL_RES_SURFACES + 1) *
+    RASTER_SURFACE_BYTES_PER_PIXEL *
+    BUDGETED_RASTER_SCALE *
+    BUDGETED_RASTER_SCALE +
+  BUDGETED_SCAN_BYTES_PER_PIXEL;
+/**
+ * The policy cap: 4096x4096 document pixels. It is deliberately below
+ * `DOCUMENT_RASTER_BUDGET_BYTES / PEAK_BYTES_PER_DOCUMENT_PIXEL`
+ * (18,512,476), so the worst-case peak stays inside the 1 GiB budget.
+ */
+export const MAX_DOCUMENT_PIXELS = 16_777_216;
+/** Worst-case peak surface bytes at `MAX_DOCUMENT_PIXELS`. */
+export const PEAK_DOCUMENT_RASTER_BYTES = MAX_DOCUMENT_PIXELS * PEAK_BYTES_PER_DOCUMENT_PIXEL;
 
 export const DOCUMENT_SIZE_LIMIT_DESCRIPTION =
   `${MIN_DOCUMENT_SIZE}-${MAX_DOCUMENT_SIZE} px per side and at most ` +
@@ -76,14 +121,14 @@ export function documentPixelCount(width: number, height: number): number {
 }
 
 /**
- * Worst-case byte estimate for `surfaces` full-resolution RGBA buffers at
- * `rasterScale`. Defaults to the budget model above; tests can lower either
- * value without allocating anything.
+ * Byte estimate for `surfaces` full-resolution RGBA buffers at `rasterScale`.
+ * Defaults to the budget model above; tests can lower either value without
+ * allocating anything.
  */
 export function estimateDocumentRasterBytes(
   width: number,
   height: number,
-  surfaces: number = BUDGETED_RASTER_SURFACES,
+  surfaces: number = BUDGETED_FULL_RES_SURFACES,
   rasterScale: number = BUDGETED_RASTER_SCALE,
 ): number {
   if (!Number.isFinite(width) || !Number.isFinite(height)) {
@@ -95,6 +140,21 @@ export function estimateDocumentRasterBytes(
     Math.max(1, rasterScale) *
     Math.max(1, rasterScale) *
     Math.max(1, surfaces)
+  );
+}
+
+/**
+ * Worst-case peak surface bytes for a one-layer document: the resident
+ * surfaces, one transient full-resolution surface (the erase snapshot *or* the
+ * grouped live-preview scratch - never both) and a transient scan buffer.
+ */
+export function estimatePeakDocumentRasterBytes(width: number, height: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return (
+    estimateDocumentRasterBytes(width, height) +
+    documentPixelCount(width, height) * BUDGETED_SCAN_BYTES_PER_PIXEL
   );
 }
 
