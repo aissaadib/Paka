@@ -442,6 +442,53 @@ attacks the same term from the other side.
 The numbers above are measured; the mechanism and the proposed fix are a
 hypothesis and a proposal.
 
+#### F7b — the mechanism, tested directly (measured)
+
+The mechanism above was then tested in isolation from the renderer: draw a
+64x64 sub-rect from a canvas source in three variants — (a) the source is
+static, (b) the source was written to inside the sampled region just before
+the draw, (c) the source was written to somewhere else just before the draw.
+
+| Source canvas | Static source | Written inside the sampled region | Written elsewhere |
+| --- | --- | --- | --- |
+| 2048x2048 | 0.02 ms | 7.85 ms | 7.60 ms |
+| 3072x3072 | 0.04 ms | 0.05 ms | 0.05 ms |
+| 4096x4096 | 0.04 ms | 0.06 ms | 0.05 ms |
+
+What this settles:
+
+* The cost is **not the blit** and **not the dirty region** — a 64x64 blit
+  from a static source is 0.02-0.04 ms at every size.
+* The cost appears only when the **source canvas has pending writes**, and it
+  is then paid in full whether the write was inside or outside the sampled
+  region (7.85 vs 7.60 ms), so it is a whole-canvas operation rather than
+  dirty-region tracking.
+* At 2048^2 a draw from a just-written canvas costs ~7.8 ms; at 3072^2 and
+  4096^2 the same draw costs ~0.05 ms. That is the knee, and it is the
+  per-element cost measured on the renderer in F7 (6.77 ms/element at
+  2048^2 versus 0.24 ms/element at 3072^2).
+
+**Conclusion (measured):** the per-element rebuild cost is the renderer
+reading back the document-sized stroke buffer it has just written to, once per
+element. The internal reason for the size knee (very likely Chromium switching
+the canvas between a CPU-backed and a GPU-backed surface around a few
+megapixels) remains a **hypothesis**; the effect and the threshold are
+measurements.
+
+**What it implies:** the blit must not read the document-sized buffer.
+Rasterize each element into a small, reused, element-sized scratch and blit
+*that* — the scratch is small, so reading it back is cheap — or keep the
+element's coverage as an `ImageData` / `ImageBitmap` rather than a canvas.
+If the reasoning holds, the 2048^2 per-element cost should fall from ~6.8 ms
+towards the ~0.02 ms a static-source blit costs, i.e. a 100-element rebuild
+at 2048^2 from ~900 ms to a few ms. A per-layer cache of the last
+rasterization (so an undo re-rasterizes only the changed element) attacks the
+same term from the other side and does not depend on this mechanism. Either
+way the change touches the composite path (one alpha applied once, no
+self-darkening, live == commit == rebuild == export) and the eraser path, so
+it needs the same pixel-equality proof R1 got, plus the area and call-count
+assertions.
+
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
