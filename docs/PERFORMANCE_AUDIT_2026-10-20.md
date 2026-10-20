@@ -867,5 +867,17 @@ canvases in software. A practical recipe that needs no new dependency:
    single sample: take the median of at least five, and repeat the whole
    measurement after an unrelated build to check for drift.
 
+**Measure the frames with `requestAnimationFrame` deltas, and do not force a
+sync with `getImageData` inside the measurement.** In this harness the same
+configuration measured 901 ms and 54 ms in two runs, and a "knee" appeared and
+disappeared; a canvas that is read back repeatedly is served differently by
+Chromium, so a readback-based sync can move a canvas between a fast and a
+slow path and manufacture a cliff that is not there. rAF deltas need no sync
+at all — the frame clock *is* the clock. The destination-area accounting
+(Appendix A) needs no readback either: wrapping `drawImage` only counts.
+If a readback is unavoidable, read a different 1x1 canvas rather than the
+destination, so the destination's readback counter is not the thing being
+measured.
+
 This is the only measurement this audit could not take itself, and it is the
 one that decides whether the next performance slice is worth its cost.
