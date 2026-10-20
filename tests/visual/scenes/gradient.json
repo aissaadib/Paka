@@ -1,0 +1,48 @@
+{
+    "id":  "gradient",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "gradient",
+                                            "type":  "linear",
+                                            "x1":  20,
+                                            "y1":  20,
+                                            "x2":  140,
+                                            "y2":  60,
+                                            "stops":  [
+                                                          {
+                                                              "offset":  0,
+                                                              "color":  "#ff0000"
+                                                          },
+                                                          {
+                                                              "offset":  1,
+                                                              "color":  "#0000ff"
+                                                          }
+                                                      ],
+                                            "opacity":  1
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#16181c",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       100
+                                                   ],
+                                            "ys":  [
+                                                       90,
+                                                       95
+                                                   ]
+                                        }
+                                    ]
+                   }
+               ]
+}

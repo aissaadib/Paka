@@ -1,0 +1,34 @@
+{
+    "id":  "stamped-brush",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "stamp":  true,
+                                                          "stampSpacing":  0.25,
+                                                          "color":  "#16181c",
+                                                          "stampHardness":  0.6,
+                                                          "hardness":  1,
+                                                          "size":  18
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       80,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       60,
+                                                       30,
+                                                       60
+                                                   ]
+                                        }
+                                    ]
+                   }
+               ]
+}

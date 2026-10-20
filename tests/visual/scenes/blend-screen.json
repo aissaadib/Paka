@@ -1,0 +1,51 @@
+{
+    "id":  "blend-screen",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#16181c",
+                                                          "size":  24
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       40,
+                                                       40
+                                                   ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "id":  "Blend",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#3fb950",
+                                                          "size":  24
+                                                      },
+                                            "xs":  [
+                                                       30,
+                                                       130
+                                                   ],
+                                            "ys":  [
+                                                       80,
+                                                       80
+                                                   ]
+                                        }
+                                    ],
+                       "blendMode":  "screen"
+                   }
+               ]
+}
