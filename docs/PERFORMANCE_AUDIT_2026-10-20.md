@@ -4,6 +4,25 @@
 was changed by this audit. The only repository file this audit added is this
 report.
 
+**State at the end of the session:** `main` at `2fa34cc`, which contains
+
+* `4ac040b` — **R1 (dirty bounds) shipped**: the rebuild is bounded by each
+  element's inked rectangle (47x-187x less touched area), byte-identical
+  pixels.
+* `520aa77` — the grouped-preview scratch is released when no preview is
+  active, which is what keeps the raster budget's peak model true.
+* `2fa34cc` — **the element-scratch variant (F7) was reverted**: it bought
+  nothing demonstrable (the timing claim did not reproduce, see F7e), it
+  differed by 1/255 of alpha on a few dozen pixels at rasterScale 2 (F7d),
+  and it would have moved the documented raster budget from 58 to 59 bytes per
+  document pixel.
+
+So the durable results of this audit are the *area* reduction (F1c), the
+*mechanism* of the remaining cost (F7b, F7f), the memory budget (F5) and the
+pixel verdicts (F7d) — and one open lead: the per-draw cost charged for the
+document-sized layer surface (F7f), which needs a profile **in the packaged
+app** before anyone restructures the surfaces around it.
+
 **Baseline audited:** `main` at `e1071d9` ("fix: composite the live preview
 inside its own layer"), project format v8. The renderer file
 `src/core/rendering/Canvas2DRenderer.ts` was byte-identical to that commit
@@ -573,6 +592,14 @@ So:
   (0.001 %). If a future slice wants zero difference at every raster scale,
   that 1/255 is the thing to chase, and it is in the scratch blit.
 
+**Outcome:** the element-scratch variant shipped as `f7cf50c` and was
+**reverted** as `2fa34cc` — the timing benefit did not reproduce (F7e), the
+1/255 difference at rasterScale 2 is exactly the pixel proof the project's
+own rule for a rasterization change asks for, and the scratch would have moved
+the documented raster budget from 58 to 59 bytes per document pixel. The
+1/255 here is the measurement the revert rests on, so it is the one number in
+this audit that changed a decision.
+
 The lesson for the method: a quick prototype can invent a defect that the real
 implementation does not have, and a cache-busted import of a file another
 agent is actively editing measures their work-in-progress rather than a
@@ -722,8 +749,15 @@ frame-rate number could be obtained in this environment.
    surface growth as a separate, explicit policy item: either a
    layer-count/surface budget, or lazy surface allocation for layers that are
    hidden or never drawn.
-5. **R5 — do not start.** Nothing in this audit justifies a tile-based
-   renderer.
+5. **R5 — the destination lead, and it needs a packaged-app profile first.**
+   F7f shows the remaining per-element cost is the *destination*: every
+   element is blitted into the document-sized layer surface and each blit is
+   charged the destination's area (~0.1 ms per destination megapixel in this
+   harness). Batching (accumulate elements into one small scratch, blit once)
+   is the cheap first step and does not change the surface model; tiles are
+   the structural answer. Neither is a small slice: both change the surface
+   model and the raster budget, so the audit's earlier "defer" still stands
+   **until a profile in the packaged app** shows the term is worth it there.
 
 **Non-goals for this audit and for the follow-up slices:** no renderer
 replacement (WebGL/WebGPU stays out of scope until a profile shows Canvas 2D
@@ -792,3 +826,46 @@ here and would mask the effect being measured.
 For frame-rate numbers in the packaged app, sample `requestAnimationFrame`
 deltas in a visible window; the agent browser harness suspends rAF when the
 tab is hidden, so no frame-rate claim can be made from it.
+
+## Appendix C — profiling the packaged app (the recipe for the open lead)
+
+The open lead (F7f) needs the packaged Tauri window, because the harness
+suspends `requestAnimationFrame` when its tab is hidden and rasterises large
+canvases in software. A practical recipe that needs no new dependency:
+
+1. Run the app (`pnpm tauri dev`, or the packaged build) with a document of a
+   known size, e.g. 4096x4096, and a layer with a hundred strokes.
+2. Open the WebView2 developer tools (in a dev build: `Ctrl+Shift+I`) and
+   paste the instrument from Appendix A **plus** the area accounting, so the
+   numbers are directly comparable with this audit:
+
+   ```js
+   const proto = CanvasRenderingContext2D.prototype;
+   const orig = proto.drawImage;
+   const det = (ctx) => { const t = ctx.getTransform(); return Math.abs(t.a * t.d - t.b * t.c); };
+   let acc = { calls: 0, area: 0, destArea: 0 };
+   proto.drawImage = function (img, ...rest) {
+     acc.calls += 1;
+     let dw, dh;
+     if (rest.length === 2) { dw = img.width; dh = img.height; }
+     else if (rest.length === 4) { dw = rest[2]; dh = rest[3]; }
+     else { dw = rest[6]; dh = rest[7]; }
+     acc.area += Math.abs(dw * dh) * det(this);
+     acc.destArea += Math.abs(dw * dh) * det(this);
+     return orig.call(this, img, ...rest);
+   };
+   ```
+
+3. Draw (a) a stroke that is small on screen and (b) a stroke that fills the
+   view, and compare the frame cost. Then repeat with a 2048x2048 document and
+   a 4096x4096 one. If the per-frame cost grows with the *document* size while
+   the on-screen content is the same, the destination-area term is real in the
+   packaged app too, and batching (or tiles) is worth scheduling. If it does
+   not, the term is a harness artefact and the audit's F7f should be filed as
+   such.
+4. Do **not** read frame timings from a hidden window, and do not trust a
+   single sample: take the median of at least five, and repeat the whole
+   measurement after an unrelated build to check for drift.
+
+This is the only measurement this audit could not take itself, and it is the
+one that decides whether the next performance slice is worth its cost.
