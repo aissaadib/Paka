@@ -82,7 +82,11 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
-| `3580e82` | **Document raster budget** — at most 16,777,216 document pixels in total (4096x4096), from a 1 GiB budget for four 2x RGBA surfaces; New Document and project loading enforce it before anything is allocated; format stays version 8. |
+| `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active, so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
+| `21cd7c7` | **Finished-gesture notice reset** — a refused layer change explains once per gesture, and a finished gesture ends that state. |
+| `fae138c` | **Honest peak raster model** — the budget models the peak surface set (three 2x surfaces plus a transient scan buffer, 58 bytes per document pixel) instead of four full surfaces; the cap is unchanged. |
+| `372e7be` | **Refusal notice once per gesture** — a layer change refused during a gesture explains why once, instead of on every attempt. |
+| `3580e82` | **Document raster budget** — at most 16,777,216 document pixels in total (4096x4096), from a 1 GiB budget for the peak surface set; New Document and project loading enforce it before anything is allocated; format stays version 8. |
 | `4c68c89` | **Layer and history safety** — layer changes refused during a gesture; metadata undo/redo keeps the active layer; a merge barrier keeps two gestures two undo steps. |
 | `e1071d9` | **Live preview compositing** — the in-flight stroke composites in its own layer's slot, honouring visibility, opacity and blend mode; a reused group scratch for a non-default layer opacity/blend. |
 | `32e06bb` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and the picker share the composite; format version 8. |
@@ -204,7 +208,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   undo steps.
 - **A document is bounded by total pixels, not only by side length.** At most
   `MAX_DOCUMENT_PIXELS` = 16,777,216 document px, from an explicit 1 GiB budget
-  for four 2x RGBA surfaces (4 bytes x 2^2 x 4 surfaces per document pixel).
+  for the peak surface set: three 2x RGBA surfaces (the layer surface, the
+  stroke buffer, and at most one of the erase snapshot or the grouped
+  live-preview scratch) plus a transient scan buffer - 58 bytes per document
+  pixel (`3 x 4 x 2^2 + 10`), 928 MiB at the cap.
   The per-side limit stays 8..8192, so an 8192-wide document may be at most
   2048 px high. The limit is enforced in the document model and in the project
   parser before anything is allocated, and it is a safety limit, not a schema

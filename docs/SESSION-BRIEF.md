@@ -51,7 +51,11 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
 
 | Commit | Slice |
 | --- | --- |
-| `3580e82` | **Document raster budget** — a document may use at most 16,777,216 px in total (4096×4096), derived from four 2× RGBA surfaces inside a 1 GiB budget; New Document and project loading enforce it before anything is allocated; format stays v8. |
+| `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active (on end, on cancel, on a document or raster-scale change, and before an eraser takes its snapshot), so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
+| `21cd7c7` | **Finished-gesture notice reset** — a refused layer change explains once per gesture, and a finished gesture ends that state. |
+| `fae138c` | **Honest peak raster model** — the budget models the peak surface set (three 2× surfaces plus a transient scan buffer, 58 bytes per document pixel) instead of four full surfaces; the 16,777,216-px cap is unchanged. |
+| `372e7be` | **Refusal notice once per gesture** — a layer change refused during a gesture explains why once, instead of on every attempt. |
+| `3580e82` | **Document raster budget** — a document may use at most 16,777,216 px in total (4096×4096), derived from a 1 GiB budget for the peak surface set; New Document and project loading enforce it before anything is allocated; format stays v8. |
 | `4c68c89` | **Layer and history safety** — layer changes are refused while a gesture is in flight; undo/redo of a metadata change keeps the active layer; an action between two same-keyed changes ends the merge run. |
 | `e1071d9` | **Live preview compositing** — the in-flight stroke is drawn in its own layer's slot, honouring that layer's visibility, opacity and blend mode; grouped path for a non-default layer opacity/blend. |
 | `32e06bb` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and picker share the composite; format v8. |
@@ -124,8 +128,9 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
   position, file name/messages, `● unsaved`.
 - **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
 - **New document**: 8–8192 px per side and at most 16,777,216 px in total,
-  validated. The total limit is a raster-memory budget (four 2× RGBA surfaces
-  inside 1 GiB), so a large document cannot ask for a multi-gigabyte surface.
+  validated. The total limit is a raster-memory budget (three 2× RGBA surfaces
+  plus a transient scan buffer, 58 bytes per document pixel, inside 1 GiB), so
+  a large document cannot ask for a multi-gigabyte surface.
 
 ## 4. Code map
 
@@ -283,10 +288,12 @@ Key files for the next slice (stamp engine):
   the selection, moving the viewport, an undo or a redo - ends a merge run, so
   two same-keyed changes separated by it stay two undo steps.
 - **A document is bounded by total pixels, not only by side length.** At most
-  16,777,216 document px, from an explicit 1 GiB budget for four 2x RGBA
-  surfaces (4 bytes x 2^2 x 4 surfaces per document pixel). Enforced in the
-  document model and in the project parser before anything is allocated; the
-  file format version is unchanged.
+  16,777,216 document px, from an explicit 1 GiB budget for the peak surface
+  set: three 2x RGBA surfaces (the layer surface, the stroke buffer, and at
+  most one of the erase snapshot or the grouped live-preview scratch) plus a
+  transient scan buffer - 58 bytes per document pixel (`3 x 4 * 2^2 + 10`),
+  928 MiB at the cap. Enforced in the document model and in the project parser
+  before anything is allocated; the file format version is unchanged.
 - **A shape is an ordinary stroke** whose samples trace the outline;
   `fill: true` fills the polygon before tracing the outline. No geometry type.
 - **A fill is a pixel patch**, not a traced contour: colour, tight bbox, binary
@@ -324,6 +331,12 @@ Product:
 
 - No text tool; only brush, eraser, select, line, rectangle, ellipse, bucket,
   gradient, picker, pan.
+- Layer rasterization is a full rebuild: for each element on a layer the
+  renderer clears the whole stroke buffer and blends one full-surface draw, so
+  an undo on a busy layer costs `O(elements x surface pixels)` regardless of the
+  stroke geometry. Measured numbers, their environmental limits, and the
+  recommended first fix (dirty bounds for the stroke buffer) are in
+  [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
 - Gradients: two stops, whole-layer, no stop editor, no angle snapping, no
   transparent stop, not selectable (cannot move/duplicate/flip).
 - Fills: binary mask, no feather/gap-closing, no pre-commit preview, not

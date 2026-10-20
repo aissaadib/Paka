@@ -197,6 +197,14 @@ composite read back as an `ImageData`, which is exactly what the bucket fill
 scans: the fill's boundary is the picture the user sees, not one layer's
 internal pixels.
 
+Rasterizing a layer is a rebuild, not an incremental edit: for every element on
+that layer the renderer clears the whole stroke buffer and blends one
+full-surface draw, so the cost is `O(elements x surface pixels)` and does not
+depend on the stroke's geometry. A measured breakdown - including the
+environmental limits of those measurements - and the recommended first fix
+(dirty bounds for the stroke buffer) are in
+[PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
+
 ### Layer blend modes
 
 A layer's `blendMode` is compositing metadata, not part of its pixels. The
@@ -773,12 +781,23 @@ The total limit is a memory budget, not an arbitrary cap. A canvas backing
 store is RGBA, so one document-resolution surface costs `width * height * 4`
 bytes at raster scale 1 and four times that at the app's maximum display scale
 of 2. The renderer can hold several of those at once: one surface per layer,
-the live stroke buffer, a full-resolution erase snapshot while an eraser is
-down, and a temporary 1x composite for export or a bucket scan. Budgeting four
-2x surfaces against 1 GiB gives
-`floor(1 GiB / (4 bytes * 2^2 * 4 surfaces)) = 16,777,216` document pixels,
-which keeps one 2x surface at 256 MiB instead of the roughly 1.07 GB an
-8192x8192 document would need for a single surface.
+the live stroke buffer, and - at most one more - either a full-resolution erase
+snapshot while an eraser is down *or* the grouped live-preview scratch for a
+layer with opacity below 1 or a non-`normal` blend mode. Those two are
+mutually exclusive by construction: an eraser previews by mutating its own
+layer surface, so the renderer passes no preview for it and never builds the
+group scratch while the erase snapshot exists. A transient scan buffer adds
+about 10 bytes per document pixel (a bucket scan's composite + `ImageData` +
+visited bitmap + mask; the 1x PNG export composite is 4).
+
+That peak is `3 * 4 * 2^2 + 10 = 58` bytes per document pixel - 928 MiB at the
+cap - inside a 1 GiB budget, which keeps one 2x surface at 256 MiB instead of
+the roughly 1.07 GB an 8192x8192 document would need for a single surface. The
+one-surface rule is a requirement of the renderer, not a hope: if the
+grouped-preview scratch were retained after a preview and an eraser then ran,
+the peak would be `4 * 4 * 2^2 + 10 = 74` bytes per document pixel (1.16 GiB),
+over the budget. The renderer therefore releases the scratch whenever no
+preview is active.
 
 The limit lives in the document model (`isValidDocumentSize`), so it applies
 wherever a document is created - the New Document dialog and `createDocument` -
