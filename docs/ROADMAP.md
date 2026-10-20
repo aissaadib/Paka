@@ -53,6 +53,9 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       steps.
 - [x] Reject invalid or unsupported project files before touching the live
       document; the parser returns a result object and never throws.
+- [x] Bounded raster memory: a document may use at most 16,777,216 pixels in
+      total, so an 8192x8192 document can no longer ask for a ~1.07 GB surface.
+      New Document and project loading enforce it before anything is allocated.
 - [x] Dirty-revision tracking; new documents start clean; save clears it.
 - [x] Guard paths for Save-first / Cancel / Discard and failed saves, including
       close-with-unsaved-work and New/Open while dirty.

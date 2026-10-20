@@ -763,6 +763,35 @@ applied once when the buffer composites, so filling and tracing cannot darken
 each other. The default non-zero winding rule is enough: the outline is a single
 simple loop.
 
+### Document size and surface memory
+
+Document geometry is bounded twice. Each side is limited to 8..8192 px, and the
+**total** pixel count is limited to 16,777,216 (4096x4096), so an 8192-wide
+document may be at most 2048 px high.
+
+The total limit is a memory budget, not an arbitrary cap. A canvas backing
+store is RGBA, so one document-resolution surface costs `width * height * 4`
+bytes at raster scale 1 and four times that at the app's maximum display scale
+of 2. The renderer can hold several of those at once: one surface per layer,
+the live stroke buffer, a full-resolution erase snapshot while an eraser is
+down, and a temporary 1x composite for export or a bucket scan. Budgeting four
+2x surfaces against 1 GiB gives
+`floor(1 GiB / (4 bytes * 2^2 * 4 surfaces)) = 16,777,216` document pixels,
+which keeps one 2x surface at 256 MiB instead of the roughly 1.07 GB an
+8192x8192 document would need for a single surface.
+
+The limit lives in the document model (`isValidDocumentSize`), so it applies
+wherever a document is created - the New Document dialog and `createDocument` -
+and in the project parser, which checks the dimensions before it reads any
+layer content. An oversized file is therefore refused before the engine
+replaces the open document or allocates a surface, and a project that is inside
+the budget keeps opening unchanged; nothing is scaled down silently.
+
+This bounds *calculable backing-store pixels*, not the browser's total memory:
+the display canvas, the compositor and the GPU driver add their own overhead,
+and every additional layer adds another full-resolution surface. The budget
+covers a one-layer document plus the working buffers.
+
 ## Undo / redo
 
 Two kinds of step share one stack, so undo behaves uniformly whether the last

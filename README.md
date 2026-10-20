@@ -102,7 +102,9 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   menu and `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+J` duplicates the active layer).
   Dragging a slider is one step, not one per tick. History is capped at 200
   commands.
-- **New document** dialog with size validation (8-8192 px per side).
+- **New document** dialog with size validation (8-8192 px per side, at most
+  16,777,216 px in total, so a large document cannot ask for a multi-gigabyte
+  raster surface).
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`) writing a versioned `.paka` file that stores document
   metadata and **ordered layer content** - stroke samples, fill patches and

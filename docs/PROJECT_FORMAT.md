@@ -197,7 +197,7 @@ version described under [Versioning](#versioning).
 | --- | --- | --- |
 | `id` | string | Document id, unique within the file. |
 | `name` | string | The drawing's own label. Independent of the file name. |
-| `width`, `height` | number | Document size in document pixels; must be 8-8192. |
+| `width`, `height` | number | Document size in document pixels; must be 8-8192 per side and at most 16,777,216 px in total. |
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
 
@@ -358,7 +358,8 @@ looks like:
 
 - contents that are not JSON, or a `format` that is not `paka-project`;
 - a missing, non-integer, older-than-1 or newer-than-supported `version`;
-- document dimensions outside 8-8192, or non-finite numbers anywhere;
+- document dimensions outside 8-8192 per side, more than 16,777,216 pixels in
+  total, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
 - a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"` or
@@ -431,6 +432,11 @@ Two further guarantees:
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
   what makes the format easy to extend.
+- **The document pixel limit is a safety limit, not a schema change.** A file
+  whose `document.width * document.height` exceeds 16,777,216 is refused by the
+  reader because rasterizing its surfaces would be unsafe, not because an older
+  reader would draw the picture differently, so the format version is unchanged
+  and files inside the limit are read exactly as before.
 - **`stabilizer` is the first field added under that rule.** It shapes the
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads

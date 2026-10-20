@@ -14,6 +14,44 @@ export const MIN_DOCUMENT_SIZE = 8;
 export const MAX_DOCUMENT_SIZE = 8192;
 export const DEFAULT_DOCUMENT_BACKGROUND = "#ffffff";
 
+/**
+ * Bounded raster-surface budget for one document.
+ *
+ * Canvas backing stores are RGBA, so one document-resolution surface costs
+ * `width * height * 4` bytes at raster scale 1 and four times that at the
+ * app's maximum display scale of 2. The renderer can hold several of those at
+ * once: one surface per layer, the live stroke buffer, a full-resolution erase
+ * snapshot while an eraser is down, and a temporary 1x composite for export or
+ * a bucket scan.
+ *
+ * The model below covers a one-layer document plus those working buffers (one
+ * budgeted surface is spare headroom for the 1x composite); every additional
+ * layer adds one more full-resolution surface. Budgeting four 2x RGBA surfaces
+ * against 1 GiB gives
+ * `floor(1 GiB / (4 bytes * 2^2 * 4 surfaces)) = 16,777,216` document pixels
+ * (4096x4096). That keeps one 2x surface at 256 MiB instead of the roughly
+ * 1.07 GB an 8192x8192 document would need for a single surface.
+ *
+ * This is a guard on calculable backing-store pixels, not a promise about
+ * browser, GPU or compositor overhead. The per-side 8192 ceiling stays for
+ * file-format compatibility; the total pixel budget is the stricter limit.
+ */
+export const RASTER_SURFACE_BYTES_PER_PIXEL = 4;
+export const BUDGETED_RASTER_SCALE = 2;
+export const BUDGETED_RASTER_SURFACES = 4;
+export const DOCUMENT_RASTER_BUDGET_BYTES = 1024 * 1024 * 1024;
+export const MAX_DOCUMENT_PIXELS = Math.floor(
+  DOCUMENT_RASTER_BUDGET_BYTES /
+    (RASTER_SURFACE_BYTES_PER_PIXEL *
+      BUDGETED_RASTER_SCALE *
+      BUDGETED_RASTER_SCALE *
+      BUDGETED_RASTER_SURFACES),
+);
+
+export const DOCUMENT_SIZE_LIMIT_DESCRIPTION =
+  `${MIN_DOCUMENT_SIZE}-${MAX_DOCUMENT_SIZE} px per side and at most ` +
+  `${MAX_DOCUMENT_PIXELS.toLocaleString("en-US")} px in total`;
+
 export interface CreateDocumentOptions {
   readonly name?: string;
   readonly width: number;
@@ -32,6 +70,43 @@ export function createLayer(name: string): Layer {
   };
 }
 
+/** Rounded document pixel count used by the raster budget. */
+export function documentPixelCount(width: number, height: number): number {
+  return Math.round(width) * Math.round(height);
+}
+
+/**
+ * Worst-case byte estimate for `surfaces` full-resolution RGBA buffers at
+ * `rasterScale`. Defaults to the budget model above; tests can lower either
+ * value without allocating anything.
+ */
+export function estimateDocumentRasterBytes(
+  width: number,
+  height: number,
+  surfaces: number = BUDGETED_RASTER_SURFACES,
+  rasterScale: number = BUDGETED_RASTER_SCALE,
+): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return (
+    documentPixelCount(width, height) *
+    RASTER_SURFACE_BYTES_PER_PIXEL *
+    Math.max(1, rasterScale) *
+    Math.max(1, rasterScale) *
+    Math.max(1, surfaces)
+  );
+}
+
+/** True when the rounded dimensions fit the document raster budget. */
+export function isWithinDocumentRasterBudget(width: number, height: number): boolean {
+  if (!Number.isFinite(width) || !Number.isFinite(height)) {
+    return false;
+  }
+  const pixels = documentPixelCount(width, height);
+  return Number.isFinite(pixels) && pixels > 0 && pixels <= MAX_DOCUMENT_PIXELS;
+}
+
 /** True when `width`/`height` are usable document dimensions. */
 export function isValidDocumentSize(width: number, height: number): boolean {
   return (
@@ -40,7 +115,8 @@ export function isValidDocumentSize(width: number, height: number): boolean {
     width >= MIN_DOCUMENT_SIZE &&
     width <= MAX_DOCUMENT_SIZE &&
     height >= MIN_DOCUMENT_SIZE &&
-    height <= MAX_DOCUMENT_SIZE
+    height <= MAX_DOCUMENT_SIZE &&
+    isWithinDocumentRasterBudget(width, height)
   );
 }
 
@@ -50,7 +126,7 @@ export function createDocument(options: CreateDocumentOptions): DrawingDocument 
   if (!isValidDocumentSize(width, height)) {
     throw new RangeError(
       `Document size ${width}x${height} is outside the supported range ` +
-        `${MIN_DOCUMENT_SIZE}-${MAX_DOCUMENT_SIZE} px.`,
+        `(${DOCUMENT_SIZE_LIMIT_DESCRIPTION}).`,
     );
   }
 

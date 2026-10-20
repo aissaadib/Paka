@@ -24,9 +24,8 @@
 import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, normalizeBrush } from "../brushes/defaults";
 import {
   DEFAULT_DOCUMENT_BACKGROUND,
+  DOCUMENT_SIZE_LIMIT_DESCRIPTION,
   isValidDocumentSize,
-  MAX_DOCUMENT_SIZE,
-  MIN_DOCUMENT_SIZE,
 } from "../document/document";
 import type {
   DrawingDocument,
@@ -523,10 +522,12 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
 
   const width = Math.round(readAnyNumber(rawDocument.width, "The document width"));
   const height = Math.round(readAnyNumber(rawDocument.height, "The document height"));
+  // This is the allocation gate: reject unsafe dimensions before reading any
+  // layer content or letting the engine replace the open document.
   if (!isValidDocumentSize(width, height)) {
     fail(
       `The document size ${width}x${height} is outside the supported range ` +
-        `(${MIN_DOCUMENT_SIZE}-${MAX_DOCUMENT_SIZE} px).`,
+        `(${DOCUMENT_SIZE_LIMIT_DESCRIPTION}).`,
     );
   }
 
