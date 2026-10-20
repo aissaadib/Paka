@@ -489,6 +489,54 @@ self-darkening, live == commit == rebuild == export) and the eraser path, so
 it needs the same pixel-equality proof R1 got, plus the area and call-count
 assertions.
 
+#### F7c — the proposed fix, prototyped: the cost model holds, but a naive implementation is not pixel-identical
+
+The fix was then prototyped in the page (not in the repo): rasterize each
+element into a reused, element-sized scratch and blit that, instead of the
+document-sized stroke buffer, using the renderer's own region computation and
+an identity transform for the blit.
+
+Cost (50 tiny strokes, per element, medians):
+
+| Document | Scale | Shipped | Prototype | |
+| --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 2.28 ms | 0.08 ms | 28x faster |
+| 2048x2048 | 1 | 6.80 ms | 0.08 ms | 85x faster |
+| 2048x2048 | 2 | 0.23 ms | 0.25 ms | neutral |
+| 3072x3072 | 1 | 0.15 ms | 0.12 ms | neutral |
+
+So the cost model is confirmed: reading back the document-sized buffer *is*
+the remaining per-element cost, and an element-sized scratch removes it. Where
+the shipped path is already fast (surfaces above the knee) the prototype is
+neutral, so it is not a trade-off there.
+
+**The pixel trap, which matters more than the timing:** the prototype is
+**not** pixel-identical to the shipped path.
+
+| Document | Scale | Differing bytes | Of | Max byte delta |
+| --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 4,749 | 4,194,304 (0.11 %) | 27 |
+| 2048x2048 | 1 | 4,831 | 16,777,216 (0.03 %) | 27 |
+| 2048x2048 | 2 | 21,178 | 67,108,864 (0.03 %) | 10 |
+| 3072x3072 | 1 | 4,821 | 37,748,736 (0.03 %) | 27 |
+
+Most likely cause (**hypothesis**, not proven): the scratch *clips* the
+stroke to the region, so the antialiased ring of a round cap or join that
+extends past the region border is cut off, while the shipped path rasterizes
+into the full buffer and keeps it. The region is padded by the brush radius
++ three blur radii + 1 px, which is apparently not quite enough for
+Chromium's antialiasing bleed.
+
+**Consequence for the next slice:** the change is worth doing (85x on the slow
+side of the knee, neutral elsewhere), but it must first solve the clipping —
+widen the region by a measured antialiasing margin, or keep the scratch
+unclipped where the coverage can bleed — and then prove live == commit ==
+rebuild == export with real pixels, exactly as R1 did. A scratch that is too
+small is fast *and wrong*, and only a pixel comparison catches it. (A first
+version of the prototype also blitted the scratch under the surface's scale
+transform, which mis-placed it at 2x; the identity transform fixed it — the
+same trap applies to a real implementation.)
+
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
