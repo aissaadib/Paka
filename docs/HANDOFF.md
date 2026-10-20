@@ -5,7 +5,7 @@ briefing that the previous session would have given you: what Paka is, how work
 is done here, what is already shipped, which decisions are settled, how to verify
 anything, and what to do next.
 
-Last verified: **2026-10-20**, at the gradient commit on `main` (the current
+Last verified: **2026-10-20**, at the raster-budget commit on `main` (the current
 `HEAD` when this file was written; clean and in sync with `origin/main`).
 
 A condensed, paste-ready version of this briefing lives in
@@ -67,8 +67,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, pushed after the layer blend mode slice.
-- **`pnpm test` → 422 tests in 26 files, all pass.** `pnpm typecheck` clean;
+- Branch `main`, pushed after the live-preview compositing, layer-safety and
+  raster-budget slices.
+- **`pnpm test` → 461 tests in 29 files, all pass.** `pnpm typecheck` clean;
   `pnpm build` succeeds.
 - **Project file format version 8** (`PROJECT_VERSION = 8`).
 - A release executable has been built and launched successfully:
@@ -81,7 +82,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and the picker share the composite; format version 8. |
+| `3580e82` | **Document raster budget** — at most 16,777,216 document pixels in total (4096x4096), from a 1 GiB budget for four 2x RGBA surfaces; New Document and project loading enforce it before anything is allocated; format stays version 8. |
+| `4c68c89` | **Layer and history safety** — layer changes refused during a gesture; metadata undo/redo keeps the active layer; a merge barrier keeps two gestures two undo steps. |
+| `e1071d9` | **Live preview compositing** — the in-flight stroke composites in its own layer's slot, honouring visibility, opacity and blend mode; a reused group scratch for a non-default layer opacity/blend. |
+| `32e06bb` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and the picker share the composite; format version 8. |
 | `59c4cd6` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %), cached strength tiles, no self-darkening, applies to brush/eraser/shapes; format version 7. |
 | `567a091` | **Brush spacing and stabilizer** — spacing surfaced as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) captured per stroke, with the release point appended as a visible settle segment; brush/eraser only; additive within format version 6. |
 | `56b12ab` | **Brush hardness** — `hardness` on the brush, captured per stroke; one post-pass feather of the finished silhouette (bounded, reused scratch), soft brush/eraser/shapes; format version 6. |
@@ -132,7 +136,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   (`MAX_FILL_SCAN_PIXELS`). The transient worst case is roughly 170 MB (composite,
   `ImageData`, visited bitmap and mask); a larger document refuses the press with
   a status-bar notice rather than freezing. A small fill stores only its own
-  bounding-box mask, not a full-canvas copy.
+  bounding-box mask, not a full-canvas copy. The document pixel budget is the
+  same number, so a document created or opened through the app never reaches
+  it; the scan guard still protects a document that bypasses validation.
 - **A gradient is a first-class `GradientRecord`, not a pixel snapshot.** It
   carries `kind: "gradient"`, `type` (`linear`/`radial`), endpoints, colour stops
   and opacity, and lives in the same ordered element list as strokes and fills.
@@ -174,6 +180,34 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `readCompositePixel` (picker) uses the same order, so they cannot disagree.
   Modes are not per stroke, and there is no group/clipping or alpha-inheritance
   context yet.
+- **A live preview composites inside its own layer.** The in-flight stroke is
+  drawn in its layer's slot - after that layer's committed content and before
+  any layer above it - so it honours the layer's visibility, opacity and blend
+  mode, and the release never changes the stacking. A layer with `opacity < 1`
+  or a `multiply` / `screen` blend groups the layer surface and the stroke
+  buffer in one reused scratch canvas, because the layer's alpha and blend
+  apply to the *finished* layer; an opaque `normal` layer keeps the cheap
+  `source-over` path. Export and bucket sampling pass no preview.
+- **A layer change during a gesture is refused.** A stroke, fill, gradient or
+  selection drag owns content that is not in history yet, and a layer edit
+  could remove the layer the preview is being painted into. The engine shows a
+  notice and changes nothing, and the finish/cancel paths discard a preview
+  whose layer has vanished.
+- **Undo/redo of a metadata-only layer edit keeps the active layer.** Rename,
+  visibility, opacity, blend mode and reorder no longer restore the layer that
+  happened to be active when the edit was made, so undo does not move the user
+  off the layer they are looking at and does not drop the selection. Structural
+  commands (add, delete, duplicate) still own the active layer.
+- **A merge barrier separates gestures.** Selecting a layer, changing the
+  brush or a tool, and undo/redo end a merge run, so two same-keyed changes
+  separated by another action stay two undo steps.
+- **A document is bounded by total pixels, not only by side length.** At most
+  `MAX_DOCUMENT_PIXELS` = 16,777,216 document px, from an explicit 1 GiB budget
+  for four 2x RGBA surfaces (4 bytes x 2^2 x 4 surfaces per document pixel).
+  The per-side limit stays 8..8192, so an 8192-wide document may be at most
+  2048 px high. The limit is enforced in the document model and in the project
+  parser before anything is allocated, and it is a safety limit, not a schema
+  change: the format version stays 8.
 - **Selection stores only `{ layerId, strokeIds }`.** The dashed frame plus blue
   centreline trace is an overlay: display-only, never in a layer, never exported,
   never serialized.

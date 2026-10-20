@@ -6,8 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at the layer blend mode slice on `main` — clean
-and in sync with `origin/main`.
+Last verified: **2026-10-20**, at the live-preview compositing, layer-safety and
+raster-budget slices on `main` — clean and in sync with `origin/main`.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,8 +30,9 @@ and in sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, working tree clean after the layer blend mode slice.
-- `pnpm test` → **422 tests in 26 files, all pass** (re-run for this slice).
+- Branch `main`, working tree clean after the live-preview compositing,
+  layer-safety and raster-budget slices.
+- `pnpm test` → **461 tests in 29 files, all pass** (re-run for this slice).
 - `pnpm typecheck` clean; `pnpm build` succeeds (verified for this slice).
 - Project file format **version 8** (`PROJECT_VERSION = 8`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7, and
@@ -42,12 +43,18 @@ and in sync with `origin/main`.
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
   stabilizer and grain texture shipped; the stamp engine remains. Phase 4 has
   `normal` / `multiply` / `screen` layer blend modes; masks and groups remain.
+  Phase 0 gained three more correctness items: live-preview compositing inside
+  its own layer, layer/history safety during a gesture, and a bounded document
+  raster budget.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and picker share the composite; format v8. |
+| `3580e82` | **Document raster budget** — a document may use at most 16,777,216 px in total (4096×4096), derived from four 2× RGBA surfaces inside a 1 GiB budget; New Document and project loading enforce it before anything is allocated; format stays v8. |
+| `4c68c89` | **Layer and history safety** — layer changes are refused while a gesture is in flight; undo/redo of a metadata change keeps the active layer; an action between two same-keyed changes ends the merge run. |
+| `e1071d9` | **Live preview compositing** — the in-flight stroke is drawn in its own layer's slot, honouring that layer's visibility, opacity and blend mode; grouped path for a non-default layer opacity/blend. |
+| `32e06bb` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and picker share the composite; format v8. |
 | `59c4cd6` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %); one `destination-in` pass, cached strength tiles, no self-darkening; brush/eraser/shapes; format v7. |
 | `567a091` | **Brush spacing and stabilizer** — spacing exposed as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) with a visible release settle; brush/eraser only; captured per stroke; additive within format v6. |
 | `56b12ab` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
@@ -66,7 +73,9 @@ and in sync with `origin/main`.
   semi-transparent self-overlap never darkens. **Hardness** softens the finished
   stroke's outer edge in one pass: the interior keeps full coverage, self-overlap
   still cannot darken, and hardness `1` is the unchanged crisp edge. Presses
-  outside the paper are ignored.
+  outside the paper are ignored. The **live preview** composites inside its own
+  layer, so it honours that layer's position, visibility, opacity and blend
+  mode, and releasing the stroke never changes the stacking.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
 - **Shapes** (`L` line, `R` rectangle, `O` ellipse): live preview, one stroke =
@@ -101,7 +110,9 @@ and in sync with `origin/main`.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
   opacity, blend mode (`Normal`, `Multiply`, `Screen`) and selection. A blend
   mode combines the finished layer with the paper and every lower layer. Layer
-  edits are undoable (including the deleted layer's elements).
+  edits are undoable (including the deleted layer's elements) and are **refused
+  while a gesture is in flight**, so a release can never commit into a layer
+  that was removed mid-drag.
 - **History**: 200 commands; one step per gesture; a slider drag is one step.
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`), versioned `.paka` with ordered layer content (stroke samples,
@@ -112,7 +123,9 @@ and in sync with `origin/main`.
 - **Status bar**: document size, zoom, history depth, selected count, cursor
   position, file name/messages, `● unsaved`.
 - **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
-- **New document**: 8–8192 px per side, validated.
+- **New document**: 8–8192 px per side and at most 16,777,216 px in total,
+  validated. The total limit is a raster-memory budget (four 2× RGBA surfaces
+  inside 1 GiB), so a large document cannot ask for a multi-gigabyte surface.
 
 ## 4. Code map
 
@@ -248,7 +261,32 @@ Key files for the next slice (stamp engine):
 - **Preview vs commit**: press inserts real preview content (or starts a buffer),
   moves update it in place, release records exactly one command, cancel /
   lost capture / tool switch / over-ceiling removes it with **no history and no
-  revision bump**.
+  revision bump**. The preview is composited **inside its own layer** - after
+  that layer's committed content and before any layer above it - so it honours
+  the layer's visibility, opacity and blend mode, and the release produces the
+  same picture the user watched. A layer with `opacity < 1` or a `multiply` /
+  `screen` blend groups the layer and the stroke in one reused scratch canvas,
+  because the layer's alpha and blend apply to the *finished* layer.
+- **A layer change during a gesture is refused.** A stroke, fill, gradient or
+  selection drag owns content that is not in history yet, and a layer edit
+  could remove the layer the preview is being painted into, so the release
+  would commit into a layer that is no longer in the document. The engine
+  answers with a notice and changes nothing; the finish and cancel paths
+  discard a preview whose layer has vanished.
+- **Undo/redo of a metadata-only layer edit keeps the active layer.** Rename,
+  visibility, opacity, blend mode and reorder no longer restore whichever
+  layer happened to be active when the edit was made, so undo does not move
+  the user off the layer they are looking at, and does not drop the selection.
+  Structural commands (add, delete, duplicate) still own the active layer.
+- **A merge barrier separates gestures.** An action that is not part of the
+  same continuous gesture - selecting a layer, changing the brush or a tool, an
+  undo or a redo - ends a merge run, so two same-keyed changes separated by it
+  stay two undo steps.
+- **A document is bounded by total pixels, not only by side length.** At most
+  16,777,216 document px, from an explicit 1 GiB budget for four 2x RGBA
+  surfaces (4 bytes x 2^2 x 4 surfaces per document pixel). Enforced in the
+  document model and in the project parser before anything is allocated; the
+  file format version is unchanged.
 - **A shape is an ordinary stroke** whose samples trace the outline;
   `fill: true` fills the polygon before tracing the outline. No geometry type.
 - **A fill is a pixel patch**, not a traced contour: colour, tight bbox, binary
@@ -304,6 +342,11 @@ Product:
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; no guides/grids; no
   autosave/crash recovery; `Ctrl+N` unbound.
+- A layer with a non-default opacity or blend mode spends one extra
+  document-sized scratch canvas while it is being previewed.
+- The document pixel budget covers a one-layer document plus the working
+  buffers; every additional layer adds another full-resolution surface, and
+  the layer count itself is not capped.
 - Project files store samples/masks/geometry as JSON, so they can grow large;
   no compressed/binary container yet.
 - React layer has no automated tests.
@@ -336,6 +379,13 @@ Verification gaps:
   `normal` unchanged), the export composite matched, and undo/redo restored the
   layer. The mode mapping, dirty flag, single-step history, duplication and v8
   format round-trip are covered by Vitest. No packaged Tauri or high-DPI check.
+- The live-preview compositing was proven with real pixels through the real
+  `Canvas2DRenderer` using a software pixel canvas (a brush and a shape preview
+  under an opaque and a translucent upper layer, active-layer opacity applied
+  once, `multiply` / `screen` over a coloured paper, hidden and zero-opacity
+  layers, preview pixels equal to the post-release pixels). The layer-safety
+  and raster-budget changes are covered by Vitest. No manual browser check and
+  no packaged Tauri or high-DPI check was done for these three slices.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
@@ -438,9 +488,9 @@ changing what current hard, soft and grain files look like.
 ## 10. First ten minutes of a new session
 
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
-   texture commit (or the commit this file names).
+   raster-budget commit (or the commit this file names).
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 422 tests in 26 files).
+   anything (expect 461 tests in 29 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.
