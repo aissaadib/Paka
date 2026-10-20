@@ -77,6 +77,13 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   picks the colour actually on screen rather than the colour a stroke was
   authored with. It samples on click (no drag), stays selected afterwards, and
   is not an edit: it adds no history step and never marks the document dirty.
+- **HSV colour wheel**: a **Colour** panel beside the layers. The disc picks a
+  hue (the angle) and a saturation (the distance from the centre), the value
+  slider picks the brightness, and the three sliders name the same numbers and
+  are keyboard-operable. It writes the same brush colour the picker, the
+  toolbar's colour input and the swatches write, so the wheel follows a colour
+  picked off the canvas - and choosing a colour is not an edit: it adds no
+  history step and never marks the document dirty.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
   (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
   outer edge), **sampling** (2-200 % of the brush diameter: how densely fast
@@ -85,7 +92,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **texture** (0-100 %: deterministic grain over the finished coverage), a
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
   how far apart the dabs sit) and **stamp hardness** (the falloff of a single
-  dab), colour (picker plus an 8-swatch palette), and toggles for
+  dab), colour (picker, an 8-swatch palette and the colour wheel), and toggles for
   pressure-driven size and pressure-driven opacity. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;
   hardness and texture apply to the brush, the eraser and shapes, while sampling,

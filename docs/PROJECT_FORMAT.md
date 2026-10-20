@@ -347,7 +347,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | --- | --- | --- |
 | `size` | 1-512 | Diameter in document pixels at full pressure. |
 | `opacity` | 0-1 | Alpha for the whole stroke, applied once when it composites. |
-| `color` | non-empty string | CSS colour. |
+| `color` | non-empty string | CSS colour. The colour wheel, the toolbar's colour input, the swatches and the canvas picker all write this same field, so picking a colour never changes the format. |
 | `hardness` | 0-1 | Edge falloff: `1` is the hard edge, lower values feather the finished silhouette. Required in version 6; version-1 to -5 files have no field and read as `1`. |
 | `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
 | `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |

@@ -541,6 +541,43 @@ The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
 and there is nothing to finish or cancel - and it stays selected afterwards,
 consistent with the eraser. `B` returns to the brush.
 
+### The colour wheel
+
+The **Colour** panel holds an HSV wheel: a disc where the angle of the pointer
+is the hue and its distance from the centre is the saturation, a value
+(brightness) slider, and three sliders that name the same three numbers. It is
+a *view* of the brush colour, not a second source of truth:
+
+- The brush still stores an `#rrggbb` string, and the wheel writes through the
+  same `setBrush` path the toolbar's colour input, the swatches and the canvas
+  picker use. So a colour picked off the canvas moves the wheel, and a colour
+  chosen on the wheel is the colour the next stroke is painted with.
+- The conversion is exact. `rgbToHsv` and `hsvToRgb` are inverses over the
+  whole 8-bit sRGB cube, so a colour that came from the app comes back as the
+  same three bytes (verified over all 16,777,216 of them), and the hue a grey
+  has - none - is reported as hue `0` with saturation `0`.
+- The disc's geometry is fixed in `src/features/color/wheelGeometry.ts` and
+  shared with the CSS: hue `0` is at 3 o'clock, the hue grows clockwise (the
+  CSS `conic-gradient` is rotated `from 90deg` to match), the centre is
+  saturation `0` and the rim is saturation `1`. A drag that leaves the disc
+  keeps tracking the pointer's angle and clamps the saturation at the rim.
+
+One subtlety is worth stating, because it is the difference between a control
+that feels right and one that fights the user: the stored colour is 8-bit
+sRGB, and on a dark or desaturated colour that grid is coarse. The default
+brush colour `#16181c` has six levels of red, so a hue of 205° is stored as a
+colour whose own hue is 220°. The wheel therefore keeps the hue and
+saturation the user *asked for* while the brush holds the colour the wheel
+wrote, and falls back to the stored colour as soon as the colour is changed
+from anywhere else. Without that, dragging the hue slider on a dark colour
+would snap the slider back to a nearby hue on every step.
+
+Like the rest of the brush, the wheel is session state for the next gesture:
+choosing a colour is not an edit, adds no history step and never marks the
+document dirty. The three sliders are native range inputs, so the wheel is
+fully operable from the keyboard, and the disc is a pointer affordance on top
+of them.
+
 ### Shape tools
 
 A line, rectangle or ellipse is a **stroke whose samples trace the shape's
@@ -1301,7 +1338,9 @@ These are real gaps, not footnotes:
   visible layers; there is no per-layer sampling, no `Alt`-click temporary
   picker from the brush, no magnifier preview and no colour history or swatches
   from picks. Precision is the surfaces' - 8-bit sRGB - so sampling a
-  semi-transparent area yields the blended screen colour by design.
+  semi-transparent area yields the blended screen colour by design. The colour
+  wheel picks colours *by* hue rather than by sampling, and has no swatch
+  library, no colour history and no eyedropper of its own.
 - **A bucket fill is a committed raster patch, not an editable region.** Its
   boundary is the binary set of pixels the scan selected, so there is no
   feathering, no "fill within selection", no gap-closing and no way to change

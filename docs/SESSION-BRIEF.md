@@ -31,12 +31,13 @@ sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `feat/stamp-brush-engine` (from `main` at `ad2ef11`), after the
-  live-preview compositing, layer-safety, raster-budget, bounded-rasterization
-  and **stamp (dab) brush engine** slices. The stamp slice is **uncommitted**:
-  it is in the working tree, ready for review.
-- `pnpm test` → **524 tests in 30 files, all pass** (the stamp slice).
-- `pnpm typecheck` clean; `pnpm build` succeeds (the stamp slice).
+- Branch `feat/t10-hsv-color-wheel` (from `feat/stamp-brush-engine` at
+  `9b0a885`), after the live-preview compositing, layer-safety, raster-budget,
+  bounded-rasterization, **stamp (dab) brush engine** and **HSV colour wheel**
+  slices. The colour wheel slice is committed on its own branch, ready for
+  review; it is not merged into `feat/stamp-brush-engine` yet.
+- `pnpm test` → **549 tests in 31 files, all pass** (the colour wheel slice).
+- `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
@@ -57,7 +58,8 @@ sync with `origin/main`.
 
 | Commit | Slice |
 | --- | --- |
-| *(uncommitted)* | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
+| *(this branch)* | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
+| `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. The reverted commit stays in the history. |
 | `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |
 | `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active (on end, on cancel, on a document or raster-scale change, and before an eraser takes its snapshot), so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
@@ -112,6 +114,12 @@ sync with `origin/main`.
   not clipped to it.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
+- **HSV colour wheel** (the **Colour** panel): a disc where the angle is the
+  hue and the distance from the centre is the saturation, a value slider, and
+  three sliders naming the same numbers. It writes the brush colour through
+  `setBrush`, so it follows a colour picked off the canvas and the toolbar's
+  colour input; the sliders are keyboard-operable; choosing a colour is not an
+  edit.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
   eraser and shapes), sampling (2–200 % of diameter, sample density),
   stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
@@ -344,6 +352,18 @@ Key files for the next slice (directional / per-dab stamp textures):
   the same: the current brush is session state, while every stroke stores the
   full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
   `texture`, `stamp`, `stampSpacing` and `stampHardness`.
+- **The colour wheel is a view of the brush colour, not a second source of
+  truth.** The brush still stores an `#rrggbb` string, and the wheel writes
+  through the same `setBrush` path as the toolbar's colour input, the swatches
+  and the canvas picker, so colour has one place and a colour picked off the
+  canvas moves the wheel. `rgbToHsv` and `hsvToRgb` are exact inverses over
+  the whole 8-bit sRGB cube, and a grey reports hue `0` with saturation `0`.
+  The wheel keeps the hue and saturation the *user* asked for while the brush
+  holds the colour the wheel wrote, because the 8-bit grid is coarse on a dark
+  colour - the default `#16181c` stores a hue of 205° as a colour whose own
+  hue is 220° - and any colour changed elsewhere replaces it with the stored
+  colour. Choosing a colour is session state for the next gesture, not an
+  edit.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
