@@ -1,0 +1,893 @@
+{
+  "schema": "paka.provenance-record/1",
+  "artifactType": "license-and-provenance-gate-decision",
+  "generatedAt": "2026-10-20",
+  "generator": {
+    "agent": "paka-license-gate",
+    "role": "License and Provenance Gate",
+    "mode": "read-only review; no repository file was modified to produce this record",
+    "disclaimer": "Engineering triage under the evidence available on the review date. Not legal advice. Does not create, transfer or waive any rights."
+  },
+  "candidate": {
+    "id": "PHASE3-STAMP-ENGINE",
+    "title": "Stamp-based brush engine behind the existing stroke interface (per-dab spacing, true hardness curves, directional/image textures)",
+    "descriptionSource": [
+      "docs/SESSION-BRIEF.md#9-next-slice--stamp-based-brush-engine-phase-3",
+      "docs/ROADMAP.md#next-slice",
+      "feature-analysis.md (untracked internal analyst artifact; used only as the candidate description, not as an approved design)"
+    ],
+    "status": "not implemented at the reviewed commit",
+    "scopeSummary": "A stroke is rendered as a sequence of dabs placed along the path at a controllable spacing; each dab contributes a coverage profile; all coverage is accumulated into one stroke buffer by union/max and composited once at the stroke opacity; appearance-changing stamp settings are captured per stroke and recorded in the .paka format."
+  },
+  "repository": {
+    "url": "https://github.com/aissaadib/Paka.git",
+    "remote": "origin",
+    "branch": "main",
+    "commit": "ad2ef11bb4fac508f0dda375a3eba5d7a9b7d7c9",
+    "commitSubject": "docs: clarify how to measure frames in the packaged app",
+    "commitDate": "2026-10-20T16:56:36Z",
+    "checkoutPath": "C:\\Users\\aissa\\Desktop\\Paka",
+    "workingTree": {
+      "modified": ["skills-lock.json"],
+      "untracked": [
+        ".agents/skills/code-review-and-quality/",
+        ".agents/skills/debugging-and-error-recovery/",
+        ".agents/skills/git-workflow-and-versioning/",
+        ".agents/skills/incremental-implementation/",
+        ".agents/skills/performance-optimization/",
+        ".agents/skills/source-driven-development/",
+        ".agents/skills/test-driven-development/",
+        "feature-analysis.md"
+      ],
+      "note": "None of these are in the candidate's blast radius, but they are recorded because two of them carry third-party licence evidence (see records R-006..R-013)."
+    }
+  },
+  "subjectLicense": {
+    "spdxId": "MIT",
+    "path": "LICENSE",
+    "copyright": "Copyright (c) 2026 HumanHEART",
+    "textUrl": "https://opensource.org/license/mit",
+    "known": true,
+    "note": "Paka's distribution licence is known, so no copyleft obligation currently attaches to Paka. This becomes active if Paka links a copyleft dependency, copies or links GPL code, or the owner changes the licence."
+  },
+  "distributionModel": {
+    "known": "partly",
+    "channels": [
+      {
+        "type": "source-repository",
+        "detail": "Public GitHub repository github.com/aissaadib/Paka (API \"private\": false)",
+        "evidence": "https://api.github.com/repos/aissaadib/Paka"
+      },
+      {
+        "type": "desktop-installer",
+        "detail": "Tauri bundle: src-tauri/tauri.conf.json -> bundle.active true, bundle.targets \"all\"",
+        "evidence": "src-tauri/tauri.conf.json"
+      },
+      {
+        "type": "npm-package",
+        "detail": "Not distributed: package.json sets \"private\": true",
+        "evidence": "package.json"
+      }
+    ],
+    "undocumented": [
+      "Owner confirmation that MIT is the intended distribution licence, not only the source licence",
+      "Intended release channel and whether a commercial release is planned",
+      "Whether the app will be submitted to app stores (which impose their own attribution and trademark-review rules)"
+    ]
+  },
+  "method": {
+    "scanner": "none present in the harness; the path-level licence map was produced by this gate and is reproducible from the commands listed in evidenceCommands",
+    "perFileSpdxHeadersInSrc": "none (grep for SPDX-License-Identifier | @license | Copyright (c) | Licensed under over src returned no matches)",
+    "submodules": "none (.gitmodules absent)",
+    "vendoredCodeInsideSrc": "none",
+    "generatedCode": [
+      "src-tauri/gen/schemas/** - Tauri-generated, Apache-2.0 OR MIT, not tracked by git",
+      "src-tauri/target/** - build output, not tracked"
+    ],
+    "evidenceCommands": [
+      "git ls-files",
+      "grep -E \"SPDX-License-Identifier|@license|Copyright \\(c\\)|Licensed under\" src",
+      "Get-FileHash <file> -Algorithm SHA256  (vendored skills vs upstream raw files; icons vs tauri template icons)",
+      "registry.npmjs.org/{name}/{version} -> .license",
+      "crates.io/api/v1/crates/{name}/{version} -> .version.license",
+      "cargo registry src/*/{name}-{version}/Cargo.toml -> license field",
+      "api.github.com/repos/{owner}/{repo} -> .license.spdx_id",
+      "api.github.com/repos/{owner}/{repo}/git/trees/{branch}?recursive=1 -> LICENSE/COPYING/NOTICE presence scan"
+    ]
+  },
+  "decisions": [
+    {
+      "strategy": "A",
+      "name": "Independent reimplementation from Paka's own documented behaviour and code",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "appliesTo": {
+        "files": [
+          "src/core/rendering/canvas2dStroke.ts",
+          "src/core/rendering/Canvas2DRenderer.ts",
+          "src/core/brushes/strokeBuilder.ts",
+          "src/types/brush.ts",
+          "src/core/brushes/defaults.ts",
+          "src/core/rendering/types.ts",
+          "src/core/project/projectFormat.ts"
+        ],
+        "docs": [
+          "docs/ARCHITECTURE.md",
+          "docs/PROJECT_FORMAT.md",
+          "docs/SESSION-BRIEF.md",
+          "feature-analysis.md#8-essential-vs-application-specific"
+        ],
+        "commit": "ad2ef11bb4fac508f0dda375a3eba5d7a9b7d7c9"
+      },
+      "license": { "spdxId": "MIT", "holder": "HumanHEART", "path": "LICENSE" },
+      "intendedUse": "Implement the stamp/dab rasterizer inside Paka's own renderer; no third-party code; no new assets.",
+      "requiredNotices": [],
+      "requiredActions": [
+        "C1 - no third-party code or asset enters the tree as part of this slice",
+        "C2 - clean-room discipline (see cleanroom block)",
+        "C3 - no third-party documentation or tutorial content is pasted into the repository, including comments, doc-comments, commit messages and design notes",
+        "C4 - the slice's acceptance criteria are met without borrowing an implementation",
+        "C5 - this outcome is not treated as clearance of the repository; findings B-1 and B-4 remain open"
+      ],
+      "sourceOfferImplications": "none",
+      "distributionRisks": "none beyond the repository-wide findings B-1 and B-4",
+      "alternatives": ["B", "C", "D", "E", "F", "G", "H"]
+    },
+    {
+      "strategy": "B",
+      "name": "Adopt an existing third-party library as the dab engine",
+      "outcome": "RESTRICTED",
+      "requirements": [
+        "Licence must be MIT / Apache-2.0 / BSD / ISC, or a permissive dual licence where Paka elects the permissive branch. GPL, AGPL and a mandatory LGPL branch are not acceptable.",
+        "The library's copyright notice and licence text must be copied into THIRD_PARTY_NOTICES.md and shipped with the installer.",
+        "The library must be pinned in package.json / Cargo.toml, its exact version recorded here, and re-verified on every bump.",
+        "For Apache-2.0: retain any upstream NOTICE content and mark modified files (section 4(b))."
+      ],
+      "sourceOfferImplications": "none for the permissive licences considered; would arise only under the GPL-family sources in strategy C",
+      "candidates": [
+        {
+          "name": "steveruizok/perfect-freehand",
+          "version": "master (1.2.3 on npm)",
+          "spdxId": "MIT",
+          "copyright": "Copyright (c) 2021 Stephen Ruiz Ltd",
+          "fit": "Produces a stroke outline polygon, not a dab/coverage engine; does not satisfy the one-buffer / union-max / single-composite / pixel-identity invariants.",
+          "verdict": "RESTRICTED - not recommended",
+          "evidence": "https://github.com/steveruizok/perfect-freehand/blob/master/LICENSE"
+        },
+        {
+          "name": "fabricjs/fabric.js",
+          "version": "master",
+          "spdxId": "MIT",
+          "copyright": "Copyright (c) 2008-2015 Printio (Juriy Zaytsev, Maxim Chernyak); Copyright (c) 2016-present Andrea Bogazzi, Shachar Nen and Fabric.js contributors",
+          "fit": "Scene-graph canvas; adopting it would replace the DrawingRenderer boundary, which SESSION-BRIEF section 9 constraint 1 forbids.",
+          "verdict": "RESTRICTED - architecturally out of scope",
+          "evidence": "https://github.com/fabricjs/fabric.js/blob/master/LICENSE"
+        },
+        {
+          "name": "konvajs/konva",
+          "version": "master",
+          "spdxId": "MIT",
+          "copyright": "Original work Copyright (C) 2011-2013 Eric Rowell (KineticJS); Modified work Copyright (C) 2014-present Anton Lavrenov (Konva)",
+          "fit": "Same architectural objection.",
+          "verdict": "RESTRICTED - architecturally out of scope",
+          "evidence": "https://github.com/konvajs/konva/blob/master/LICENSE"
+        },
+        {
+          "name": "paperjs/paper.js",
+          "version": "develop",
+          "spdxId": "MIT",
+          "copyright": "Copyright (c) 2011-2020, Jurg Lehni & Jonathan Puckey",
+          "fit": "Same architectural objection.",
+          "verdict": "RESTRICTED - architecturally out of scope",
+          "evidence": "https://github.com/paperjs/paper.js/blob/develop/LICENSE.txt"
+        },
+        {
+          "name": "processing/p5.js",
+          "version": "main",
+          "spdxId": "LGPL-2.1",
+          "fit": "Bundling LGPL code into a single-file web app raises the replaceable-library question for the shipped bundle.",
+          "verdict": "RESTRICTED - treat as blocked for a shipped bundle absent an explicit human decision",
+          "evidence": "https://github.com/processing/p5.js/blob/main/license.txt"
+        }
+      ],
+      "alternatives": ["A"]
+    },
+    {
+      "strategy": "C",
+      "name": "Copy or adapt code from an existing brush engine",
+      "outcome": "BLOCKED",
+      "reason": "Copying or adapting GPL-3.0 / GPL-2.0 code makes Paka a derivative work; Paka is MIT, which is not compatible with distributing GPL-derived code in a non-GPL product. Paka would have to be relicensed GPL.",
+      "sourceOfferImplications": "GPL-3.0 section 6 requires the complete corresponding source of the derivative work and applies GPL-3.0 to the whole product. This is a licence change, not a source-offer appendix.",
+      "sources": [
+        {
+          "name": "GNOME/gimp",
+          "component": "brush engine",
+          "spdxId": "GPL-3.0",
+          "copyright": "Copyright (C) 2007 Free Software Foundation, Inc.",
+          "evidence": "https://github.com/GNOME/gimp/blob/master/COPYING"
+        },
+        {
+          "name": "KDE/krita",
+          "component": "brush engine",
+          "spdxId": "GPL-3.0",
+          "copyright": "Copyright (C) 2007 Free Software Foundation, Inc.",
+          "evidence": "https://github.com/KDE/krita/blob/master/COPYING"
+        },
+        {
+          "name": "mypaint/mypaint",
+          "component": "brush engine",
+          "spdxId": "GPL-2.0",
+          "copyright": "Copyright (C) 1989, 1991 Free Software Foundation, Inc.",
+          "evidence": "https://github.com/mypaint/mypaint/blob/master/COPYING"
+        },
+        {
+          "name": "SAI / Clip Studio / Corel Painter / Procreate / ArtRage / Rebelle",
+          "component": "brush engines",
+          "spdxId": null,
+          "copyright": "proprietary - no grant of any kind",
+          "verdict": "BLOCKED",
+          "evidence": "no licence grant exists to request"
+        }
+      ],
+      "note": "GIMP and Krita are mixed-licensed at repository level (GPL / LGPL / CC0 parts). The brush engine itself is GPL. A file-by-file licence scan of any specific file would be required before reconsideration - and the brush engines answer GPL.",
+      "alternatives": ["A", "E"]
+    },
+    {
+      "strategy": "D",
+      "name": "Port a particular implementation to TypeScript",
+      "outcome": "BLOCKED",
+      "reason": "A translation of a GPL implementation is a derivative work of it and must be distributed under the same licence. Renaming symbols, changing language, reformatting or rewriting syntax does not change the status of copied implementation.",
+      "sourceOfferImplications": "same as strategy C",
+      "alternatives": ["A", "E"]
+    },
+    {
+      "strategy": "E",
+      "name": "Clean-room reimplementation from a GPL source's published behaviour",
+      "outcome": "RESTRICTED",
+      "reason": "Behaviour is not copyrightable, so a reimplementation written from a behavioural description is not a derivative work. This is possible but requires a genuine clean-room protocol, and the candidate does not need it.",
+      "requirements": [
+        "A Paka-authored behaviour specification exists (feature-analysis.md section 8 satisfies this for the candidate)",
+        "The implementer has not read the GPL source and does not read it during the work",
+        "No GPL code, comments, constants, identifier names, structure or test fixtures are reproduced",
+        "The decision to consult the GPL source is recorded explicitly by the coordinator before work starts, naming the implementer"
+      ],
+      "sourceOfferImplications": "none, provided the clean-room protocol is genuinely followed; if it is not, the result falls under strategies C and D",
+      "verdictNote": "RESTRICTED, and not recommended. Default is not to consult GPL brush-engine sources.",
+      "alternatives": ["A"]
+    },
+    {
+      "strategy": "F",
+      "name": "Separate-process integration (shell out to an external painting application)",
+      "outcome": "RESTRICTED",
+      "reason": "Lowest legal risk of the GPL options: Paka ships and links no GPL code. The risks are mostly non-licence risks (external tool terms, output provenance, product shape) plus the fact that the stamp engine is confirmed pure front-end.",
+      "requirements": [
+        "The specific external tool and its specific automation/CLI licence must be checked separately and recorded",
+        "That tool's trademark and attribution requirements must be satisfied",
+        "The tool's output licence must not be asserted by Paka beyond what the tool and its inputs grant"
+      ],
+      "sourceOfferImplications": "none for Paka; GPL obligations attach to the external program and its users",
+      "architectureNote": "Rejected for this slice: docs/SESSION-BRIEF.md section 9 and feature-analysis.md section 7 confirm the stamp engine is pure front-end and the Rust shell is not involved.",
+      "alternatives": ["A"]
+    },
+    {
+      "strategy": "G",
+      "name": "Bundle brush presets / stamp images / textures / LUTs / palettes / fonts",
+      "outcome": "RESTRICTED",
+      "reason": "The repository currently contains no such assets and the slice as described is procedural, so this is a contingency rule rather than an active plan.",
+      "requirements": [
+        "CC0-1.0 preferred for generated textures, noise tiles, LUTs and stamp masks",
+        "MIT / Apache-2.0 / BSD / ISC / SIL-OFL-1.1 acceptable with notices recorded and shipped; SIL-OFL additionally requires the OFL text and Reserved Font Name compliance",
+        "Each bundled asset recorded with source URL, file name, SHA-256, SPDX id, author and retrieval date",
+        "User-supplied stamp images are the user's content and create no Paka notice obligation"
+      ],
+      "blocked": ["GPL", "AGPL", "LGPL", "CC-BY-SA", "CC-BY-NC", "no licence statement at all"],
+      "sourceOfferImplications": "none for the accepted licences",
+      "alternatives": ["A"]
+    },
+    {
+      "strategy": "H",
+      "name": "Add third-party icons / fonts / LUTs to the tree later",
+      "outcome": "RESTRICTED",
+      "requirements": [
+        "Same licence bar as strategy G",
+        "An artwork licence does not grant the right to use the vendor's brand; the TAURI trademark problem (finding B-1) must not be repeated with another vendor's mark",
+        "Icons in src-tauri/icons/ are part of the installed product, so the bar is distribution, not build-time"
+      ],
+      "alternatives": ["A"]
+    }
+  ],
+  "records": [
+    {
+      "id": "R-001",
+      "path": "LICENSE",
+      "kind": "root-license",
+      "provenance": "Paka-authored",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART",
+      "intendedUse": "Licence of the whole Paka project",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": ["Retain the MIT notice in every copy or substantial portion of the distributed product"],
+      "actions": ["Add a README License section", "Ship the notice with the installer", "Add THIRD_PARTY_NOTICES.md"],
+      "evidence": "LICENSE at commit ad2ef11bb4fac508f0dda375a3eba5d7a9b7d7c9"
+    },
+    {
+      "id": "R-002",
+      "path": "src/**",
+      "kind": "source",
+      "provenance": "Paka-authored; no third-party blob; no per-file SPDX header",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART",
+      "fileCount": 122,
+      "intendedUse": "Application source",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": [],
+      "evidence": "git ls-files; grep for SPDX/copyright headers in src returned no matches"
+    },
+    {
+      "id": "R-003",
+      "path": "src-tauri/src/**, src-tauri/build.rs, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json",
+      "kind": "source",
+      "provenance": "Paka-authored",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART",
+      "fileCount": 10,
+      "intendedUse": "Rust shell: native environment probe and project/PNG I/O",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": [],
+      "evidence": "git ls-files"
+    },
+    {
+      "id": "R-004",
+      "path": "docs/**, AGENTS.md, README.md",
+      "kind": "documentation",
+      "provenance": "Paka-authored",
+      "spdxId": "MIT",
+      "fileCount": 8,
+      "intendedUse": "Project documentation",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": ["Add a README License section and a third-party notices section"],
+      "evidence": "git ls-files"
+    },
+    {
+      "id": "R-005",
+      "path": "src-tauri/icons/**",
+      "kind": "asset-icons",
+      "provenance": "Third party - the TAURI logo. icon.ico is byte-identical (SHA-256) to tauri-apps/tauri@dev:crates/tauri-cli/templates/app/src-tauri/icons/icon.ico; icon.png is the same artwork re-encoded at 512x512; the remaining PNG/ICNS files are the same mark at the other template sizes.",
+      "spdxId": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 - Present Tauri Apps Contributors (copyright licence only)",
+      "trademark": {
+        "holder": "The Tauri Programme within the Commons Conservancy",
+        "spdxId": null,
+        "status": "NOT LICENSED FOR THIS USE",
+        "evidence": "https://tauri.app/about/trademark",
+        "quote": "You may use the word marks, but not the logos, to truthfully describe the relationship between your software and ours. Any other use may imply that we have certified or approved your software. If you wish to use our logos, please contact us to discuss license terms."
+      },
+      "intendedUse": "Paka application icon and Windows Store assets",
+      "outcome": "BLOCKED",
+      "reason": "The copyright licence grants no trademark rights (MIT has no trademark grant; Apache-2.0 section 6 excludes trade names, trademarks and service marks). Shipping a Paka installer whose icon is the TAURI logo implies endorsement or affiliation and misbrands the product.",
+      "requiredNotices": [],
+      "actions": [
+        "Replace all 16 files with Paka-owned artwork before any distribution (pnpm tauri icon <source>)",
+        "The replacement must be Paka-owned or licensed as a mark; recolouring or redrawing the TAURI logo is still the TAURI logo and is forbidden by the trademark policy",
+        "Alternatively, obtain a licence from trademark@tauri.app and record it here"
+      ],
+      "blocksDistribution": true,
+      "blocksCandidateSlice": false,
+      "fileCount": 16,
+      "evidence": "SHA-256 comparison against upstream template icons; pixel inspection; https://github.com/tauri-apps/tauri/tree/dev/crates/tauri-cli/templates/app/src-tauri/icons"
+    },
+    {
+      "id": "R-006",
+      "path": ".agents/skills/frontend-ui-engineering/SKILL.md",
+      "kind": "vendored-documentation",
+      "provenance": "addyosmani/agent-skills@main:skills/frontend-ui-engineering/SKILL.md - SHA-256 identical to upstream",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "intendedUse": "Agent tooling only; not shipped in the Paka binary",
+      "outcome": "RESTRICTED",
+      "requiredNotices": ["The MIT copyright notice and permission notice must be included in all copies or substantial portions - Paka retains no copy of it today"],
+      "actions": ["Add the Addy Osmani MIT notice to THIRD_PARTY_NOTICES.md"],
+      "evidence": "https://github.com/addyosmani/agent-skills/blob/main/LICENSE ; upstream README: \"MIT - use these skills in your projects, teams, and tools.\""
+    },
+    {
+      "id": "R-007",
+      "path": ".agents/skills/vercel-react-best-practices/**",
+      "kind": "vendored-documentation",
+      "provenance": "vercel-labs/agent-skills@main:skills/react-best-practices/** - SHA-256 identical to upstream for SKILL.md, AGENTS.md, README.md, metadata.json, rules/_sections.md and rules/rerender-derived-state-no-effect.md",
+      "spdxId": "MIT",
+      "copyright": "Vercel, Inc. (upstream states no copyright line; the rules' README credits 'Originally created by @shuding at Vercel')",
+      "licenseEvidence": {
+        "statedIn": "the upstream repository README, section '## License', text 'MIT'",
+        "firstPresentAt": "740483462a (2025-12-08), the repository's first commit",
+        "presentAt": ["805687f34e (2026-04-14), last commit touching the copied SKILL.md", "dc8367e6f9 (2026-04-14), last commit touching the copied rules/", "main today"],
+        "standaloneLicenseFile": false,
+        "githubApiLicenseField": null,
+        "caveats": "The licence is stated in prose in the README rather than in a canonical LICENSE file, and upstream states no copyright line. Neither prevents redistribution under MIT; both are recorded in THIRD_PARTY_NOTICES.md."
+      },
+      "intendedUse": "Agent tooling only; not shipped in the Paka binary",
+      "outcome": "RESTRICTED",
+      "correctedOn": "2026-10-20",
+      "previouslyReportedOutcome": "NEEDS HUMAN REVIEW",
+      "correctionReason": "The first finding concluded that no licence existed because the repository ships no LICENSE file and the GitHub API reports license: null. The upstream README states the licence as MIT. The licence map had only looked for licence files.",
+      "requiredNotices": ["Retain the MIT copyright notice and permission notice - the notice is licenses/MIT.txt and the copyright holder is recorded as Vercel, Inc. in THIRD_PARTY_NOTICES.md"],
+      "actions": [
+        "Done: the MIT permission notice ships in licenses/MIT.txt and the copyright holder is recorded in THIRD_PARTY_NOTICES.md",
+        "Nothing is untracked, git-ignored or purged; the earlier recommendation to remove the directory from the public repository is withdrawn",
+        "Optional: ask Vercel to add a canonical LICENSE file upstream"
+      ],
+      "blocksDistribution": false,
+      "blocksCandidateSlice": false,
+      "fileCount": 76,
+      "evidence": "https://github.com/vercel-labs/agent-skills ; README at commits 740483462a, 805687f34e, dc8367e6f9 and main"
+    },
+    {
+      "id": "R-008",
+      "path": ".agents/skills/{code-review-and-quality,debugging-and-error-recovery,git-workflow-and-versioning,incremental-implementation,performance-optimization,source-driven-development,test-driven-development}/** (untracked)",
+      "kind": "vendored-documentation",
+      "provenance": "addyosmani/agent-skills@main (recorded in skills-lock.json with source and computedHash per skill)",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "intendedUse": "Agent tooling only; not shipped in the Paka binary; untracked at the reviewed commit",
+      "outcome": "RESTRICTED",
+      "requiredNotices": ["Same MIT notice requirement as R-006 when they are tracked"],
+      "actions": ["Include in THIRD_PARTY_NOTICES.md if tracked"],
+      "evidence": "skills-lock.json ; https://github.com/addyosmani/agent-skills/blob/main/LICENSE"
+    },
+    {
+      "id": "R-009",
+      "path": "pnpm-lock.yaml",
+      "kind": "dependency-manifest",
+      "provenance": "npm registry, resolved versions at the reviewed commit",
+      "packageCount": 82,
+      "licenseHistogram": {
+        "MIT": 51,
+        "Apache-2.0 OR MIT": 13,
+        "MPL-2.0": 12,
+        "Apache-2.0": 3,
+        "MIT OR Apache-2.0": 1,
+        "ISC": 1,
+        "BSD-3-Clause": 1,
+        "GPL": 0,
+        "AGPL": 0,
+        "LGPL": 0,
+        "unlicensed": 0
+      },
+      "intendedUse": "Front-end runtime and build dependencies",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": ["MIT, BSD-3-Clause, ISC and Apache-2.0 notice text into THIRD_PARTY_NOTICES.md"],
+      "actions": ["Record the MPL-2.0 notice for lightningcss; lightningcss is a build-time devDependency and is not shipped in the app bundle"],
+      "evidence": "registry.npmjs.org/{name}/{version} .license for all 82 lockfile packages; cross-checked against the 44 copies installed on disk"
+    },
+    {
+      "id": "R-010",
+      "path": "src-tauri/Cargo.lock",
+      "kind": "dependency-manifest",
+      "provenance": "crates.io, resolved versions at the reviewed commit",
+      "crateCount": 422,
+      "licenseHistogram": {
+        "MIT": 99,
+        "MIT OR Apache-2.0 (and equivalent spellings)": 157,
+        "Apache-2.0": 2,
+        "Apache-2.0 WITH LLVM-exception (and disjunctions)": 4,
+        "BSD-3-Clause (and disjunctions)": 4,
+        "Zlib (and disjunctions)": 6,
+        "MPL-2.0": 5,
+        "Unicode-3.0": 18,
+        "0BSD / Unlicense / ISC": 11,
+        "MIT OR Apache-2.0 OR LGPL-2.1-or-later": 2,
+        "GPL": 0,
+        "AGPL": 0,
+        "mandatory LGPL": 0,
+        "unlicensed": 0
+      },
+      "notableCrates": {
+        "MPL-2.0": ["cssparser", "cssparser-macros", "dtoa-short", "option-ext", "selectors"],
+        "Apache-2.0-only": ["tao", "sync_wrapper"],
+        "dualChoice": ["tauri", "wry", "muda", "tauri-plugin-dialog", "tauri-runtime", "tauri-runtime-wry", "tauri-utils", "tauri-build", "tauri-codegen", "tauri-macros", "tauri-plugin", "serde", "serde_json", "base64"],
+        "lgplStringInDisjunctiveGrant": ["r-efi@5.3.0", "r-efi@6.0.0"]
+      },
+      "intendedUse": "Rust runtime dependencies, statically linked into the shipped binary",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [
+        "MPL-2.0 licence text for cssparser, cssparser-macros, dtoa-short, option-ext and selectors (MPL-2.0 section 3.2 requires the licence to be made available with the distribution; these crates are linked into the shipped binary)",
+        "Unicode-3.0 notice for the 18 ICU4X data crates",
+        "BSD-3-Clause, Zlib, ISC, 0BSD and Unlicense notice texts",
+        "MIT and Apache-2.0 notice texts for the remaining crates"
+      ],
+      "actions": [
+        "Record the chosen branch for r-efi as MIT or Apache-2.0; do NOT elect the LGPL-2.1-or-later branch, which would attach LGPL obligations to a crate linked into the shipped binary",
+        "Ship the collected licence texts with the installer"
+      ],
+      "evidence": "248 crates read from the local cargo registry Cargo.toml licence field; 173 platform-specific crates resolved via https://crates.io/api/v1/crates/{name}/{version}; 1 (paka 0.1.0) is the local crate"
+    },
+    {
+      "id": "R-011",
+      "path": "src-tauri/gen/schemas/**",
+      "kind": "generated-code",
+      "provenance": "Generated by tauri-codegen at build time",
+      "spdxId": "Apache-2.0 OR MIT",
+      "intendedUse": "Tauri capability/schema metadata",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": [],
+      "evidence": "not tracked by git; tauri-codegen licence field"
+    },
+    {
+      "id": "R-012",
+      "path": "index.html, package.json, tsconfig.json, tsconfig.node.json, vite.config.ts, .gitignore, .vscode/extensions.json, skills-lock.json",
+      "kind": "project-configuration",
+      "provenance": "Paka-authored",
+      "spdxId": "MIT",
+      "fileCount": 8,
+      "intendedUse": "Build and tooling configuration",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": [],
+      "evidence": "git ls-files"
+    },
+    {
+      "id": "R-013",
+      "path": "(whole repository) - bundled assets other than icons",
+      "kind": "asset-scan",
+      "provenance": "none",
+      "spdxId": null,
+      "fileCount": 0,
+      "intendedUse": "No fonts, textures, presets, sample art, palettes, LUTs or audio exist in the tree. index.html references no remote or CDN asset and there is no public/ directory.",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "requiredNotices": [],
+      "actions": ["Apply the strategy G rules to any asset added in future"],
+      "evidence": "git ls-files filtered by asset extensions; grep of index.html for font/CDN references"
+    },
+    {
+      "id": "R-014",
+      "path": "src/core/rendering/stampCoverage.ts (new, untracked at re-check); src/types/brush.ts; src/core/brushes/defaults.ts; src/core/rendering/Canvas2DRenderer.ts",
+      "kind": "in-progress-implementation",
+      "provenance": "Paka-authored work in progress for the candidate",
+      "spdxId": "MIT",
+      "intendedUse": "The stamp/dab rasterizer behind the DrawingRenderer boundary",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "recheckFindings": {
+        "thirdPartyImports": "none - imports are ../../types/brush, ../../utils/color, ../../utils/math, ./canvas2dStroke (all Paka's own)",
+        "attributionStrings": "none - no copyright, SPDX, adapted from, ported from, based on, inspired by or reference strings",
+        "newRuntimeDependencies": "none - package.json and src-tauri/Cargo.toml unchanged",
+        "newAssets": "none - the tracked-binary set is still the 16 icon files",
+        "modifiedFiles": ["src/types/brush.ts", "src/core/brushes/defaults.ts", "src/core/rendering/Canvas2DRenderer.ts"]
+      },
+      "caveat": "Consistent with Strategy A and with condition C1. This is NOT proof of clean-room status: the gate cannot verify the implementer's reading history from the repository. The attestation in cleanroom.implementerAttestation remains outstanding (action A9).",
+      "requiredNotices": [],
+      "actions": ["Record the clean-room attestation before merging"]
+    },
+    {
+      "id": "R-015",
+      "path": "docs/architecture-port-plan.md (untracked internal artifact)",
+      "kind": "project-document",
+      "provenance": "Paka-authored internal artifact of this agent set",
+      "spdxId": "MIT",
+      "intendedUse": "Architecture decision record for the candidate",
+      "outcome": "RESTRICTED",
+      "reason": "Records incorrect licence attributions for its contingency upstreams (Krita as GPL-2.0, MyPaint as LGPL-2.1) and names an unverifiable project (xp-brush). Its chosen path (no third-party code) is unaffected.",
+      "requiredNotices": [],
+      "actions": ["Corrected 2026-10-20: Krita is GPL-3.0, MyPaint is GPL-2.0, xp-brush removed, and the 'no licence-gate document' note points at the gate"]
+    },
+    {
+      "id": "R-016",
+      "path": "src-tauri/icons/**, src-tauri/app-icon.svg, scripts/generate-app-icon.mjs, src-tauri/icons/README.md",
+      "kind": "asset-icons",
+      "provenance": "Original to this repository. The artwork is generated from geometry - a rounded plate and a tapered chain of overlapping dabs along a cubic Bezier - by scripts/generate-app-icon.mjs. No source image, no traced outline, no third-party asset. Colours are the app's own tokens (--bg-app, --border, --accent).",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART",
+      "intendedUse": "Paka application icon and Windows Store assets",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "replaces": "The stock tauri init icon set, which was the TAURI mark (trademark of The Tauri Programme within the Commons Conservancy). Every generated file now differs from the upstream TAURI template; icon.ico was byte-identical to it before and is not any more.",
+      "requiredNotices": [],
+      "actions": ["Optionally ask a designer to refine the mark; the artwork is original either way"],
+      "evidence": "SHA-256 comparison against tauri-apps/tauri@dev:crates/tauri-cli/templates/app/src-tauri/icons; pixel inspection of icon.png, 32x32.png and Square44x44Logo.png"
+    },
+    {
+      "id": "R-017",
+      "path": "THIRD_PARTY_NOTICES.md, licenses/**, scripts/generate-third-party-notices.mjs",
+      "kind": "notice-file",
+      "provenance": "Generated by this repository's own scripts from pnpm-lock.yaml and src-tauri/Cargo.lock. The licence texts are verbatim copies of the canonical texts, retrieved from apache.org, mozilla.org and unicode.org, or taken from the licence file the crate itself ships.",
+      "spdxId": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART (the notice file); each third-party copyright line is in the tables",
+      "intendedUse": "The notice file and the licence texts for the material shipped in the installer",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "coverage": {
+        "npmPackages": 82,
+        "cargoCrates": 421,
+        "unmatchedLicences": 0,
+        "licenceTexts": ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "MPL-2.0", "Unicode-3.0", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "Unlicense"]
+      },
+      "election": "MIT is elected wherever a package is offered under several licences; packages that require several licences at once are listed under each of them. r-efi, the only package whose licence string mentions LGPL, is taken under MIT.",
+      "requiredNotices": [],
+      "actions": ["Re-run scripts/generate-third-party-notices.mjs whenever a lockfile changes and before every release"],
+      "evidence": "licenses/dependency-inventory.json; the 43 crates not present in the local cargo registry were resolved from the crate tarball pinned by Cargo.lock"
+    }
+  ],
+  "repositoryFindings": [
+    {
+      "id": "B-1",
+      "severity": "resolved-2026-10-20",
+      "title": "The TAURI logo is Paka's application icon",
+      "outcome": "BLOCKED",
+      "records": ["R-005", "R-016"],
+      "resolution": "All 16 icons were regenerated from original Paka artwork (src-tauri/app-icon.svg, generated by scripts/generate-app-icon.mjs). Every generated file now differs from the upstream TAURI template. See docs/RELEASE-READINESS.md item R1.",
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-2",
+      "severity": "resolved-2026-10-20",
+      "title": "Verbatim copies of the Vercel skill set are committed to a public repository",
+      "outcome": "RESTRICTED",
+      "records": ["R-007"],
+      "correctedOn": "2026-10-20",
+      "previouslyReportedOutcome": "NEEDS HUMAN REVIEW",
+      "correctionReason": "The upstream README states the licence as MIT; the first finding only looked for licence files.",
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-3",
+      "severity": "resolved-2026-10-20",
+      "title": "MIT notice for vendored Addy Osmani skills is not retained anywhere",
+      "outcome": "RESTRICTED",
+      "records": ["R-006", "R-008"],
+      "resolution": "licenses/MIT.txt ships with the installer and the copyright holder is recorded in THIRD_PARTY_NOTICES.md.",
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-4",
+      "severity": "resolved-2026-10-20",
+      "title": "No third-party notices are published and several statically linked licence texts are not shipped",
+      "outcome": "RESTRICTED",
+      "records": ["R-001", "R-009", "R-010", "R-017"],
+      "resolution": "THIRD_PARTY_NOTICES.md, licenses/ (ten verbatim licence texts plus the machine-readable inventory), bundle.resources, bundle.license, bundle.licenseFile, bundle.copyright and a README License section. See docs/RELEASE-READINESS.md item R5.",
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-5",
+      "severity": "governance",
+      "title": "Paka's own contribution terms, trademark policy and patent position are undocumented",
+      "outcome": "NEEDS HUMAN REVIEW",
+      "records": ["R-001"],
+      "humanDecisionRequired": true
+    },
+    {
+      "id": "B-6",
+      "severity": "clean",
+      "title": "The existing dependency graph contains no copyleft and no unlicensed package",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "records": ["R-009", "R-010"],
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-7",
+      "severity": "clean",
+      "title": "No assets exist beyond the icons",
+      "outcome": "APPROVED FOR SPECIFIED STRATEGY",
+      "records": ["R-013"],
+      "humanDecisionRequired": false
+    },
+    {
+      "id": "B-8",
+      "severity": "provenance-defect",
+      "title": "docs/architecture-port-plan.md mis-states the licences of its contingency upstreams and names an unverifiable project",
+      "outcome": "RESTRICTED",
+      "records": ["R-015"],
+      "corrections": [
+        { "planSays": "Krita GPL-2.0", "actuallyIs": "GPL-3.0", "evidence": "https://api.github.com/repos/KDE/krita -> license.spdx_id GPL-3.0 ; https://github.com/KDE/krita/blob/master/COPYING", "planLines": [134, 816] },
+        { "planSays": "mypaint LGPL-2.1", "actuallyIs": "GPL-2.0", "evidence": "https://api.github.com/repos/mypaint/mypaint -> license.spdx_id GPL-2.0 ; https://github.com/mypaint/mypaint/blob/master/COPYING", "planLines": [134, 816] },
+        { "planSays": "xp-brush GPL-2.0", "actuallyIs": "no such brush-engine project could be verified", "evidence": "https://api.github.com/search/repositories?q=xp-brush -> 4 unrelated results, no brush engine", "planLines": [134, 816] }
+      ],
+      "impact": "The plan's conclusion (implement independently, no third-party code) is correct and matches Strategy A. Two of its stated reasons are wrong, and the MyPaint reason is wrong in kind: MyPaint is GPL, so the consequence is relicensing Paka, not a linking obligation.",
+      "alsoSuperseded": "The plan's L29 / L35 / L158 statement that no licence-gate document exists and that there is no licence obligation at all was reached without a gate and missed findings B-1 and B-4.",
+      "humanDecisionRequired": false
+    }
+  ],
+  "blocked": [
+    {
+      "material": "GIMP brush engine source or any derivative",
+      "reason": "GPL-3.0",
+      "primarySource": "https://github.com/GNOME/gimp/blob/master/COPYING"
+    },
+    {
+      "material": "Krita brush engine source or any derivative",
+      "reason": "GPL-3.0",
+      "primarySource": "https://github.com/KDE/krita/blob/master/COPYING"
+    },
+    {
+      "material": "MyPaint brush engine source or any derivative",
+      "reason": "GPL-2.0",
+      "primarySource": "https://github.com/mypaint/mypaint/blob/master/COPYING"
+    },
+    {
+      "material": "A faithful translation or port of any of the above",
+      "reason": "Translation does not launder a GPL licence; the result remains a derivative work",
+      "primarySource": "https://www.gnu.org/licenses/gpl-faq.html"
+    },
+    {
+      "material": "Source, presets, textures or code from SAI / Clip Studio / Procreate / Corel Painter / ArtRage",
+      "reason": "Proprietary; no licence grant exists",
+      "primarySource": null
+    },
+    {
+      "material": "The TAURI logo as the Paka application icon",
+      "reason": "Copyright licence grants no trademark rights; the trademark policy requires a licence from the holder for third-party use of the logo",
+      "primarySource": "https://tauri.app/about/trademark"
+    },
+    {
+      "material": ".agents/skills/vercel-react-best-practices/**",
+      "reason": "REMOVED FROM THIS LIST ON 2026-10-20. The upstream project states its licence as MIT in its repository README, present since the repository's first commit and at every commit that touched the copied files. The material may be redistributed and may stay tracked; only the MIT notice obligation applies, and it is discharged by licenses/MIT.txt and THIRD_PARTY_NOTICES.md.",
+      "primarySource": "https://github.com/vercel-labs/agent-skills"
+    },
+    {
+      "material": "Bundled CC-BY-SA, CC-BY-NC, GPL, AGPL or unlicensed assets",
+      "reason": "Not redistributable under Paka's terms",
+      "primarySource": "https://creativecommons.org/share-your-work/cclicenses/"
+    },
+    {
+      "material": "p5.js in the shipped bundle",
+      "reason": "LGPL-2.1 obligations on a bundled web app; treat as blocked absent an explicit human decision",
+      "primarySource": "https://github.com/processing/p5.js/blob/main/license.txt"
+    }
+  ],
+  "cleanroom": {
+    "rule": "A strategy is an independent reimplementation only if either the implementer has not read the source implementation being referenced, or the implementation was written from a Paka-authored behaviour specification that does not reproduce the source's expression, structure, constants, comments, identifier names or code layout. Renaming symbols, changing language, reformatting or rewriting syntax does not change the status of copied implementation.",
+    "taintRule": "If an implementer has read GPL brush-engine source in order to produce the implementation, that implementer's output must be discarded and re-written by someone who has not read the source, from the Paka-authored specification.",
+    "existingSpecification": "feature-analysis.md section 8 - 9 essential behaviours, Paka-authored, sufficient on its own",
+    "implementerAttestation": "required before the slice is merged: the implementer records that no GIMP, Krita, MyPaint, SAI, Clip Studio, Procreate, Corel Painter or ArtRage brush-engine source was read while producing the implementation, or names the implementer who must re-do the work",
+    "status": "pending - attestation not yet provided"
+  },
+  "postReviewRecheck": {
+    "performedAt": "2026-10-20",
+    "reason": "The coordinator began implementing while this gate was running; the tree was re-scanned at the end of the review.",
+    "decisionUnchanged": true,
+    "checked": [
+      "imports of the new stamp engine module",
+      "attribution strings in the new source",
+      "package.json and src-tauri/Cargo.toml for new dependencies",
+      "tracked binary assets for new files",
+      "licence attributions in the architecture translator's plan document"
+    ],
+    "result": "The in-progress implementation satisfies Strategy A on every check the gate can run (no third-party import, no attribution string, no new dependency, no new asset). One provenance defect was found in a project document and is recorded as finding B-8 with the correct values."
+  },
+  "postReleaseReadinessRecheck": {
+    "performedAt": "2026-10-20",
+    "branch": "chore/release-readiness",
+    "reason": "The release-readiness workstream re-examined the gate's own findings before acting on them.",
+    "corrections": [
+      {
+        "finding": "B-2",
+        "was": "NEEDS HUMAN REVIEW - the upstream project carries no licence at all",
+        "now": "RESTRICTED - the upstream project states its licence as MIT in its repository README",
+        "evidence": "The '## License' section of vercel-labs/agent-skills@main README reads 'MIT'. It is present at 740483462a (2025-12-08, the repository's first commit) and at 805687f34e and dc8367e6f9 (2026-04-14), the last commits to touch the copied SKILL.md and rules/.",
+        "whyTheFirstFindingMissedIt": "The scan looked for licence FILES and trusted the GitHub API's license field, which only detects files. A licence stated in a README is invisible to both.",
+        "actionTaken": "The untracking and history-purge recommendations are withdrawn. The files stay tracked. The MIT notice obligation is discharged by licenses/MIT.txt and THIRD_PARTY_NOTICES.md.",
+        "lesson": "A licence map that only looks for licence files is not a licence map."
+      },
+      {
+        "finding": "B-8",
+        "was": "three licence attributions wrong in docs/architecture-port-plan.md",
+        "now": "corrected - Krita is GPL-3.0, MyPaint is GPL-2.0, xp-brush removed",
+        "evidence": "KDE/krita API license.spdx_id = GPL-3.0; mypaint/mypaint API license.spdx_id = GPL-2.0; a repository search for xp-brush returns no brush engine."
+      }
+    ],
+    "resolutions": [
+      { "finding": "B-1", "resolution": "All 16 icons regenerated from original Paka artwork; every file now differs from the upstream TAURI template." },
+      { "finding": "B-4", "resolution": "THIRD_PARTY_NOTICES.md, licenses/ (ten verbatim texts plus the inventory), bundle.resources, bundle.license, bundle.licenseFile, bundle.copyright, README License section." },
+      { "finding": "B-3", "resolution": "The MIT notice for the vendored skills ships in licenses/MIT.txt and the holders are recorded in THIRD_PARTY_NOTICES.md." },
+      { "condition": "C2 (clean room)", "resolution": "docs/CLEAN-ROOM-ATTESTATION.md records the attestation and its evidence; the owner countersignature is outstanding." }
+    ],
+    "stillOpen": ["R6 patent grant", "R7 governance documents", "R8 in-app About/Licences screen", "R9 CI licence allow-list"]
+  },
+  "assumptions": [
+    "feature-analysis.md is an untracked internal artifact of this agent set, not upstream material; its technical conclusions are not ratified by this gate.",
+    "The format-version question in feature-analysis.md section 9.2 (v8 vs v9) is a technical decision for the coordinator and architecture translator and has no licence consequence.",
+    "Clean-room compliance is a process property that this gate records but cannot verify from the repository alone.",
+    "The npm and Rust licence maps reflect the exact lockfile versions at this commit; a dependency bump re-opens the gate for that dependency.",
+    "Only the upstream revisions named in this record were inspected; a later revision may carry a different licence.",
+    "No assessment was made of code-signing or notarisation terms, app-store review policy, export control, or the privacy of user content.",
+    "No conclusion is drawn about Rust compiler or target-platform toolchain licences.",
+    "The 38 npm packages in the lockfile that are not installed on this Windows host are platform-specific optional binaries; their licences were read from the npm registry, not from disk."
+  ],
+  "requiredActions": [
+    {
+      "id": "A1",
+      "blocks": "distribution",
+      "action": "Replace all 16 files in src-tauri/icons/ with Paka-owned artwork and confirm the source is owned or licensed as a mark. Alternatively obtain a licence from trademark@tauri.app.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-1"
+    },
+    {
+      "id": "A2",
+      "blocks": "distribution",
+      "action": "Create THIRD_PARTY_NOTICES.md and ship it with the installer, including the full licence texts of the five statically linked MPL-2.0 crates, the Unicode-3.0 notice, and the MIT notices for the vendored skills. Record the chosen r-efi branch.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-4"
+    },
+    {
+      "id": "A3",
+      "blocks": "distribution",
+      "action": "Add a README License section, CONTRIBUTING.md with a DCO or CLA, and an in-app About screen naming Tauri.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-5"
+    },
+    {
+      "id": "A4",
+      "blocks": "nothing",
+      "action": "Done on 2026-10-20: the Vercel skill is MIT (upstream README), so the files stay tracked; the MIT notice ships in licenses/MIT.txt and the copyright holder is recorded as Vercel, Inc. in THIRD_PARTY_NOTICES.md. Optional follow-up: ask Vercel to add a canonical LICENSE file upstream.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-2"
+    },
+    {
+      "id": "A5",
+      "blocks": "nothing",
+      "action": "Add a CI check that fails when a new dependency appears whose licence is not on an allow-list of permissive SPDX ids.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-6"
+    },
+    {
+      "id": "A6",
+      "blocks": "nothing",
+      "action": "Re-run this gate on every dependency bump and before every release; record the result here.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-6"
+    },
+    {
+      "id": "A7",
+      "blocks": "nothing",
+      "action": "Decide whether Paka wants an express patent grant (MIT contains none; the Apache-2.0 option on the tauri/wry family does).",
+      "owner": "Paka owner",
+      "linkedFinding": "B-5"
+    },
+    {
+      "id": "A8",
+      "blocks": "nothing",
+      "action": "Correct the licence attributions in docs/architecture-port-plan.md: Krita is GPL-3.0 (not GPL-2.0), MyPaint is GPL-2.0 (not LGPL-2.1), and xp-brush could not be verified and should be removed. Alternatively remove the contingency list, which the chosen path does not need.",
+      "owner": "Paka owner",
+      "linkedFinding": "B-8"
+    },
+    {
+      "id": "A9",
+      "blocks": "merge",
+      "action": "Record the implementer's clean-room attestation for the stamp engine before the slice is merged: that no GIMP / Krita / MyPaint / SAI / Clip Studio / Procreate / Corel Painter / ArtRage brush-engine source was read while producing the implementation, or the name of the implementer who must re-do the work.",
+      "owner": "implementer",
+      "linkedFinding": "cleanroom"
+    }
+  ],
+  "humanDecisionRequired": [
+    "Confirm MIT as the intended distribution licence for the app, and confirm the app will be distributed as an installer.",
+    "Decide the TAURI logo question (replace with Paka artwork, or seek a licence). Recolouring or redrawing the TAURI logo does not resolve it. RESOLVED 2026-10-20 - the icons were replaced with original Paka artwork.",
+    "Decide the Vercel-skill question. RESOLVED 2026-10-20 - the upstream README states MIT, so the files stay tracked and only the notice obligation applies.",
+    "Decide whether to publish THIRD_PARTY_NOTICES.md, a README License section, CONTRIBUTING.md and an in-app About/Licences screen, and to ship the licence texts with the installer. NOTICES AND README DONE 2026-10-20; CONTRIBUTING.md and the in-app screen remain open.",
+    "Decide whether GIMP or Krita may be consulted as a behavioural reference at all, and if so, name the implementer and the clean-room protocol before work starts. The implemented slice consulted neither; see docs/CLEAN-ROOM-ATTESTATION.md.",
+    "Decide the patent-grant question.",
+    "Record the chosen licence branch for r-efi (MIT or Apache-2.0, not LGPL-2.1-or-later). DONE 2026-10-20 - MIT is elected and recorded in THIRD_PARTY_NOTICES.md."
+  ],
+  "sources": [
+    { "id": "S1", "title": "MIT License (canonical text)", "url": "https://opensource.org/license/mit" },
+    { "id": "S2", "title": "Apache License 2.0 (canonical text)", "url": "https://www.apache.org/licenses/LICENSE-2.0" },
+    { "id": "S3", "title": "Mozilla Public License 2.0", "url": "https://www.mozilla.org/media/MPL/2.0/index.txt" },
+    { "id": "S4", "title": "Paka LICENSE at the reviewed commit", "url": "LICENSE" },
+    { "id": "S5", "title": "Paka public repository", "url": "https://github.com/aissaadib/Paka" },
+    { "id": "S6", "title": "Tauri LICENSE-MIT - Copyright (c) 2017 - Present Tauri Apps Contributors", "url": "https://github.com/tauri-apps/tauri/blob/dev/LICENSE-MIT" },
+    { "id": "S7", "title": "Tauri LICENSE-APACHE-2.0 - section 6 Trademarks, section 4(b)(c)(d)", "url": "https://github.com/tauri-apps/tauri/blob/dev/LICENSE-APACHE-2.0" },
+    { "id": "S8", "title": "Tauri Trademark Guidelines", "url": "https://tauri.app/about/trademark" },
+    { "id": "S9", "title": "Tauri upstream template icons (source of Paka src-tauri/icons/)", "url": "https://github.com/tauri-apps/tauri/tree/dev/crates/tauri-cli/templates/app/src-tauri/icons" },
+    { "id": "S10", "title": "Tauri docs - Architecture > License", "url": "https://v2.tauri.app/concept/architecture/#license" },
+    { "id": "S11", "title": "addyosmani/agent-skills - MIT, Copyright (c) 2025 Addy Osmani", "url": "https://github.com/addyosmani/agent-skills/blob/main/LICENSE" },
+    { "id": "S12", "title": "vercel-labs/agent-skills - no LICENSE file", "url": "https://github.com/vercel-labs/agent-skills" },
+    { "id": "S13", "title": "GIMP COPYING - GNU GPL v3", "url": "https://github.com/GNOME/gimp/blob/master/COPYING" },
+    { "id": "S14", "title": "Krita COPYING - GNU GPL v3", "url": "https://github.com/KDE/krita/blob/master/COPYING" },
+    { "id": "S15", "title": "MyPaint COPYING (master) - GNU GPL v2", "url": "https://github.com/mypaint/mypaint/blob/master/COPYING" },
+    { "id": "S16", "title": "p5.js license.txt - LGPL-2.1", "url": "https://github.com/processing/p5.js/blob/main/license.txt" },
+    { "id": "S17", "title": "perfect-freehand LICENSE - MIT", "url": "https://github.com/steveruizok/perfect-freehand/blob/master/LICENSE" },
+    { "id": "S18", "title": "fabric.js LICENSE - MIT", "url": "https://github.com/fabricjs/fabric.js/blob/master/LICENSE" },
+    { "id": "S19", "title": "konva LICENSE - MIT", "url": "https://github.com/konvajs/konva/blob/master/LICENSE" },
+    { "id": "S20", "title": "paper.js LICENSE.txt - MIT", "url": "https://github.com/paperjs/paper.js/blob/develop/LICENSE.txt" },
+    { "id": "S21", "title": "crates.io API - per-crate licence", "url": "https://crates.io/api/v1/crates/{name}/{version}" },
+    { "id": "S22", "title": "npm registry - per-manifest licence", "url": "https://registry.npmjs.org/{name}/{version}" },
+    { "id": "S23", "title": "GNU GPL FAQ - translation and derivative works", "url": "https://www.gnu.org/licenses/gpl-faq.html" }
+  ]
+}

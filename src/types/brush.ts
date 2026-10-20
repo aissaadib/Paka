@@ -65,4 +65,34 @@ export interface BrushSettings {
    * shapes through the same coverage path.
    */
   readonly texture: number;
+  /**
+   * Whether the stroke is rasterized as a chain of dabs instead of segments.
+   *
+   * `false` is the plain segment path, which is what every stroke drawn
+   * before the stamp engine existed uses. `true` places round dabs along the
+   * stored path at `stampSpacing` intervals and unions their coverage, so the
+   * stroke keeps its own opacity and never darkens where dabs overlap. The
+   * stamp is a *rasterization strategy*: the stored samples stay the
+   * authoritative record, and the setting is captured per stroke.
+   */
+  readonly stamp: boolean;
+  /**
+   * Distance between dab centres, as a fraction of the brush size.
+   *
+   * This is **not** `spacing`, which is the density of the stored samples: the
+   * dab distance is measured against the brush's nominal size, so a 10 % dab
+   * spacing is 0.1 * `size` document pixels apart. Lower values place more
+   * dabs and make the stroke smoother (and more expensive to rasterize); the
+   * maximum is the brush's own diameter, where the dabs just touch.
+   */
+  readonly stampSpacing: number;
+  /**
+   * Radial falloff of one dab, in `[0, 1]`.
+   *
+   * `1` is a crisp dab edge with a one-pixel antialiased rim. Lower values
+   * widen the falloff towards the dab's centre, which is a true hardness
+   * curve rather than a blur of the finished silhouette. It is independent of
+   * `hardness`, which feathers the whole stroke after its coverage exists.
+   */
+  readonly stampHardness: number;
 }

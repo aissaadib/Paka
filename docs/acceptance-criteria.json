@@ -1,0 +1,464 @@
+{
+  "plan": "docs/architecture-port-plan.md",
+  "featureAnalysis": "docs/g1/feature-analysis.md",
+  "featureEvidence": "docs/g1/feature-evidence.json",
+  "slice": "S1",
+  "feature": "Stamp (dab) brush engine behind the existing stroke interface",
+  "featureId": "PHASE3-STAMP-ENGINE",
+  "generated": "2026-10-20",
+  "baseline": {
+    "commit": "ad2ef11",
+    "projectFormatVersion": 8,
+    "tests": 461,
+    "testFiles": 29,
+    "projectLicence": "MIT",
+    "runtimeDependencies": ["@tauri-apps/api", "@tauri-apps/plugin-dialog", "react", "react-dom"],
+    "thirdPartyCodeInScope": false
+  },
+  "commands": {
+    "test": "pnpm test",
+    "typecheck": "pnpm typecheck",
+    "build": "pnpm build",
+    "app": "pnpm tauri dev"
+  },
+  "notes": [
+    "The analyst's matrix (docs/g1/feature-analysis.md section 12, T-01..T-32) is adopted; each criterion below names the analyst rows it covers.",
+    "AC ids are this plan's own; the analystTestIds field maps back to the analyst's rows.",
+    "The plan's own additions beyond the analyst matrix are the region-footprint guard (AC-14), the sample-density invariance proof (AC-07), the resolution-independence proof (AC-18), the per-stroke dab budget (AC-19) and the coverage-cache release (AC-20)."
+  ],
+  "criteria": [
+    {
+      "id": "AC-01",
+      "area": "legacy-parity",
+      "requirement": "A brush with stampSpacing = 0 rasterizes through the existing segment path, byte for byte.",
+      "analystTestIds": ["T-01", "T-02", "T-03", "T-04"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dStroke.test.ts, src/test/canvas2dRenderer.test.ts",
+        "assertion": "With stampSpacing 0 the recorded call sequence is unchanged (save/beginPath/moveTo/lineTo/stroke/restore, every stroke at alpha 1, lineWidth = the mean-pressure diameter); the renderer blits the raw buffer 1:1, allocates no feather scratch, creates no pattern and applies no filter."
+      },
+      "passCondition": "The recorded call sequence for a default brush is unchanged, the existing hard/soft/grain tests stay green, and the default brush's layer surface bytes are unchanged."
+    },
+    {
+      "id": "AC-02",
+      "area": "legacy-parity",
+      "requirement": "Every project file written before this slice still renders exactly as before.",
+      "analystTestIds": ["T-24", "T-27"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/projectFormat.test.ts",
+        "assertion": "A v1..v8 file parses with stampSpacing = 0 and stampFalloff = 0, the parsed brush is otherwise byte-equal to the pre-slice parse, and a v1..v8 file and a v9 file with the same stroke produce the same pixels."
+      },
+      "passCondition": "All v1..v8 fixtures parse with zero-valued stamp fields, no other field changes, and the rendered pixels match the v9 equivalent."
+    },
+    {
+      "id": "AC-03",
+      "area": "union",
+      "requirement": "Dab coverage is a per-pixel maximum, never a sum: overlapping dabs and self-crossing strokes cannot darken.",
+      "analystTestIds": ["T-09", "T-10"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts, src/test/canvas2dRenderer.test.ts",
+        "assertion": "For two dabs with coverage a and b on the same pixel the union is max(a, b); a self-crossing stamped stroke at opacity 0.5 over white paper is rgb(128,128,128) at the crossing (stacking would give 64); a soft edge overlapping an opaque core equals max(edge, core)."
+      },
+      "passCondition": "max(a,b) holds byte-exactly for every overlapping pixel, including the antialiased rim (falloff > 0), and the crossing pixel is exactly rgb(128,128,128)."
+    },
+    {
+      "id": "AC-04",
+      "area": "union",
+      "requirement": "The union rule is per stroke, not per layer: two separate strokes of the same colour still build up where they overlap.",
+      "analystTestIds": ["T-11"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts",
+        "assertion": "A stamped stroke at opacity 1 drawn over a painted stroke of the same colour still builds up in the overlap."
+      },
+      "passCondition": "The overlap is darker than either stroke alone, exactly as for the legacy segment path."
+    },
+    {
+      "id": "AC-05",
+      "area": "parity",
+      "requirement": "Live drawing, commit, layer rebuild, undo/redo, reopen and PNG export produce identical stamped coverage.",
+      "analystTestIds": ["T-12", "T-13", "T-14", "T-15"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts, src/test/projectLifecycle.test.ts, src/test/drawingEngine.test.ts",
+        "assertion": "The coverage produced by incremental extendStroke calls is byte-identical to the coverage produced by one full rasterization of the same samples; a rebuild after undo/redo reproduces the same bytes; a save/reopen cycle reproduces the same pixels; a stroke that grows from 1 to 3 samples matches a full re-rasterization of the 3 samples (the start ring)."
+      },
+      "passCondition": "All compared coverage buffers are byte-identical (0 differing bytes, toEqual not toBeCloseTo), not approximately equal."
+    },
+    {
+      "id": "AC-06",
+      "area": "determinism",
+      "requirement": "The stamp plan is a pure function of the stored samples and the brush.",
+      "analystTestIds": ["T-19", "T-16"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts",
+        "assertion": "Planning the dabs twice gives identical results; planning from a differently chunked delivery of the same samples gives identical dabs; no call to Math.random, Date.now or performance.now exists in src/core/rendering/stampRaster.ts or in the stamp branch of Canvas2DRenderer.ts."
+      },
+      "passCondition": "Byte-identical dabs across runs and delivery orders, and a source scan finds no non-deterministic call in the stamp path."
+    },
+    {
+      "id": "AC-07",
+      "area": "geometry",
+      "requirement": "The dab plan does not depend on the sample density, so the existing spacing field stays non-appearance-changing.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts",
+        "assertion": "The same raw path captured at two different sample densities (above the 0.05 px duplicate-sample floor) yields the same dab plan and the same coverage bytes. This turns the linear-interpolation derivation into a tested guarantee."
+      },
+      "passCondition": "Both captures give identical dabs and identical coverage, so changing `spacing` never requires a format bump."
+    },
+    {
+      "id": "AC-08",
+      "area": "geometry",
+      "requirement": "Dabs are placed along the stroke's stored polyline at a fixed arc-length lattice, and their radius follows the interpolated pressure.",
+      "analystTestIds": ["T-05", "T-06", "T-07"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts",
+        "assertion": "Dab k sits at arc length k * stampSpacing * diameter from the path start; the recorded positions are exactly spacing document px apart; the dab at a bend carries the path's tangent, not the sample grid's; the dab radius equals strokeDiameter(brush, pressure at that arc position)."
+      },
+      "passCondition": "All assertions hold within one float epsilon for straight, curved and pressure-varying paths, and the dab count is ceil(pathLength / spacing) + 1."
+    },
+    {
+      "id": "AC-09",
+      "area": "geometry",
+      "requirement": "A press without movement deposits exactly one dab; a stroke with no samples deposits nothing.",
+      "analystTestIds": ["T-08"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts",
+        "assertion": "A single-sample stroke yields exactly one dab at the sample with the brush diameter, matching the existing stampDot contract; an empty stroke yields zero dabs and no image."
+      },
+      "passCondition": "Both cases hold, and the legacy stampDot test stays green."
+    },
+    {
+      "id": "AC-10",
+      "area": "format",
+      "requirement": "The project format is bumped to version 9 and the new brush fields are required there.",
+      "analystTestIds": ["T-23", "T-25", "T-26"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/projectFormat.test.ts",
+        "assertion": "PROJECT_VERSION is 9; a v9 file round-trips stampSpacing and stampFalloff exactly; a v9 file with a missing, out-of-range or non-numeric field is refused with a message naming the field; a v10 file is refused with the 'this build reads up to N' message."
+      },
+      "passCondition": "All four assertions hold, and the version-history comment in projectFormat.ts matches docs/PROJECT_FORMAT.md."
+    },
+    {
+      "id": "AC-11",
+      "area": "format",
+      "requirement": "An older build refuses a v9 file rather than drawing a different picture.",
+      "analystTestIds": ["T-26"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/projectFormat.test.ts",
+        "assertion": "The parser refuses version > PROJECT_VERSION; the v9 stamp fields are not optional-with-default, so a v8 reader cannot silently ignore them."
+      },
+      "passCondition": "A v9 file is refused by the v8 code path, and the v9 reader refuses a v9 file that omits a stamp field."
+    },
+    {
+      "id": "AC-12",
+      "area": "brush",
+      "requirement": "stampSpacing and stampFalloff are ordinary brush settings: defaulted to 0, clamped into range, and part of the brush identity.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/brushSettings.test.ts",
+        "assertion": "DEFAULT_BRUSH has stampSpacing 0 and stampFalloff 0; normalizeBrush clamps stampSpacing into [0,2] and stampFalloff into [0,1]; brushSettingsEqual distinguishes brushes that differ only in a stamp field."
+      },
+      "passCondition": "All three assertions hold (a missing normalizeBrush or brushSettingsEqual entry is a silent failure and must not happen)."
+    },
+    {
+      "id": "AC-13",
+      "area": "history",
+      "requirement": "A stamped stroke is one undo step and the brush is captured per stroke.",
+      "analystTestIds": ["T-15", "T-28", "T-29"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/drawingEngine.test.ts",
+        "assertion": "Drawing a stamped stroke and undoing it removes the whole stroke in one step and leaves the layer pixel-identical to the pre-stroke state; the committed StrokeRecord carries the brush that was used, including both stamp fields; changing the brush afterwards does not rewrite the committed stroke and does not change the history depth or the dirty flag."
+      },
+      "passCondition": "All assertions hold."
+    },
+    {
+      "id": "AC-14",
+      "area": "region-guard",
+      "requirement": "No dab coverage escapes the composited region: the live preview and the committed stroke show the same pixels.",
+      "analystTestIds": ["T-20", "T-21"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts",
+        "assertion": "coverageInside (the existing helper) is true for a stamped stroke: every covered pixel lies inside the padded sample bounds; the live preview pixel and the committed layer pixel at the same document point are equal."
+      },
+      "passCondition": "coverageInside returns true and the live and committed pixels are equal (the Feature Analysis section 5.1 hazard is closed)."
+    },
+    {
+      "id": "AC-15",
+      "area": "history",
+      "requirement": "Cancelling a stamped stroke leaves no trace: no history entry, no dirty flag, no pixels.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts, src/test/drawingEngine.test.ts",
+        "assertion": "cancelStroke clears the stroke buffer and releases the coverage cache; the engine records no command and does not bump the revision."
+      },
+      "passCondition": "Both assertions hold."
+    },
+    {
+      "id": "AC-16",
+      "area": "eraser",
+      "requirement": "The eraser subtracts the union of the dabs, and a self-crossing eraser stroke erases once.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts",
+        "assertion": "The eraser path uses the same coverage as the paint path; the snapshot rebuild keeps the crossing-erases-once invariant; the existing eraser pixel tests still pass."
+      },
+      "passCondition": "Both assertions hold."
+    },
+    {
+      "id": "AC-17",
+      "area": "shapes",
+      "requirement": "Shape tools keep the segment path, and the file says so.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/drawingEngine.test.ts, src/test/projectFormat.test.ts",
+        "assertion": "A rectangle drawn while a stamped brush is selected produces a stroke record with stampSpacing 0 and stampFalloff 0, and renders through the legacy path."
+      },
+      "passCondition": "The record stores the zero-valued stamp fields and the shape's pixels are unchanged from today."
+    },
+    {
+      "id": "AC-18",
+      "area": "resolution",
+      "requirement": "The dab plan is resolution-independent, and the rasterized result agrees across rasterScale and zoom.",
+      "analystTestIds": ["T-17", "T-18"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts",
+        "assertion": "The same stroke at rasterScale 1 and 2 agrees within 1/255 at document resolution; the document-resolution pixel is identical at zoom 1 and zoom 4 (zoom never affects rasterized data)."
+      },
+      "passCondition": "Both assertions hold within the stated tolerance."
+    },
+    {
+      "id": "AC-19",
+      "area": "performance",
+      "requirement": "A hostile or accidental project cannot hang the renderer: the stamp plan has deterministic, path-growth-stable guards.",
+      "analystTestIds": ["T-31"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampRaster.test.ts",
+        "assertion": "The minimum spacing floor (0.25 document px) holds; the per-stroke coverage budget is enforced; the cut is expressed as a lattice index, so the same first K dabs are produced whether the path has 10 samples or 10 000, and the live and rebuild paths truncate identically."
+      },
+      "passCondition": "All three hold, the guard constants are named and documented, and the truncation is described in docs/ARCHITECTURE.md."
+    },
+    {
+      "id": "AC-20",
+      "area": "memory",
+      "requirement": "The slice adds no new full-resolution surface, the coverage cache is released, and the documented raster budget is accounted for honestly.",
+      "analystTestIds": ["T-32"],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts, src/core/document/document.ts",
+        "assertion": "The renderer allocates no canvas beyond the ones it allocated before the slice for the same sequence of operations; the coverage cache is released at commit, cancel, document swap and raster-scale change; the hot path allocates no object per pointer sample (the coverage tiles are Uint8ClampedArray); PEAK_BYTES_PER_DOCUMENT_PIXEL is still 58 and the coverage cache consumes at most 8 of the 10 bytes/document-pixel transient allowance (2 left)."
+      },
+      "passCondition": "The canvas allocation count is unchanged, PEAK_BYTES_PER_DOCUMENT_PIXEL stays 58, and docs/PERFORMANCE_AUDIT_2026-10-20.md plus docs/SESSION-BRIEF.md record the 2 bytes/document-pixel of remaining transient headroom and the cache's footprint in the same commit.",
+      "reviewNote": "Corrected 2026-10-20 by docs/memory-budget-review.md: the earlier '58 to 62' expectation was not supported by the evidence. The envelope holds; the headroom shrinks."
+    },
+    {
+      "id": "AC-28",
+      "area": "memory",
+      "requirement": "The coverage upload is tiled: one reused 64x64 device-pixel ImageData per tile, never a document-sized buffer.",
+      "analystTestIds": [],
+      "design": "docs/architecture-port-plan.md section 19.2",
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts, src/test/stampCoverage.test.ts",
+        "assertion": "The stamp path uploads one 64x64 device-pixel tile at a time at the offset (tileX*64, tileY*64); the upload ImageData is allocated once per renderer and reused; the total temporary upload allocation is at most 80 KiB (one 16 KiB tile image plus at most four edge images); a document-wide stamped stroke creates no document-sized ImageData; the coverage buffer content is identical to the single-dirty-rect upload (same union, same colour, same alpha) over the whole canvas."
+      },
+      "passCondition": "The largest ImageData created by the stamp path is 64x64 (or the clipped edge size), the number of putImageData calls equals the number of pending tiles, and a whole-canvas comparison shows the tiled upload and the single-rect upload produce identical buffer bytes.",
+      "reviewNote": "Found by docs/memory-budget-review.md section 4.4; the design is in the plan's section 19.2. As implemented, writeStampCoverage creates one ImageData for the whole dirty rectangle, which is document-sized (256 MiB at the cap) in the rebuild path."
+    },
+    {
+      "id": "AC-29",
+      "area": "robustness",
+      "requirement": "Dab generation is bounded in the planner, so no project file can exhaust memory or hang the renderer.",
+      "analystTestIds": [],
+      "design": "docs/architecture-port-plan.md sections 19.3 and 19.4",
+      "verification": {
+        "type": "automated",
+        "test": "src/test/stampCoverage.test.ts",
+        "assertion": "Three runtime bounds are enforced in the planner (src/core/rendering/stampCoverage.ts): (1) a non-finite segment ends the walk and a segment longer than MAX_INTERPOLATION_DISTANCE places at most MAX_STAMP_DABS_PER_SEGMENT dabs and then resumes the lattice; (2) the accumulated dab-box work in device pixels is capped at MAX_STAMP_DAB_WORK; (3) at most MAX_STAMP_SAMPLES samples are walked. Every bound cuts at a prefix of the dab sequence, so the truncated dab list is identical in the live path (cursor) and the rebuild path (full walk)."
+      },
+      "passCondition": "A stroke whose samples span +/-1e9, or whose path is 5,000,000 samples long, or whose coordinates are non-finite, is planned in bounded time and bounded memory; the dab list produced by the cursor equals the list produced by the full walk for the same samples; the parser's accepted inputs are unchanged.",
+      "reviewNote": "Found by docs/memory-budget-review.md section 5.4. The bounds are runtime enforcement points, not file-load validation: readSampleArray already refuses non-finite samples, and no coordinate-range rule is added to the parser (that would be a format-policy change)."
+    },
+    {
+      "id": "AC-30",
+      "area": "memory",
+      "requirement": "The worst case, in which the rebuild scratch and a grouped live preview are alive at the same time, stays inside the documented raster budget.",
+      "analystTestIds": [],
+      "design": "docs/architecture-port-plan.md section 19.5",
+      "verification": {
+        "type": "automated",
+        "test": "src/core/document/document.ts, src/test/documentRasterBudget.test.ts",
+        "assertion": "PEAK_BYTES_PER_DOCUMENT_PIXEL is still 58 and PEAK_DOCUMENT_RASTER_BYTES is still 973,078,528; the stamp path's contribution to the peak is at most 8 bytes per document pixel (the in-flight map plus the resident rebuild scratch, 1 byte per device pixel each) plus at most 0.005 for the upload buffers; the worst scenario (48 for the three surfaces + 8 for the coverage + 0.005 for the upload) is at most 56.005 bytes per document pixel, i.e. 896 MiB at the cap."
+      },
+      "passCondition": "The documented constants are unchanged, the recalculated worst case is at most 56.005 bytes per document pixel, and docs/ARCHITECTURE.md, docs/SESSION-BRIEF.md and docs/PERFORMANCE_AUDIT_2026-10-20.md state the coverage cache's 8 bytes per document pixel and the 2 bytes per document pixel of remaining headroom.",
+      "reviewNote": "Without the tiled upload the same scenario is 72.005 bytes per document pixel (1152 MiB), which leaves the 1 GiB budget; see docs/memory-budget-review.md section 11.1."
+    },
+    {
+      "id": "AC-31",
+      "area": "performance",
+      "requirement": "The dab-work budget has a named constant whose value is derived, and its derivation is recorded.",
+      "analystTestIds": [],
+      "design": "docs/architecture-port-plan.md section 19.4",
+      "verification": {
+        "type": "manual",
+        "assertion": "MAX_STAMP_DAB_WORK is a named constant in device pixels of dab-box area, clamped to a floor and a ceiling, and either (a) derived from a documented latency target plus one packaged-app measurement of the stamp path's device-pixel rate, with both recorded in the commit, or (b) recorded as a provisional value whose derivation is explicitly unresolved, with the measurement task named. The commit must not claim the budget is validated while it is provisional."
+      },
+      "passCondition": "The constant exists, the unit is device pixels of dab-box area per stroke, and the commit states either the measurement it came from or that it is provisional. No benchmark claim appears without a measurement."
+    },
+    {
+      "id": "AC-32",
+      "area": "architecture",
+      "requirement": "The file format's accepted inputs are unchanged by this slice; the bounds are runtime enforcement points.",
+      "analystTestIds": [],
+      "design": "docs/architecture-port-plan.md section 19.1",
+      "verification": {
+        "type": "automated",
+        "test": "src/core/project/projectFormat.ts, src/test/projectFormat.test.ts",
+        "assertion": "readSampleArray and readBrush are unchanged in what they accept (no coordinate-range rule, no new required field, no new rejection); the version stays 9; the bounds live in src/core/rendering/stampCoverage.ts, which every rendering path uses."
+      },
+      "passCondition": "The parser accepts exactly what it accepted before the bounds were added, and the bounds are reachable from the live path, the rebuild path and the export path alike."
+    },
+    {
+      "id": "AC-21",
+      "area": "architecture",
+      "requirement": "The renderer boundary and the document model are unchanged.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "pnpm typecheck, git diff",
+        "assertion": "src/core/rendering/types.ts (DrawingRenderer), src/core/document/types.ts (StrokeRecord, LayerElement), src/core/commands/* and src/core/brushes/strokeBuilder.ts are byte-unchanged; no new element kind and no new command type exist."
+      },
+      "passCondition": "git diff shows no change to those files, and the typecheck is clean."
+    },
+    {
+      "id": "AC-22",
+      "area": "architecture",
+      "requirement": "No dependency is added, and no pointer sample reaches React or an IPC boundary.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "package.json, pnpm-lock.yaml",
+        "assertion": "The dependency lists are byte-unchanged; no src-tauri command is added; the dab plan runs inside the renderer, not in the React layer."
+      },
+      "passCondition": "package.json and pnpm-lock.yaml are unchanged and src-tauri has no new command."
+    },
+    {
+      "id": "AC-23",
+      "area": "preview",
+      "requirement": "The live preview of a stamped stroke is composited inside the stroke's own layer, honouring that layer's visibility, opacity and blend mode.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "src/test/canvas2dRenderer.test.ts",
+        "assertion": "The existing preview-compositing assertions are re-run with a stamped stroke and the grouping behaviour is unchanged."
+      },
+      "passCondition": "The preview and the committed pixels match, exactly as for a legacy stroke."
+    },
+    {
+      "id": "AC-24",
+      "area": "ui",
+      "requirement": "The two new controls are real controls with correct defaults, and the two meanings of spacing cannot be confused.",
+      "analystTestIds": ["T-30"],
+      "verification": {
+        "type": "manual",
+        "steps": [
+          "Run pnpm tauri dev.",
+          "Confirm the Stamp spacing slider defaults to Off (0%) and the Stamp falloff slider to 0%.",
+          "Confirm the pre-existing sample-density slider is labelled 'Sampling' and cannot be read as dab spacing.",
+          "Set Stamp spacing to 50% on a size 8 brush, draw a stroke, and confirm visible dabs.",
+          "Undo once: the whole stroke disappears. Save, reopen: the dabs are identical. Export PNG: identical to the display."
+        ]
+      },
+      "passCondition": "All five observations hold, the default brush looks unchanged, and no placeholder control exists."
+    },
+    {
+      "id": "AC-25",
+      "area": "verification",
+      "requirement": "The whole slice is verified before it is claimed done.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "automated",
+        "test": "pnpm test, pnpm typecheck, pnpm build",
+        "assertion": "pnpm test passes with at least the baseline 461 tests plus the new ones; pnpm typecheck is clean; pnpm build succeeds."
+      },
+      "passCondition": "All three commands succeed in the same commit, and automated, browser and device evidence are reported separately."
+    },
+    {
+      "id": "AC-26",
+      "area": "docs",
+      "requirement": "The documentation moves with the behaviour in the same commit.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "manual",
+        "steps": [
+          "README.md, docs/ARCHITECTURE.md, docs/PROJECT_FORMAT.md, docs/ROADMAP.md, docs/SESSION-BRIEF.md, docs/HANDOFF.md and AGENTS.md all describe the stamp engine.",
+          "AGENTS.md gains a row for src/core/rendering/stampRaster.ts and a test-map row for src/test/stampRaster.test.ts, and its drifted line anchors are refreshed.",
+          "docs/ROADMAP.md Phase 3 records the shipped part and leaves the deferred parts unchecked.",
+          "The stale harness comment in src/test/canvas2dRenderer.test.ts is corrected."
+        ]
+      },
+      "passCondition": "All documents mention the slice, and no document still describes the stamp engine as unshipped work in the sections it changes."
+    },
+    {
+      "id": "AC-27",
+      "area": "architecture",
+      "requirement": "The raster budget decision is explicit and recorded, not implicit.",
+      "analystTestIds": [],
+      "verification": {
+        "type": "manual",
+        "steps": [
+          "The coordinator has chosen plan option A (footprint-bounded coverage cache, peak 62 bytes per document pixel) or option B (no cache, peak 58, quadratic live path).",
+          "The choice is written into docs/ARCHITECTURE.md, docs/SESSION-BRIEF.md section 6 and docs/PERFORMANCE_AUDIT_2026-10-20.md F5 in the same commit."
+        ]
+      },
+      "passCondition": "The chosen option is documented in all three files, and the implementation matches it."
+    }
+  ],
+  "outOfScope": [
+    "Directional or image-based stamp textures (asset pipeline, new content kind).",
+    "Non-round, elongated, offset or bristle dab shapes, and any change to strokeSampleBounds.",
+    "Per-dab scatter, rotation or jitter.",
+    "Per-dab opacity.",
+    "Velocity-based dynamics.",
+    "Changing the existing spacing field (it stays sample density).",
+    "GPU / WebGL / WebGPU, a renderer rewrite, or a native IPC dab path.",
+    "A document-sized coverage surface (it would break the 58-byte-per-document-pixel budget).",
+    "Layer masks, groups, tile-based layer surfaces.",
+    "Any change to StrokeRecord, LayerElement, the command types or the document pixel budget."
+  ],
+  "openQuestionsForTheCoordinator": [
+    "MAX_STAMP_DAB_WORK: the unit and the shape are fixed (device pixels of dab-box area per stroke, clamped to a floor and a ceiling) but the value is unresolved by design. It needs a documented latency target (the project has none) and one packaged-app measurement of the stamp path's device-pixel rate. Until both exist the constant must be recorded as provisional (AC-31).",
+    "Should the project adopt a latency or frame-time target? It would settle the budget above and is useful beyond this slice.",
+    "Should a truncated stroke be reported in the status bar? The design says yes (plan section 19.3.4): a truncated stroke is a visible artifact and the user should be told.",
+    "Should the rebuild scratch be released after a rebuild batch? Recommended (plan section 19.5): it is a one-line lifecycle change with a 64 MiB effect at the cap.",
+    "Should Bound 1's per-segment cap end the stroke, or cap the dabs within the jump and continue? The design caps and continues, so a fast flick is not cut (plan section 19.3.2).",
+    "Upload granularity: the design fixes the unit at one 64x64 coverage tile with a reused ImageData (plan section 19.2); a larger band would cut the call count but re-introduce a bigger per-upload allocation."
+  ],
+  "answeredByThisPlan": {
+    "Q1_format_version": "v9, with both stamp fields required (plan section 2.3).",
+    "Q2_control_naming": "Two sliders - 'Stamp spacing' (0 = Off) and 'Stamp falloff'; the existing 'Spacing' becomes 'Sampling'.",
+    "Q3_filled_shape_interior": "Unchanged - shapes keep the segment path, so the interior stays a flat polygon fill.",
+    "Q4_spacing_invariance": "Yes under arc-length lattice placement, proven by a test (AC-07).",
+    "Q5_union_mechanism": "A footprint-bounded JavaScript coverage cache uploaded with putImageData into the existing stroke buffer; a document-sized coverage surface is rejected on the raster budget.",
+    "Q6_eraser_union": "Yes - the eraser subtracts the same union, and a crossing eraser stroke erases once.",
+    "Q7_shape_output": "Unchanged in S1 - shapes keep the segment path and record zero-valued stamp fields.",
+    "Q8_dab_budget": "A deterministic truncation at a fixed lattice index plus a 0.25 document px spacing floor (AC-19)."
+  }
+}

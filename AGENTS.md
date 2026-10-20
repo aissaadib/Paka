@@ -55,13 +55,14 @@ architecture by browsing.
 | 1342 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
 | 1050 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
 | 961 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
-| 724 | `src/core/project/projectFormat.ts` | v7 serialize/parse/validate |
+| 724 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
-`floodFill`, `document/types.ts`, `canvas2dStroke`, `shapeGeometry`,
-`strokeBuilder`, `strokeSelection`, `commandStack`, `types.ts` (tools),
+`floodFill`, `document/types.ts`, `canvas2dStroke`, `stampCoverage`,
+`shapeGeometry`, `strokeBuilder`, `strokeSelection`, `commandStack`,
+`types.ts` (tools),
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
@@ -76,6 +77,7 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-102), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
+| Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L767/L870), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L675) |
 | Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L805/L831), `types/brush.ts`, `BrushControls.tsx`, format v7 |
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1254), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
@@ -121,6 +123,11 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 84, 384, 456 |
 | `readBrush` (format validation) | `core/project/projectFormat.ts` | ~675 |
+| `stampDabs`, `StampDabCursor` (dab plan) | `core/rendering/stampCoverage.ts` | 106, 150 |
+| `stampDabCoverage` (per-dab profile) | `core/rendering/stampCoverage.ts` | 218 |
+| `StampCoverage` (coverage union, tiles) | `core/rendering/stampCoverage.ts` | 246 |
+| `MAX_STAMP_COVERAGE_WORK`, `MIN_STAMP_SPACING_PX` | `core/rendering/stampCoverage.ts` | 39, 32 |
+| `extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage` | `core/rendering/Canvas2DRenderer.ts` | 945, 985, 1020 |
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
 | `Tool`, `ToolContext` | `core/tools/types.ts` | 121, 17 |
@@ -163,6 +170,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
 | Brush texture / grain | `canvas2dStroke.test.ts` (`textureCoverage`), `canvas2dRenderer.test.ts` (pattern pass), `projectFormat.test.ts`, `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
+| Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
 | Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
 | Stroke raster | `canvas2dStroke.test.ts` |
 | Renderer / layers / compositing | `canvas2dRenderer.test.ts` (grep `it(`) |

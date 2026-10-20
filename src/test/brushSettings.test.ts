@@ -3,6 +3,7 @@ import {
   brushSettingsEqual,
   DEFAULT_BRUSH,
   MAX_BRUSH_SIZE,
+  MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   normalizeBrush,
   stepBrushSize,
@@ -50,6 +51,9 @@ describe("brush configuration", () => {
       spacing: 100,
       stabilizer: -4,
       texture: 9,
+      stamp: true,
+      stampSpacing: 9,
+      stampHardness: -2,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -61,6 +65,8 @@ describe("brush configuration", () => {
     expect(normalized.spacing).toBe(2);
     expect(normalized.stabilizer).toBe(0);
     expect(normalized.texture).toBe(1);
+    expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
+    expect(normalized.stampHardness).toBe(0);
   });
 
   it("applies a patch without mutating the current settings", () => {

@@ -153,8 +153,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       the smoothed path.
 - [x] Texture as a deterministic, document-anchored grain post-pass, captured
       per stroke, format v7. This is a surface texture, not per-dab texture.
-- [ ] Stamp-based brush engine behind the existing stroke interface (per-dab
-      spacing, true hardness curves, directional/stamp textures).
+- [x] Stamp-based brush engine behind the existing stroke interface (per-dab
+      spacing and a true per-dab hardness curve, with the dabs unioned so a
+      stroke never darkens where it crosses itself). Format v9.
+- [ ] Directional, image-based or per-dab stamp textures: a texture that varies
+      per dab and can follow the path direction, rather than one
+      document-anchored grain post-pass over the finished coverage.
 
 ## Phase 4 - Layer system
 
@@ -194,35 +198,34 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Stamp-based brush engine behind the existing stroke interface** (the last
-Phase 3 item). Texture now ships as a coverage post-pass; this slice is about
-true dab placement, per-dab spacing/hardness and directional/stamp textures. The
-current rasterizer draws segments between samples, and `spacing` means sample
-density. A stamp engine must not silently change what existing files look like.
+**Directional, image-based or per-dab stamp textures** (the rest of Phase 3).
+The stamp engine itself has shipped: a stroke can be drawn as a chain of round
+dabs placed along its path, unioned so it never darkens where it crosses
+itself, with a true per-dab hardness curve (format v9). The grain is still one
+document-anchored post-pass over the finished coverage.
+
+This slice is about the texture layer of that engine: a texture that varies
+**per dab** and can follow the path direction, the way a bristle or a dry
+brush varies, rather than one grain over the whole stroke.
 
 Non-negotiable constraints:
 
-- `DrawingRenderer` and `StrokeRecord` remain the boundary. Stamps are a
+- `DrawingRenderer` and `StrokeRecord` remain the boundary. A texture is a
   rasterization strategy, not a new element kind; the vector samples stay the
   authoritative record for undo, reopen and export.
-- Keep the existing segment path as the default. Hard, soft and grain strokes
-  drawn with no stamp settings must stay pixel-identical, including the
-  single-alpha and no-self-darkening invariants.
-- Accumulate per-dab coverage into **one** stroke buffer (max/union, not
-  repeated source-over), then composite once at the stroke opacity. A
-  self-crossing stamped stroke must not darken. Apply grain after the dabs, not
-  per dab, unless the format records the difference.
-- Any grain must stay deterministic from document coordinates, so live drawing,
-  layer rebuild, undo/redo, reopen and PNG export agree at every zoom and
-  `rasterScale`. No `Math.random()` in a repaint path.
-- Capture any new stamp setting per stroke. A non-default stamp/dab appearance
-  that an older reader cannot reproduce requires a format bump (v9 if fields
-  change appearance); keep `spacing` (sample density) distinct from stamp
-  spacing or document an explicit migration if they are merged.
-- UI: real stamp spacing/hardness/texture controls only when the engine honours
-  them, with no placeholders.
+- The existing segment path and the existing grain pass must stay unchanged by
+  default: a hard, soft or grain stroke drawn with no stamp settings stays
+  pixel-identical.
+- A per-dab texture must stay **deterministic from document coordinates**, so
+  live drawing, layer rebuild, undo/redo, reopen and PNG export agree at every
+  zoom and `rasterScale`. No `Math.random()` in a repaint path.
+- A texture that changes the pixels needs a format bump (v10 if a field
+  changes appearance), and the older reader must refuse the file rather than
+  draw the wrong look.
+- Keep `spacing` (sample density) distinct from the stamp's dab spacing.
+- UI: real texture controls only when the engine honours them, with no
+  placeholders.
 
-Acceptance bar: existing output unchanged by default; one gesture remains one
-undo step; changing stamp settings never rewrites committed strokes; live,
-committed, reopened and exported stamped pixels match; self-overlap and
-overlapping dabs do not darken.
+Acceptance bar: existing output unchanged by default; a textured dab stroke is
+one undo step; live, committed, reopened and exported pixels match; the
+texture is anchored to the document, not to the frame.

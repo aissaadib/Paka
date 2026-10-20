@@ -4,7 +4,8 @@
 was changed by this audit. The only repository file this audit added is this
 report.
 
-**State at the end of the session:** `main` at `2fa34cc`, which contains
+**State at the end of the session:** `main` at `ad2ef11` (the last code change is
+`2fa34cc`), which contains
 
 * `4ac040b` — **R1 (dirty bounds) shipped**: the rebuild is bounded by each
   element's inked rectangle (47x-187x less touched area), byte-identical
@@ -424,6 +425,37 @@ is released when no preview is active. The renderer now releases it
 The remaining, *unaddressed* part of the budget is that **every additional
 layer adds another full-resolution surface** (16 B/px at 2x), which the
 document cap does not bound.
+
+**The stamp engine does not move the peak (2026-10-20).** The stamp (dab)
+brush engine keeps its coverage in a JavaScript map of 1 byte per **device**
+pixel over the **stroke's own footprint** - at most 4 bytes per document pixel
+at the budgeted scale of 2 - and it is a transient, so it fits inside the same
+10 bytes-per-document-pixel allowance as the bucket scan: the in-flight map and
+the resident scratch together use at most 8 of those 10 bytes, leaving **2
+bytes per document pixel of transient headroom** for the next feature that needs
+scratch space (masks, groups, tile-based layer surfaces). Two details keep it
+there:
+
+* the coverage map is **tiled and allocated on demand**, so it follows the
+  inked area rather than the document size;
+* the upload from the coverage map into the stroke buffer is **one `ImageData`
+  per tile** (64 x 64 x 4 = 16 KB), never one for the whole dirty rectangle -
+  which would be document-sized (256 MiB at the cap) in the rebuild path.
+
+The coverage map is JavaScript heap rather than a canvas backing store, so it
+sits outside the budget model's stated scope ("calculable backing-store
+pixels"). It is stated here next to the budget rather than folded into the
+constants in `document.ts`, so the model keeps describing exactly what it says
+it describes. The envelope therefore stays **58 bytes per document pixel**
+(worst observed scenario 56 B/px, 896 MiB at the cap, inside the 1 GiB budget).
+
+The stamp engine's own cost is quadratic in the brush radius, because each dab
+touches its whole bounding box: a 512 px brush at `rasterScale` 2 is a thousand
+device pixels across, so a million pixels per dab. The planner therefore
+enforces a **per-stroke work budget** (`MAX_STAMP_COVERAGE_WORK`), cut at a
+lattice index so the live path and the rebuild path truncate identically; an
+extreme stroke is cut short rather than stalling the app. The live path pays
+only for the new dabs of each pointer event.
 
 ### F7 — After R1: the remaining per-element cost is the canvas-to-canvas blit, and it has a knee (measured 2026-10-20, after `4ac040b`)
 

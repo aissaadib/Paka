@@ -3,8 +3,10 @@
 import {
   MAX_BRUSH_SIZE,
   MAX_SPACING,
+  MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   MIN_SPACING,
+  MIN_STAMP_SPACING,
 } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
@@ -48,12 +50,12 @@ export function BrushControls() {
         onChange={(hardness) => actions.setBrush({ hardness })}
       />
       <SliderField
-        label="Spacing"
+        label="Sampling"
         min={MIN_SPACING * 100}
         max={MAX_SPACING * 100}
         step={1}
         value={brush.spacing * 100}
-        title="Gap between interpolated samples as a percentage of brush size; lower values smooth fast strokes at a memory cost"
+        title="Gap between interpolated samples as a percentage of brush size; lower values smooth fast strokes at a memory cost. This is the sample density, not the dab spacing of the stamp"
         format={(value) => `${Math.round(value)}%`}
         onChange={(spacing) => actions.setBrush({ spacing: spacing / 100 })}
       />
@@ -77,6 +79,41 @@ export function BrushControls() {
         format={(value) => `${Math.round(value * 100)}%`}
         onChange={(texture) => actions.setBrush({ texture })}
       />
+      <label
+        className="toggle"
+        title="Draw the stroke as a chain of round dabs instead of continuous segments"
+      >
+        <input
+          type="checkbox"
+          checked={brush.stamp}
+          onChange={(event) => actions.setBrush({ stamp: event.target.checked })}
+        />
+        Stamp
+      </label>
+      {brush.stamp ? (
+        <>
+          <SliderField
+            label="Stamp spacing"
+            min={MIN_STAMP_SPACING * 100}
+            max={MAX_STAMP_SPACING * 100}
+            step={1}
+            value={brush.stampSpacing * 100}
+            title="Distance between dabs as a percentage of the brush size; this is not the sample density above"
+            format={(value) => `${Math.round(value)}%`}
+            onChange={(stampSpacing) => actions.setBrush({ stampSpacing: stampSpacing / 100 })}
+          />
+          <SliderField
+            label="Stamp hardness"
+            min={0}
+            max={1}
+            step={0.01}
+            value={brush.stampHardness}
+            title="Falloff of a single dab; 100% is a crisp dab edge, lower values soften it towards the centre"
+            format={(value) => `${Math.round(value * 100)}%`}
+            onChange={(stampHardness) => actions.setBrush({ stampHardness })}
+          />
+        </>
+      ) : null}
       <label
         className="toggle"
         title="Pen pressure controls stroke width (ignored by mouse input)"

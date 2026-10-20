@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 8,
+  "version": 9,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -95,7 +95,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -117,7 +120,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -139,7 +145,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -346,6 +355,9 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
 | `texture` | 0-1 | Strength of the deterministic, document-anchored grain applied once to the finished stroke coverage. `0` is the plain coverage. Required in version 7; version-1 to -6 files have no field and read as `0`. |
+| `stamp` | boolean | Whether the stroke is rasterized as a chain of round dabs instead of round-capped segments. `false` is the legacy segment path. Required in version 9; version-1 to -8 files have no field and read as `false`. |
+| `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
+| `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 
 ## Validation policy
 
@@ -370,8 +382,9 @@ looks like:
   values;
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
-  a `stabilizer` present but outside `0..1`, and a version-7 `texture` that is
-  missing or outside `0..1`;
+  a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
+  missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
+  `stampSpacing`/`stampHardness` that is missing or outside its range;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -400,7 +413,11 @@ looks like:
   stored samples already describe the smoothed path, so old version-6 files and
   all earlier versions render exactly as they did;
 - a missing `texture` in a version-1 to -6 file → `0`. Version 7 requires it
-  because a version-6 reader would ignore a textured stroke and draw it plain.
+  because a version-6 reader would ignore a textured stroke and draw it plain;
+- a missing `stamp` in a version-1 to -8 file → `false`, and missing
+  `stampSpacing`/`stampHardness` → their defaults. The stamp did not exist
+  before version 9, and the stamp off is exactly the segment path those files
+  were written by.
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
@@ -427,7 +444,8 @@ Two further guarantees:
 | 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
 | 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | Writes the additive `stabilizer` field too. |
 | 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | Writes the required `texture` field. |
-| 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | The current version; what this build always writes. |
+| 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | - |
+| 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -445,6 +463,11 @@ Two further guarantees:
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field
   could be added additively.
+- **`stamp` required version 9.** It changes how the stored samples are
+  rasterized - a chain of dabs instead of round-capped segments - so a
+  version-8 reader that ignored it would draw a stamped stroke as a plain one,
+  which is a different picture. Version-1 to -8 files read with the stamp off,
+  which is exactly the path they were written by.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

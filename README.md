@@ -5,7 +5,8 @@ drawing engine written in React + TypeScript, with HTML Canvas 2D as the current
 raster backend.
 
 This is the **foundation** of the app, not a finished product. You can draw
-pressure-sensitive strokes, tune brush size, hardness, spacing, stabilization and grain texture, flood-fill regions,
+pressure-sensitive strokes, tune brush size, hardness, sampling, stabilization,
+grain texture and the stamp (dab) brush, flood-fill regions,
 paint linear and radial gradients, pan and zoom, manage layers with working
 undo/redo for strokes, fills and gradients, and **save, reopen and export your
 work as a project file or a PNG**. Several things are explicitly missing; see
@@ -78,16 +79,25 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   is not an edit: it adds no history step and never marks the document dirty.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
   (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
-  outer edge), **spacing** (2-200 % of the brush diameter: how densely fast
+  outer edge), **sampling** (2-200 % of the brush diameter: how densely fast
   movements are interpolated), **stabilizer** (0-100 %: smooths the captured
   pointer path; the line lags while moving and settles on the release point),
-  **texture** (0-100 %: deterministic grain over the finished coverage), colour
-  (picker plus an 8-swatch palette), and toggles for pressure-driven size and
-  pressure-driven opacity. Every brush setting is captured by each stroke, so
-  changing one later never rewrites existing work; hardness and texture apply to
-  the brush, the eraser and shapes, while spacing and stabilizer apply to the
-  brush and eraser (a shape's geometry comes from the drag, not the freehand
-  path).
+  **texture** (0-100 %: deterministic grain over the finished coverage), a
+  **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
+  how far apart the dabs sit) and **stamp hardness** (the falloff of a single
+  dab), colour (picker plus an 8-swatch palette), and toggles for
+  pressure-driven size and pressure-driven opacity. Every brush setting is
+  captured by each stroke, so changing one later never rewrites existing work;
+  hardness and texture apply to the brush, the eraser and shapes, while sampling,
+  stabilizer and the stamp apply to the brush and eraser (a shape's geometry
+  comes from the drag, not the freehand path).
+- **Stamp (dab) brush**: with the stamp switched on, a stroke is drawn as a
+  chain of round dabs placed along its path instead of as continuous segments.
+  The dabs overlap and their coverage is combined with a maximum, so a stroke
+  never darkens where it crosses itself, and each dab carries its own hardness
+  curve - a true falloff inside the dab rather than a blur of the finished
+  silhouette. Live drawing, undo/redo, reopening a file and exporting a PNG all
+  produce the same dabs.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -264,20 +274,28 @@ paste-ready version of the same briefing is in
 - **Hardness is a single-pass feather of the finished stroke, not a true
   hardness profile.** Lowering it blurs the stroke silhouette once, so the edge
   is a Gaussian falloff and extends slightly beyond the nominal diameter (the
-  interior stays at full coverage and opacity is still applied once). There is
-  no stamp engine, so a very large soft stroke costs one extra pass over its
-  bounding box per repaint.
+  interior stays at full coverage and opacity is still applied once). The
+  stamp engine's own **stamp hardness** is the per-dab profile, which is a true
+  falloff inside each dab; the stroke-level feather still runs over the
+  finished coverage, so a soft brush stays soft when the stamp is on.
 - **Texture is one deterministic grain pass over the finished coverage, not a
   stamped or per-dab texture.** It darkens no more than the plain stroke, is
   anchored to document coordinates (so it survives zoom, undo/redo and export),
-  and `0` leaves the hard/soft pixels unchanged. Directional, image-based and
-  per-dab textures still need the stamp engine.
-- **Spacing is sample density, not stamp spacing.** It only controls how many
+  and `0` leaves the hard/soft pixels unchanged. Directional and image-based
+  textures are not implemented.
+- **Sampling is sample density, not stamp spacing.** It only controls how many
   interpolated points a fast movement produces, so a lower value costs memory
-  but does not change the brush's width or grain. **Stabilizer is an exponential
+  but does not change the brush's width or grain; the stamp's own **stamp
+  spacing** is the distance between dabs. **Stabilizer is an exponential
   follow filter**: at high strength the line visibly lags the pointer and
   settles with one final segment on release; it has no look-ahead or rope-style
   catch-up, and shape tools ignore it.
+- **The stamp engine is round dabs only.** There is no directional, image-based
+  or per-dab texture, no scatter, rotation or jitter, and no per-dab opacity
+  (a stroke still gets one alpha). A stamped stroke's cost grows with the
+  square of the brush radius, so a very large brush with a fine dab spacing is
+  expensive to re-rasterize; the planner stops after a fixed amount of work, so
+  an extreme stroke is cut short rather than stalling the app.
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
@@ -288,10 +306,10 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `7`** (`version: 1` to `6` files still
-  open and are written back as 7; their strokes default to a hardness of 1,
-  texture 0, and a missing stabilizer reads as 0 because it was added additively
-  within version 6).
+- **The current project version is `9`** (`version: 1` to `8` files still
+  open and are written back as 9; their strokes default to a hard edge, texture
+  0, a missing stabilizer reads as 0 because it was added additively within
+  version 6, and the stamp is off because it did not exist before version 9).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

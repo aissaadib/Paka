@@ -21,7 +21,14 @@
  * rejected file never touches the open document.
  */
 
-import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, normalizeBrush } from "../brushes/defaults";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MAX_STAMP_SPACING,
+  MIN_BRUSH_SIZE,
+  MIN_STAMP_SPACING,
+  normalizeBrush,
+} from "../brushes/defaults";
 import {
   DEFAULT_DOCUMENT_BACKGROUND,
   DOCUMENT_SIZE_LIMIT_DESCRIPTION,
@@ -81,10 +88,16 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * Version 8: a layer's `blendMode` may be `multiply` or `screen`, not only
  * `normal`. A version-7 reader rejects the unknown mode, so the version was
  * bumped; version-1 to -7 files still open unchanged.
+ * Version 9: a stroke's `brush` carries `stamp`, `stampSpacing` and
+ * `stampHardness`. A version-8 reader ignores them and draws the segment
+ * path, so a stamped stroke would come out as a different picture - the
+ * version was bumped and the fields are required. Version-1 to -8 files still
+ * open unchanged, with the stamp off, which is exactly the segment path they
+ * were written by.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 8;
+export const PROJECT_VERSION = 9;
 export const PROJECT_FILE_EXTENSION = "paka";
 
 const LAYER_BLEND_MODES: readonly LayerBlendMode[] = ["normal", "multiply", "screen"];
@@ -715,6 +728,25 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // required field in version 7; earlier files had no texture.
     texture:
       version >= 7 ? readNumber(record.texture, `${label} brush texture`, 0, 1) : 0,
+    // The stamp engine changes how stored samples are rasterized, so it became
+    // a required field in version 9: a version-8 reader ignores these fields
+    // and draws the segment path, which is a different picture for a stamped
+    // stroke. Earlier files had no stamp at all, and the stamp off is exactly
+    // the segment path they were written by.
+    stamp: version >= 9 ? readBoolean(record.stamp, `${label} brush stamp`) : false,
+    stampSpacing:
+      version >= 9
+        ? readNumber(
+            record.stampSpacing,
+            `${label} brush stamp spacing`,
+            MIN_STAMP_SPACING,
+            MAX_STAMP_SPACING,
+          )
+        : DEFAULT_BRUSH.stampSpacing,
+    stampHardness:
+      version >= 9
+        ? readNumber(record.stampHardness, `${label} brush stamp hardness`, 0, 1)
+        : DEFAULT_BRUSH.stampHardness,
   });
 }
 

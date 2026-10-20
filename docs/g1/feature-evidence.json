@@ -1,0 +1,465 @@
+{
+  "schemaVersion": "1.0",
+  "artifact": "feature-evidence",
+  "generated": "2026-10-20",
+  "analyst": "paka-feature-analyst",
+  "mode": "read-only analysis; no source file in the analysed repository was modified",
+  "companionDocument": "feature-analysis.md",
+
+  "source": {
+    "repositoryUrl": "https://github.com/aissaadib/Paka.git",
+    "remoteName": "origin",
+    "branch": "main",
+    "commit": "ad2ef11bb4fac508f0dda375a3eba5d7a9b7d7c9",
+    "commitSubject": "docs: clarify how to measure frames in the packaged app",
+    "commitDate": "2026-10-20T16:56:36+00:00",
+    "checkoutPath": "C:\\Users\\aissa\\Desktop\\Paka",
+    "licence": "MIT",
+    "licenceFile": "LICENSE",
+    "licenceCopyright": "Copyright (c) 2026 HumanHEART",
+    "workingTreeAtAnalysis": {
+      "clean": false,
+      "modified": ["skills-lock.json"],
+      "untracked": [".agents/skills/**"],
+      "blastRadiusForThisFeature": "none"
+    }
+  },
+
+  "feature": {
+    "id": "PHASE3-STAMP-ENGINE",
+    "name": "Stamp-based brush engine behind the existing stroke interface",
+    "family": "Paka roadmap Phase 3 (brush feel)",
+    "status": "not-implemented",
+    "statusEvidence": {
+      "method": "rg -n \"stamp|dab\" src",
+      "hits": 33,
+      "interpretation": "all hits are the single-dab helper stampDot, prose, or unrelated words (timestamp, stamp the flag). No dab-placement, per-dab texture or hardness-curve code exists."
+    },
+    "specifiedIn": [
+      { "file": "docs/ROADMAP.md", "lines": "156-157", "kind": "phase checkbox (unchecked)" },
+      { "file": "docs/ROADMAP.md", "lines": "195-228", "kind": "Next slice (authority)" },
+      { "file": "docs/SESSION-BRIEF.md", "lines": "441-499", "kind": "Next slice — constraints, checklist, acceptance criteria" }
+    ],
+    "targetBehaviour": [
+      "per-dab spacing along the path (a new control; today's 'spacing' is sample density)",
+      "true per-dab hardness curves (today: one Gaussian feather of the finished silhouette)",
+      "directional / per-dab texture (today: one document-anchored grain post-pass)",
+      "default hard / soft / grain output must be pixel-identical to today"
+    ]
+  },
+
+  "baselineBehaviour": [
+    { "behaviour": "stroke = round-capped segments between consecutive samples at full coverage", "symbol": "rasterizeStroke", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "151-207" },
+    { "behaviour": "a press without movement deposits one round dab", "symbol": "stampDot", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "117-129" },
+    { "behaviour": "per-segment width from the mean pressure of the sample pair", "symbol": "strokeDiameter", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "82-85" },
+    { "behaviour": "one alpha for the whole stroke, modulated by mean pressure", "symbol": "strokeOpacity", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "97-108" },
+    { "behaviour": "soft edge = one Gaussian feather of the finished silhouette, radius = size * 0.1 * (1 - hardness)", "symbol": "strokeFeatherRadius / featherStroke", "file": "src/core/rendering/canvas2dStroke.ts + src/core/rendering/Canvas2DRenderer.ts", "lines": "43-49 / 1123-1164" },
+    { "behaviour": "grain = one document-anchored destination-in post-pass over a cached 128x128 tile", "symbol": "textureCoverage / applyStrokeTexture / textureTile", "file": "src/core/rendering/canvas2dStroke.ts + src/core/rendering/Canvas2DRenderer.ts", "lines": "65-79 / 1058-1081 / 1084-1108" },
+    { "behaviour": "filled shape = polygon fill, then outline trace, both at full coverage", "symbol": "rasterizeStroke", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "184-195" },
+    { "behaviour": "sample density and exponential stabilizer shape the stored samples", "symbol": "StrokeBuilder.addSample / finish", "file": "src/core/brushes/strokeBuilder.ts", "lines": "114-175 / 186-196" },
+    { "behaviour": "the brush is copied onto every stroke record", "symbol": "createStrokeRecord", "file": "src/core/brushes/strokeBuilder.ts", "lines": "46-64" },
+    { "behaviour": "brush changes are editor state: no history step, no dirty flag", "symbol": "DrawingEngine.setBrush", "file": "src/core/engine/DrawingEngine.ts", "lines": "836-844" }
+  ],
+
+  "dataFlow": [
+    { "step": 1, "from": "DOM pointer events", "to": "core/input/canvasInputBinder -> core/input/pointer", "produces": "PointerSample { docX, docY, pressure, time }" },
+    { "step": 2, "from": "DrawingEngine.beginStroke", "to": "core/brushes/strokeBuilder", "produces": "StrokeRecord with a copied brush", "file": "src/core/engine/DrawingEngine.ts", "lines": "1056-1083" },
+    { "step": 3, "from": "DrawingEngine.extendStroke", "to": "Canvas2DRenderer.extendStroke(stroke, fromIndex)", "produces": "only the newly appended part is rasterized", "file": "src/core/engine/DrawingEngine.ts", "lines": "1085-1094" },
+    { "step": 4, "from": "Canvas2DRenderer.extendStroke", "to": "rasterizeStroke(ctx, stroke, fromIndex)", "produces": "stroke buffer coverage at alpha 1", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "295-325" },
+    { "step": 5, "from": "Canvas2DRenderer.render", "to": "paintDocument -> paintStrokeCoverage(preview)", "produces": "live preview drawn from the WHOLE buffer (no region)", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "405-443 / 628-676 / 997-1047" },
+    { "step": 6, "from": "DrawingEngine.finishStroke", "to": "renderer.endStroke -> compositeStrokeBuffer(surface, stroke)", "produces": "commit blended from a REGION-bounded blit", "file": "src/core/engine/DrawingEngine.ts", "lines": "1408-1445" },
+    { "step": 7, "from": "DrawingEngine.finishStroke", "to": "StrokeStore.insert + CommandStack.push(createStrokeCommand)", "produces": "one undo step; the command carries no pixels", "file": "src/core/engine/DrawingEngine.ts", "lines": "1438-1443" },
+    { "step": 8, "from": "undo / redo / reopen / export", "to": "rasterizeLayer -> rasterizeStrokeToBuffer -> compositeStrokeBuffer", "produces": "pixels rebuilt from the stored samples", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "765-785 / 879-888 / 961-981" }
+  ],
+
+  "invariants": [
+    { "id": "I1", "rule": "Coverage is full inside the buffer; the stroke's opacity is applied exactly once, when the buffer composites. Overlapping segments must never darken the stroke.", "owner": "src/core/rendering/canvas2dStroke.ts", "lines": "136-140, 163; 97-108", "existingTest": "src/test/canvas2dStroke.test.ts:118-127; src/test/canvas2dRenderer.test.ts:2600-2621" },
+    { "id": "I2", "rule": "Live preview, layer commit, undo/redo rebuild, reopen and PNG export produce the same pixels at every zoom and rasterScale.", "owner": "src/core/rendering/Canvas2DRenderer.ts", "lines": "997-1047 (single funnel paintStrokeCoverage)", "existingTest": "src/test/canvas2dRenderer.test.ts:2540-2598" },
+    { "id": "I3", "rule": "A stroke is self-describing: it carries the brush it was drawn with; re-rasterizing never consults editor or tool state.", "owner": "src/core/brushes/strokeBuilder.ts", "lines": "55; src/core/document/types.ts:79", "existingTest": "src/test/drawingEngine.test.ts:254-294" },
+    { "id": "I4", "rule": "A stroke is exactly one undo step; StrokeCommand carries no pixels.", "owner": "src/core/engine/DrawingEngine.ts", "lines": "1408-1445", "existingTest": "src/test/commandStack.test.ts, src/test/strokeCommand.test.ts" },
+    { "id": "I5", "rule": "The vector samples stay authoritative; stamps are a rasterization strategy, not a new element kind.", "owner": "docs/ROADMAP.md:205-207; src/core/document/types.ts:76-104", "existingTest": "src/test/projectFormat.test.ts, src/test/projectLifecycle.test.ts" },
+    { "id": "I6", "rule": "Determinism: no Math.random(), no time, no zoom dependence in a repaint path.", "owner": "src/core/rendering/canvas2dStroke.ts", "lines": "65-79", "existingTest": "src/test/canvas2dStroke.test.ts:256-264" },
+    { "id": "I7", "rule": "The cost follows the inked area, not the document size; the rebuild clears and blends only the rectangle an element inks.", "owner": "src/core/rendering/Canvas2DRenderer.ts", "lines": "879-888, 935-949, 970", "existingTest": "src/test/canvas2dRenderer.test.ts:2442-2503, 2423-2440" },
+    { "id": "I8", "rule": "The brush is editor state: a brush change is not an edit.", "owner": "src/core/engine/DrawingEngine.ts", "lines": "836-844", "existingTest": "src/test/drawingEngine.test.ts:157-212" },
+    { "id": "I9", "rule": "DrawingRenderer and StrokeRecord remain the boundary.", "owner": "src/core/rendering/types.ts", "lines": "46-108", "existingTest": null },
+    { "id": "I10", "rule": "Raster budget: at most 16,777,216 document px; peak 58 bytes per document pixel; the erase snapshot and the grouped-preview scratch are mutually exclusive.", "owner": "src/core/rendering/Canvas2DRenderer.ts", "lines": "282-291, 1275-1277; docs/ARCHITECTURE.md:774-812", "existingTest": "src/test/canvas2dRenderer.test.ts:2654-2720" }
+  ],
+
+  "stateOwnership": [
+    { "state": "brush (and any future stamp settings)", "owner": "DrawingEngine.brush", "file": "src/core/engine/DrawingEngine.ts", "lines": "325", "lifetime": "session; never history, never dirty" },
+    { "state": "stroke samples xs/ys/pressures/times", "owner": "StrokeRecord in StrokeStore", "file": "src/core/document/types.ts", "lines": "76-104", "lifetime": "document lifetime; the authoritative record" },
+    { "state": "in-progress stroke coverage", "owner": "Canvas2DRenderer.strokeBuffer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "117-118", "lifetime": "one gesture" },
+    { "state": "layer pixels", "owner": "LayerSurfaceStore surfaces", "file": "src/core/rendering/layerSurfaceStore.ts", "lines": "19-118", "lifetime": "until invalidated; a rebuildable cache" },
+    { "state": "feather scratch", "owner": "Canvas2DRenderer.featherBuffer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "1167-1175", "lifetime": "reused for every soft stroke" },
+    { "state": "grain tile cache", "owner": "Canvas2DRenderer.textureTiles", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "121, 1084-1108", "lifetime": "per renderer; keyed by strength quantized to 1/20" },
+    { "state": "grouped-preview scratch", "owner": "Canvas2DRenderer.previewSurface", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "717-732, 1275-1277", "lifetime": "only while a grouped preview is on screen" },
+    { "state": "undo stack", "owner": "CommandStack", "file": "src/core/commands/commandStack.ts", "lines": "27", "lifetime": "200 commands; not serialized" }
+  ],
+
+  "units": {
+    "documentSpace": "stroke samples, brush size, spacing, feather radius, texture strength, dab spacing — document pixels (float)",
+    "surfaceSpace": "stroke buffer and layer surfaces are the document at rasterScale (1 or 2, HiDPI)",
+    "transformOwnership": "rasterizeStroke works in document coordinates; the caller owns the transform (canvas2dStroke.ts:13-14)",
+    "colour": "8-bit sRGB, straight-alpha RGBA surfaces",
+    "threading": "single-threaded, main thread only; FrameScheduler batches repaints to animation frames; React never sees a pointer sample"
+  },
+
+  "couplings": [
+    {
+      "id": "C1",
+      "severity": "critical",
+      "title": "The bounded blit silently drops out-of-region coverage",
+      "detail": "compositeStrokeBuffer composites only strokeRegion(stroke) (Canvas2DRenderer.ts:970,978), and strokeRegion is derived from strokeSampleBounds (935-949, 908-927) as samples +/- (strokeDiameter(brush,1)/2 + featherRadius*3 + 1). The live preview path draws the WHOLE buffer (paintDocument:670 -> paintStrokeCoverage without a region -> Canvas2DRenderer.ts:1028). Any coverage outside the bounds is visible while drawing and absent after the release.",
+      "impact": "live vs commit divergence; silent loss of dab coverage for bristle, elongated, offset or wide-footprint stamps",
+      "evidence": ["src/core/rendering/Canvas2DRenderer.ts:670", "src/core/rendering/Canvas2DRenderer.ts:970-981", "src/core/rendering/Canvas2DRenderer.ts:1028", "src/core/rendering/Canvas2DRenderer.ts:908-949"]
+    },
+    {
+      "id": "C2",
+      "severity": "critical",
+      "title": "rasterizeStroke's incremental contract is stateless; dab placement is not",
+      "detail": "rasterizeStroke(ctx, stroke, fromIndex) reproduces the tail of a segment path from fromIndex alone. A dab's position depends on the previous dab's position, so the dab at the join between the drawn part and the appended part is not derivable from fromIndex.",
+      "impact": "the incremental live path and the full rebuild path would place different dabs unless a cursor is introduced or dab placement is redefined as a pure function of the whole path",
+      "evidence": ["src/core/rendering/canvas2dStroke.ts:151-207", "src/core/rendering/Canvas2DRenderer.ts:295-325", "src/core/brushes/strokeBuilder.ts:114-175", "src/core/engine/DrawingEngine.ts:1085-1094"]
+    },
+    {
+      "id": "C3",
+      "severity": "critical",
+      "title": "Canvas 2D has no max-alpha composite, so 'max/union' coverage is not directly available",
+      "detail": "ROADMAP.md:212-214 requires per-dab coverage to be accumulated by max/union rather than repeated source-over, because source-over at alpha 1 saturates a neighbouring dab's soft edge and destroys the per-dab hardness curve. CSS/Canvas separable blend modes (lighten, screen) max the colour channels but still use source-over for alpha, so they do not provide a max-alpha operation.",
+      "impact": "highest technical risk of the slice; needs a per-pixel coverage mask or a coverage-encoded scratch plus a conversion pass",
+      "evidence": ["docs/ROADMAP.md:212-214", "src/core/rendering/canvas2dStroke.ts:136-140", "src/core/rendering/canvas2dStroke.ts:87-96", "docs/ARCHITECTURE.md:283-286"]
+    },
+    {
+      "id": "C4",
+      "severity": "high",
+      "title": "Per-dab opacity is not representable in the current model",
+      "detail": "strokeOpacity derives ONE alpha for the whole stroke from the MEAN pressure, explicitly because Canvas 2D cannot vary alpha within a stroke without per-pixel max blending.",
+      "impact": "per-dab opacity must not be promised in the UI; a stamp that varies opacity per dab would break I1",
+      "evidence": ["src/core/rendering/canvas2dStroke.ts:87-108", "docs/ARCHITECTURE.md:283-286"]
+    },
+    {
+      "id": "C5",
+      "severity": "high",
+      "title": "The fill-shape interior is a flat polygon fill, not brush coverage",
+      "detail": "rasterizeStroke fills the closed polygon the shape's samples trace with ctx.fill() at the brush colour, then traces the outline. The interior is not covered by dabs. Today this is invisible because hardness and grain are post-passes over the finished coverage.",
+      "impact": "under a stamp engine the interior question becomes real; it changes the appearance of every filled rectangle and ellipse",
+      "evidence": ["src/core/rendering/canvas2dStroke.ts:184-195", "docs/ARCHITECTURE.md:342-343"]
+    },
+    {
+      "id": "C6",
+      "severity": "high",
+      "title": "The eraser subtracts the whole buffer live but a bounded region on rebuild",
+      "detail": "applyErase calls paintStrokeCoverage with NO region (whole buffer subtracted), while the rebuild path goes through compositeStrokeBuffer with operation 'destination-out' (region-bounded). Equal today by construction; divergent the moment a stamp footprint escapes the region.",
+      "impact": "invisible divergence between the live erase and the rebuilt erase",
+      "evidence": ["src/core/rendering/Canvas2DRenderer.ts:1205-1224", "src/core/rendering/Canvas2DRenderer.ts:778-782", "src/core/rendering/Canvas2DRenderer.ts:1186-1202"]
+    },
+    {
+      "id": "C7",
+      "severity": "medium",
+      "title": "The brush is shallow-copied; a non-primitive stamp field would alias",
+      "detail": "createStrokeRecord does brush: { ...brush } and cloneStroke does the same. A shallow spread copies a reference for any non-primitive field, so a stamp descriptor object would be shared between a stroke and its clone.",
+      "impact": "latent today (all fields are primitive); a real bug the moment a stamp field is not",
+      "evidence": ["src/core/brushes/strokeBuilder.ts:55", "src/core/brushes/strokeBuilder.ts:77"]
+    },
+    {
+      "id": "C8",
+      "severity": "medium",
+      "title": "A new brush field is silently dropped unless three files change",
+      "detail": "The field must be added to BrushSettings, to normalizeBrush (which clamps every field and is always applied by updateBrushSettings), to brushSettingsEqual (which compares every field, otherwise a slider looks dead), and to readBrush (which reads fields explicitly). The serializer needs nothing: brush: element.brush dumps the whole object.",
+      "impact": "silent failures in the UI and in the format round-trip",
+      "evidence": ["src/types/brush.ts:11-67", "src/core/brushes/defaults.ts:29-42", "src/core/brushes/defaults.ts:44-49", "src/core/brushes/defaults.ts:52-65", "src/core/project/projectFormat.ts:454", "src/core/project/projectFormat.ts:686-719"]
+    },
+    {
+      "id": "C9",
+      "severity": "medium",
+      "title": "The format version decision is a genuine fork between two written rules",
+      "detail": "The project rule says a bump is required when an older reader would render a DIFFERENT PICTURE (SESSION-BRIEF.md section 6). A purely additive, off-by-default stamp field would be ignored by a v8 reader, which would then draw the segment path — the same picture. But SESSION-BRIEF.md section 9 requires v9 and states that an older reader must refuse a v9 file. ROADMAP.md:218-221 is the softer form.",
+      "impact": "decides the writer, the reader, the validation rules and the version-rejection test",
+      "evidence": ["docs/SESSION-BRIEF.md section 6 (Format versioning)", "docs/SESSION-BRIEF.md:462-467, 492-499", "docs/ROADMAP.md:218-221", "src/core/project/projectFormat.ts:510-514"]
+    },
+    {
+      "id": "C10",
+      "severity": "medium",
+      "title": "spacing must stay non-appearance-changing — provable, but fragile",
+      "detail": "A dab engine that places dabs by arc length along the polyline of the stored samples is geometrically invariant to spacing, because StrokeBuilder interpolates points on the straight line between raw samples and interpolates pressure linearly. This holds only while interpolation stays linear and the raw point is always appended (addSample drops a raw point closer than MIN_SAMPLE_DISTANCE = 0.05 px).",
+      "impact": "if a stamp engine re-interpolates the path or places dabs per sample rather than per arc length, spacing becomes appearance-changing and the format policy changes with it",
+      "evidence": ["src/core/brushes/strokeBuilder.ts:149-160", "src/core/brushes/strokeBuilder.ts:170-173", "src/core/brushes/strokeBuilder.ts:29", "docs/ROADMAP.md:220-221"]
+    },
+    {
+      "id": "C11",
+      "severity": "medium",
+      "title": "Brush, eraser and shapes share one rasterizer",
+      "detail": "The eraser is a brush whose strokes subtract coverage; the tools differ only in erases. All three reach rasterizeStroke, so a stamp engine changes the eraser and the shape tools as well.",
+      "impact": "the slice's blast radius is three tools, not one",
+      "evidence": ["src/core/tools/brushTool.ts:8-11, 17-59", "src/core/engine/DrawingEngine.ts:1070, 1119-1127", "docs/ARCHITECTURE.md:378-380"]
+    },
+    {
+      "id": "C12",
+      "severity": "low",
+      "title": "The single-dab special case is load-bearing",
+      "detail": "extendStroke redraws the whole stroke once it grows past one sample, because the initial dab would otherwise be overdrawn by the first segment's round cap — a second antialiasing pass on the start ring that would make the live buffer differ from undo/reopen/export.",
+      "impact": "a dab-based engine changes the shape of this problem; the branch must be re-derived, not assumed",
+      "evidence": ["src/core/rendering/Canvas2DRenderer.ts:305-316", "src/core/rendering/canvas2dStroke.ts:169-182", "docs/ARCHITECTURE.md:288-296", "src/test/canvas2dRenderer.test.ts:378-414"]
+    },
+    {
+      "id": "C13",
+      "severity": "low",
+      "title": "The texture tile cache quantizes a user-visible strength",
+      "detail": "textureTile keys the cache by Math.round(clamp(strength,0,1)*20)/20 — 21 buckets — so two strengths inside one bucket share a tile.",
+      "impact": "a stamp engine that quantizes a user-visible parameter must document the quantization or the slider appears unresponsive",
+      "evidence": ["src/core/rendering/Canvas2DRenderer.ts:1084-1108"]
+    }
+  ],
+
+  "existingTests": {
+    "files": [
+      { "file": "src/test/canvas2dStroke.test.ts", "lines": 274, "cases": 29, "harness": "RecordingCanvas (draw-call stream)", "covers": "strokeDiameter, strokeFeatherRadius, strokeOpacity, rasterizeStroke (full coverage, per-segment width, single dab, fromIndex redraw, fill flag), stampDot, textureCoverage" },
+      { "file": "src/test/canvas2dRenderer.test.ts", "lines": 2730, "cases": 86, "harness": "RecordingCanvas + a software PixelCanvas", "covers": "compositing order, layer opacity and blend, live preview, eraser snapshot semantics, hardness feather, grain pattern pass, fill patches, gradients, export, colour probe, selection overlay, bounded rebuild, preview-scratch lifetime" },
+      { "file": "src/test/projectFormat.test.ts", "lines": 1050, "harness": "parsed values", "covers": "brush round-trip (450-567), per-version defaults, field validation (887-940), version rejection (807)" },
+      { "file": "src/test/drawingEngine.test.ts", "lines": 2095, "harness": "engine state", "covers": "brush is editor state (157-212), per-stroke brush capture (254-294), undo/redo, layer safety" },
+      { "file": "src/test/strokeBuilder.test.ts", "harness": "builder", "covers": "interpolation, spacing, stabilizer, finish settle" },
+      { "file": "src/test/commandStack.test.ts, src/test/strokeCommand.test.ts", "harness": "history", "covers": "one command per gesture, redo re-inserts at the original index" },
+      { "file": "src/test/projectLifecycle.test.ts, src/test/projectFiles.test.ts", "harness": "I/O", "covers": "save then reopen reproduces the document" }
+    ],
+    "harnesses": [
+      { "name": "RecordingCanvas", "file": "src/test/support/recordingCanvas.ts", "lines": "51-211", "proves": "which canvas was painted, in what order, with which globalAlpha, globalCompositeOperation, fillStyle, lineWidth, lineDash and filter", "doesNotProve": "any pixel value" },
+      { "name": "PixelCanvas", "file": "src/test/canvas2dRenderer.test.ts", "lines": "1498-2059", "proves": "real straight-alpha pixels for fillRect, clearRect, 1:1 drawImage with transforms, save/restore, and the source-over / destination-out / destination-in / multiply / screen operations; also rasterizes paths (arc = 24-gon, fill = point-in-polygon, stroke = capsule per segment)", "doesNotProve": "antialiased edges (hard edges only), circle accuracy (24-gon), any 'max' composite operation" }
+    ],
+    "coverageGaps": [
+      { "gap": "no pixel test proves the segment rasterizer's actual coverage; the pixel tests seed coverage into the buffer rather than rasterizing a real stroke", "whyItMatters": "a stamp engine's dab profile would be equally unproven unless the harness is extended or a browser check is done", "evidence": ["src/test/canvas2dRenderer.test.ts:1457-1459 (stale comment)", "src/test/canvas2dRenderer.test.ts:1835-1930 (actual implementation)"] },
+      { "gap": "no pixel test at rasterScale 2 for a soft stroke (the harness has no blur kernel)", "whyItMatters": "a resolution-dependent stamp would pass every existing test and still be wrong at 2x", "evidence": ["src/test/canvas2dRenderer.test.ts:2536-2538", "src/test/canvas2dRenderer.test.ts:2152"] },
+      { "gap": "the grain pattern's document anchoring is asserted at the draw-call level, not at the pixel level", "whyItMatters": "a stamp engine needs the same invariant asserted at the pixel level", "evidence": ["src/test/canvas2dRenderer.test.ts:975-1016"] },
+      { "gap": "no React-layer test exists at all", "whyItMatters": "a new stamp control can only be verified manually in the running app", "evidence": ["docs/SESSION-BRIEF.md section 7"] },
+      { "gap": "no packaged-Tauri or HiDPI verification has ever been done", "whyItMatters": "same for the stamp engine", "evidence": ["docs/SESSION-BRIEF.md section 7"] }
+    ]
+  },
+
+  "documentationAgreements": [
+    { "claim": "segments are drawn at full coverage; the stroke's opacity is applied once", "doc": "docs/ARCHITECTURE.md:271-282", "code": "src/core/rendering/canvas2dStroke.ts:136-140, 163, 97-108", "verdict": "agree" },
+    { "claim": "hardness is a Gaussian feather with radius size * 0.1 * (1 - hardness)", "doc": "docs/ARCHITECTURE.md:298-331", "code": "src/core/rendering/canvas2dStroke.ts:32, 43-49; src/core/rendering/Canvas2DRenderer.ts:1123-1164", "verdict": "agree" },
+    { "claim": "grain is one destination-in pass with a document-anchored cached 128x128 tile", "doc": "docs/ARCHITECTURE.md:352-380", "code": "src/core/rendering/canvas2dStroke.ts:52, 65-79; src/core/rendering/Canvas2DRenderer.ts:1058-1108", "verdict": "agree" },
+    { "claim": "a stroke is one undo step; undo re-rasterizes from the store", "doc": "docs/ARCHITECTURE.md:819-822", "code": "src/core/engine/DrawingEngine.ts:1408-1445; src/core/rendering/Canvas2DRenderer.ts:765-785", "verdict": "agree" },
+    { "claim": "spacing is sample density, not stamp spacing", "doc": "README.md:275-277; docs/ARCHITECTURE.md:753-764", "code": "src/core/brushes/strokeBuilder.ts:146 (rasterizeStroke never reads spacing)", "verdict": "agree" },
+    { "claim": "format v8; texture required from v7; stabilizer additive in v6", "doc": "docs/PROJECT_FORMAT.md:417-446", "code": "src/core/project/projectFormat.ts:87, 696-717", "verdict": "agree" },
+    { "claim": "the rebuild is bounded by each element's inked rectangle", "doc": "docs/PERFORMANCE_AUDIT_2026-10-20.md:9-11, 46-47", "code": "src/core/rendering/Canvas2DRenderer.ts:879-888, 935-949", "verdict": "agree" },
+    { "claim": "brush changes are editor state (no history, no dirty)", "doc": "docs/SESSION-BRIEF.md section 6", "code": "src/core/engine/DrawingEngine.ts:836-844", "verdict": "agree" }
+  ],
+
+  "documentationConflicts": [
+    {
+      "id": "D1",
+      "severity": "high",
+      "title": "Format-version rule vs the slice's acceptance criteria",
+      "docA": { "file": "docs/SESSION-BRIEF.md", "lines": "section 6 (Format versioning)", "quote": "a bump is required when an older reader would render a different picture, not for convenience" },
+      "docB": { "file": "docs/SESSION-BRIEF.md", "lines": "464-465 (constraint 5) and 499 (acceptance criterion)", "quote": "Appearance-changing fields that a v8 reader cannot ignore require format version 9; prove it with tests. [...] Old projects open unchanged; a v9 file requires the new fields and an older reader refuses it rather than drawing the wrong look." },
+      "docC": { "file": "docs/ROADMAP.md", "lines": "218-221", "quote": "A non-default stamp/dab appearance that an older reader cannot reproduce requires a format bump (v9 if fields change appearance)" },
+      "conflict": "A purely additive, off-by-default stamp field would be ignored by a v8 reader, which would then draw the segment path — the same picture the new reader draws by default. By the project rule that needs no bump; the slice's acceptance criteria demand v9 anyway. The readings coincide only if the default output changes or if the v9 field is required and its absence mis-renders.",
+      "resolutionOwner": "coordinator / architecture translator",
+      "existingMachinery": ["src/core/project/projectFormat.ts:510-514 (refuses version > PROJECT_VERSION)", "src/core/project/projectFormat.ts:696-717 (required-field-per-version precedent for hardness and texture)"]
+    },
+    {
+      "id": "D2",
+      "severity": "medium",
+      "title": "Stale comment inside the pixel test harness",
+      "file": "src/test/canvas2dRenderer.test.ts",
+      "lines": "1457-1459",
+      "quote": "Stroke rasterization (paths, arcs) is deliberately a no-op: coverage is seeded straight into the stroke buffer, because these tests are about where that coverage is composited, not about how it was rasterized.",
+      "contradiction": "The implementation rasterizes paths: arc is a 24-gon (1851-1859), fill is point-in-polygon per pixel (1863-1892), stroke is a capsule per segment (1893-1930).",
+      "impact": "a reader who trusts the comment will conclude that no pixel test can check a dab's shape and will defer the proof to a manual browser check; the harness can in fact check spacing, dab count, coverage extent and the union rule (though not an antialiased hardness curve)."
+    },
+    {
+      "id": "D3",
+      "severity": "medium",
+      "title": "The UI already spends the word 'Spacing'",
+      "doc": "README.md:275-277; docs/ARCHITECTURE.md:753-764",
+      "code": "src/features/brushes/BrushControls.tsx:51-59 (label 'Spacing', tooltip 'Gap between interpolated samples as a percentage of brush size')",
+      "conflict": "A stamp-spacing control cannot also be called 'Spacing' without a user-visible contradiction.",
+      "resolutionOwner": "coordinator / product"
+    },
+    {
+      "id": "D4",
+      "severity": "low",
+      "title": "AGENTS.md line anchors have drifted from the commit",
+      "doc": "AGENTS.md section 5",
+      "code": "src/core/rendering/Canvas2DRenderer.ts",
+      "detail": "AGENTS.md lists paintStrokeCoverage at L767, featherStroke at L870, compositeStrokeBuffer at L742 and the file as 961 lines; at the analysed commit they are L997, L1123, L961 and 1295 lines.",
+      "note": "AGENTS.md itself says line anchors are hints and that grep is authoritative; the anchors should be refreshed."
+    }
+  ],
+
+  "dependencies": {
+    "graphicsApi": {
+      "name": "HTML Canvas 2D (no WebGL, no canvas wrapper library)",
+      "primitivesUsedToday": ["globalCompositeOperation: source-over / destination-out / destination-in / multiply / screen", "ctx.filter = blur(px)", "createPattern + pattern.setTransform", "getImageData / putImageData", "arc / fill / stroke / drawImage"],
+      "hardLimits": ["no max-alpha composite operation (see C3)", "ctx.filter blur is the only soft-edge primitive", "the eraser is modelled as destination-out against a snapshot, not as a real subtract accumulator"]
+    },
+    "uiToolkit": { "name": "React 19 + SliderField + label.toggle", "files": ["src/features/brushes/BrushControls.tsx:15-105", "src/components/toolbar/SliderField.tsx"], "note": "a stamp control is a SliderField plus actions.setBrush({...}); no placeholders allowed (docs/ROADMAP.md:222-223)" },
+    "stateLayer": { "name": "EditorActions.setBrush", "files": ["src/state/editorStore.ts:26, 86", "src/core/engine/DrawingEngine.ts:836-844"], "flow": "setBrush -> updateBrushSettings -> normalizeBrush + brushSettingsEqual -> commands.breakMerge() -> publish()" },
+    "inputStack": { "name": "PointerEvent -> canvasInputBinder -> pointer -> PointerSample", "note": "unchanged by a stamp engine; it consumes the samples, not the events" },
+    "fileFormat": { "name": ".paka JSON", "version": 8, "files": ["src/core/project/projectFormat.ts:87, 451-465, 686-719, 510-514"], "note": "the serializer dumps the whole brush object; readBrush reads fields explicitly, so a new field needs an explicit read and a version policy" },
+    "nativeFramework": { "name": "Tauri 2 + Rust", "files": ["src-tauri/src/project_io.rs", "src-tauri/src/lib.rs", "src-tauri/src/native_environment.rs"], "note": "NOT involved — the stamp engine is pure front-end" },
+    "runtime": { "name": "browser (Tauri WebView)", "note": "ctx.filter and canvas gradients are both WebView-supported" },
+    "testRuntime": { "name": "Vitest on Node with two fake canvases", "note": "the pixel harness must be extended for dab geometry, or the visual proof must come from a browser check" }
+  },
+
+  "essentialVsApplicationSpecific": {
+    "essential": [
+      "one stroke = one coverage buffer = one alpha applied at composite time (I1); a per-dab alpha is wrong",
+      "dabs placed at a controllable spacing along the path, each with a per-dab coverage profile",
+      "coverage accumulated by union/max, not by repeated source-over (C3)",
+      "pixel-identical output across live, commit, undo/redo, reopen and export, at any zoom and rasterScale (I2, I6)",
+      "all coverage inside the composited region (C1)",
+      "stamp settings captured on the stroke record and reproduced by the format (I3, I5)",
+      "determinism from document state alone (I6)",
+      "one undo step per gesture; the record is the samples, not pixels (I4, I5)",
+      "cost follows the inked area (I7)"
+    ],
+    "applicationSpecific": [
+      "Tauri 2 + React 19 + Vite + strict TypeScript; the React shell; the toolbar layout",
+      "the .paka JSON format, its version-numbering scheme and the 'bump on a different picture' rule",
+      "the rasterScale 1-2 HiDPI scheme and the 'surfaces are the document at rasterScale' model",
+      "the 58-bytes-per-document-pixel raster budget and the 16,777,216 px document cap",
+      "hardness as a Gaussian feather with SOFT_EDGE_RADIUS_RATIO = 0.1; grain as a 128x128 white tile under destination-in; the mean-pressure opacity model; the default brush (size 6, #16181c, hardness 1, spacing 0.12)",
+      "the eraser-as-negative-stroke model and its snapshot discipline",
+      "the 'Spacing' slider already meaning sample density in the UI",
+      "the layer model, blend modes, selection model, and the 200-command history cap"
+    ]
+  },
+
+  "performance": {
+    "hotPathsAmplified": [
+      { "path": "rasterizeLayer (rebuild on undo/redo/reopen)", "today": "one segment path per sample pair", "withDabs": "dabs ~= pathLength / stampSpacing draw calls per stroke" },
+      { "path": "live extendStroke", "today": "one stroke() per new sample pair", "withDabs": "one dab per dab interval" },
+      { "path": "paintStrokeCoverage", "today": "1 raw blit / 1 blur / 1 grain pass", "withDabs": "unchanged if the stamp is baked into the buffer, but the union rule may add a per-pixel pass" }
+    ],
+    "worstCaseArithmetic": { "document": "4096 px", "brushSize": 512, "stampSpacing": "2 % of the diameter = 10.24 px", "dabs": 400, "atThe0_75pxFloor": 5461, "note": "a layer with 100 such strokes rebuilds to roughly 546,000 dab draws on every undo" },
+    "existingAudit": { "file": "docs/PERFORMANCE_AUDIT_2026-10-20.md", "headline": "Rebuild/undo scales with element count: cost is O(elements x surface pixels); the area half was fixed by R1 (4ac040b), the per-draw cost still needs a profile in the packaged app", "relevance": "a stamp engine multiplies the per-element draw count by the dab count; the recommended fix (dirty bounds for the stroke buffer) does not address it" },
+    "rasterBudgetConstraint": { "limit": "58 bytes per document pixel (3 x 4 x 2^2 + 10), 928 MiB at the cap, inside a 1 GiB budget", "source": "docs/ARCHITECTURE.md:774-812; docs/SESSION-BRIEF.md section 6", "implication": "a union/max coverage accumulator implemented as a SEPARATE document-sized buffer would be a fourth full-resolution surface = 74 bytes per document pixel = 1.16 GiB, over budget. Precedent: the element-scratch variant F7 was reverted partly for this reason (2fa34cc, audit lines 14-18). Any union mechanism must reuse the existing buffer or be bounded to the stroke's footprint." }
+  },
+
+  "knownBugs": {
+    "correctnessBugsInTheCurrentRasterizer": "none found during this analysis",
+    "documentationDefects": ["D2 (stale harness comment)", "D4 (drifted AGENTS.md anchors)"],
+    "openPolicyConflict": "D1 (format version)"
+  },
+
+  "openQuestions": [
+    { "id": "Q1", "question": "Does the stamp engine require format v9, or is an additive off-by-default field enough?", "blocks": "the writer, the reader, the validation rules and the version-rejection test", "nextInspection": "coordinator decision against SESSION-BRIEF.md section 6; if v9, the precedent is readBrush (686-719) plus the newer-version rejection (510-514)" },
+    { "id": "Q2", "question": "What is the stamp-spacing control called, and is it one slider or several?", "blocks": "the toolbar and the README/ARCHITECTURE wording", "nextInspection": "a naming decision; no code inspection needed; see D3" },
+    { "id": "Q3", "question": "Does a stamped brush's fill-shape interior get stamped dabs, or stay a flat polygon fill?", "blocks": "the appearance of every filled rectangle and ellipse", "nextInspection": "a decision, then re-derive the fill-flag path (canvas2dStroke.ts:184-195)" },
+    { "id": "Q4", "question": "Is spacing provably non-appearance-changing under the chosen dab placement?", "blocks": "the format policy (a changing spacing would make spacing appearance-changing)", "nextInspection": "implement, then test (T-09 / T-27) rather than rely on the derivation in C10" },
+    { "id": "Q5", "question": "How is the per-dab union/max coverage realised in Canvas 2D without a fourth full-resolution surface?", "blocks": "the technical core of the slice", "nextInspection": "prototype against PixelCanvas (it implements only source-over / destination-out / destination-in / multiply / screen, 1523-1587); a max operation must be added to the harness" },
+    { "id": "Q6", "question": "Does the union rule apply to the eraser too, and how does destination-out behave against a union-ed buffer?", "blocks": "eraser parity between the live and rebuild paths", "nextInspection": "a decision, then the existing eraser pixel tests (canvas2dRenderer.test.ts:591-812)" },
+    { "id": "Q7", "question": "Is the stamp engine allowed to change the shape tools' output?", "blocks": "the blast radius (brush, eraser, shapes share rasterizeStroke)", "nextInspection": "a decision; the roadmap's 'default unchanged' bar covers it only if the stamp is off by default" },
+    { "id": "Q8", "question": "What is the dab budget per stroke?", "blocks": "worst-case rebuild cost (up to ~5461 dabs per stroke)", "nextInspection": "a product decision; it must be enforced somewhere" }
+  ],
+
+  "acceptanceMatrix": [
+    { "id": "T-01", "group": "default path unchanged", "where": "src/test/canvas2dStroke.test.ts", "setup": "default brush, 3 samples", "expected": "the recorded call sequence is unchanged from today (save/beginPath/moveTo/lineTo/stroke/.../restore), every stroke call at alpha === 1, lineWidth = the mean-pressure diameter (5 and 0.1 for the existing fixture)" },
+    { "id": "T-02", "group": "default path unchanged", "where": "src/test/canvas2dRenderer.test.ts", "setup": "hard brush, no stamp settings", "expected": "the renderer blits the raw buffer 1:1 (9-argument drawImage with the identity transform), allocates no feather scratch, creates no pattern, applies no filter" },
+    { "id": "T-03", "group": "default path unchanged", "where": "src/test/canvas2dRenderer.test.ts", "setup": "soft brush (hardness 0.4), no stamp settings", "expected": "one blur of the padded bbox, then the same blit" },
+    { "id": "T-04", "group": "default path unchanged", "where": "src/test/canvas2dRenderer.test.ts", "setup": "grain brush (texture 1), no stamp settings", "expected": "one destination-in pattern pass, unchanged" },
+    { "id": "T-05", "group": "stamp path", "where": "src/test/canvas2dStroke.test.ts", "setup": "stamped stroke, straight path of length 100, spacing = 25 % of the diameter", "expected": "the dab draw-call count is exactly ceil(100 / spacing) + 1 (+/-1 for the endpoint rule) and is identical across two runs" },
+    { "id": "T-06", "group": "stamp path", "where": "src/test/canvas2dStroke.test.ts", "setup": "stamped stroke, spacing = 200 % of the diameter", "expected": "the recorded dab positions are evenly spaced by exactly 'spacing' document px along the path" },
+    { "id": "T-07", "group": "stamp path", "where": "src/test/canvas2dStroke.test.ts", "setup": "a stroke whose path bends", "expected": "the dab at the bend carries the path tangent at that point (dabs follow the path, not the sample grid)" },
+    { "id": "T-08", "group": "stamp path", "where": "src/test/canvas2dStroke.test.ts", "setup": "a single-sample press with stamp settings", "expected": "exactly one dab at the sample with the stamp diameter" },
+    { "id": "T-09", "group": "union / no darkening", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "a stamped stroke crossing itself, opacity 0.5, black on white", "expected": "the crossing pixel is rgb(128,128,128), identical to the existing expectation at 2618; stacking would give 64" },
+    { "id": "T-10", "group": "union / no darkening", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "two dabs of the same stroke overlapping, one with a soft edge", "expected": "the alpha at the overlap equals max(edgeA, coreB): the soft edge is not erased by the neighbour's core and the two do not sum" },
+    { "id": "T-11", "group": "union / no darkening", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "a stamped stroke at opacity 1 over a painted stroke of the same colour", "expected": "the two strokes still build up where they overlap (the union rule is per stroke, not per layer)" },
+    { "id": "T-12", "group": "path parity", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "stamped brush, checkEveryPathAgrees-style", "expected": "the pixel at the sample point is exactly equal (toEqual) across rebuild, second rebuild, live preview, release and composeDocumentImage()" },
+    { "id": "T-13", "group": "path parity", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "a stroke growing from 1 sample to 3", "expected": "the live pixels after the third sample equal the pixels of a full re-rasterization of the same three samples" },
+    { "id": "T-14", "group": "path parity", "where": "src/test/projectLifecycle.test.ts", "setup": "save then reopen", "expected": "the reopened stroke's brush (including every stamp field) equals the saved one and the rebuilt pixels are identical" },
+    { "id": "T-15", "group": "path parity", "where": "src/test/commandStack.test.ts, src/test/drawingEngine.test.ts", "setup": "one stamped gesture", "expected": "exactly one history entry; undo leaves the layer pixel-identical to the pre-stroke state; redo restores the same pixels" },
+    { "id": "T-16", "group": "determinism", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "two stamped strokes with the same path but different bounding boxes", "expected": "the RGBA at the same document pixel is identical (document-anchored variation)" },
+    { "id": "T-17", "group": "determinism", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "the same stroke at rasterScale 1 and rasterScale 2", "expected": "the document-resolution pixel is identical within a tolerance of 1/255" },
+    { "id": "T-18", "group": "determinism", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "the same stroke at zoom 1 and zoom 4", "expected": "the document-resolution pixel is identical" },
+    { "id": "T-19", "group": "determinism", "where": "src/test/canvas2dRenderer.test.ts", "setup": "a stamped stroke rasterized twice", "expected": "byte-identical buffers (no Math.random, no time)" },
+    { "id": "T-20", "group": "geometry / clipping", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "a stamped stroke, then coverageInside(strokeBuffer, ...)", "expected": "coverageInside returns true for the padded sample bounds: no coverage escapes the composited region" },
+    { "id": "T-21", "group": "geometry / clipping", "where": "src/test/canvas2dRenderer.test.ts (pixel)", "setup": "a stamped stroke with a deliberately wide dab footprint", "expected": "the live preview pixel and the committed layer pixel at the same document point are equal (no coverage dropped at commit)" },
+    { "id": "T-22", "group": "geometry / clipping", "where": "src/test/canvas2dRenderer.test.ts (draw-call)", "setup": "a stamped stroke", "expected": "the inked rectangle the rebuild touches equals the stroke's footprint and is not document-sized" },
+    { "id": "T-23", "group": "format", "where": "src/test/projectFormat.test.ts", "setup": "a current-version file with the stamp fields", "expected": "round-trips exactly; payload.layers[0].elements[0].brush.<field> equals the value written" },
+    { "id": "T-24", "group": "format", "where": "src/test/projectFormat.test.ts", "setup": "a version-1 to version-8 file", "expected": "opens unchanged; the stamp fields default to the values that make the segment path the output" },
+    { "id": "T-25", "group": "format", "where": "src/test/projectFormat.test.ts", "setup": "a current-version file with a stamp field missing, out of range or non-numeric", "expected": "refused with a message naming the field" },
+    { "id": "T-26", "group": "format", "where": "src/test/projectFormat.test.ts", "setup": "a file with version = PROJECT_VERSION + 1", "expected": "refused with 'this build reads up to N'" },
+    { "id": "T-27", "group": "format", "where": "src/test/projectFormat.test.ts", "setup": "a version-1 to -8 file and a current-version file holding the same stroke", "expected": "the two files produce the same pixels for the same stroke" },
+    { "id": "T-28", "group": "editor state and UI", "where": "src/test/drawingEngine.test.ts", "setup": "engine.setBrush({ stampField: x })", "expected": "the history depth is unchanged and the dirty flag is unchanged" },
+    { "id": "T-29", "group": "editor state and UI", "where": "src/test/drawingEngine.test.ts", "setup": "draw with stamp settings, then change the settings", "expected": "the committed stroke's brush keeps the values it was drawn with; a later stroke takes the new ones" },
+    { "id": "T-30", "group": "editor state and UI", "where": "manual (browser)", "setup": "the toolbar", "expected": "a stamp control exists, is labelled unambiguously (not 'Spacing' alone), and is absent if the engine does not honour it" },
+    { "id": "T-31", "group": "performance sanity", "where": "src/test/canvas2dRenderer.test.ts (draw-call)", "setup": "a stroke of length 4000 with spacing 10 % of the diameter", "expected": "the dab count is about 4000 / (0.1 * size) + 1 and is bounded by an explicit per-stroke cap; the assertion is on the count, not on wall-clock" },
+    { "id": "T-32", "group": "performance sanity", "where": "src/test/canvas2dRenderer.test.ts (draw-call)", "setup": "the renderer's allocated canvases after a stamped stroke", "expected": "the number of document-sized surfaces is unchanged (no fourth surface)" }
+  ],
+
+  "symbolIndex": [
+    { "symbol": "SOFT_EDGE_RADIUS_RATIO", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "32" },
+    { "symbol": "strokeFeatherRadius", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "43-49" },
+    { "symbol": "TEXTURE_TILE_SIZE / TEXTURE_MIN_COVERAGE", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "52 / 54" },
+    { "symbol": "textureCoverage", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "65-79" },
+    { "symbol": "strokeDiameter", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "82-85" },
+    { "symbol": "strokeOpacity", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "97-108" },
+    { "symbol": "stampDot", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "117-129" },
+    { "symbol": "rasterizeStroke", "file": "src/core/rendering/canvas2dStroke.ts", "lines": "151-207" },
+    { "symbol": "BrushSettings", "file": "src/types/brush.ts", "lines": "11-67" },
+    { "symbol": "DEFAULT_BRUSH", "file": "src/core/brushes/defaults.ts", "lines": "15-26" },
+    { "symbol": "normalizeBrush / updateBrushSettings / brushSettingsEqual", "file": "src/core/brushes/defaults.ts", "lines": "29-42 / 44-49 / 52-65" },
+    { "symbol": "MAX_INTERPOLATED_POINTS / MAX_INTERPOLATION_DISTANCE / MIN_SAMPLE_DISTANCE / MIN_SPACING_STEP / STABILIZER_MAX_LAG", "file": "src/core/brushes/strokeBuilder.ts", "lines": "22 / 27 / 29 / 31 / 39" },
+    { "symbol": "createStrokeRecord / cloneStroke", "file": "src/core/brushes/strokeBuilder.ts", "lines": "46-64 / 71-84" },
+    { "symbol": "StrokeBuilder.addSample / finish / append", "file": "src/core/brushes/strokeBuilder.ts", "lines": "114-175 / 186-196 / 198-209" },
+    { "symbol": "StrokeRecord", "file": "src/core/document/types.ts", "lines": "76-104" },
+    { "symbol": "LayerElement", "file": "src/core/document/types.ts", "lines": "176" },
+    { "symbol": "Canvas2DRenderer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "109-1295" },
+    { "symbol": "textureTiles cache", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "121" },
+    { "symbol": "beginStroke / extendStroke / replaceStroke / endStroke / cancelStroke", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "279-293 / 295-325 / 336-345 / 347-381 / 383-395" },
+    { "symbol": "render / paintDocument", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "405-443 / 628-676" },
+    { "symbol": "buildPreviewGroup / ensurePreviewSurface", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "686-714 / 717-732" },
+    { "symbol": "rasterizeLayer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "765-785" },
+    { "symbol": "rasterizeStrokeToBuffer / clearStrokeBufferRegion", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "879-888 / 891-898" },
+    { "symbol": "strokeSampleBounds / strokeRegion", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "908-927 / 935-949" },
+    { "symbol": "compositeStrokeBuffer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "961-981" },
+    { "symbol": "paintStrokeCoverage", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "997-1047" },
+    { "symbol": "applyStrokeTexture / textureTile", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "1058-1081 / 1084-1108" },
+    { "symbol": "featherStroke / ensureFeatherBuffer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "1123-1164 / 1167-1175" },
+    { "symbol": "beginErase / applyErase / restoreEraseBase", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "1186-1202 / 1205-1224 / 1234-1247" },
+    { "symbol": "dropPreviewSurface / prepareStrokeBuffer / clearStrokeBuffer", "file": "src/core/rendering/Canvas2DRenderer.ts", "lines": "1275-1277 / 1279-1285 / 1287-1294" },
+    { "symbol": "DrawingRenderer", "file": "src/core/rendering/types.ts", "lines": "46-108" },
+    { "symbol": "LayerSurfaceStore.prepare / clear", "file": "src/core/rendering/layerSurfaceStore.ts", "lines": "96-105 / 107-114" },
+    { "symbol": "DrawingEngine.setBrush", "file": "src/core/engine/DrawingEngine.ts", "lines": "836-844" },
+    { "symbol": "DrawingEngine.beginStroke / extendStroke", "file": "src/core/engine/DrawingEngine.ts", "lines": "1056-1083 / 1085-1094" },
+    { "symbol": "DrawingEngine.finishStroke / cancelStroke", "file": "src/core/engine/DrawingEngine.ts", "lines": "1408-1445 / 1447-1454" },
+    { "symbol": "PROJECT_VERSION", "file": "src/core/project/projectFormat.ts", "lines": "87" },
+    { "symbol": "stroke element serializer", "file": "src/core/project/projectFormat.ts", "lines": "451-465" },
+    { "symbol": "readBrush", "file": "src/core/project/projectFormat.ts", "lines": "686-719" },
+    { "symbol": "newer-version rejection", "file": "src/core/project/projectFormat.ts", "lines": "510-514" },
+    { "symbol": "BrushControls", "file": "src/features/brushes/BrushControls.tsx", "lines": "15-105" },
+    { "symbol": "EditorActions.setBrush", "file": "src/state/editorStore.ts", "lines": "26, 86" },
+    { "symbol": "BrushTool", "file": "src/core/tools/brushTool.ts", "lines": "17-59" },
+    { "symbol": "RecordingCanvas / RECORDED_METHODS", "file": "src/test/support/recordingCanvas.ts", "lines": "51-211 / 15-31" },
+    { "symbol": "PixelCanvas", "file": "src/test/canvas2dRenderer.test.ts", "lines": "1498-2059" },
+    { "symbol": "withPixels / readPixel / expectPixel", "file": "src/test/canvas2dRenderer.test.ts", "lines": "2127-2170 / 2083-2090 / 2092-2104" },
+    { "symbol": "coverageInside", "file": "src/test/canvas2dRenderer.test.ts", "lines": "2423-2440" },
+    { "symbol": "checkEveryPathAgrees", "file": "src/test/canvas2dRenderer.test.ts", "lines": "2540-2586" }
+  ],
+
+  "provenance": {
+    "note": "This feature is to be implemented inside the MIT-licensed Paka repository; no third-party code is required (Canvas 2D primitives plus the project's own algorithms).",
+    "licenceFacts": {
+      "repositoryLicence": "MIT",
+      "copyright": "Copyright (c) 2026 HumanHEART",
+      "dependenciesWithCopyleft": "none identified",
+      "vendoredCode": "none identified for this feature's path"
+    },
+    "priorArtInTheTree": {
+      "note": "the existing single-dab helper is the closest thing to a stamp today and is MIT-licensed as part of the repository",
+      "symbol": "stampDot",
+      "file": "src/core/rendering/canvas2dStroke.ts",
+      "lines": "117-129"
+    },
+    "externalAssetsRequired": "none — a procedural dab profile needs no image asset; an image-based stamp would introduce an asset-licensing question not present today"
+  },
+
+  "gapsNotClosedByThisAnalysis": [
+    "No browser or packaged-Tauri verification was performed; the brief records both as outstanding for every prior slice.",
+    "The React layer has no automated tests, so the toolbar behaviour of a new stamp control can only be checked manually.",
+    "The pixel harness has no blur kernel and no 'max' composite, so an antialiased hardness curve and a union accumulator cannot both be proven by the existing harness alone.",
+    "No profile was taken in the packaged app, so the dab-count worst case is arithmetic, not a measurement."
+  ]
+}

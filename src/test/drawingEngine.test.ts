@@ -9,7 +9,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_BRUSH, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+  MIN_STAMP_SPACING,
+} from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
@@ -292,6 +297,70 @@ describe("DrawingEngine stroke capture", () => {
     expect(engine.listStrokes(layerId)[0].brush.spacing).toBe(0.3);
     expect(engine.listStrokes(layerId)[0].brush.stabilizer).toBe(0.8);
     expect(engine.listStrokes(layerId)[0].brush.texture).toBe(0.6);
+  });
+
+  it("treats the stamp settings as editor state: no history step, no dirty flag", () => {
+    const engine = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setBrush({ stamp: true, stampSpacing: 0.3, stampHardness: 0.5 });
+    expect(engine.getState().brush.stamp).toBe(true);
+    expect(engine.getState().brush.stampSpacing).toBe(0.3);
+    expect(engine.getState().brush.stampHardness).toBe(0.5);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // Out-of-range values are clamped, and a no-op change publishes nothing.
+    engine.setBrush({ stampSpacing: 0.001, stampHardness: 4 });
+    expect(engine.getState().brush.stampSpacing).toBe(MIN_STAMP_SPACING);
+    expect(engine.getState().brush.stampHardness).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("captures the stamp settings per stroke, so a later change rewrites nothing", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ stamp: true, stampSpacing: 0.25, stampHardness: 0.4 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 40, timeStamp: 16 }));
+    engine.finishStroke();
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.stamp).toBe(true);
+    expect(stroke.brush.stampSpacing).toBe(0.25);
+    expect(stroke.brush.stampHardness).toBe(0.4);
+
+    // Changing the setting describes the next stroke; it never rewrites an
+    // existing record's brush.
+    engine.setBrush({ stamp: false, stampSpacing: 0.9, stampHardness: 1 });
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.stampSpacing).toBe(0.25);
+    expect(engine.listStrokes(layerId)[0].brush.stampHardness).toBe(0.4);
+
+    // A stamped stroke is one undo step, like any other.
+    expect(engine.getState().history).toMatchObject({ depth: 1, canUndo: true });
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+  });
+
+  it("draws shapes with the plain segment path, even when the brush is stamped", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ stamp: true });
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 60, docY: 40, timeStamp: 16 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 40, timeStamp: 32 }));
+
+    // A shape is an outline, not a chain of dabs, so its record says so.
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {

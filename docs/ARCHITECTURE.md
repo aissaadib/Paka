@@ -198,11 +198,24 @@ scans: the fill's boundary is the picture the user sees, not one layer's
 internal pixels.
 
 Rasterizing a layer is a rebuild, not an incremental edit: for every element on
-that layer the renderer clears the whole stroke buffer and blends one
-full-surface draw, so the cost is `O(elements x surface pixels)` and does not
-depend on the stroke's geometry. A measured breakdown - including the
-environmental limits of those measurements - and the recommended first fix
-(dirty bounds for the stroke buffer) are in
+that layer the renderer rasterizes it into the shared stroke buffer and blends it
+onto the layer surface, one element at a time, in painting order. Since `4ac040b`
+that work is bounded by the element's own footprint instead of by the document:
+the buffer is cleared and blended only over the rectangle the element can ink -
+the padded bounding box of its samples, which is the brush radius, the blur
+spread of a soft edge and one pixel of margin - while the layer's own single full
+clear is unchanged, because a rebuild still starts from an empty surface. The
+surface and the stroke buffer share the same device pixel grid, so that rectangle
+is blitted one to one under the identity transform and nothing is resampled, and
+the pixels are the same ones the old full-surface blend produced. The cost of a
+rebuild therefore follows the strokes' geometry instead of the document size: a
+measured 47x-187x less touched area per rebuild for strokes that ink a small part
+of the document, and about 1.1x for strokes that cover the whole document. The
+display and the eraser still draw the whole buffer, because the viewport clips
+that for us and the eraser subtracts from the layer it mutates. The measured
+breakdown - including the environmental limits of those measurements, the
+remaining per-draw cost charged for the document-sized surface, and the recipe
+for profiling it in the packaged app - is in
 [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
 
 ### Layer blend modes
@@ -379,6 +392,67 @@ undo/redo, reopen or PNG export. The grain applies to brush, eraser and shapes
 through the shared coverage path; a filled shape's interior grains along with
 its outline. It is a visible surface texture, not per-dab spacing or a true
 texture brush, and it still composites at the stroke opacity once.
+
+### Stamp engine (dabs)
+
+`BrushSettings.stamp` switches the rasterization strategy for a stroke: with it
+off, the stroke is the legacy round-capped segment path, byte for byte; with it
+on, the stroke is a **union of round dabs** placed along the stored polyline.
+
+The dabs are placed by **arc length**, not per sample: the first dab sits on the
+first sample and the rest every `stampSpacing * size` document pixels along the
+path, with the remainder of a segment carried into the next one. Two consequences
+matter:
+
+- The plan does not depend on the **sample density**, so the existing `spacing`
+  field stays non-appearance-changing: the same path captured at two densities
+  produces the same dabs (there is a test for it).
+- The plan is a **pure function of the samples and the brush** - no randomness,
+  no clock, no zoom, no `rasterScale` - so live drawing, the commit, a layer
+  rebuild, undo/redo, a reopened file and a PNG export all produce the same
+  dabs. `src/core/rendering/stampCoverage.ts` is the only place that decides
+  where a dab goes, so the live path and the rebuild path cannot disagree.
+
+The dabs' coverage is combined with a **per-pixel maximum**, never a sum.
+Canvas 2D has no max-alpha composite operation - its `lighten` blend mode
+compares colours, not alpha - so the union is computed in plain numbers in a
+coverage map and uploaded to the stroke buffer as pixels:
+
+```
+coverage map   = 1 byte per device pixel, in 64x64 tiles, allocated on demand
+dab profile    = 1 inside the dab's core, a smooth falloff to 0 at its radius
+union          = max(existing coverage, the dab's coverage)
+upload         = one ImageData per tile (16 KB), putImageData into the stroke buffer
+```
+
+A self-crossing or overlapping stamped stroke therefore cannot darken, and the
+stroke's opacity is still applied **once**, when the buffer composites - the same
+invariant the segment path keeps. The stroke-level hardness feather and the grain
+post-pass still run over the finished coverage, so a soft or grainy brush stays
+soft or grainy when the stamp is on.
+
+The coverage map is bounded by the **stroke's own footprint**, like the feather
+scratch, so the stamp engine adds no document-sized surface and the raster
+budget's 58 bytes per document pixel still holds (see *Document size and surface
+memory*). The upload is per tile, so the buffer it needs is 16 KB whatever the
+stroke's size.
+
+Two guards keep the cost and the memory bounded, and both are deterministic, so
+the live path and the rebuild path cut at the same place:
+
+- a **spacing floor** of 0.5 document pixels, so a 1 px brush cannot ask for
+  thousands of dabs per pixel;
+- a **per-stroke work budget** (`MAX_STAMP_COVERAGE_WORK`): the planner stops
+  placing dabs once the dabs' bounding boxes add up to the budget. The cut is a
+  lattice index, so the same first K dabs are produced whether the path holds
+  ten samples or ten thousand. A project file's path length is not bounded by the
+  parser, so this is what stops a hostile file from exhausting memory; an
+  extreme stroke is cut short, which is a rendering limit rather than a hang.
+
+The stamp applies to **brush and eraser** strokes. Shape tools keep the segment
+path - a shape is an outline, and a filled shape is a flat polygon - and a
+shape's stroke record stores the stamp fields as they were not used, so the file
+says what was actually drawn.
 
 ### Eraser strokes
 
@@ -810,6 +884,21 @@ This bounds *calculable backing-store pixels*, not the browser's total memory:
 the display canvas, the compositor and the GPU driver add their own overhead,
 and every additional layer adds another full-resolution surface. The budget
 covers a one-layer document plus the working buffers.
+
+The stamp engine's coverage map does not move the peak. It is **1 byte per
+device pixel over the stroke's own footprint** - at most 4 bytes per document
+pixel at the budgeted scale of 2 - and it is a transient like the scan buffer,
+so it fits inside the same 10 bytes per document pixel allowance: the in-flight
+map and the resident scratch together use at most 8 of those 10 bytes, leaving
+**2 bytes per document pixel of transient headroom** for the next feature that
+needs scratch space (masks, groups, tiles). Two details keep it there: the
+coverage map is tiled and allocated on demand, so it follows the inked area
+rather than the document, and the upload to the stroke buffer is **one
+`ImageData` per tile** (16 KB), never one for the whole dirty rectangle, which
+would be document-sized in the rebuild path. The coverage map is JavaScript
+heap rather than a canvas backing store, so it sits outside the budget model's
+stated scope; it is stated here next to the budget rather than folded into the
+constants, so the model keeps describing what it says it describes.
 
 ## Undo / redo
 

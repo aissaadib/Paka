@@ -216,6 +216,18 @@ function isInsideDocument(document: DrawingDocument, x: number, y: number): bool
 }
 
 /**
+ * The brush a shape is drawn with.
+ *
+ * The stamp engine draws a chain of round dabs along a path, which suits the
+ * brush and the eraser but not a shape: a shape is an outline, and a filled
+ * shape is a flat polygon. So a shape records the plain segment path even when
+ * the brush is stamped, and the stroke stays self-describing.
+ */
+function shapeBrush(brush: BrushSettings): BrushSettings {
+  return brush.stamp ? { ...brush, stamp: false } : brush;
+}
+
+/**
  * Union of the *painted* bounds of `strokes`, or `null` when there are none.
  *
  * Each stroke is widened by half its maximum diameter, because the pixels of a
@@ -1118,7 +1130,10 @@ export class DrawingEngine implements StrokeSource {
     }
     const stroke = createStrokeRecord(
       layerId,
-      this.brush,
+      // The stamp engine draws a chain of dabs along the path; a shape is an
+      // outline (and, when filled, a flat polygon), so it keeps the plain
+      // segment path even when the brush is stamped.
+      shapeBrush(this.brush),
       this.activeTool().erases === true,
       // Read here, at press time, so the preview and the committed stroke agree:
       // a shape keeps the fill setting it was started with. A line's definition

@@ -67,21 +67,27 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, pushed after the live-preview compositing, layer-safety and
-  raster-budget slices.
-- **`pnpm test` → 461 tests in 29 files, all pass.** `pnpm typecheck` clean;
-  `pnpm build` succeeds.
-- **Project file format version 8** (`PROJECT_VERSION = 8`).
+- Branch `feat/stamp-brush-engine` (from `main` at `ad2ef11`), after the
+  live-preview compositing, layer-safety, raster-budget, bounded-rasterization
+  and **stamp (dab) brush engine** slices. The stamp slice is **uncommitted**:
+  it is in the working tree, ready for review.
+- **`pnpm test` → 524 tests in 30 files, all pass** (the stamp slice).
+  `pnpm typecheck` clean; `pnpm build` succeeds.
+- **Project file format version 9** (`PROJECT_VERSION = 9`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
   non-default manifests` warning (see §8). The executable predates the fill,
-  gradient, hardness, spacing/stabilizer, texture and blend mode slices.
+  gradient, hardness, spacing/stabilizer, texture, blend mode, raster-budget,
+  bounded-rasterization and stamp slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
+| *(uncommitted)* | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
+| `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. |
+| `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |
 | `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active, so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
 | `21cd7c7` | **Finished-gesture notice reset** — a refused layer change explains once per gesture, and a finished gesture ends that state. |
 | `fae138c` | **Honest peak raster model** — the budget models the peak surface set (three 2x surfaces plus a transient scan buffer, 58 bytes per document pixel) instead of four full surfaces; the cap is unchanged. |
@@ -302,26 +308,35 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke` (including the fill
   branch for filled shapes), `strokeFeatherRadius` / `SOFT_EDGE_RADIUS_RATIO`,
   `TEXTURE_TILE_SIZE` / `textureCoverage`.
+- `src/core/rendering/stampCoverage.ts` — the stamp engine: `stampDabs` and
+  `StampDabCursor` (the arc-length dab plan), `stampDabCoverage` (the per-dab
+  profile), `StampCoverage` (the per-pixel maximum over 64x64 tiles),
+  `MAX_STAMP_COVERAGE_WORK` (the per-stroke budget) and
+  `MIN_STAMP_SPACING_PX` (the spacing floor).
 - `src/core/rendering/Canvas2DRenderer.ts` — `paintStrokeCoverage`,
   `featherStroke` (bounded scratch + scaled blur), `applyStrokeTexture` /
   `textureTile`, `rasterizeFillPatch`, `rasterizeGradient`,
-  `readCompositeImage`, element-ordered layer rebuilds.
+  `readCompositeImage`, element-ordered layer rebuilds, and the stamp path
+  (`extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage`).
 - `src/core/document/types.ts` — `StrokeRecord` (incl. `fill?: boolean`),
   `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
   version-history comment, fill/gradient validation, version-aware `readBrush`
-  (required `hardness` in v6+, `texture` in v7+, defaults for older files).
+  (required `hardness` in v6+, `texture` in v7+, `stamp`/`stampSpacing`/
+  `stampHardness` in v9+, defaults for older files).
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
 - `src/features/brushes/BrushControls.tsx` — size, opacity, **Hardness**,
-  **Spacing**, **Stabilizer** and **Texture** sliders.
+  **Sampling**, **Stabilizer**, **Texture** sliders and the **Stamp** switch with
+  its **Stamp spacing** and **Stamp hardness** sliders.
 - `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
   `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
 - Tests: `src/test/brushSettings.test.ts`, `src/test/canvas2dStroke.test.ts`,
-  `src/test/floodFill.test.ts`, `src/test/fillCommand.test.ts`,
+  `src/test/stampCoverage.test.ts`, `src/test/floodFill.test.ts`,
+  `src/test/fillCommand.test.ts`,
   `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
   `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
   `src/test/projectLifecycle.test.ts`, shared fakes in
@@ -447,23 +462,30 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 9. Next move
 
-**Stamp-based brush engine behind the existing stroke interface** (the remaining
-Phase 3 work). Texture now ships as a grain post-pass; stamps are about per-dab
-spacing, true hardness curves and directional/image textures. The "Next slice"
-section of [ROADMAP.md](ROADMAP.md) is kept current and is the authority.
+**Directional, image-based or per-dab stamp textures** (the rest of the Phase 3
+work). The stamp engine itself has shipped: a stroke can be drawn as a chain of
+round dabs placed along its path, unioned so it never darkens where it crosses
+itself, with a true per-dab hardness curve (format version 9). The grain is
+still one document-anchored post-pass over the finished coverage. The "Next
+slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the authority.
 
 The constraints that matter:
 
 - keep `DrawingRenderer`/`StrokeRecord` as the boundary; samples stay the
   authoritative record for undo, reopen and export;
-- keep the segment path as the default and preserve hard/soft/grain output;
-  accumulate per-dab coverage into one buffer so overlapping dabs cannot darken;
-- keep grain deterministic from document coordinates so live, rebuild, undo/redo,
-  reopen and PNG export agree at every zoom and `rasterScale`;
-- a non-default stamp/dab appearance cannot be ignored by a v8 reader without
-  changing the picture, so expect **format version 9** if fields change output;
-- keep `spacing` (sample density) distinct from stamp spacing, or document an
-  explicit migration if they are merged.
+- keep the segment path, the grain pass and the stamp engine as the defaults and
+  preserve hard/soft/grain/stamped output;
+- a per-dab texture multiplies a dab's coverage **before** the union, so the
+  union stays a maximum and a stroke still cannot darken;
+- keep the texture deterministic from document coordinates (and from the dab's
+  own direction, if it follows the path) so live, rebuild, undo/redo, reopen and
+  PNG export agree at every zoom and `rasterScale`;
+- a non-default texture appearance cannot be ignored by a v9 reader without
+  changing the picture, so expect **format version 10** if fields change
+  output;
+- keep `spacing` (sample density) distinct from the stamp's dab spacing;
+- the coverage map stays footprint-bounded and the upload stays one tile at a
+  time: the raster budget's 58 bytes per document pixel must not move.
 
 Optional polish, deliberately not done yet:
 

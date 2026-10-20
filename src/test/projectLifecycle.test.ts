@@ -223,6 +223,34 @@ describe("serialize and loadProject", () => {
     expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.texture).toBe(0.55);
   });
 
+  it("round-trips the stamp settings through save and reopen", () => {
+    const engine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 40, stamp: true, stampSpacing: 0.3, stampHardness: 0.45 },
+    });
+    paintStroke(engine, 0);
+    const text = engine.serialize();
+
+    const reopened = new DrawingEngine();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    reopened.loadProject(parsed.project, null);
+
+    const strokes = reopened.listStrokes(activeLayerId(reopened));
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].brush.stamp).toBe(true);
+    expect(strokes[0].brush.stampSpacing).toBe(0.3);
+    expect(strokes[0].brush.stampHardness).toBe(0.45);
+    // The loaded stamped stroke stays one undoable step and keeps its dab
+    // settings through undo and redo, because they live on the stroke record.
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.stamp).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.stampSpacing).toBe(0.3);
+  });
+
   it("rebuilds one undoable step per loaded stroke", () => {
     const engine = new DrawingEngine();
     paintStroke(engine, 0);

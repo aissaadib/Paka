@@ -35,6 +35,14 @@ import {
   TEXTURE_TILE_SIZE,
   textureCoverage,
 } from "./canvas2dStroke";
+import {
+  COVERAGE_TILE_SIZE,
+  StampCoverage,
+  StampDabCursor,
+  stampDabs,
+  unionStampRect,
+  type StampRect,
+} from "./stampCoverage";
 import type {
   DrawingRenderer,
   RendererKind,
@@ -167,6 +175,23 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * only ever read, never written, and the canvas is reused across frames.
    */
   private previewSurface: HTMLCanvasElement | null = null;
+  /**
+   * Coverage of the in-flight stamped stroke, in device pixels.
+   *
+   * The stamp engine unions its dabs with a maximum, and Canvas 2D cannot
+   * express a maximum of alpha (its `lighten` blend mode compares colours,
+   * not alpha), so the coverage is accumulated here in plain numbers and
+   * uploaded to the stroke buffer as pixels. The map is bounded by the
+   * stroke's own footprint - like the feather scratch - so it never adds a
+   * document-sized surface to the raster budget.
+   */
+  private stampCoverage: StampCoverage | null = null;
+  /** Places the dabs of the in-flight stroke as its path grows. */
+  private stampCursor: StampDabCursor | null = null;
+  /** The reused upload buffer: one coverage tile, never larger. */
+  private stampUpload: ImageData | null = null;
+  /** Scratch coverage map used when a committed stroke is re-rasterized. */
+  private readonly stampScratch = new StampCoverage();
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
   private rasterScale: number;
@@ -278,6 +303,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
   beginStroke(stroke: StrokeRecord): void {
     this.activeStroke = stroke;
+    const stamped = this.isStamped(stroke);
+    this.stampCoverage = stamped ? new StampCoverage() : null;
+    this.stampCursor = stamped ? new StampDabCursor(stroke.brush) : null;
     this.clearStrokeBuffer();
     if (stroke.erase === true) {
       // The erase snapshot and the grouped-preview scratch are mutually
@@ -296,12 +324,22 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (this.activeStroke !== stroke) {
       // Defensive path: a stroke arrived without a matching `beginStroke`.
       this.activeStroke = stroke;
+      this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
+      this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
       if (stroke.erase === true) {
         this.beginErase(stroke.layerId);
       }
       this.clearStrokeBuffer();
       this.prepareStrokeBuffer();
-      rasterizeStroke(this.strokeCtx, stroke, 0);
+      if (this.stampCoverage !== null) {
+        this.extendStampStroke(stroke);
+      } else {
+        rasterizeStroke(this.strokeCtx, stroke, 0);
+      }
+    } else if (this.stampCoverage !== null) {
+      // The stamp engine appends its new dabs: the coverage map is the
+      // authority, so only the rectangle the new dabs touched is uploaded.
+      this.extendStampStroke(stroke);
     } else if (fromIndex <= 1) {
       // The stroke had a single sample until now, so the buffer holds the dab
       // that `rasterizeStroke` stamps for a press without movement. Once the
@@ -338,9 +376,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
     this.activeStroke = stroke;
+    // A shape replaces its geometry on every move, so its buffer is redrawn
+    // from scratch. A stamped shape is not a thing (the engine draws shapes
+    // with the plain segment path), but the branch keeps the two paths apart.
+    this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
+    this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
     this.clearStrokeBuffer();
     this.prepareStrokeBuffer();
-    rasterizeStroke(this.strokeCtx, stroke, 0);
+    if (this.stampCoverage !== null) {
+      this.extendStampStroke(stroke);
+    } else {
+      rasterizeStroke(this.strokeCtx, stroke, 0);
+    }
     this.requestFrame();
   }
 
@@ -365,6 +412,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.dropEraseBase();
       this.clearStrokeBuffer();
       this.activeStroke = null;
+      this.dropStampCoverage();
       this.dropPreviewSurface();
       this.requestFrame();
       return;
@@ -374,6 +422,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.compositeStrokeBuffer(surface, stroke);
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    this.dropStampCoverage();
     // The preview is over: the group scratch is released so it cannot sit
     // next to a later erase snapshot (see the raster budget).
     this.dropPreviewSurface();
@@ -390,6 +439,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.dropEraseBase();
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    this.dropStampCoverage();
     this.dropPreviewSurface();
     this.requestFrame();
   }
@@ -609,9 +659,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.surfaces.dispose();
     this.activeStroke = null;
     this.dropEraseBase();
+    this.dropStampCoverage();
     this.probeCanvas = null;
     this.featherBuffer = null;
     this.previewSurface = null;
+    this.stampUpload = null;
   }
 
   /**
@@ -884,7 +936,142 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     this.clearStrokeBufferRegion(region);
     this.prepareStrokeBuffer();
+    if (this.isStamped(stroke)) {
+      this.rasterizeStampStroke(stroke);
+      return;
+    }
     rasterizeStroke(this.strokeCtx, stroke, 0);
+  }
+
+  /**
+   * True when a stroke is drawn as a chain of dabs instead of segments.
+   *
+   * A filled shape keeps its flat polygon interior, so it is never drawn as
+   * dabs: the engine gives shapes the plain segment path in the first place.
+   */
+  private isStamped(stroke: StrokeRecord): boolean {
+    return stroke.brush.stamp === true && stroke.fill !== true;
+  }
+
+  /**
+   * Paints the dabs the stroke has gained since the last update.
+   *
+   * The cursor places the new dabs from the path the pointer has just added,
+   * and the coverage map keeps their union, so only the new dabs are
+   * rasterized. The cursor walks the same path as a full re-rasterization
+   * does, so the live preview stays identical to what undo, reopen and export
+   * produce for the same samples - the property every other path in the
+   * renderer relies on.
+   */
+  private extendStampStroke(stroke: StrokeRecord): void {
+    const coverage = this.stampCoverage;
+    const cursor = this.stampCursor;
+    if (!coverage || !cursor) {
+      return;
+    }
+    const dabs = cursor.advance(stroke);
+    const scale = this.rasterScale;
+    let dirty: StampRect | null = null;
+    for (const dab of dabs) {
+      const rect = coverage.paintDab(
+        dab.x * scale,
+        dab.y * scale,
+        dab.radius * scale,
+        stroke.brush.stampHardness,
+      );
+      if (rect) {
+        dirty = unionStampRect(dirty, rect);
+      }
+    }
+    if (dirty) {
+      this.writeStampCoverage(coverage, dirty, stroke.brush.color);
+    }
+  }
+
+  /**
+   * Rasterizes a whole stamped stroke into the stroke buffer.
+   *
+   * The rebuild path has no live coverage map to reuse, so the dabs are
+   * painted into a scratch map and uploaded in one go. The result is the same
+   * coverage the live path produced: the dabs and their union are a pure
+   * function of the stroke's samples.
+   */
+  private rasterizeStampStroke(stroke: StrokeRecord): void {
+    const coverage = this.stampScratch;
+    coverage.clear();
+    const dabs = stampDabs(stroke, stroke.brush);
+    const scale = this.rasterScale;
+    let dirty: StampRect | null = null;
+    for (const dab of dabs) {
+      const rect = coverage.paintDab(
+        dab.x * scale,
+        dab.y * scale,
+        dab.radius * scale,
+        stroke.brush.stampHardness,
+      );
+      if (rect) {
+        dirty = unionStampRect(dirty, rect);
+      }
+    }
+    if (dirty) {
+      this.writeStampCoverage(coverage, dirty, stroke.brush.color);
+    }
+  }
+
+  /**
+   * Uploads a rectangle of a coverage map to the stroke buffer.
+   *
+   * The upload is **per coverage tile**, so the buffer it needs is one tile
+   * (64 x 64 x 4 = 16 KB) whatever the stroke's size: a document-sized dirty
+   * rectangle would be a 256 MiB upload at the raster budget's cap. The map is
+   * the authority, so writing a whole tile is always safe - the pixels
+   * outside the changed area carry the coverage they already had.
+   *
+   * `putImageData` writes device pixels and ignores the context transform, so
+   * the tiles are placed in the buffer's own pixels.
+   */
+  private writeStampCoverage(
+    coverage: StampCoverage,
+    rect: StampRect,
+    color: string,
+  ): void {
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+    const image = this.ensureStampUpload();
+    const data = image.data;
+    const firstTileX = Math.floor(rect.left / COVERAGE_TILE_SIZE);
+    const lastTileX = Math.floor((rect.left + rect.width - 1) / COVERAGE_TILE_SIZE);
+    const firstTileY = Math.floor(rect.top / COVERAGE_TILE_SIZE);
+    const lastTileY = Math.floor((rect.top + rect.height - 1) / COVERAGE_TILE_SIZE);
+
+    for (let tileY = firstTileY; tileY <= lastTileY; tileY += 1) {
+      for (let tileX = firstTileX; tileX <= lastTileX; tileX += 1) {
+        const tile = {
+          left: tileX * COVERAGE_TILE_SIZE,
+          top: tileY * COVERAGE_TILE_SIZE,
+          width: COVERAGE_TILE_SIZE,
+          height: COVERAGE_TILE_SIZE,
+        };
+        coverage.writeRect(data, COVERAGE_TILE_SIZE, tile, rgb);
+        this.strokeCtx.putImageData(image, tile.left, tile.top);
+      }
+    }
+  }
+
+  /** The reused upload buffer: one coverage tile, never larger. */
+  private ensureStampUpload(): ImageData {
+    const existing = this.stampUpload;
+    if (existing) {
+      return existing;
+    }
+    const created = this.strokeCtx.createImageData(COVERAGE_TILE_SIZE, COVERAGE_TILE_SIZE);
+    this.stampUpload = created;
+    return created;
+  }
+
+  /** Releases the in-flight stroke's coverage map. */
+  private dropStampCoverage(): void {
+    this.stampCoverage = null;
+    this.stampCursor = null;
   }
 
   /** Clears the part of the stroke buffer a stroke is about to ink. */
@@ -1260,6 +1447,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private abandonStroke(): void {
     this.activeStroke = null;
     this.dropEraseBase();
+    this.dropStampCoverage();
     this.dropPreviewSurface();
     this.clearStrokeBuffer();
   }

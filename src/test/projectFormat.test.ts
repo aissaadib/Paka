@@ -503,6 +503,115 @@ describe("parseProject round trip", () => {
     expect(payload.version).toBe(PROJECT_VERSION);
   });
 
+  it("round-trips the stamp engine's settings at version 9", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        stamp: true,
+        stampSpacing: 0.25,
+        stampHardness: 0.4,
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.stamp).toBe(true);
+    expect(parsed.project.strokes[0].brush.stampSpacing).toBe(0.25);
+    expect(parsed.project.strokes[0].brush.stampHardness).toBe(0.4);
+
+    // The value is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stamp).toBe(true);
+    expect(payload.layers[0].elements[0].brush.stampSpacing).toBe(0.25);
+    expect(payload.layers[0].elements[0].brush.stampHardness).toBe(0.4);
+  });
+
+  it("opens version 8 files with the stamp off, which is the path they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId);
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 8;
+    delete payload.layers[0].elements[0].brush.stamp;
+    delete payload.layers[0].elements[0].brush.stampSpacing;
+    delete payload.layers[0].elements[0].brush.stampHardness;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.stamp).toBe(false);
+    expect(legacy.project.strokes[0].brush.stampSpacing).toBe(DEFAULT_BRUSH.stampSpacing);
+    expect(legacy.project.strokes[0].brush.stampHardness).toBe(DEFAULT_BRUSH.stampHardness);
+  });
+
+  it("refuses a version-9 stroke brush without the stamp settings", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stamp;
+        }),
+      ),
+    ).toContain("brush stamp");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampSpacing;
+        }),
+      ),
+    ).toContain("brush stamp spacing");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampHardness;
+        }),
+      ),
+    ).toContain("brush stamp hardness");
+  });
+
+  it("refuses a version-9 stroke brush with an invalid stamp setting", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stamp: "yes" };
+        }),
+      ),
+    ).toContain("brush stamp");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampSpacing: 5 };
+        }),
+      ),
+    ).toContain("brush stamp spacing");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampHardness: -1 };
+        }),
+      ),
+    ).toContain("brush stamp hardness");
+  });
+
   it("round-trips multiply and screen layer blend modes at version 8", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;

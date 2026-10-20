@@ -46,6 +46,9 @@ const BRUSH: BrushSettings = {
   spacing: 0.1,
   stabilizer: 0,
   texture: 0,
+  stamp: false,
+  stampSpacing: 0.1,
+  stampHardness: 1,
 };
 
 let recording: RecordingDocument;
@@ -1451,12 +1454,16 @@ describe("Canvas2DRenderer selection overlay", () => {
  * with what state, but it cannot answer "what colour is on screen". These
  * tests need the latter, so this stand-in keeps real straight-alpha pixels and
  * implements the slice of the spec the renderer uses to composite: `fillRect`,
- * `clearRect`, 1:1 `drawImage`, transforms, `save`/`restore`, and the
- * `source-over`, `destination-out`, `multiply` and `screen` operations.
+ * `clearRect`, 1:1 `drawImage`, transforms, `save`/`restore`, pattern tiling
+ * for the grain pass, and the `source-over`, `destination-out`, `destination-in`,
+ * `multiply` and `screen` operations.
  *
- * Stroke rasterization (paths, arcs) is deliberately a no-op: coverage is
- * seeded straight into the stroke buffer, because these tests are about where
- * that coverage is composited, not how it was rasterized.
+ * It also rasterizes paths: `arc` is a 24-gon, `fill` is a point-in-polygon test
+ * per pixel, and `stroke` is a capsule per segment, so a stroke's coverage is
+ * produced by the renderer rather than seeded into the buffer. The edges are
+ * hard - there is no antialiasing - so this harness can disprove a placement or
+ * extent bug, but it cannot prove Chromium's antialiased edge; that needs a
+ * real-browser comparison.
  */
 
 type PixelColour = readonly [number, number, number, number];
@@ -2103,6 +2110,60 @@ function expectPixel(
   expect(Math.abs(b - expected[2]), message).toBeLessThanOrEqual(tolerance);
 }
 
+/** A frozen copy of a canvas's pixels, for whole-canvas comparison. */
+interface PixelSnapshot {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Float32Array;
+}
+
+function snapshotCanvas(canvas: PixelCanvas): PixelSnapshot {
+  return { width: canvas.width, height: canvas.height, pixels: canvas.pixels.slice() };
+}
+
+/**
+ * Asserts that two canvases hold the same pixels.
+ *
+ * A single sample point cannot see a region-rounding defect: the compositor
+ * may clip the edge of a stroke's region and still leave the sampled pixel
+ * untouched. This compares every pixel and reports how many differ and by how
+ * much, so a failure says what changed rather than only that something did.
+ */
+function expectSameCanvas(
+  actual: PixelSnapshot,
+  expected: PixelSnapshot,
+  message: string,
+): void {
+  expect(actual.width, `${message}: width`).toBe(expected.width);
+  expect(actual.height, `${message}: height`).toBe(expected.height);
+  let differing = 0;
+  let maxDelta = 0;
+  let first: [number, number] | null = null;
+  for (let index = 0; index < expected.pixels.length; index += 4) {
+    let differs = false;
+    for (let channel = 0; channel < 4; channel += 1) {
+      const delta = Math.abs(actual.pixels[index + channel] - expected.pixels[index + channel]) * 255;
+      if (delta > 0) {
+        differs = true;
+        if (delta > maxDelta) {
+          maxDelta = delta;
+        }
+      }
+    }
+    if (differs) {
+      differing += 1;
+      if (first === null) {
+        const pixel = index / 4;
+        first = [pixel % expected.width, Math.floor(pixel / expected.width)];
+      }
+    }
+  }
+  expect(
+    differing,
+    `${message}: ${differing} pixel(s) differ, first at (${first?.[0]}, ${first?.[1]}), max channel delta ${maxDelta.toFixed(1)}/255`,
+  ).toBe(0);
+}
+
 interface PixelHarness {
   readonly renderer: Canvas2DRenderer;
   readonly display: PixelCanvas;
@@ -2127,6 +2188,7 @@ interface PixelHarness {
 function withPixels(
   build: (doc: DrawingDocument) => DrawingDocument,
   body: (harness: PixelHarness) => void,
+  options: { rasterScale?: number; size?: number } = {},
 ): void {
   const saved = (globalThis as { document?: unknown }).document;
   const allocated: PixelCanvas[] = [];
@@ -2148,12 +2210,13 @@ function withPixels(
     const renderer = new Canvas2DRenderer({
       canvas: display.asElement(),
       strokeSource,
-      rasterScale: 1,
+      rasterScale: options.rasterScale ?? 1,
       scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
     });
-    const doc = build(createDocument({ width: 32, height: 32, background: "#ffffff" }));
+    const size = options.size ?? 32;
+    const doc = build(createDocument({ width: size, height: size, background: "#ffffff" }));
     renderer.setDocument(doc);
-    renderer.setDisplaySize(32, 32, 1);
+    renderer.setDisplaySize(size, size, 1);
     renderer.render();
 
     body({
@@ -2550,6 +2613,12 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.render();
         const rebuilt = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
         expect(rebuilt[3]).toBe(255);
+        // The whole canvas, not one sample point: a defect that clips the edge
+        // of a stroke's region can leave the sampled pixel untouched.
+        const rebuiltCanvas = snapshotCanvas(harness.display);
+        const rebuiltExport = snapshotCanvas(
+          harness.renderer.composeDocumentImage() as unknown as PixelCanvas,
+        );
 
         // The bounded blit can only replace the old full-surface blit if no
         // coverage falls outside the rectangle it draws. The coverage stays
@@ -2562,6 +2631,7 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.invalidateLayer(layerId);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "second rebuild");
 
         // 2. Live: the same stroke drawn through the live path.
         harness.elements.set(layerId, []);
@@ -2572,15 +2642,22 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.extendStroke(live, 0);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "live preview");
 
         // 3. The release: the buffer composites into the layer.
         harness.renderer.endStroke(live);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "committed layer");
 
-        // 4. The export: the same picture at document size.
+        // 4. The export: the same picture at document size. The export carries
+        // no document border and no selection overlay, so it is compared with
+        // the export; and because the software canvas does not draw the border
+        // at all, it is compared with the display as well.
         const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
         expect(readPixel(exported, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(exported), rebuiltExport, "PNG export");
+        expectSameCanvas(snapshotCanvas(exported), rebuiltCanvas, "PNG export vs display");
       },
     );
   }
@@ -2729,5 +2806,492 @@ describe("Canvas2DRenderer preview scratch lifetime", () => {
     // The common case groups nothing: the preview composites straight onto
     // the layer, so no full-resolution scratch is ever allocated.
     expect(harness.renderer.holdsPreviewScratch).toBe(false);
+  });
+});
+
+describe("Canvas2DRenderer stamp engine (real pixels)", () => {
+  const STAMP_X = 16;
+  const STAMP_Y = 14;
+
+  /** A stamp brush: 8 px wide, dabs 2 px apart, crisp dab edges. */
+  const STAMP_BRUSH: BrushSettings = {
+    ...BRUSH,
+    size: 8,
+    hardness: 1,
+    texture: 0,
+    stamp: true,
+    stampSpacing: 0.25,
+    stampHardness: 1,
+  };
+
+  function createStampStroke(layerId: LayerId, brush: BrushSettings, id: string): StrokeRecord {
+    return {
+      id,
+      layerId,
+      brush,
+      erase: false,
+      xs: [6, STAMP_X, 26],
+      ys: [6, STAMP_Y, 6],
+      pressures: [1, 1, 1],
+      times: [0, 16, 32],
+      startTime: 0,
+    };
+  }
+
+  /**
+   * Live, commit, rebuild and export must show the same pixels.
+   *
+   * The stamp engine keeps its coverage in a map of its own and uploads it to
+   * the stroke buffer, so the paths it has to agree on are the same ones the
+   * segment path agrees on - plus the rebuild, which rasterizes the stroke
+   * again from the samples.
+   */
+  function checkEveryPathAgrees(brush: BrushSettings): void {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stored = createStampStroke(layerId, brush, "stored");
+
+        // 1. The rebuild: the layer is rasterized from the stroke list.
+        harness.elements.set(layerId, [stored]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const rebuilt = readPixel(harness.display, STAMP_X, STAMP_Y);
+        expect(rebuilt[3]).toBe(255);
+        // The whole canvas, not one sample point: a defect that clips the edge
+        // of a stroke's region can leave the sampled pixel untouched.
+        const rebuiltCanvas = snapshotCanvas(harness.display);
+        const rebuiltExport = snapshotCanvas(
+          harness.renderer.composeDocumentImage() as unknown as PixelCanvas,
+        );
+
+        // The coverage has to stay inside the rectangle the commit blends, or
+        // the live preview would show pixels the commit drops.
+        expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
+
+        // A second rebuild must land on the same pixels.
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(readPixel(harness.display, STAMP_X, STAMP_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "second rebuild");
+
+        // 2. Live: the same stroke drawn through the live path.
+        harness.elements.set(layerId, []);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const live = createStampStroke(layerId, brush, "live");
+        harness.renderer.beginStroke(live);
+        harness.renderer.extendStroke(live, 0);
+        harness.renderer.render();
+        expect(readPixel(harness.display, STAMP_X, STAMP_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "live preview");
+
+        // 3. The release: the buffer composites into the layer.
+        harness.renderer.endStroke(live);
+        harness.renderer.render();
+        expect(readPixel(harness.display, STAMP_X, STAMP_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "committed layer");
+
+        // 4. The export: the same picture at document size. The export carries
+        // no document border and no selection overlay, so it is compared with
+        // the export; and because the software canvas does not draw the border
+        // at all, it is compared with the display as well.
+        const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
+        expect(readPixel(exported, STAMP_X, STAMP_Y)).toEqual(rebuilt);
+        expectSameCanvas(snapshotCanvas(exported), rebuiltExport, "PNG export");
+        expectSameCanvas(snapshotCanvas(exported), rebuiltCanvas, "PNG export vs display");
+      },
+    );
+  }
+
+  it("agrees across rebuild, live, release and export", () => {
+    checkEveryPathAgrees(STAMP_BRUSH);
+  });
+
+  it("agrees for a soft dab", () => {
+    checkEveryPathAgrees({ ...STAMP_BRUSH, stampHardness: 0.25 });
+  });
+
+  it("shows the same pixels while the stroke grows as after a full redraw", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+
+        // The reference: the whole stroke, rasterized in one go.
+        const whole = createStampStroke(layerId, STAMP_BRUSH, "whole");
+        harness.elements.set(layerId, [whole]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const rebuilt = readPixel(harness.display, STAMP_X, STAMP_Y);
+        expect(rebuilt[3]).toBe(255);
+
+        // The live path, drawn one sample at a time.
+        harness.elements.set(layerId, []);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const live = createStampStroke(layerId, STAMP_BRUSH, "live");
+        live.xs.length = 0;
+        live.ys.length = 0;
+        live.pressures.length = 0;
+        live.times.length = 0;
+        harness.renderer.beginStroke(live);
+        for (const [x, y] of [
+          [6, 6],
+          [STAMP_X, STAMP_Y],
+          [26, 6],
+        ] as const) {
+          live.xs.push(x);
+          live.ys.push(y);
+          live.pressures.push(1);
+          live.times.push(0);
+          harness.renderer.extendStroke(live, live.xs.length - 1);
+        }
+        harness.renderer.render();
+        expect(readPixel(harness.display, STAMP_X, STAMP_Y)).toEqual(rebuilt);
+      },
+    );
+  });
+
+  it("does not darken a self-crossing stamped stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // The stroke runs over the same pixels twice. The dabs are unioned, so
+        // the crossing keeps the brush's own opacity instead of stacking.
+        const crossing: StrokeRecord = {
+          ...createStampStroke(layerId, { ...STAMP_BRUSH, opacity: 0.5 }, "cross"),
+          xs: [6, 26, 6],
+          ys: [14, 14, 14],
+        };
+        harness.elements.set(layerId, [crossing]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // Black at 50 % over white paper is 128; stacking it twice would be 64.
+        expectPixel(harness.display, 16, 14, [128, 128, 128], 1);
+      },
+    );
+  });
+
+  it("keeps the dab chain inside the brush radius of the path", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stroke = createStampStroke(layerId, STAMP_BRUSH, "stored");
+        harness.elements.set(layerId, [stroke]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // An 8 px brush paints 4 px either side of the centre line. The dabs
+        // must not reach past that, or the commit would drop coverage the
+        // live preview showed.
+        const buffer = harness.strokeBuffer;
+        for (let row = 0; row < buffer.height; row += 1) {
+          for (let column = 0; column < buffer.width; column += 1) {
+            if (buffer.pixels[(row * buffer.width + column) * 4 + 3] > 0) {
+              expect(column).toBeGreaterThanOrEqual(2);
+              expect(column).toBeLessThanOrEqual(30);
+            }
+          }
+        }
+      },
+    );
+  });
+
+  it("leaves the plain segment path untouched", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 100 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 100, 1);
+
+    const stroke = createStroke(layerId, BRUSH);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    // A stroke without the stamp is drawn as segments: nothing is uploaded as
+    // pixels, so the plain path cannot have changed.
+    expect(harness.strokeBuffer.named("putImageData")).toHaveLength(0);
+    expect(harness.strokeBuffer.named("stroke").length).toBeGreaterThan(0);
+  });
+
+  it("uploads the stamped coverage as pixels", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 100 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 100, 1);
+
+    const stroke = createStroke(layerId, STAMP_BRUSH);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    const uploads = harness.strokeBuffer.named("putImageData");
+    expect(uploads.length).toBeGreaterThan(0);
+    // The upload is the dab's own rectangle, not the whole document.
+    const image = uploads[0].args[0] as ImageData;
+    expect(image.width * image.height).toBeLessThan(100 * 100);
+  });
+
+  it("keeps the number of document-sized surfaces unchanged", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 100, height: 100 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 100, 1);
+    // The first render allocates the layer surfaces; after that a stamped
+    // stroke must not add one.
+    harness.renderer.render();
+    const before = recording.allocated.length;
+
+    const stroke = createStroke(layerId, STAMP_BRUSH);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.renderer.endStroke(stroke);
+
+    // The coverage map is a plain typed array, not a canvas: the stamp engine
+    // adds no document-sized surface.
+    expect(recording.allocated.length).toBe(before);
+  });
+
+  it("uploads one tile at a time, so the upload buffer stays bounded", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 400, height: 400 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(400, 400, 1);
+
+    const stroke = createStroke(layerId, { ...STAMP_BRUSH, size: 200 });
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    const uploads = harness.strokeBuffer.named("putImageData");
+    expect(uploads.length).toBeGreaterThan(0);
+    for (const upload of uploads) {
+      const image = upload.args[0] as ImageData;
+      // One coverage tile: 64 x 64 x 4 = 16 KB, whatever the stroke's size.
+      expect(image.width).toBe(64);
+      expect(image.height).toBe(64);
+    }
+  });
+
+  it("builds up where two stamped strokes of the same colour overlap", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // The union rule is per stroke: two strokes are two strokes.
+        const first = createStampStroke(layerId, STAMP_BRUSH, "first");
+        const second = createStampStroke(layerId, STAMP_BRUSH, "second");
+        harness.elements.set(layerId, [first]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const alone = readPixel(harness.display, STAMP_X, STAMP_Y);
+
+        harness.elements.set(layerId, [first, second]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const both = readPixel(harness.display, STAMP_X, STAMP_Y);
+
+        // Two opaque black strokes over white paper: the overlap is black
+        // either way, but the alpha of the layer doubles where they meet.
+        expect(alone[3]).toBe(255);
+        expect(both[3]).toBe(255);
+        expect(readPixel(harness.surfaces[0], STAMP_X, STAMP_Y)[3]).toBe(255);
+      },
+    );
+  });
+
+  it("subtracts the union of the dabs when the eraser runs", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const painted = createStampStroke(layerId, { ...STAMP_BRUSH, size: 16 }, "painted");
+        const eraser = {
+          ...createStampStroke(layerId, { ...STAMP_BRUSH, size: 16 }, "erased"),
+          erase: true,
+        };
+
+        harness.elements.set(layerId, [painted]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(readPixel(harness.surfaces[0], STAMP_X, STAMP_Y)[3]).toBe(255);
+
+        // The eraser subtracts the same union the paint path draws.
+        harness.elements.set(layerId, [painted, eraser]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(readPixel(harness.surfaces[0], STAMP_X, STAMP_Y)[3]).toBe(0);
+      },
+    );
+  });
+
+  it("erases the same pixels when the layer is rebuilt as when it is erased live", () => {
+    // The live eraser subtracts the whole stroke buffer; the rebuild erases
+    // with a region-bounded blit. The region has to cover the erase's whole
+    // coverage, so the two have to agree on *every* pixel: a single sample
+    // point cannot see a region that is one pixel too small, because the
+    // clipped rim is somewhere else. This is the case that caught a
+    // floor-instead-of-ceil region defect in a browser comparison.
+    const strokeAt = (
+      layerId: LayerId,
+      xs: number[],
+      ys: number[],
+      id: string,
+      patch: Partial<BrushSettings>,
+    ): StrokeRecord => ({
+      id,
+      layerId,
+      brush: { ...BRUSH, ...patch },
+      erase: false,
+      xs,
+      ys,
+      pressures: xs.map(() => 1),
+      times: xs.map((_value, index) => index * 16),
+      startTime: 0,
+    });
+
+    const erasers: { label: string; brush: Partial<BrushSettings> }[] = [
+      { label: "hard eraser", brush: { size: 24, hardness: 1 } },
+      { label: "soft eraser", brush: { size: 24, hardness: 0.4 } },
+      { label: "stamped eraser", brush: { size: 24, hardness: 1, stamp: true, stampSpacing: 0.1 } },
+      { label: "soft stamped eraser", brush: { size: 24, hardness: 0.4, stamp: true, stampSpacing: 0.1 } },
+    ];
+
+    for (const eraser of erasers) {
+      withPixels(
+        (doc) => doc,
+        (harness) => {
+          const layerId = harness.doc.layers[0].id;
+          // Fractional coordinates on purpose: a region's bounds are floored on
+          // the left and ceiled on the right, so a whole-pixel bound is one
+          // rounding away from being caught.
+          const painted = strokeAt(layerId, [20.5, 140.5], [60.5, 60.5], "painted", { size: 24 });
+          const erasing = {
+            ...strokeAt(layerId, [60.5, 62.5], [60.5, 60.5], "eraser", eraser.brush),
+            erase: true,
+          };
+
+          // The layer holds the painted stroke.
+          harness.elements.set(layerId, [painted]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+
+          // Erase it live: the live path subtracts the whole buffer, with no
+          // region to round.
+          harness.renderer.beginStroke(erasing);
+          harness.renderer.extendStroke(erasing, 0);
+          harness.renderer.render();
+          const liveErased = snapshotCanvas(harness.surfaces[0]);
+
+          // Rebuild the layer from the elements: the rebuild erases with a
+          // region-bounded blit, and the region has to be a superset of the
+          // erase's coverage.
+          harness.elements.set(layerId, [painted, erasing]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+          const rebuiltErased = snapshotCanvas(harness.surfaces[0]);
+
+          expectSameCanvas(rebuiltErased, liveErased, `rebuilt erase vs live erase (${eraser.label})`);
+        },
+        { size: 160 },
+      );
+    }
+  });
+
+  it("leaves no trace when the stroke is cancelled", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stroke = createStampStroke(layerId, STAMP_BRUSH, "cancelled");
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.extendStroke(stroke, 0);
+        harness.renderer.render();
+        expect(readPixel(harness.display, STAMP_X, STAMP_Y)[3]).toBe(255);
+
+        harness.renderer.cancelStroke();
+        harness.renderer.render();
+        // The buffer is cleared and the coverage cache released: the paper is
+        // back, exactly as if the stroke had never happened.
+        const pixel = readPixel(harness.display, STAMP_X, STAMP_Y);
+        expect([pixel[0], pixel[1], pixel[2]]).toEqual([255, 255, 255]);
+      },
+    );
+  });
+
+  it("rasterizes the same picture at raster scale 1 and 2", () => {
+    // The layer surface is the document at the raster scale, so the scale-2
+    // surface holds four device pixels per document pixel. The fake canvas
+    // does not resample, so the comparison averages them - the same box a
+    // browser's downscale uses.
+    const surfaceAt = (rasterScale: number): Float32Array => {
+      let pixels: Float32Array = new Float32Array(0);
+      withPixels(
+        (doc) => doc,
+        (harness) => {
+          const layerId = harness.doc.layers[0].id;
+          // A soft dab: its edge is a smooth curve rather than a one-pixel
+          // rim, so the two resolutions can be compared pixel by pixel.
+          const stroke = createStampStroke(
+            layerId,
+            { ...STAMP_BRUSH, stampHardness: 0.25 },
+            "scaled",
+          );
+          harness.elements.set(layerId, [stroke]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+          pixels = harness.surfaces[0].pixels.slice();
+        },
+        { rasterScale },
+      );
+      return pixels;
+    };
+
+    const atOne = surfaceAt(1);
+    const atTwo = surfaceAt(2);
+    const width = 32;
+    const sample = (pixels: Float32Array, stride: number, x: number, y: number): number =>
+      pixels[(y * stride + x) * 4 + 3];
+
+    // The dab plan is in document pixels, so the same dabs are placed at both
+    // scales and the picture is the same: the covered area matches, and the
+    // pixels in the middle of a dab are identical. The rim differs by a few
+    // levels, because a document pixel's coverage is the profile at its centre
+    // at scale 1 and the average of four device pixels at scale 2 - exactly as
+    // for the legacy segment path.
+    let totalOne = 0;
+    let totalTwo = 0;
+    for (let y = 0; y < width; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        totalOne += sample(atOne, width, x, y);
+        totalTwo +=
+          (sample(atTwo, width * 2, x * 2, y * 2) +
+            sample(atTwo, width * 2, x * 2 + 1, y * 2) +
+            sample(atTwo, width * 2, x * 2, y * 2 + 1) +
+            sample(atTwo, width * 2, x * 2 + 1, y * 2 + 1)) /
+          4;
+      }
+    }
+    expect(Math.abs(totalOne - totalTwo) / totalOne).toBeLessThan(0.02);
+
+    // The middle of the stroke is covered at both scales, to the same degree.
+    const scaledMiddle =
+      (sample(atTwo, width * 2, STAMP_X * 2, STAMP_Y * 2) +
+        sample(atTwo, width * 2, STAMP_X * 2 + 1, STAMP_Y * 2) +
+        sample(atTwo, width * 2, STAMP_X * 2, STAMP_Y * 2 + 1) +
+        sample(atTwo, width * 2, STAMP_X * 2 + 1, STAMP_Y * 2 + 1)) /
+      4;
+    expect(sample(atOne, width, STAMP_X, STAMP_Y)).toBeGreaterThan(0.85);
+    // The bend of the stroke is where several soft dabs overlap, so its
+    // coverage curve is the steepest there; a document pixel's coverage is the
+    // profile at its centre at scale 1 and the average of four device pixels
+    // at scale 2, which differ by a few levels.
+    expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
   });
 });
