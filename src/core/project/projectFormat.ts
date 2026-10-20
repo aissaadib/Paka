@@ -34,6 +34,7 @@ import type {
   GradientRecord,
   GradientStop,
   Layer,
+  LayerBlendMode,
   LayerElement,
   LayerId,
   StrokeRecord,
@@ -78,11 +79,20 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * strength. A version-6 reader ignores it and draws a textured stroke plain, so
  * the field is required and the version was bumped. Version-1 to -6 files open
  * unchanged with `texture = 0`.
+ * Version 8: a layer's `blendMode` may be `multiply` or `screen`, not only
+ * `normal`. A version-7 reader rejects the unknown mode, so the version was
+ * bumped; version-1 to -7 files still open unchanged.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 7;
+export const PROJECT_VERSION = 8;
 export const PROJECT_FILE_EXTENSION = "paka";
+
+const LAYER_BLEND_MODES: readonly LayerBlendMode[] = ["normal", "multiply", "screen"];
+
+function isLayerBlendMode(value: string): value is LayerBlendMode {
+  return (LAYER_BLEND_MODES as readonly string[]).includes(value);
+}
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
 /** Upper bound on the total fill-mask pixels a file may contain. */
@@ -570,11 +580,11 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
     const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
     const visible = readBoolean(record.visible, `${label} visibility`);
     const blendMode = readString(record.blendMode, `${label} blend mode`);
-    if (blendMode !== "normal") {
+    if (!isLayerBlendMode(blendMode)) {
       fail(`${label} uses the unsupported blend mode "${blendMode}".`);
     }
 
-    layers.push({ id, name: layerName, visible, opacity, blendMode: "normal" });
+    layers.push({ id, name: layerName, visible, opacity, blendMode });
 
     // Version 4 uses one ordered `elements` list. Older files have a `strokes`
     // array only, which is exactly a list of stroke elements in the same order.

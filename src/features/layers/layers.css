@@ -109,6 +109,35 @@
   font-variant-numeric: tabular-nums;
 }
 
+.layer-properties {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layer-blend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-blend__label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.layer-blend__select {
+  flex: 1;
+  height: var(--control-height);
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
 .layer-row__input {
   flex: 1;
   height: 20px;

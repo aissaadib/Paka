@@ -65,6 +65,10 @@ function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
   switch (mode) {
     case "normal":
       return "source-over";
+    case "multiply":
+      return "multiply";
+    case "screen":
+      return "screen";
   }
 }
 

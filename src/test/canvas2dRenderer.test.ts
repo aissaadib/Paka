@@ -239,6 +239,50 @@ describe("Canvas2DRenderer compositing", () => {
     expect(harness.display.named("strokeRect")[0].alpha).toBe(1);
   });
 
+  it("maps multiply and screen layer modes to the canvas composite operation", () => {
+    const harness = createHarness();
+    let doc = createDocument({ width: 20, height: 20 });
+    doc = addLayer(doc);
+    const topId = doc.layers[1].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(40, 40, 1);
+
+    harness.renderer.render();
+    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
+      "source-over",
+      "source-over",
+    ]);
+
+    harness.renderer.setDocument(updateLayer(doc, topId, { blendMode: "multiply" }));
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
+      "source-over",
+      "multiply",
+    ]);
+
+    harness.renderer.setDocument(updateLayer(doc, topId, { blendMode: "screen" }));
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
+      "source-over",
+      "screen",
+    ]);
+
+    // The mode is reset between layers and after the pass: the paper fill and
+    // the document border are never blended.
+    expect(harness.display.named("fillRect")[0].composite).toBe("source-over");
+    expect(harness.display.named("strokeRect")[0].composite).toBe("source-over");
+
+    // Export, bucket sampling and the colour probe share the same composite,
+    // so the document-size export must carry the mode too.
+    expect(harness.composeDocument().drawImages.map((image) => image.composite)).toEqual([
+      "source-over",
+      "screen",
+    ]);
+    expect(harness.renderer.readCompositePixel(1, 1)).not.toBeNull();
+  });
+
   it("follows the document layer order and reuses surfaces when layers move", () => {
     const harness = createHarness();
     let doc = createDocument({ width: 20, height: 20 });

@@ -126,6 +126,17 @@ describe("duplicateLayer", () => {
     expect(two.layers).toHaveLength(2);
   });
 
+  it("copies a non-normal blend mode", () => {
+    const two = addLayer(base);
+    const sourceId = two.layers[0].id;
+    const screened = updateLayer(two, sourceId, { blendMode: "screen" });
+    const copied = duplicateLayer(screened, sourceId);
+
+    expect(copied.layers[1].blendMode).toBe("screen");
+    // The source keeps its own mode: duplication reads, never mutates.
+    expect(copied.layers[0].blendMode).toBe("screen");
+  });
+
   it("numbers the copy name when it is already taken", () => {
     const taken = addLayer(base, "Layer 1 copy");
     const copied = duplicateLayer(taken, taken.layers[0].id);

@@ -188,6 +188,27 @@ composite read back as an `ImageData`, which is exactly what the bucket fill
 scans: the fill's boundary is the picture the user sees, not one layer's
 internal pixels.
 
+### Layer blend modes
+
+A layer's `blendMode` is compositing metadata, not part of its pixels. The
+renderer maps `normal` / `multiply` / `screen` to the matching Canvas 2D
+`globalCompositeOperation` in `compositeOperationFor` and applies it when the
+finished layer surface is drawn over the paper and the layers below it. Because
+the destination is the accumulated composite, `multiply` darkens against the
+paper and lower layers and `screen` lightens against them; layer opacity still
+scales the source first (`globalAlpha`), and the mode is reset to `source-over`
+after the layer pass so the document border and the next frame's paper are
+never blended.
+
+This is deliberately a composite-stage property. Changing a mode does not
+invalidate or re-rasterize any layer surface - only the final draw changes - so
+it is one undoable document command and one render, not an edit to stroke data.
+`paintDocument` is the single implementation shared by the display, the
+document-size PNG export and `readCompositeImage` (the bucket's source), and
+`readCompositePixel` (the colour picker) follows the same order, so all four
+agree. There is no per-stroke blend mode, group/clipping blend context or alpha
+inheritance yet.
+
 ### Why a stroke buffer
 
 Drawing directly into the layer surface would require re-rasterizing the whole
@@ -457,8 +478,8 @@ and **one coverage byte per pixel in that box**. Strokes, fill patches and
 gradients share one ordered `elements` list per layer, so a stroke drawn after a
 fill paints above it and undo can restore painting order exactly. The project
 format moved to version 4 for that list, version 5 added gradients, version 6
-added per-stroke brush hardness and version 7 added texture (see
-[PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills)).
+added per-stroke brush hardness, version 7 added texture and version 8 widened
+the layer blend mode (see [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills)).
 
 The gesture is a press, not a drag:
 
@@ -909,11 +930,15 @@ DOM-free by design.
   release commits one step, the radial/colour/opacity options are captured at
   press, zero-length drags and out-of-bounds presses record nothing, cancel and a
   tool switch remove the preview, coordinates clamp to the document, and
-  undo/redo replay the identical record. The format suite asserts a version-7
-  round trip of interleaved strokes, fills and gradients, version-1 to -6
-  compatibility, and rejection of bad boxes, masks, stops, geometry, opacity,
-  gradients in a version-4 file, missing or out-of-range hardness in version 6,
-  missing or out-of-range texture in version 7, and the fill pixel ceiling.
+  undo/redo replay the identical record. Layer blend mode changes are asserted
+  as one undoable, dirtying step, and the compositor test checks the operation
+  mapping, the reset between layers and the shared export path. The format
+  suite asserts a version-8 round trip of interleaved strokes, fills and
+  gradients with every blend mode, version-1 to -7 compatibility, and rejection
+  of bad boxes, masks, stops, geometry, opacity, unknown blend modes, gradients
+  in a version-4 file, missing or out-of-range hardness in version 6, missing or
+  out-of-range texture in version 7, future versions, and the fill pixel
+  ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
   exactly-closed outline, and the degenerate extent. Shape *behaviour* is
@@ -1031,12 +1056,12 @@ open drawing is left untouched, while a version-1 file opens with its strokes
 painted (a version-1 file has no erasures to lose). What has and has not been
 verified is reported separately rather than being implied by the test count. The
 format's own round trips are asserted in Vitest: the `erase` and `fill` flags
-survive a save/reopen, an unset flag is absent from the file, version 7 preserves
+survive a save/reopen, an unset flag is absent from the file, version 8 preserves
 an interleaved stroke/fill/gradient order with its mask bytes, geometry,
-per-stroke hardness and texture, a version-6 file opens with no texture, a
-version-5 file opens with hard strokes, a version-4 file still opens with fills
-and strokes, and a version-1, -2 or -3 file opens with its shapes traced rather
-than filled.
+per-stroke hardness, texture and layer blend mode, a version-7 file opens with
+normal blend mode, a version-6 file opens with no texture, a version-5 file opens
+with hard strokes, a version-4 file still opens with fills and strokes, and a
+version-1, -2 or -3 file opens with its shapes traced rather than filled.
 
 ## Known limitations
 
@@ -1099,8 +1124,10 @@ These are real gaps, not footnotes:
 - **Layer selection is not undoable.** Every layer *edit* is - add, duplicate,
   delete, rename, reorder, visibility and opacity - but selecting a layer
   changes no pixels and is deliberately not a history step.
-- **Blend modes**: only `normal`. The field exists so layer data can carry a
-  mode, but the compositor maps exactly one value.
+- **Blend modes**: only `normal`, `multiply` and `screen`. They are compositing
+  operations over the finished layer, so they combine with the paper and every
+  lower layer; there are no group, clipping or alpha-inheritance contexts and
+  the remaining Canvas blend modes are not exposed.
 - **Opacity is per stroke, not per dab.** A stroke gets one alpha, derived from
   the brush opacity and the stroke's mean pressure. Pressure can taper width
   within a stroke but not opacity: per-dab opacity without build-up needs

@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 7,
+  "version": 8,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -212,7 +212,7 @@ compositing order. A file must contain at least one layer.
 | `name` | string | Shown in the layers panel. |
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
-| `blendMode` | string | `"normal"` only today. |
+| `blendMode` | string | `"normal"`, `"multiply"` or `"screen"`; applied to the whole layer against the paper and the layers below it. |
 | `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
@@ -425,7 +425,8 @@ Two further guarantees:
 | 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | - |
 | 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
 | 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | Writes the additive `stabilizer` field too. |
-| 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | The current version; what this build always writes. |
+| 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | Writes the required `texture` field. |
+| 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -467,6 +468,12 @@ Two further guarantees:
   must therefore carry `hardness` in `0..1`; version-1 to -5 files predate the
   field and are read with `hardness = 1`, which is exactly what those files could
   have produced.
+- **Blend modes are why version 8 exists.** A layer's `blendMode` may now be
+  `multiply` or `screen` as well as `normal`. A version-7 reader validates the
+  value and rejects anything but `normal`, so it refuses a version-8 file
+  instead of silently compositing it normally - a visibly different picture.
+  Version-1 to -7 files always carry `normal` and open unchanged; the field was
+  already required, so there is no missing-value default.
 - **Stroke flags are still written only when set.** A stroke that paints and
   traces carries no `erase` or `fill` field; the only new mandatory stroke field
   in version 4 is `kind: "stroke"`, which distinguishes it from the other element
@@ -528,7 +535,9 @@ The output has no border, no zoom and no surrounding UI.
   mask pixels per file.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
-- **The format has one blend mode**, so `blendMode` carries no information yet.
+- **Only three blend modes**: `normal`, `multiply` and `screen`. They compose
+  against the paper and lower layers; there are no group/clipping contexts,
+  alpha inheritance or the remaining canvas blend modes.
 - **No autosave and no recovery file.** An unclean exit loses unsaved work; the
   close guard is the only protection.
 - **Metadata is minimal**: no author, no timestamps, no thumbnails, no colour

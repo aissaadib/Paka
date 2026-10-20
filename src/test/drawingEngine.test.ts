@@ -624,6 +624,31 @@ describe("DrawingEngine layer history", () => {
     expect(engine.getState().document.layers[1].name).toBe("Layer 2");
   });
 
+  it("records layer blend mode changes as one undoable step", () => {
+    const engine = createEngine();
+    engine.addLayer();
+    const topLayerId = engine.getState().document.activeLayerId as string;
+    const afterAdd = engine.getState().history.depth;
+    engine.markSaved("C:\\work\\blend.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    engine.setLayerBlendMode(topLayerId, "multiply");
+    expect(engine.getState().document.layers[1].blendMode).toBe("multiply");
+    expect(engine.getState().history.depth).toBe(afterAdd + 1);
+    expect(engine.getState().file.dirty).toBe(true);
+
+    engine.setLayerBlendMode(topLayerId, "multiply");
+    expect(engine.getState().history.depth).toBe(afterAdd + 1);
+
+    engine.setLayerBlendMode(topLayerId, "screen");
+    expect(engine.getState().history.depth).toBe(afterAdd + 2);
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers[1].blendMode).toBe("multiply");
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers[1].blendMode).toBe("normal");
+  });
+
   it("collapses an opacity drag into one undo step", () => {
     const engine = createEngine();
     engine.addLayer();

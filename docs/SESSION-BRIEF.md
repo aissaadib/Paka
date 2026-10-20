@@ -6,8 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at the grain-texture slice on `main` — clean and
-in sync with `origin/main`.
+Last verified: **2026-10-20**, at the layer blend mode slice on `main` — clean
+and in sync with `origin/main`.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,22 +30,25 @@ in sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, working tree clean after the grain-texture slice.
-- `pnpm test` → **417 tests in 26 files, all pass** (re-run for this slice).
+- Branch `main`, working tree clean after the layer blend mode slice.
+- `pnpm test` → **422 tests in 26 files, all pass** (re-run for this slice).
 - `pnpm typecheck` clean; `pnpm build` succeeds (verified for this slice).
-- Project file format **version 7** (`PROJECT_VERSION = 7`); `stabilizer` was
-  additive within v6 (missing = 0), and `texture` is required from v7.
+- Project file format **version 8** (`PROJECT_VERSION = 8`); `stabilizer` was
+  additive within v6 (missing = 0), `texture` is required from v7, and
+  `blendMode` may be `multiply` or `screen` from v8.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
-  built before the fill, gradient, hardness, spacing/stabilizer and texture
-  slices); packaged-app verification is still outstanding.
+  built before the fill, gradient, hardness, spacing/stabilizer, texture and
+  blend mode slices); packaged-app verification is still outstanding.
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
-  stabilizer and grain texture shipped; the stamp engine remains.
+  stabilizer and grain texture shipped; the stamp engine remains. Phase 4 has
+  `normal` / `multiply` / `screen` layer blend modes; masks and groups remain.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %); one `destination-in` pass, cached strength tiles, no self-darkening; brush/eraser/shapes; format v7. |
+| current `main` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and picker share the composite; format v8. |
+| `59c4cd6` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %); one `destination-in` pass, cached strength tiles, no self-darkening; brush/eraser/shapes; format v7. |
 | `567a091` | **Brush spacing and stabilizer** — spacing exposed as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) with a visible release settle; brush/eraser only; captured per stroke; additive within format v6. |
 | `56b12ab` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, two stops, opacity) in the ordered element list; live preview, one undo step; format v5. |
@@ -96,15 +99,16 @@ in sync with `origin/main`.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
-  opacity, selection. Layer edits are undoable (including the deleted layer's
-  elements).
+  opacity, blend mode (`Normal`, `Multiply`, `Screen`) and selection. A blend
+  mode combines the finished layer with the paper and every lower layer. Layer
+  edits are undoable (including the deleted layer's elements).
 - **History**: 200 commands; one step per gesture; a slider drag is one step.
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`), versioned `.paka` with ordered layer content (stroke samples,
   fill masks, gradient geometry), atomic writes, dirty indicator, discard guard.
   `Ctrl+N` is **not** bound; use the menu/dialog.
-- **PNG export**: full composite at document size, honours layer visibility and
-  opacity, leaves the document untouched.
+- **PNG export**: full composite at document size, honours layer visibility,
+  opacity and blend mode, leaves the document untouched.
 - **Status bar**: document size, zoom, history depth, selected count, cursor
   position, file name/messages, `● unsaved`.
 - **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
@@ -131,7 +135,7 @@ src/
     input/      pointer normalization, DOM binder
     rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke
     engine/     DrawingEngine: integration, gestures, history, snapshot
-    project/    format v7, gateway port, file orchestration
+    project/    format v8, gateway port, file orchestration
     export/     PNG export
   types/        shared value types
   utils/        math, colour, ids, paths, store
@@ -155,7 +159,7 @@ Key files for the next slice (stamp engine):
 - `src/core/engine/DrawingEngine.ts` — per-stroke brush capture and renderer
   begin/extend/finish lifecycle.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
-  serializer; appearance-changing stamp fields need v8.
+  serializer; appearance-changing stamp fields need v9.
 - Tests: `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`,
   `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
@@ -198,6 +202,14 @@ Key files for the next slice (stamp engine):
   composites. Segments are always drawn at alpha 1. Never lower per-segment
   alpha to fake softness: overlapping translucent segments reintroduce
   self-overlap darkening.
+- **A blend mode is composite-stage layer metadata, not stroke data.** It maps
+  to the Canvas 2D `globalCompositeOperation` used when the finished layer
+  surface is drawn over the paper and lower layers (`normal` → `source-over`,
+  else `multiply` / `screen`). Changing it does not dirty layer pixels or
+  re-rasterize; it is one undoable document command and one repaint.
+  `paintDocument` is shared by display, PNG export and bucket sampling, and
+  `readCompositePixel` (picker) follows the same order. No per-stroke blend,
+  group/clipping context or alpha inheritance yet.
 - **Hardness is a post-pass feather of the finished silhouette.** The brush
   field is `0..1`, default `1`; `strokeFeatherRadius = size * 0.1 * (1 -
   hardness)` document px, and `0` keeps the old raw-buffer path byte-identical.
@@ -256,8 +268,10 @@ Key files for the next slice (stamp engine):
   v6 requires `hardness` on every stroke brush and reads v1–v5 strokes as hard
   (`1`); `stabilizer` was added additively within v6 (missing = `0`) because the
   smoothed path is already stored in the samples; v7 requires `texture` because
-  an older reader would draw a textured stroke plain; unknown/newer versions are
-  rejected outright, as are v4 files containing a gradient.
+  an older reader would draw a textured stroke plain; v8 allows `multiply` and
+  `screen` blend modes because a v7 reader rejects them rather than drawing them
+  as `normal`; unknown/newer versions are rejected outright, as are v4 files
+  containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
   restores painting order. Undo/redo are refused during a selection gesture.
@@ -286,8 +300,10 @@ Product:
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no scale/rotate/perspective, no
   copy/paste across layers.
-- Only `normal` blend mode; no layer masks/groups; no adjustment layers; no
-  guides/grids; no autosave/crash recovery; `Ctrl+N` unbound.
+- Blend modes are limited to `normal`, `multiply` and `screen`, composited
+  against the paper and lower layers; no group/clipping contexts or alpha
+  inheritance. No layer masks/groups; no adjustment layers; no guides/grids; no
+  autosave/crash recovery; `Ctrl+N` unbound.
 - Project files store samples/masks/geometry as JSON, so they can grow large;
   no compressed/binary container yet.
 - React layer has no automated tests.
@@ -314,6 +330,12 @@ Verification gaps:
   (document anchoring). The renderer's pattern/`destination-in` pass and format
   v7 round-trip/defaults are covered by Vitest; there is no automated pixel test
   of the grain.
+- Layer blend modes were checked in the browser app and with real pixels through
+  the app's `Canvas2DRenderer`: the panel control set the layer mode, the
+  renderer produced the expected `multiply` / `screen` composite (and left
+  `normal` unchanged), the export composite matched, and undo/redo restored the
+  layer. The mode mapping, dirty flag, single-step history, duplication and v8
+  format round-trip are covered by Vitest. No packaged Tauri or high-DPI check.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
@@ -376,8 +398,8 @@ changing what current hard, soft and grain files look like.
 4. Any grain/stamp randomness must be deterministic from document coordinates so
    live, rebuild, undo/redo, reopen and PNG export agree at every zoom and
    `rasterScale`.
-5. Capture stamp settings per stroke. Appearance-changing fields that a v7
-   reader cannot ignore require **format version 8**; prove it with tests.
+5. Capture stamp settings per stroke. Appearance-changing fields that a v8
+   reader cannot ignore require **format version 9**; prove it with tests.
 6. Keep `spacing` (sample density) distinct from stamp spacing, or document an
    explicit migration if they are merged.
 
@@ -391,8 +413,8 @@ changing what current hard, soft and grain files look like.
       placeholders.
 - [ ] `src/core/engine/DrawingEngine.ts`: per-stroke capture and brush setters
       stay editor state (no history, no dirty).
-- [ ] `src/core/project/projectFormat.ts`: format v8 if appearance changes,
-      validate the new fields, read v1-v7 unchanged.
+- [ ] `src/core/project/projectFormat.ts`: format v9 if appearance changes,
+      validate the new fields, read v1-v8 unchanged.
 - [ ] Tests: segment/grain parity at default, stamped live/commit equality,
       self-overlap/no-darkening, deterministic pattern at different zoom/scale,
       format round-trip and old-file defaults.
@@ -410,7 +432,7 @@ changing what current hard, soft and grain files look like.
 - A stamped stroke is one undo step; it never rewrites existing strokes.
 - Live drawing, undo/redo, reopen and export produce the same stamped pixels.
 - Overlapping dabs and a self-crossing stamped stroke do not darken.
-- Old projects open unchanged; a v8 file requires the new fields and an older
+- Old projects open unchanged; a v9 file requires the new fields and an older
   reader refuses it rather than drawing the wrong look.
 
 ## 10. First ten minutes of a new session
@@ -418,7 +440,7 @@ changing what current hard, soft and grain files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    texture commit (or the commit this file names).
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 417 tests in 26 files).
+   anything (expect 422 tests in 26 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

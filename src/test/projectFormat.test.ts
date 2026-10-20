@@ -479,7 +479,7 @@ describe("parseProject round trip", () => {
     expect(legacy.project.strokes[0].brush.hardness).toBe(1);
   });
 
-  it("round-trips spacing, stabilizer and texture at version 7", () => {
+  it("round-trips spacing, stabilizer and texture", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const stroke = strokeFor(layerId, {
@@ -501,6 +501,45 @@ describe("parseProject round trip", () => {
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
     expect(payload.version).toBe(PROJECT_VERSION);
+  });
+
+  it("round-trips multiply and screen layer blend modes at version 8", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const multiplied = updateLayer(document, layerId, { blendMode: "multiply" });
+    const screened = updateLayer(document, layerId, { blendMode: "screen" });
+
+    const parsedMultiply = parseProject(
+      serializeProject(multiplied, storeOf([[layerId, [strokeFor(layerId)]]])),
+    );
+    expect(parsedMultiply.ok).toBe(true);
+    if (parsedMultiply.ok) {
+      expect(parsedMultiply.project.document.layers[0].blendMode).toBe("multiply");
+    }
+
+    const parsedScreen = parseProject(
+      serializeProject(screened, storeOf([[layerId, [strokeFor(layerId)]]])),
+    );
+    expect(parsedScreen.ok).toBe(true);
+    if (parsedScreen.ok) {
+      expect(parsedScreen.project.document.layers[0].blendMode).toBe("screen");
+    }
+  });
+
+  it("opens version 7 files with the normal blend mode", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]])),
+    ) as { version: number };
+    payload.version = 7;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.layers[0].blendMode).toBe("normal");
   });
 
   it("opens version 6 files with stabilizer 0 and texture 0", () => {
@@ -804,7 +843,7 @@ describe("parseProject rejections", () => {
     expect(rejectionOf(mutate((project) => (project.layers[0].visible = "yes" as unknown as boolean)))).toContain(
       "visibility",
     );
-    expect(rejectionOf(mutate((project) => (project.layers[0].blendMode = "multiply")))).toContain(
+    expect(rejectionOf(mutate((project) => (project.layers[0].blendMode = "color-dodge")))).toContain(
       "unsupported blend mode",
     );
   });

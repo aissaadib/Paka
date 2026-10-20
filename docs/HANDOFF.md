@@ -67,21 +67,22 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, in sync with `origin/main` after the texture slice.
-- **`pnpm test` → 417 tests in 26 files, all pass.** `pnpm typecheck` clean;
+- Branch `main`, pushed after the layer blend mode slice.
+- **`pnpm test` → 422 tests in 26 files, all pass.** `pnpm typecheck` clean;
   `pnpm build` succeeds.
-- **Project file format version 7** (`PROJECT_VERSION = 7`).
+- **Project file format version 8** (`PROJECT_VERSION = 8`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
   non-default manifests` warning (see §8). The executable predates the fill,
-  gradient, hardness, spacing/stabilizer and texture slices.
+  gradient, hardness, spacing/stabilizer, texture and blend mode slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %), cached strength tiles, no self-darkening, applies to brush/eraser/shapes; format version 7. |
+| current `main` | **Layer blend modes** — `normal`, `multiply` and `screen` per layer, applied when the finished layer composites over the paper and lower layers; one undoable step, no re-rasterization; display, PNG export, bucket sampling and the picker share the composite; format version 8. |
+| `59c4cd6` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %), cached strength tiles, no self-darkening, applies to brush/eraser/shapes; format version 7. |
 | `567a091` | **Brush spacing and stabilizer** — spacing surfaced as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) captured per stroke, with the release point appended as a visible settle segment; brush/eraser only; additive within format version 6. |
 | `56b12ab` | **Brush hardness** — `hardness` on the brush, captured per stroke; one post-pass feather of the finished silhouette (bounded, reused scratch), soft brush/eraser/shapes; format version 6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, stops, opacity) in the ordered element list; live drag preview, one undo step, format version 5. |
@@ -150,17 +151,29 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   renderer uses a Canvas linear/radial gradient over the full surface, with
   element opacity in `globalAlpha`; zero-length or fully transparent records draw
   nothing.
-- **Project format is version 7.** `layers[].elements` is one ordered list of
+- **Project format is version 8.** `layers[].elements` is one ordered list of
   `kind: "stroke"`, `kind: "fill"` and `kind: "gradient"` entries; versions 1-3
   have only `layers[].strokes`, read as stroke elements in the same order.
   Version-4 files open unchanged and may contain fills; a gradient in a
   version-4 file is rejected. Version-5 files open unchanged and gain
   `hardness = 1`; every version-6 brush must carry an explicit `0..1` hardness.
   Version-6 files open unchanged with `stabilizer = 0` and `texture = 0`; every
-  version-7 brush must carry an explicit `0..1` texture. Both bumps are required
-  because an older reader would ignore the field and mis-render the stroke
-  (soft strokes for v6, textured strokes for v7). `stabilizer` remains additive
-  within v6: it only shapes stored samples, so a missing field reads as `0`.
+  version-7 brush must carry an explicit `0..1` texture. Version-7 files open
+  unchanged as `blendMode: "normal"` layers; version 8 allows `multiply` and
+  `screen` as well. Each bump is required because an older reader would ignore
+  the field and mis-render the picture (soft strokes for v6, textured strokes
+  for v7, normal instead of multiplied/screened layers for v8). `stabilizer`
+  remains additive within v6: it only shapes stored samples, so a missing field
+  reads as `0`.
+- **Blend modes are composite-stage layer metadata.** `blendMode` maps to the
+  Canvas 2D `globalCompositeOperation` (`multiply` / `screen`, else
+  `source-over`) applied to the *finished* layer surface over the paper and the
+  layers below it. Changing it does not invalidate or re-rasterize any surface;
+  it is one undoable `DocumentCommand` and one repaint. `paintDocument` is shared
+  by the display, PNG export and `readCompositeImage` (bucket sampling), and
+  `readCompositePixel` (picker) uses the same order, so they cannot disagree.
+  Modes are not per stroke, and there is no group/clipping or alpha-inheritance
+  context yet.
 - **Selection stores only `{ layerId, strokeIds }`.** The dashed frame plus blue
   centreline trace is an overlay: display-only, never in a layer, never exported,
   never serialized.
@@ -405,8 +418,8 @@ The constraints that matter:
   accumulate per-dab coverage into one buffer so overlapping dabs cannot darken;
 - keep grain deterministic from document coordinates so live, rebuild, undo/redo,
   reopen and PNG export agree at every zoom and `rasterScale`;
-- a non-default stamp/dab appearance cannot be ignored by a v7 reader without
-  changing the picture, so expect **format version 8** if fields change output;
+- a non-default stamp/dab appearance cannot be ignored by a v8 reader without
+  changing the picture, so expect **format version 9** if fields change output;
 - keep `spacing` (sample density) distinct from stamp spacing, or document an
   explicit migration if they are merged.
 
@@ -442,6 +455,13 @@ Optional polish, deliberately not done yet:
   rendering of the feather remain unverified; save/reopen is covered by Vitest
   at the format and lifecycle level. The harness edge profile is evidence of
   falloff and parity, not a perceptual review of the curve.
+- **Layer blend modes were verified in the browser app and through the real
+  `Canvas2DRenderer`** (§8): the panel control changed the mode, the renderer
+  composited actual pixels with `multiply` and `screen`, the document export
+  matched the display path, and undo/redo restored the full layer composite.
+  They have **not** been verified in the packaged Tauri window; native
+  save/reopen of a blended layer is covered by Vitest at the format and
+  lifecycle level, not by a native round trip.
 - **High-DPI behaviour of the release executable is unverified.** The link warned
   about merged resource manifests; the app launches, its window responds and its
   title updates from the frontend, but DPI scaling of the packaged build was not
@@ -455,8 +475,10 @@ Optional polish, deliberately not done yet:
   hardness is a Gaussian feather of the stroke silhouette (not a stamp profile);
   spacing controls sample density rather than stamp spacing; the stabilizer is an
   exponential follow filter with visible lag and no look-ahead/rope catch-up;
-  texture is a single grain pass, not a stamped/directional/image texture, and
-  there is no stamp engine yet.
+  texture is a single grain pass, not a stamped/directional/image texture;
+  there is no stamp engine yet; blend modes are limited to `normal`, `multiply`
+  and `screen`, composited against the paper and lower layers with no group or
+  clipping context.
 
 ## 11. First five minutes of a new session
 

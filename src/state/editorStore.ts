@@ -12,7 +12,7 @@ import {
   type EditorSnapshot,
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
-import type { LayerId } from "../core/document/types";
+import type { LayerBlendMode, LayerId } from "../core/document/types";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
@@ -47,6 +47,7 @@ export interface EditorActions {
   renameLayer(layerId: LayerId, name: string): void;
   toggleLayerVisibility(layerId: LayerId): void;
   setLayerOpacity(layerId: LayerId, opacity: number): void;
+  setLayerBlendMode(layerId: LayerId, blendMode: LayerBlendMode): void;
   moveLayer(layerId: LayerId, delta: number): void;
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
@@ -105,6 +106,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     renameLayer: (layerId, name) => engine.renameLayer(layerId, name),
     toggleLayerVisibility: (layerId) => engine.toggleLayerVisibility(layerId),
     setLayerOpacity: (layerId, opacity) => engine.setLayerOpacity(layerId, opacity),
+    setLayerBlendMode: (layerId, blendMode) => engine.setLayerBlendMode(layerId, blendMode),
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
     selectLayer: (layerId) => engine.selectLayer(layerId),
     clearSelection: () => engine.clearSelection(),

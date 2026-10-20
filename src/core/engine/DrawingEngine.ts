@@ -70,6 +70,7 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  LayerBlendMode,
   LayerElement,
   LayerId,
   StrokeRecord,
@@ -731,6 +732,15 @@ export class DrawingEngine implements StrokeSource {
       before,
       documentOps.updateLayer(before, layerId, { opacity }),
       { mergeKey: `layer-opacity:${layerId}` },
+    );
+  }
+
+  setLayerBlendMode(layerId: LayerId, blendMode: LayerBlendMode): void {
+    const before = this.doc;
+    this.commitDocumentChange(
+      "Layer Blend Mode",
+      before,
+      documentOps.updateLayer(before, layerId, { blendMode }),
     );
   }
 

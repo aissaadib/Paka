@@ -7,6 +7,7 @@
  */
 
 import { useMemo } from "react";
+import type { LayerBlendMode } from "../../core/document/types";
 import {
   IconArrowDown,
   IconArrowUp,
@@ -20,6 +21,12 @@ import { SliderField } from "../../components/toolbar/SliderField";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { LayerRow } from "./LayerRow";
 import "./layers.css";
+
+const BLEND_MODE_OPTIONS: readonly { readonly value: LayerBlendMode; readonly label: string }[] = [
+  { value: "normal", label: "Normal" },
+  { value: "multiply", label: "Multiply" },
+  { value: "screen", label: "Screen" },
+];
 
 export function LayersPanel() {
   const { actions } = useEditor();
@@ -94,15 +101,39 @@ export function LayersPanel() {
       }
       footer={
         activeLayer ? (
-          <SliderField
-            label="Opacity"
-            min={0}
-            max={1}
-            step={0.01}
-            value={activeLayer.opacity}
-            format={(value) => `${Math.round(value * 100)}%`}
-            onChange={(opacity) => actions.setLayerOpacity(activeLayer.id, opacity)}
-          />
+          <div className="layer-properties">
+            <label className="layer-blend">
+              <span className="layer-blend__label">Blend</span>
+              <select
+                className="layer-blend__select"
+                value={activeLayer.blendMode}
+                aria-label="Layer blend mode"
+                onChange={(event) => {
+                  const option = BLEND_MODE_OPTIONS.find(
+                    (candidate) => candidate.value === event.target.value,
+                  );
+                  if (option) {
+                    actions.setLayerBlendMode(activeLayer.id, option.value);
+                  }
+                }}
+              >
+                {BLEND_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <SliderField
+              label="Opacity"
+              min={0}
+              max={1}
+              step={0.01}
+              value={activeLayer.opacity}
+              format={(value) => `${Math.round(value * 100)}%`}
+              onChange={(opacity) => actions.setLayerOpacity(activeLayer.id, opacity)}
+            />
+          </div>
         ) : null
       }
     >

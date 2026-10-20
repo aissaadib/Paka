@@ -145,7 +145,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 4 - Layer system
 
-- [ ] Blend modes beyond `normal`.
+- [x] Blend modes beyond `normal`: `multiply` and `screen` on a layer, applied
+      when the finished layer composites over the paper and the layers below it.
+      Changing the mode is one undoable step and does not re-rasterize layer
+      pixels - it only changes the final composite. Display, PNG export, bucket
+      sampling and the colour picker share that composite. Format v8, because a
+      v7 reader rejects the new values instead of drawing them as `normal`.
 - [ ] Layer masks and clipping.
 - [ ] Groups.
 
@@ -198,7 +203,7 @@ Non-negotiable constraints:
   layer rebuild, undo/redo, reopen and PNG export agree at every zoom and
   `rasterScale`. No `Math.random()` in a repaint path.
 - Capture any new stamp setting per stroke. A non-default stamp/dab appearance
-  that an older reader cannot reproduce requires a format bump (v8 if fields
+  that an older reader cannot reproduce requires a format bump (v9 if fields
   change appearance); keep `spacing` (sample density) distinct from stamp
   spacing or document an explicit migration if they are merged.
 - UI: real stamp spacing/hardness/texture controls only when the engine honours

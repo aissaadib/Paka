@@ -92,11 +92,13 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder,
-  visibility, opacity and selection. Layer pixels composite bottom-first over
-  the paper colour.
+  visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`) and
+  selection. Layer pixels composite bottom-first over the paper colour; a blend
+  mode combines the whole layer with everything below it, including the paper.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
-  rename, reorder, visibility and opacity. Available from the toolbar, the Edit
+  rename, reorder, visibility, opacity and blend mode. Available from the
+  toolbar, the Edit
   menu and `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+J` duplicates the active layer).
   Dragging a slider is one step, not one per tick. History is capped at 200
   commands.
@@ -111,8 +113,8 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   discard warning before new, open or close, and atomic writes that never leave a
   half-written file.
 - **PNG export** (`File → Export PNG…`) of the full composite at document size,
-  including layer visibility and opacity, without touching the editable
-  document.
+  including layer visibility, opacity and blend mode, without touching the
+  editable document.
 - **Status bar** reporting document size, zoom, history depth, how many strokes
   are selected, the live cursor position in document coordinates, the current
   file name and file messages.
@@ -246,7 +248,10 @@ paste-ready version of the same briefing is in
   faceted to the same sub-pixel degree as its outline.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
-- Only the **`normal`** blend mode is implemented.
+- Only the **`normal`**, **`multiply`** and **`screen`** blend modes are
+  implemented. They are canvas compositing operations over the finished layer,
+  so they combine with the paper and every lower layer; there are no group,
+  clipping or alpha-inheritance semantics yet.
 - Opacity is applied **per stroke, not per dab**: a stroke gets one alpha, from
   the brush opacity and the stroke's mean pressure. Pressure tapers width within
   a stroke but not opacity - per-dab opacity without build-up needs per-pixel

@@ -13,11 +13,11 @@ import type { BrushSettings } from "../../types/brush";
 export type LayerId = string;
 
 /**
- * Layer compositing mode. Only `normal` is implemented by the Canvas 2D
- * compositor today; the field exists so layer data and UI can carry a mode
- * once the compositor supports more.
+ * Layer compositing mode. Maps to the Canvas 2D composite operation used when
+ * the finished layer is drawn over the paper and the layers below it; `normal`
+ * is `source-over`, and the layer opacity scales the source first.
  */
-export type LayerBlendMode = "normal";
+export type LayerBlendMode = "normal" | "multiply" | "screen";
 
 export interface Layer {
   readonly id: LayerId;
