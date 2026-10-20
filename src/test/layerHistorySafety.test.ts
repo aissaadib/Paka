@@ -372,4 +372,49 @@ describe("layer edits during an active gesture", () => {
     expect(engine.getState().history.depth).toBe(afterAdd);
     expect(engine.getState().document.activeLayerId).toBe(topLayerId);
   });
+
+  it("explains a refused layer change once per gesture", () => {
+    const engine = createEngine();
+    engine.addLayer();
+    const topLayerId = engine.getState().document.activeLayerId as string;
+    const afterAdd = engine.getState().history.depth;
+
+    engine.beginStroke(createSample({ docX: 40, docY: 40 }));
+    const beforeRefusal = engine.getState();
+
+    // The first refusal explains itself, which publishes a new snapshot.
+    engine.setLayerOpacity(topLayerId, 0.5);
+    const afterFirstRefusal = engine.getState();
+    expect(afterFirstRefusal.notice).toContain("Finish the current stroke or selection");
+    expect(afterFirstRefusal).not.toBe(beforeRefusal);
+
+    // Further refusals in the same gesture keep the explanation and do not
+    // republish: a refused slider drag must not refresh the status bar on
+    // every tick.
+    engine.setLayerOpacity(topLayerId, 0.25);
+    engine.removeLayer(topLayerId);
+    const afterSecondRefusal = engine.getState();
+    expect(afterSecondRefusal).toBe(afterFirstRefusal);
+    expect(afterSecondRefusal.notice).toBe(afterFirstRefusal.notice);
+
+    // The refusal itself is unchanged: the layer, its opacity and the history
+    // are all untouched.
+    expect(layer(engine, topLayerId).opacity).toBe(1);
+    expect(engine.getState().document.layers).toHaveLength(2);
+    expect(engine.getState().history.depth).toBe(afterAdd);
+
+    // A dismissal stands for the rest of the gesture: the explanation is not
+    // raised again on the next refused tick.
+    engine.dismissNotice();
+    expect(engine.getState().notice).toBeNull();
+    engine.setLayerOpacity(topLayerId, 0.75);
+    expect(engine.getState().notice).toBeNull();
+
+    // The next gesture explains again on its own.
+    engine.cancelStroke();
+    engine.beginStroke(createSample({ docX: 60, docY: 60 }));
+    engine.setLayerOpacity(topLayerId, 0.75);
+    expect(engine.getState().notice).toContain("Finish the current stroke or selection");
+    engine.cancelStroke();
+  });
 });

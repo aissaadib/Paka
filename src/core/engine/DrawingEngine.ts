@@ -195,6 +195,13 @@ const WHEEL_ZOOM_SENSITIVITY = 0.0018;
 const WHEEL_ZOOM_FACTOR_LIMIT = 0.25;
 
 /**
+ * Shown when a layer operation is refused because a pointer gesture is still
+ * in flight. One explanation per gesture is enough; see
+ * `refuseLayerChangeDuringGesture`.
+ */
+const GESTURE_REFUSAL_NOTICE = "Finish the current stroke or selection before changing layers.";
+
+/**
  * True when a document-space point lies on the document rectangle.
  *
  * The canvas is deliberately larger than the document - there is a margin of
@@ -346,6 +353,12 @@ export class DrawingEngine implements StrokeSource {
   private gradientEndColor = DEFAULT_GRADIENT_END_COLOR;
   private activeGradient: ActiveGradient | null = null;
   private notice: string | null = null;
+  /**
+   * Whether the gesture-refusal notice has already been raised for the
+   * gesture in flight. One explanation per gesture is enough; repeating it on
+   * every refused tick would republish the status bar for nothing.
+   */
+  private refusalNoticeShown = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
   /**
@@ -969,6 +982,17 @@ export class DrawingEngine implements StrokeSource {
     );
   }
 
+  /**
+   * Marks the start of a gesture.
+   *
+   * Each gesture gets its own refusal notice: the explanation is shown once
+   * per gesture, so a refused slider drag does not republish the status bar
+   * on every tick, and the next gesture can explain again.
+   */
+  private beginGesture(): void {
+    this.refusalNoticeShown = false;
+  }
+
   /** True when `layerId` is still part of the current document. */
   private layerExists(layerId: LayerId): boolean {
     return this.doc.layers.some((layer) => layer.id === layerId);
@@ -981,12 +1005,21 @@ export class DrawingEngine implements StrokeSource {
    * is being painted into, so release would commit into a layer that is no
    * longer part of the document. Refusing is the safe no-op; the notice tells
    * the user why the click did nothing.
+   *
+   * The explanation is shown **once per gesture**. A slider drag that is
+   * refused on every tick would otherwise raise the notice on every tick, and
+   * a dismissed notice would pop back up on the next one; the refusal itself
+   * is unchanged, and the explanation stays on screen until it is dismissed.
+   * The next gesture may explain again.
    */
   private refuseLayerChangeDuringGesture(): boolean {
     if (!this.isGestureActive()) {
       return false;
     }
-    this.raiseNotice("Finish the current stroke or selection before changing layers.");
+    if (!this.refusalNoticeShown) {
+      this.refusalNoticeShown = true;
+      this.raiseNotice(GESTURE_REFUSAL_NOTICE);
+    }
     return true;
   }
 
@@ -1038,6 +1071,7 @@ export class DrawingEngine implements StrokeSource {
     const builder = new StrokeBuilder(stroke);
     builder.addSample(toStrokeSample(sample));
 
+    this.beginGesture();
     this.strokeBuilder = builder;
     this.activeStroke = stroke;
 
@@ -1092,6 +1126,7 @@ export class DrawingEngine implements StrokeSource {
       this.shapeFill && this.activeTool().definition.fillable === true,
     );
     stroke.startTime = sample.timeStamp;
+    this.beginGesture();
     this.strokeBuilder = null;
     this.activeStroke = stroke;
     this.renderer?.beginStroke(stroke);
@@ -1207,6 +1242,7 @@ export class DrawingEngine implements StrokeSource {
     const patch = createFillPatch(layerId, this.brush.color, region);
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(patch);
+    this.beginGesture();
     this.activeFill = { patch, index };
     this.renderer?.invalidateLayer(layerId);
     this.notice = null;
@@ -1293,6 +1329,7 @@ export class DrawingEngine implements StrokeSource {
     );
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(gradient);
+    this.beginGesture();
     this.activeGradient = { gradient, index };
     this.renderer?.invalidateLayer(layerId);
     this.notice = null;
@@ -1631,6 +1668,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.cancelSelectionGesture();
+    this.beginGesture();
     this.selectionGesture = {
       mode: "marquee",
       anchor: { x: sample.docX, y: sample.docY },
@@ -1663,6 +1701,7 @@ export class DrawingEngine implements StrokeSource {
     if (entries.length === 0) {
       return;
     }
+    this.beginGesture();
     this.selectionGesture = {
       mode: "move",
       anchor: { x: sample.docX, y: sample.docY },
