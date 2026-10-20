@@ -321,3 +321,18 @@ paste-ready version of the same briefing is in
 - The React layer has **no automated tests**; it is verified manually in the
   running app. The format, file-service and export orchestration have Vitest
   coverage, and the Rust file I/O has `#[cfg(test)]` tests in `project_io.rs`.
+
+## License
+
+Paka is MIT-licensed — see [`LICENSE`](LICENSE), "Copyright (c) 2026
+HumanHEART".
+
+The notices for the third-party material that ships inside the installer are in
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md), and the verbatim licence
+texts are in [`licenses/`](licenses/). Both are bundled with the installer, so
+a recipient of the installer receives them.
+
+Paka is built with [Tauri](https://tauri.app), which is licensed MIT OR
+Apache-2.0. TAURI is a trademark of The Tauri Programme within the Commons
+Conservancy. Paka's application icon is original artwork to this repository —
+see [`src-tauri/icons/README.md`](src-tauri/icons/README.md).
