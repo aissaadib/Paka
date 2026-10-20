@@ -39,7 +39,7 @@ non-dependency material listed in the last section.
 | Licence | Text | What it requires of a distributor |
 | --- | --- | --- |
 | MIT | `licenses/MIT.txt` | Include the copyright notice and the permission notice. `licenses/MIT.txt` is the permission notice; the per-dependency copyright line is in the tables below. |
-| Apache-2.0 | `licenses/Apache-2.0.txt` | Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). None of the Apache-2.0 dependencies below ships a `NOTICE` file, and Paka modifies none of them. |
+| Apache-2.0 | `licenses/Apache-2.0.txt` | Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). The `@playwright/*` and `playwright*` packages below ship a `NOTICE` file; its content is reproduced under 'The Apache-2.0 NOTICE' below. Paka modifies none of them. |
 | Apache-2.0 WITH LLVM-exception | `licenses/Apache-2.0-LLVM-exception.txt` | Include the Apache-2.0 licence text and the LLVM exception, which is what `licenses/Apache-2.0-LLVM-exception.txt` contains. |
 | MPL-2.0 | `licenses/MPL-2.0.txt` | Include the licence text and inform recipients how to obtain the source of the covered files (section 3.2). Paka does not modify these files, so no source is published; the source of each crate is at the crates.io URL in the table. |
 | Unicode-3.0 | `licenses/Unicode-3.0.txt` | Include the Unicode licence text, which `licenses/Unicode-3.0.txt` contains. The copyright line of each covered item is in the table. |
@@ -72,7 +72,7 @@ the files covered by a copyleft licence, is at the crates.io URL in its row.
 
 #### Apache-2.0 — 4 packages
 
-Licence text: `licenses/Apache-2.0.txt`. Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). None of the Apache-2.0 dependencies below ships a `NOTICE` file, and Paka modifies none of them.
+Licence text: `licenses/Apache-2.0.txt`. Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). The `@playwright/*` and `playwright*` packages below ship a `NOTICE` file; its content is reproduced under 'The Apache-2.0 NOTICE' below. Paka modifies none of them.
 
 | Package | Version | Licence | Copyright | Source |
 | --- | --- | --- | --- | --- |
@@ -558,16 +558,19 @@ The build-time packages (`vite`, `vitest`, `typescript`, `lightningcss`
 and their dependencies) do not ship with the application. Both are listed here,
 because both are part of this repository's source distribution.
 
-### npm (82 packages)
+### npm (85 packages)
 
-#### Apache-2.0 — 3 packages
+#### Apache-2.0 — 6 packages
 
-Licence text: `licenses/Apache-2.0.txt`. Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). None of the Apache-2.0 dependencies below ships a `NOTICE` file, and Paka modifies none of them.
+Licence text: `licenses/Apache-2.0.txt`. Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). The `@playwright/*` and `playwright*` packages below ship a `NOTICE` file; its content is reproduced under 'The Apache-2.0 NOTICE' below. Paka modifies none of them.
 
 | Package | Version | Licence | Copyright | Source |
 | --- | --- | --- | --- | --- |
+| `@playwright/test` | 1.64.1 | `Apache-2.0` | Copyright (c) Microsoft Corporation | https://github.com/microsoft/playwright |
 | `detect-libc` | 2.1.2 | `Apache-2.0` | Copyright 2017 Lovell Fuller and others. | git://github.com/lovell/detect-libc |
 | `expect-type` | 1.4.0 | `Apache-2.0` | Copyright 2024 Misha Kaletsky | https://github.com/mmkal/expect-type |
+| `playwright` | 1.64.1 | `Apache-2.0` | Copyright (c) Microsoft Corporation | https://github.com/microsoft/playwright |
+| `playwright-core` | 1.64.1 | `Apache-2.0` | Copyright (c) Microsoft Corporation | https://github.com/microsoft/playwright |
 | `typescript` | 6.0.3 | `Apache-2.0` | — see the package's own licence file | https://github.com/microsoft/TypeScript |
 
 #### BSD-3-Clause — 1 packages
@@ -721,6 +724,17 @@ item in `docs/RELEASE-READINESS.md` (item R3).
 The licence decision behind it is `docs/g1/reuse-decision.md`, with the
 machine-readable companion `docs/g1/provenance-record.json`. Both are
 Paka-authored and carry no third-party obligation.
+### The Apache-2.0 NOTICE
+
+The `@playwright/test`, `playwright` and `playwright-core` packages ship a
+`NOTICE` file. Apache-2.0 section 4(d) requires its content to be carried
+forward, so it is reproduced here in full:
+
+> Playwright
+> Copyright (c) Microsoft Corporation
+>
+> This software contains code derived from the Puppeteer project (https://github.com/puppeteer/puppeteer),
+> available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/blob/master/LICENSE).
 ## Review required
 
 Every dependency in the inventory matched a licence family above.

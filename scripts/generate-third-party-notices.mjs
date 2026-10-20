@@ -62,7 +62,7 @@ const FAMILIES = [
     match: /^Apache-2\.0$/,
     text: "licenses/Apache-2.0.txt",
     obligation:
-      "Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). None of the Apache-2.0 dependencies below ships a `NOTICE` file, and Paka modifies none of them.",
+      "Include a copy of the licence (section 4(a)); retain the copyright, patent, trademark and attribution notices (section 4(c)); mark any modified file (section 4(b)); carry forward any upstream `NOTICE` content (section 4(d)). The \`@playwright/*\` and \`playwright*\` packages below ship a \`NOTICE\` file; its content is reproduced under 'The Apache-2.0 NOTICE' below. Paka modifies none of them.",
   },
   {
     id: "Apache-2.0 WITH LLVM-exception",
@@ -325,6 +325,17 @@ item in \`docs/RELEASE-READINESS.md\` (item R3).
 The licence decision behind it is \`docs/g1/reuse-decision.md\`, with the
 machine-readable companion \`docs/g1/provenance-record.json\`. Both are
 Paka-authored and carry no third-party obligation.
+### The Apache-2.0 NOTICE
+
+The \`@playwright/test\`, \`playwright\` and \`playwright-core\` packages ship a
+\`NOTICE\` file. Apache-2.0 section 4(d) requires its content to be carried
+forward, so it is reproduced here in full:
+
+> Playwright
+> Copyright (c) Microsoft Corporation
+>
+> This software contains code derived from the Puppeteer project (https://github.com/puppeteer/puppeteer),
+> available under the Apache 2.0 license (https://github.com/puppeteer/puppeteer/blob/master/LICENSE).
 ## Review required
 
 ${

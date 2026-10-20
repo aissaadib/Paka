@@ -40,6 +40,15 @@
                     "source":  "https://github.com/oxc-project/oxc",
                     "homepage":  "https://oxc.rs"
                 },
+                  {
+                      "ecosystem":  "npm",
+                      "name":  "@playwright/test",
+                      "version":  "1.64.1",
+                      "license":  "Apache-2.0",
+                      "copyright":  "Copyright (c) Microsoft Corporation",
+                      "source":  "https://github.com/microsoft/playwright",
+                      "homepage":  "https://playwright.dev"
+                  },
                 {
                     "ecosystem":  "npm",
                     "name":  "@rolldown/binding-android-arm64",
@@ -616,6 +625,24 @@
                     "source":  "micromatch/picomatch",
                     "homepage":  "https://github.com/micromatch/picomatch"
                 },
+                  {
+                      "ecosystem":  "npm",
+                      "name":  "playwright",
+                      "version":  "1.64.1",
+                      "license":  "Apache-2.0",
+                      "copyright":  "Copyright (c) Microsoft Corporation",
+                      "source":  "https://github.com/microsoft/playwright",
+                      "homepage":  "https://playwright.dev"
+                  },
+                  {
+                      "ecosystem":  "npm",
+                      "name":  "playwright-core",
+                      "version":  "1.64.1",
+                      "license":  "Apache-2.0",
+                      "copyright":  "Copyright (c) Microsoft Corporation",
+                      "source":  "https://github.com/microsoft/playwright",
+                      "homepage":  "https://playwright.dev"
+                  },
                 {
                     "ecosystem":  "npm",
                     "name":  "postcss",
