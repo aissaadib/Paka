@@ -59,6 +59,17 @@ const SELECTION_TRACE_ALPHA = 0.85;
 /** Device pixels; divided by the display scale so it is constant at any zoom. */
 const SELECTION_TRACE_WIDTH = 1.5;
 const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
+/**
+ * How much of the document the element scratch may cover.
+ *
+ * The scratch is a full-resolution surface, so it has to fit in the raster
+ * budget of `core/document/document.ts` next to the layer surface, the stroke
+ * buffer and the erase snapshot. At one sixteenth of the document it adds at
+ * most one byte per document pixel to the peak, which keeps the budget as
+ * documented; an element that inks more falls back to the document-sized
+ * buffer, where the cost is the same as it was before.
+ */
+const ELEMENT_SCRATCH_MAX_FRACTION = 16;
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -167,6 +178,21 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * only ever read, never written, and the canvas is reused across frames.
    */
   private previewSurface: HTMLCanvasElement | null = null;
+  /**
+   * Scratch canvas for one element's coverage during a rebuild.
+   *
+   * Sized to the element's inked rectangle and reused across elements and
+   * rebuilds. A rebuild blits this small canvas onto the layer, and reading
+   * back a small canvas is cheap: reading back the document-sized stroke
+   * buffer after writing to it cost milliseconds per element on a 2048^2
+   * surface, which was the whole remaining cost of a rebuild.
+   *
+   * Its size is capped (see `ELEMENT_SCRATCH_MAX_FRACTION`), so it stays a
+   * small fraction of the document and the raster budget in
+   * `core/document/document.ts` keeps holding. An element that inks more than
+   * the cap allows falls back to the document-sized buffer.
+   */
+  private elementSurface: HTMLCanvasElement | null = null;
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
   private rasterScale: number;
@@ -612,6 +638,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.probeCanvas = null;
     this.featherBuffer = null;
     this.previewSurface = null;
+    this.elementSurface = null;
   }
 
   /**
@@ -774,8 +801,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
         this.rasterizeGradient(surface, element);
         continue;
       }
-      this.rasterizeStrokeToBuffer(element);
-      this.compositeStrokeBuffer(
+      this.compositeElement(
         surface,
         element,
         element.erase === true ? "destination-out" : "source-over",
@@ -866,6 +892,102 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.doc?.height ?? surface.canvas.height,
     );
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Rasterizes one element and blends it onto a layer, for a rebuild.
+   *
+   * The element's coverage is rasterized into the element scratch - a small,
+   * reused canvas the size of the element's inked rectangle - and that scratch
+   * is blitted onto the layer. The blit reads back a small canvas, which is
+   * cheap; reading back the document-sized stroke buffer after writing to it
+   * was the whole remaining cost of a rebuild.
+   *
+   * An element that inks more than the scratch may cover falls back to the
+   * document-sized buffer, which keeps the raster budget intact.
+   */
+  private compositeElement(
+    surface: LayerSurface,
+    stroke: StrokeRecord,
+    operation: GlobalCompositeOperation = "source-over",
+  ): void {
+    const region = this.strokeRegion(stroke);
+    if (!region) {
+      // A stroke without samples has no coverage to composite.
+      return;
+    }
+    if (!this.fitsElementScratch(region)) {
+      this.rasterizeStrokeToBuffer(stroke);
+      this.compositeStrokeBuffer(surface, stroke, operation);
+      return;
+    }
+    const scratch = this.rasterizeElementScratch(stroke, region);
+    if (!scratch) {
+      return;
+    }
+    this.surfaces.prepare(surface);
+    surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
+    surface.ctx.globalCompositeOperation = operation;
+    this.paintStrokeCoverageRegion(
+      surface.ctx,
+      stroke,
+      scratch,
+      { left: 0, top: 0, width: region.width, height: region.height },
+      region,
+    );
+    surface.ctx.globalAlpha = 1;
+    surface.ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Rasterizes a stroke into the element scratch.
+   *
+   * The scratch is translated so that the document coordinates land on the
+   * same device pixels they would in the document-sized buffer. The offset is
+   * a whole number of device pixels, so the subpixel phase - and with it the
+   * antialiasing of the coverage - is unchanged.
+   */
+  private rasterizeElementScratch(
+    stroke: StrokeRecord,
+    region: StrokeRegion,
+  ): HTMLCanvasElement | null {
+    const scratch = this.ensureElementSurface(region.width, region.height);
+    const ctx = scratch.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.clearRect(0, 0, scratch.width, scratch.height);
+    ctx.setTransform(this.rasterScale, 0, 0, this.rasterScale, -region.left, -region.top);
+    rasterizeStroke(ctx, stroke, 0);
+    return scratch;
+  }
+
+  /** True when the element's rectangle may be rasterized into the scratch. */
+  private fitsElementScratch(region: StrokeRegion): boolean {
+    const doc = this.doc;
+    if (!doc) {
+      return false;
+    }
+    const documentPixels = doc.width * doc.height * this.rasterScale * this.rasterScale;
+    return region.width * region.height * ELEMENT_SCRATCH_MAX_FRACTION <= documentPixels;
+  }
+
+  /** The element scratch, resized to an element's rectangle and reused. */
+  private ensureElementSurface(width: number, height: number): HTMLCanvasElement {
+    const existing = this.elementSurface;
+    if (existing) {
+      resizeCanvas(existing, Math.max(1, width), Math.max(1, height));
+      return existing;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width));
+    canvas.height = Math.max(1, Math.round(height));
+    this.elementSurface = canvas;
+    return canvas;
   }
 
   /**
@@ -975,7 +1097,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
     surface.ctx.globalCompositeOperation = operation;
-    this.paintStrokeCoverage(surface.ctx, stroke, region);
+    this.paintStrokeCoverageRegion(surface.ctx, stroke, this.strokeBuffer, region, region);
     surface.ctx.globalAlpha = 1;
     surface.ctx.globalCompositeOperation = "source-over";
   }
@@ -988,17 +1110,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * copy - which is what keeps live drawing, layer commits, rebuilds after
    * undo/redo and export pixel-identical for both a hard and a soft brush.
    *
-   * With a `region`, only that rectangle of the buffer is drawn: the surface
-   * and the buffer share a pixel grid, so the rectangle is blitted one to one
-   * and the pixels outside it - which hold no coverage of this stroke - are
-   * never touched. Without one (the display and eraser paths) the whole
-   * buffer is drawn, because the viewport clips that for us.
+   * This is the display and eraser path: it draws the document-sized stroke
+   * buffer, because the viewport clips that for us. The surface path uses
+   * `paintStrokeCoverageRegion` instead, which draws one element's rectangle.
    */
-  private paintStrokeCoverage(
-    ctx: CanvasRenderingContext2D,
-    stroke: StrokeRecord,
-    region?: StrokeRegion,
-  ): void {
+  private paintStrokeCoverage(ctx: CanvasRenderingContext2D, stroke: StrokeRecord): void {
     const doc = this.doc;
     if (!doc) {
       return;
@@ -1006,40 +1122,76 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const radius = strokeFeatherRadius(stroke.brush);
     const texture = Math.min(Math.max(stroke.brush.texture ?? 0, 0), 1);
     if (radius <= 0 && texture <= 0) {
-      if (region) {
-        // The identity transform keeps the blit on the device pixel grid, so
-        // no resampling can shift the coverage by a fraction of a pixel.
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.drawImage(
-          this.strokeBuffer,
-          region.left,
-          region.top,
-          region.width,
-          region.height,
-          region.left,
-          region.top,
-          region.width,
-          region.height,
-        );
-        ctx.restore();
-        return;
-      }
       ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
       return;
     }
-    // A zero-radius copy is the scratch path for a hard textured stroke; it
-    // keeps the raw stroke buffer untouched for the next extend.
-    const feathered = this.featherStroke(stroke, radius);
+    const region = this.strokeRegion(stroke);
+    if (!region) {
+      return;
+    }
+    const feathered = this.featheredCoverage(this.strokeBuffer, region, region, radius);
     if (!feathered) {
       return;
     }
     if (texture > 0) {
-      const scale = this.rasterScale;
       this.applyStrokeTexture(
         feathered.canvas,
-        Math.round(feathered.x * scale),
-        Math.round(feathered.y * scale),
+        Math.round(feathered.x * this.rasterScale),
+        Math.round(feathered.y * this.rasterScale),
+        texture,
+      );
+    }
+    ctx.drawImage(feathered.canvas, feathered.x, feathered.y, feathered.width, feathered.height);
+  }
+
+  /**
+   * Draws one element's coverage rectangle onto a layer surface.
+   *
+   * `source` holds the coverage and `sourceRect` the part of it to draw;
+   * `destRect` is where that part lands, in the surface's device pixels. For
+   * the document-sized buffer the two are the same rectangle (the buffer and
+   * the surface share a pixel grid); for the element scratch the source is
+   * element-local and the destination carries the element's offset.
+   *
+   * The blit runs under the identity transform, so it stays on the device
+   * pixel grid and no resampling can shift the coverage by a fraction of a
+   * pixel.
+   */
+  private paintStrokeCoverageRegion(
+    ctx: CanvasRenderingContext2D,
+    stroke: StrokeRecord,
+    source: HTMLCanvasElement,
+    sourceRect: StrokeRegion,
+    destRect: StrokeRegion,
+  ): void {
+    const radius = strokeFeatherRadius(stroke.brush);
+    const texture = Math.min(Math.max(stroke.brush.texture ?? 0, 0), 1);
+    if (radius <= 0 && texture <= 0) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(
+        source,
+        sourceRect.left,
+        sourceRect.top,
+        sourceRect.width,
+        sourceRect.height,
+        destRect.left,
+        destRect.top,
+        destRect.width,
+        destRect.height,
+      );
+      ctx.restore();
+      return;
+    }
+    const feathered = this.featheredCoverage(source, sourceRect, destRect, radius);
+    if (!feathered) {
+      return;
+    }
+    if (texture > 0) {
+      this.applyStrokeTexture(
+        feathered.canvas,
+        Math.round(feathered.x * this.rasterScale),
+        Math.round(feathered.y * this.rasterScale),
         texture,
       );
     }
@@ -1108,40 +1260,31 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
-   * Blurs the stroke buffer's silhouette by `radius` document pixels and returns
-   * it together with the document rectangle it occupies.
+   * Blurs a coverage rectangle by `radius` document pixels and returns it
+   * together with the document rectangle it occupies.
    *
-   * Only the stroke's padded bounding box is blurred and drawn, so the cost of
-   * a soft edge follows the stroke's own footprint instead of the document
-   * size. The pad is three blur radii, which is where a Gaussian's contribution
-   * has faded out; it also keeps the blur from clipping against the scratch
-   * canvas, whose edges then fall on transparent pixels. The blur length is
-   * scaled by `rasterScale`, so the soft edge is the same width on screen and in
-   * the rasterized layer, and the returned rectangle is in document coordinates
-   * so both callers can draw it through their own transform.
+   * Only the rectangle is blurred and drawn, so the cost of a soft edge
+   * follows the stroke's own footprint instead of the document size. The pad is
+   * three blur radii, which is where a Gaussian's contribution has faded out;
+   * it also keeps the blur from clipping against the scratch canvas, whose
+   * edges then fall on transparent pixels. The blur length is scaled by
+   * `rasterScale`, so the soft edge is the same width on screen and in the
+   * rasterized layer, and the returned rectangle is in document coordinates so
+   * both callers can draw it through their own transform.
+   *
+   * `sourceRect` is the part of the source canvas that holds the coverage and
+   * `destRect` is where that part belongs in the document, which differ for
+   * the element scratch (element-local source) and are the same rectangle for
+   * the document-sized buffer.
    */
-  private featherStroke(
-    stroke: StrokeRecord,
+  private featheredCoverage(
+    source: HTMLCanvasElement,
+    sourceRect: StrokeRegion,
+    destRect: StrokeRegion,
     radius: number,
   ): { canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number } | null {
-    const doc = this.doc;
-    if (!doc) {
-      return null;
-    }
-
     const scale = this.rasterScale;
-    const bounds = this.strokeSampleBounds(stroke);
-    if (!bounds) {
-      return null;
-    }
-    const { minX, minY, maxX, maxY } = bounds;
-
-    const left = Math.max(0, Math.floor(minX * scale));
-    const top = Math.max(0, Math.floor(minY * scale));
-    const right = Math.min(this.strokeBuffer.width, Math.ceil(maxX * scale));
-    const bottom = Math.min(this.strokeBuffer.height, Math.ceil(maxY * scale));
-    const width = right - left;
-    const height = bottom - top;
+    const { left, top, width, height } = sourceRect;
     if (width <= 0 || height <= 0) {
       return null;
     }
@@ -1157,10 +1300,16 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.filter = radius > 0 ? `blur(${radius * scale}px)` : "none";
-    ctx.drawImage(this.strokeBuffer, left, top, width, height, 0, 0, width, height);
+    ctx.drawImage(source, left, top, width, height, 0, 0, width, height);
     ctx.filter = "none";
 
-    return { canvas, x: left / scale, y: top / scale, width: width / scale, height: height / scale };
+    return {
+      canvas,
+      x: destRect.left / scale,
+      y: destRect.top / scale,
+      width: destRect.width / scale,
+      height: destRect.height / scale,
+    };
   }
 
   /** The shared feather scratch canvas, allocated on first use and reused after. */

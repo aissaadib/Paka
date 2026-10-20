@@ -1500,6 +1500,8 @@ class PixelCanvas {
   private _height = 0;
   /** Straight-alpha RGBA, one float per channel in `[0, 1]`. */
   pixels = new Float32Array(0);
+  /** The draw calls this canvas received, by name. */
+  readonly calls: string[] = [];
   readonly ctx: CanvasRenderingContext2D;
 
   constructor() {
@@ -1776,6 +1778,7 @@ class PixelCanvas {
         }
       },
       drawImage(source: unknown, ...args: number[]): void {
+        self.calls.push("drawImage");
         if (!(source instanceof PixelCanvas)) {
           return;
         }
@@ -1861,6 +1864,7 @@ class PixelCanvas {
         // The fill rule closes every subpath implicitly.
       },
       fill(): void {
+        self.calls.push("fill");
         const colour = parsePixelColour(state.fillStyle);
         if (!colour || state.path.length === 0) {
           return;
@@ -1891,6 +1895,7 @@ class PixelCanvas {
         }
       },
       stroke(): void {
+        self.calls.push("stroke");
         const colour = parsePixelColour(state.strokeStyle);
         if (!colour) {
           return;
@@ -2113,6 +2118,8 @@ interface PixelHarness {
   readonly surfaces: PixelCanvas[];
   /** The layer content the renderer rebuilds from. */
   readonly elements: Map<LayerId, LayerElement[]>;
+  /** Every canvas the renderer created, in creation order. */
+  readonly allocated: PixelCanvas[];
 }
 
 /**
@@ -2127,6 +2134,7 @@ interface PixelHarness {
 function withPixels(
   build: (doc: DrawingDocument) => DrawingDocument,
   body: (harness: PixelHarness) => void,
+  size = 32,
 ): void {
   const saved = (globalThis as { document?: unknown }).document;
   const allocated: PixelCanvas[] = [];
@@ -2151,9 +2159,9 @@ function withPixels(
       rasterScale: 1,
       scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
     });
-    const doc = build(createDocument({ width: 32, height: 32, background: "#ffffff" }));
+    const doc = build(createDocument({ width: size, height: size, background: "#ffffff" }));
     renderer.setDocument(doc);
-    renderer.setDisplaySize(32, 32, 1);
+    renderer.setDisplaySize(size, size, 1);
     renderer.render();
 
     body({
@@ -2163,6 +2171,7 @@ function withPixels(
       strokeBuffer: allocated[0],
       surfaces: allocated.slice(1),
       elements,
+      allocated,
     });
   } finally {
     (globalThis as { document?: unknown }).document = saved;
@@ -2419,8 +2428,30 @@ function touchedArea(canvas: RecordingCanvas, only?: "clearRect" | "drawImage"):
   return area;
 }
 
-/** True when every covered pixel of a canvas lies inside a rectangle. */
-function coverageInside(
+/**
+ * Compares two snapshots of canvas pixels.
+ *
+ * The tolerance is one 8-bit step: a path that shifts the coverage by a
+ * fraction of a pixel or changes an edge would move far more than that.
+ */
+function expectSamePixels(actual: Float32Array, expected: Float32Array): void {
+  expect(actual.length).toBe(expected.length);
+  let worst = 0;
+  let worstIndex = -1;
+  for (let index = 0; index < actual.length; index += 1) {
+    const difference = Math.abs(actual[index] - expected[index]);
+    if (difference > worst) {
+      worst = difference;
+      worstIndex = index;
+    }
+  }
+  expect(
+    worst,
+    `pixel channel ${worstIndex} differs by ${worst} (${actual[worstIndex]} vs ${expected[worstIndex]})`,
+  ).toBeLessThanOrEqual(1 / 255);
+}
+
+/** True when every covered pixel of a canvas lies inside a rectangle. */function coverageInside(
   canvas: PixelCanvas,
   left: number,
   top: number,
@@ -2440,6 +2471,11 @@ function coverageInside(
 }
 
 describe("Canvas2DRenderer bounded layer rasterization", () => {
+  /** The canvas a stroke was rasterized into: the element scratch. */
+  function elementScratch(): RecordingCanvas | undefined {
+    return recording.allocated.find((canvas) => canvas.named("stroke").length > 0);
+  }
+
   it("clears and blends only the rectangle a stroke inks", () => {
     const strokes = new Map<LayerId, StrokeRecord[]>();
     const harness = createHarness({ strokes });
@@ -2464,17 +2500,27 @@ describe("Canvas2DRenderer bounded layer rasterization", () => {
     harness.renderer.render();
 
     const [surface] = harness.layerSurfaces();
+    const scratch = elementScratch();
+    expect(scratch).toBeDefined();
+
     // A 10 px brush pads the samples by 6 px, so the stroke inks 32 x 32 px.
-    expect(touchedArea(harness.strokeBuffer, "clearRect")).toBe(32 * 32);
+    expect(touchedArea(scratch as RecordingCanvas, "clearRect")).toBe(32 * 32);
     expect(touchedArea(surface, "drawImage")).toBe(32 * 32);
     // A full-document clear and blend would have been 200 x 200 each.
     expect(touchedArea(surface, "drawImage")).toBeLessThan((200 * 200) / 10);
 
+    // The element is rasterized into the small scratch, never into the
+    // document-sized stroke buffer: reading that buffer back after writing to
+    // it was the whole remaining cost of a rebuild.
+    expect(touchedArea(harness.strokeBuffer, "clearRect")).toBe(0);
+
     // The blend is a one-to-one blit of that rectangle: the surface and the
-    // stroke buffer share a pixel grid, so nothing is resampled.
+    // scratch share a pixel grid, so nothing is resampled. The source is
+    // element-local, the destination carries the element's offset.
     const blend = surface.drawImages[0];
     expect(blend.args.length).toBe(9);
-    expect(blend.args.slice(1)).toEqual([144, 144, 32, 32, 144, 144, 32, 32]);
+    expect(blend.args[0]).toBe(scratch);
+    expect(blend.args.slice(1)).toEqual([0, 0, 32, 32, 144, 144, 32, 32]);
   });
 
   it("keeps the layer's own clear whole but bounds every element", () => {
@@ -2537,7 +2583,11 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
    * path's geometry and placement rather than the kernel; the grain case is
    * real, because the pattern pass is implemented.
    */
-  function checkEveryPathAgrees(brush: BrushSettings): void {
+  function checkEveryPathAgrees(
+    brush: BrushSettings,
+    size: number,
+    usesScratch: boolean,
+  ): void {
     withPixels(
       (doc) => doc,
       (harness) => {
@@ -2550,18 +2600,30 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.render();
         const rebuilt = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
         expect(rebuilt[3]).toBe(255);
+        const rebuiltCanvas = harness.display.pixels.slice();
 
-        // The bounded blit can only replace the old full-surface blit if no
-        // coverage falls outside the rectangle it draws. The coverage stays
-        // within the brush radius of the samples (4 px for an 8 px brush), and
-        // the drawn rectangle is that bound plus the padding the area test
-        // pins.
-        expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
+        // Which path the rebuild took: the element scratch, or the
+        // document-sized stroke buffer for an element too large for it. The
+        // scratch is the small canvas a stroke was rasterized into.
+        const scratch = harness.allocated.find(
+          (canvas) =>
+            canvas !== harness.display &&
+            canvas.width < harness.doc.width &&
+            canvas.calls.includes("stroke"),
+        );
+        if (usesScratch) {
+          // Reading the document-sized buffer back after writing to it was
+          // the whole remaining cost of a rebuild.
+          expect(scratch).toBeDefined();
+        } else {
+          expect(scratch).toBeUndefined();
+        }
 
         // A second rebuild must land on the same pixels.
         harness.renderer.invalidateLayer(layerId);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSamePixels(harness.display.pixels, rebuiltCanvas);
 
         // 2. Live: the same stroke drawn through the live path.
         harness.elements.set(layerId, []);
@@ -2572,29 +2634,47 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.extendStroke(live, 0);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSamePixels(harness.display.pixels, rebuiltCanvas);
+
+        // The live buffer's coverage stays inside the brush radius of the
+        // samples (4 px for an 8 px brush), which is what lets the release
+        // blend only that rectangle of the buffer.
+        expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
 
         // 3. The release: the buffer composites into the layer.
         harness.renderer.endStroke(live);
         harness.renderer.render();
         expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSamePixels(harness.display.pixels, rebuiltCanvas);
 
         // 4. The export: the same picture at document size.
         const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
         expect(readPixel(exported, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+        expectSamePixels(exported.pixels, rebuiltCanvas);
       },
+      size,
     );
   }
 
   it("agrees for a hard brush", () => {
-    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 1, texture: 0 });
+    const brush = { ...BRUSH, size: 8, hardness: 1, texture: 0 };
+    // A document large enough for the element scratch, and a small one where
+    // the element is too large for it and the rebuild falls back to the
+    // document-sized buffer. Both have to produce the same picture.
+    checkEveryPathAgrees(brush, 128, true);
+    checkEveryPathAgrees(brush, 32, false);
   });
 
   it("agrees for a soft brush", () => {
-    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 0.4, texture: 0 });
+    const brush = { ...BRUSH, size: 8, hardness: 0.4, texture: 0 };
+    checkEveryPathAgrees(brush, 128, true);
+    checkEveryPathAgrees(brush, 32, false);
   });
 
   it("agrees for a grain brush", () => {
-    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 1, texture: 1 });
+    const brush = { ...BRUSH, size: 8, hardness: 1, texture: 1 };
+    checkEveryPathAgrees(brush, 128, true);
+    checkEveryPathAgrees(brush, 32, false);
   });
 
   it("does not darken a self-crossing stroke", () => {
@@ -2647,6 +2727,7 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.render();
         expect(readPixel(harness.surfaces[0], SAMPLE_X, SAMPLE_Y)[3]).toBe(0);
       },
+      128,
     );
   });
 });
