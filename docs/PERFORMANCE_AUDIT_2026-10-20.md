@@ -403,6 +403,45 @@ The remaining, *unaddressed* part of the budget is that **every additional
 layer adds another full-resolution surface** (16 B/px at 2x), which the
 document cap does not bound.
 
+### F7 — After R1: the remaining per-element cost is the canvas-to-canvas blit, and it has a knee (measured 2026-10-20, after `4ac040b`)
+
+R1 removed the area term, so the rebuild was profiled again by wrapping the
+renderer's per-element internals (50 tiny strokes, one layer, medians of 3
+rounds):
+
+| Surface | Total per element | `compositeStrokeBuffer` (the blit) | `rasterizeStrokeToBuffer` | `strokeRegion` |
+| --- | --- | --- | --- | --- |
+| 2048x2048 (4.19 Mpx) | 6.85 ms | **6.77 ms** | 0.07 ms | 0.03 ms |
+| 3072x3072 (9.44 Mpx) | 0.28 ms | **0.24 ms** | 0.02 ms | 0.01 ms |
+
+99 % of what is left is the bounded blit onto the surface, and its cost has a
+**knee**: a 100-element rebuild of tiny strokes takes 323.8 ms on a 1024^2
+surface, 901 ms on a 2048^2 surface, 917 ms on a 2048^2 surface at 2x, and
+**17.9 ms on a 3072^2 surface** and 18.9 ms on a 4096^2 surface. The
+per-element cost is 3.2 / 9.0 / 9.2 / 0.18 / 0.19 ms — about 50x lower above
+~4-9 Mpx — while the inked area is the same (a few kpx) in every case. An
+ordinary 2048^2 document sits on the wrong side of that knee in this harness.
+
+An isolated micro-benchmark (no renderer, static source canvas) shows the
+bounded blit itself is cheap and size-independent: a 64x64 canvas-to-canvas
+blit costs 0.02 ms from a 2048^2 source and 0.03 ms from a 4096^2 source,
+while a *full-canvas* draw costs 1.6 ms and 10.5 ms respectively. So the
+expensive part is not the blit but reaching the source.
+
+**Hypothesis (not proven here):** the source is the document-sized stroke
+buffer, which was just drawn into, so each blit must flush or read back that
+canvas, and that cost is paid per element and scales with the whole buffer;
+the knee would then be Chromium's canvas acceleration switching at a few
+megapixels. **If that is right**, the next step is small: do not draw from a
+document-sized canvas that was just written — rasterize each element into a
+reused, element-sized scratch and blit that — which should make the
+per-element cost independent of the document size. A per-layer cache of the
+last rasterization (so an undo re-rasterizes only the changed element)
+attacks the same term from the other side.
+
+The numbers above are measured; the mechanism and the proposed fix are a
+hypothesis and a proposal.
+
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
