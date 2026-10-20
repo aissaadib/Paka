@@ -487,15 +487,17 @@ measurements.
 Rasterize each element into a small, reused, element-sized scratch and blit
 *that* — the scratch is small, so reading it back is cheap — or keep the
 element's coverage as an `ImageData` / `ImageBitmap` rather than a canvas.
-If the reasoning holds, the 2048^2 per-element cost should fall from ~6.8 ms
-towards the ~0.02 ms a static-source blit costs, i.e. a 100-element rebuild
-at 2048^2 from ~900 ms to a few ms. A per-layer cache of the last
-rasterization (so an undo re-rasterizes only the changed element) attacks the
-same term from the other side and does not depend on this mechanism. Either
-way the change touches the composite path (one alpha applied once, no
-self-darkening, live == commit == rebuild == export) and the eraser path, so
-it needs the same pixel-equality proof R1 got, plus the area and call-count
-assertions.
+A per-layer cache of the last rasterization (so an undo re-rasterizes only the
+changed element) attacks the same term from the other side. Either way the
+change touches the composite path (one alpha applied once, no self-darkening,
+live == commit == rebuild == export) and the eraser path, so it needs the same
+pixel-equality proof R1 got, plus the area and call-count assertions.
+
+> **Correction (2026-10-20):** the *timing* this predicted did not reproduce
+> on an idle machine, because the source side was not the whole story — the
+> **destination** is (F7f). The element scratch is still the right shape (and
+> it shipped as `f7cf50c`), but the win it can deliver is bounded by the
+> destination cost, which it does not touch.
 
 #### F7c — the proposed fix, prototyped: the cost model holds, but a naive implementation is not pixel-identical
 
@@ -545,8 +547,8 @@ controlled re-run on the committed tree gives **0 differing bytes** between
 the shipped element-scratch path, the document-buffer path and this very
 prototype (1024x1024, 50 tiny hard strokes, full layer surface). The pixel
 table above is void; the cost numbers above stand, because they measure the
-same work and agree with the F7b mechanism and with the independently
-measured 85x. See F7d.
+same work and agree with the F7b mechanism — though the *magnitude* of that
+mechanism's effect is itself session-dependent (F7e). See F7d.
 
 #### F7d — F1b is pixel-identical to pre-F1b (measured, Chromium)
 
@@ -613,6 +615,48 @@ So, stated plainly:
 A smaller, honest claim is worth more here than a large one that does not
 reproduce.
 
+#### F7f — the remaining cost is the DESTINATION, not the source (measured)
+
+On an idle machine the last term was isolated with a micro-benchmark: 100
+blits of 80x80 px (0.64 Mpx written in total) from a small static source into
+destinations of growing size.
+
+| Destination | Destination area | Time for 100 blits | Per draw | Per destination Mpx per draw |
+| --- | --- | --- | --- | --- |
+| 512x512 | 0.26 Mpx | 5.8 ms | 0.06 ms | 0.22 ms |
+| 1024x1024 | 1.05 Mpx | 13.5 ms | 0.14 ms | 0.13 ms |
+| 2048x2048 | 4.19 Mpx | 43.1 ms | 0.43 ms | 0.10 ms |
+| 4096x4096 | 16.78 Mpx | 247 ms | 2.47 ms | 0.15 ms |
+
+The pixels written are the same 0.64 Mpx in every case, so the cost is
+proportional to the **destination's area**, not to the blit and not to the call
+count — one blit of 800x800 px (the same 0.64 Mpx, resampled) into a 4096^2
+destination costs 178.8 ms.
+
+This matches the renderer's own numbers from the same session: **0.28 /
+0.49-0.54 / 1.72-1.84 ms per element** at 1.05 / 4.19 / 16.78 Mpx surfaces.
+The per-element cost of a rebuild is therefore the *destination*: every
+element is blitted into the document-sized layer surface, and each blit is
+charged the destination's area.
+
+**Consequences, stated against this audit's own earlier advice:**
+
+* F1b (bounded blit) could not remove this term, and neither can F7 (small
+  source): both shrink the source or the blit, while the cost is the
+  destination.
+* The only lever is **fewer draws into the document-sized surface**: batching
+  (accumulate several elements into one small scratch and blit that once) or
+  keeping a layer's coverage in tiles / partial surfaces and compositing per
+  tile on demand. This audit had deferred the tile-based option (R5) as
+  "not justified by the evidence" — that deferral no longer holds for large
+  documents, though spatial batching is the cheaper first step and does not
+  change the surface model.
+* **Caveat:** the constant (~0.1 ms per destination megapixel) is slow — that
+  is this harness, not the packaged app on a real GPU, where the same term
+  should be far smaller. The transferable part is the *shape* (per-draw cost
+  proportional to the destination area), not the constant, and it needs a
+  packaged-app profile before anyone re-architects the surfaces around it.
+
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
@@ -633,7 +677,7 @@ frame-rate number could be obtained in this environment.
 | **R2** | **Incremental / viewport-limited feathering** — keep the blurred result and re-blur only the newly inked band (plus the 3-radius pad), or blur only the visible region during a live stroke | Per-frame blur cost stops growing with the stroke length | F3: a full-document soft stroke at 2x currently re-blurs 16.6 Mpx every frame (0.55 s here) plus 0.24 s for grain | High: the "live preview == committed pixels" invariant must survive exactly. A Gaussian blur is not separable across a band boundary, so the incremental result must be proven pixel-identical, not approximately equal | Medium-large, needs pixel-equality tests |
 | **R3** | **Composite cache / invalidation** — keep paper+layers in a cached canvas, invalidate on layer content/opacity/blend/visibility change, and during a stroke only draw the preview on top | Per-frame cost during a stroke stops re-blending every layer | F4: 8 layers cost ~0.15 ms/layer here (or ~0.5 ms with real content and a blend mode) — small at 1280x800, 4x that on a 4K display | Medium: Agent 1's fix (preview composited inside its own layer, honouring opacity/blend) must be preserved by the cache; the cache must be invalidated on every path that changes a layer's appearance | Medium |
 | **R4** | **Raster-scale and surface budget policy** — keep the 16.7 Mpx document cap; additionally make `rasterScale` doc-size aware (e.g. 2x only up to 2048^2) and/or budget surfaces per layer | Memory and fill rate for big documents | F5: a 1x document at 4096^2 is 64 MiB per surface; at 2x it is 256 MiB. Lowering the scale for large documents is a visible quality trade-off | Medium-high: HiDPI crispness is a product decision; the current rule is `clamp(dpr, 1, 2)` | Small (policy) but touches product behaviour |
-| **R5** | **Tile-based surfaces** — render layers as tiles, only the visible ones | Removes the document-area term entirely | Not justified by this evidence: the document-area term is what R1 removes at a fraction of the risk, and the new document cap already refuses the documents that would need tiling | Very high: it changes the surface model, the export path, the erase snapshot and the format's mental model | Very large — **defer** |
+| **R5** | **Tile-based / partial surfaces** — keep a layer's coverage in tiles or partial surfaces and composite per tile on demand, instead of drawing every element into one document-sized surface | Removes the *destination-area* term: fewer draws into a big canvas | F7f: the remaining per-element cost is the destination — every element is blitted into the document-sized layer surface and each blit is charged ~0.1 ms per destination megapixel (harness constant). Neither F1b nor F7 can touch it. So the earlier "defer" no longer holds for large documents; **spatial batching** (accumulate elements into one small scratch, blit once) is the cheaper first step and does not change the surface model | Very high: it changes the surface model, the export path, the erase snapshot and the format's mental model. Needs a packaged-app profile first, because the constant is harness-specific | Very large — **revisit, batch first** |
 
 ---
 
@@ -646,13 +690,23 @@ frame-rate number could be obtained in this environment.
    hard, soft, grained and soft+grained brushes. The one case that did not
    improve is a layer whose strokes together cover the whole document (~23 %
    slower) — see F1c.
-1. **R1 follow-up — the per-element overhead at small surfaces.** With the
-   area term gone, the rebuild cost at small documents is dominated by a
-   per-element cost (~2.4 ms per element on a 1024^2 surface in this harness,
-   versus ~0.19 ms on a 4096^2 surface). The next lever there is the *number*
-   of elements — e.g. a per-layer cache of the last rasterization, so an undo
-   that only changes one stroke does not re-rasterize its neighbours — not
-   the area. Worth a profile before any work.
+1. **The per-element cost is the DESTINATION (F7f) — the next lever is fewer
+   draws into the document-sized layer surface, not smaller draws.** Every
+   element of a rebuild is blitted into the layer surface, and each blit is
+   charged the destination's area (~0.1 ms per destination megapixel in this
+   harness; the constant is harness-specific, the shape is not). F1b shrank the
+   blit and F7 shrank the source; neither touches this. Two ways forward:
+   * **Batching** (cheap, no model change): accumulate several elements into
+     one small scratch and blit that once, so a layer of N elements costs a
+     few destination draws instead of N. A per-layer cache of the last
+     rasterization (so an undo re-rasterizes only the changed element) is the
+     same idea applied to the element count.
+   * **Tiles / partial surfaces** (R5, expensive): keep a layer's coverage in
+     tiles and composite per tile on demand.
+
+   Both need a **packaged-app profile** first — on a real GPU the constant is
+   likely far smaller, and that changes the priority of this lever relative
+   to the others.
 2. **R2 — incremental feathering**, but only if the soft brush is still
    visibly slow in the packaged app. The safest first version is
    *viewport-limited* feathering (blur only what is visible while a stroke is
