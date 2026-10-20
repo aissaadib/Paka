@@ -9,6 +9,10 @@ toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 Last verified: **2026-10-20**, at commit `dc87f1d` on `main` — clean and in sync
 with `origin/main`.
 
+> **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
+> token-efficient file/symbol map and reading protocol; this brief is the
+> project state and plan.
+
 ---
 
 ## 1. What Paka is
