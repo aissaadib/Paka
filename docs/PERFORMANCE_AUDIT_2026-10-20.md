@@ -210,7 +210,10 @@ Three things this says, including the parts that are not flattering:
 
 1. **The win is real and large** where strokes ink a small part of the
    document: the 100-element undo at 2048^2 / 2x goes from 3.37 Gpx to 18 Mpx,
-   and from 2.53 s to 19 ms in this harness.
+   and from 2.53 s to 19 ms in this harness. (The *area* is durable; the
+   *timing* is not — see F7e: on an idle machine the same comparison is much
+   closer, because the cost that F1b removes only appears when the
+   document-sized read-back is expensive.)
 2. **A layer of strokes that together cover the document got ~23 % slower**
    (1061 -> 1307 ms). There the inked rectangle is nearly the whole document,
    so the area barely shrinks (1.11x) while the new path adds a per-element
@@ -442,6 +445,11 @@ attacks the same term from the other side.
 The numbers above are measured; the mechanism and the proposed fix are a
 hypothesis and a proposal.
 
+> **Correction (2026-10-20, late in the day):** the *magnitude* of the effect
+> is session-dependent, and the "knee" quoted above does not reproduce on an
+> idle machine — see F7e. The mechanism itself (F7b) is a reproducible
+> measurement; the rebuild timings around it are not.
+
 #### F7b — the mechanism, tested directly (measured)
 
 The mechanism above was then tested in isolation from the renderer: draw a
@@ -498,12 +506,19 @@ an identity transform for the blit.
 
 Cost (50 tiny strokes, per element, medians):
 
-| Document | Scale | Shipped | Prototype | |
+| Document | Scale | Shipped (F1b) | Prototype | |
 | --- | --- | --- | --- | --- |
 | 1024x1024 | 1 | 2.28 ms | 0.08 ms | 28x faster |
 | 2048x2048 | 1 | 6.80 ms | 0.08 ms | 85x faster |
 | 2048x2048 | 2 | 0.23 ms | 0.25 ms | neutral |
 | 3072x3072 | 1 | 0.15 ms | 0.12 ms | neutral |
+
+> **Correction (2026-10-20):** these timings were measured on a heavily
+> loaded machine and **do not reproduce on an idle one** (F7e). The *cost
+> model* they support is still right — a draw from a just-written canvas is a
+> whole-canvas operation (F7b) — but the size of the effect is not a stable
+> number. Read this table as "what the mechanism can be worth when the
+> document-sized read-back is expensive", not as a promise.
 
 So the cost model is confirmed: reading back the document-sized buffer *is*
 the remaining per-element cost, and an element-sized scratch removes it. Where
@@ -562,6 +577,41 @@ agent is actively editing measures their work-in-progress rather than a
 shipped implementation. An A/B that decides such a question must compare
 **the shipped path** against a **faithful reference**, on a **committed
 tree**.
+
+#### F7e — the timing claims do not reproduce on an idle machine (correction)
+
+Late in the day, with the other agents idle, the three paths were measured
+again — interleaved in one session on the committed tree (`f7cf50c`), 100 tiny
+strokes, per element:
+
+| Document | Scale | Surface | pre-F1b | F1b | F7 (element scratch) |
+| --- | --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 1.05 Mpx | 0.30 ms | 0.26 ms | 0.28 ms |
+| 2048x2048 | 1 | 4.19 Mpx | 0.53 ms | 0.54 ms | 0.49 ms |
+| 2048x2048 | 2 | 16.78 Mpx | 1.87 ms | 1.72 ms | 1.84 ms |
+
+All three paths are within ~10 % of each other. The same configuration that
+measured 901 ms earlier in the day now measures 54 ms, and the "knee" (where
+3072^2 and 4096^2 were *faster* than 2048^2) is gone: the per-element cost now
+grows monotonically with the surface size (0.26 / 0.54 / 1.84 ms at
+1.05 / 4.19 / 16.78 Mpx) for *every* path.
+
+So, stated plainly:
+
+* The **area** results (F1c) are durable — they are geometry, not timing.
+* The **mechanism** (F7b) is durable — it is an isolated measurement of
+  Chromium's canvas behaviour.
+* The **timings** around them are not: the 85x and the knee were artefacts of
+  a loaded machine and of the canvas state at the time (a canvas that has
+  been read back many times, or one demoted to a CPU-backed surface, makes
+  every read of it expensive).
+* The remaining per-element cost still scales with the **surface** size, not
+  with the inked area, and neither F1b nor F7 removes it. That is the next
+  real lever, and it needs a profile **in the packaged app** (real GPU, no
+  readback pressure) before anyone acts on it.
+
+A smaller, honest claim is worth more here than a large one that does not
+reproduce.
 
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
