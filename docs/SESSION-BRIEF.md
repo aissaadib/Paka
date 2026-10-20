@@ -279,9 +279,9 @@ Key files for the next slice (stamp engine):
   the user off the layer they are looking at, and does not drop the selection.
   Structural commands (add, delete, duplicate) still own the active layer.
 - **A merge barrier separates gestures.** An action that is not part of the
-  same continuous gesture - selecting a layer, changing the brush or a tool, an
-  undo or a redo - ends a merge run, so two same-keyed changes separated by it
-  stay two undo steps.
+  same continuous gesture - selecting a layer, changing the brush, a tool or
+  the selection, moving the viewport, an undo or a redo - ends a merge run, so
+  two same-keyed changes separated by it stay two undo steps.
 - **A document is bounded by total pixels, not only by side length.** At most
   16,777,216 document px, from an explicit 1 GiB budget for four 2x RGBA
   surfaces (4 bytes x 2^2 x 4 surfaces per document pixel). Enforced in the

@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import {
   DEFAULT_DOCUMENT_BACKGROUND,
+  MAX_DOCUMENT_PIXELS,
   MAX_DOCUMENT_SIZE,
   MIN_DOCUMENT_SIZE,
   isValidDocumentSize,
@@ -101,7 +102,9 @@ export function NewDocumentDialog({ onCancel, onCreate }: NewDocumentDialogProps
         <p className={valid ? "dialog__note" : "dialog__error"}>
           {valid
             ? "Pixels. Layer and brush sizes follow the document resolution."
-            : `Size must be between ${MIN_DOCUMENT_SIZE} and ${MAX_DOCUMENT_SIZE} px.`}
+            : `Size must be between ${MIN_DOCUMENT_SIZE} and ${MAX_DOCUMENT_SIZE} px per side, ` +
+              `and at most ${MAX_DOCUMENT_PIXELS.toLocaleString("en-US")} px in total, so a ` +
+              `large document cannot ask for a multi-gigabyte raster surface.`}
         </p>
         <div className="dialog__actions">
           <button type="button" className="button" onClick={onCancel}>

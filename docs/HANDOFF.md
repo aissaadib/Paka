@@ -199,8 +199,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   off the layer they are looking at and does not drop the selection. Structural
   commands (add, delete, duplicate) still own the active layer.
 - **A merge barrier separates gestures.** Selecting a layer, changing the
-  brush or a tool, and undo/redo end a merge run, so two same-keyed changes
-  separated by another action stay two undo steps.
+  brush, a tool or the selection, moving the viewport, and undo/redo end a
+  merge run, so two same-keyed changes separated by another action stay two
+  undo steps.
 - **A document is bounded by total pixels, not only by side length.** At most
   `MAX_DOCUMENT_PIXELS` = 16,777,216 document px, from an explicit 1 GiB budget
   for four 2x RGBA surfaces (4 bytes x 2^2 x 4 surfaces per document pixel).

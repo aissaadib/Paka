@@ -95,6 +95,9 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`) and
   selection. Layer pixels composite bottom-first over the paper colour; a blend
   mode combines the whole layer with everything below it, including the paper.
+  A layer cannot be changed while a stroke, fill, gradient or selection drag is
+  in flight, so a release can never commit into a layer that was removed
+  mid-drag.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the
