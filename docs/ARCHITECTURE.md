@@ -804,11 +804,33 @@ Stack mechanics:
   the same key collapse into one entry via `mergeWith`, keeping the earliest
   revert point and the latest apply point. The opacity slider uses this, so a
   drag is a single undo step instead of one per tick.
+- A **merge barrier** ends a merge run. An action that is not part of the same
+  continuous gesture - selecting another layer, changing the brush or a tool,
+  an undo or a redo - breaks the run, so the next same-keyed change starts a
+  fresh history entry instead of folding into an older one. Two opacity drags
+  separated by a layer change are two gestures, and therefore two undo steps.
 - Layer operations are **transactional**: no layer mutation touches the document
   directly. Deleting a layer is therefore recoverable, and every edit bumps the
   revision that drives the dirty flag. Selecting a layer is the one exception -
   it changes no pixels and is not an edit, so it neither dirties the document
   nor enters history.
+
+Layer changes are **refused while a gesture is in flight**. A stroke, fill,
+gradient or selection drag owns content that is not in history yet, and a layer
+edit at that moment could remove or reorder the layer the preview is being
+painted into, so the release would commit into a layer that is no longer part
+of the document. The engine answers with a notice ("Finish the current stroke
+or selection before changing layers.") and changes nothing. As a last resort -
+an external document swap - the finish and cancel paths check that the target
+layer still exists and discard the preview instead of recording an orphan
+stroke, fill or gradient.
+
+A metadata-only layer edit (rename, visibility, opacity, blend mode, reorder)
+**preserves the active layer** across undo and redo. Such a command no longer
+restores whichever layer happened to be active when the edit was made: undoing
+an opacity change keeps the layer the user is looking at, and with it the
+selection the user made. Structural commands (add, delete, duplicate) still own
+which layer becomes active, because they create or remove layers.
 
 History depth is capped (200 commands by default), dropping the oldest entries.
 

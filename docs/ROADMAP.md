@@ -45,6 +45,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       produces the same picture the user watched.
 - [x] Transactional document/layer mutations: every layer edit is a reversible
       command; deleting a layer no longer discards its strokes irrecoverably.
+- [x] Layer and history safety: a layer change is refused while a stroke, fill,
+      gradient or selection gesture is in flight (the release could not commit
+      into a layer that no longer exists); undo/redo of a metadata change keeps
+      the active layer, and therefore the selection; an action between two
+      same-keyed changes ends the merge run, so two gestures stay two undo
+      steps.
 - [x] Reject invalid or unsupported project files before touching the live
       document; the parser returns a result object and never throws.
 - [x] Dirty-revision tracking; new documents start clean; save clears it.

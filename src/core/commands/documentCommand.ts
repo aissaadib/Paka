@@ -55,6 +55,16 @@ export interface DocumentCommandSpec {
    * used for metadata-only changes (no element transfers).
    */
   readonly mergeKey?: string;
+  /**
+   * Keeps whichever layer is active right now when `before`/`after` is applied,
+   * provided that layer still exists in the target document. Metadata commands
+   * (rename, visibility, opacity, blend mode, reorder) set this so undo cannot
+   * jump back to a layer that was active when the edit was made; that stale
+   * active layer would also drop the user's current selection. Structural
+   * commands (add/delete/duplicate) leave it off: they own which layer becomes
+   * active.
+   */
+  readonly preserveActiveLayer?: boolean;
 }
 
 /**
@@ -62,6 +72,31 @@ export interface DocumentCommandSpec {
  * command's end state without widening the `Command` interface for everyone.
  */
 const SPECS = new WeakMap<Command, DocumentCommandSpec>();
+
+/**
+ * Returns `target`, optionally with the active layer carried over from the
+ * document as it is now. The current layer wins only while it still exists in
+ * `target`; a structural undo that removes it falls back to the target's own
+ * active layer so the document is never left pointing at a missing layer.
+ */
+function resolveActiveLayer(
+  target: DrawingDocument,
+  current: DrawingDocument,
+  spec: DocumentCommandSpec,
+): DrawingDocument {
+  if (!spec.preserveActiveLayer) {
+    return target;
+  }
+  const active = current.activeLayerId;
+  if (
+    active === null ||
+    active === target.activeLayerId ||
+    !target.layers.some((layer) => layer.id === active)
+  ) {
+    return target;
+  }
+  return { ...target, activeLayerId: active };
+}
 
 /**
  * Builds a reversible layer operation. Commands are created *already applied*
@@ -79,7 +114,7 @@ export function createDocumentCommand(
     if (spec.addedElements) {
       host.restoreLayerElements(spec.addedElements.layerId, spec.addedElements.elements);
     }
-    host.applyDocument(spec.after);
+    host.applyDocument(resolveActiveLayer(spec.after, host.getDocument(), spec));
   };
 
   const revert = (): void => {
@@ -89,7 +124,7 @@ export function createDocumentCommand(
     if (spec.removedElements) {
       host.restoreLayerElements(spec.removedElements.layerId, spec.removedElements.elements);
     }
-    host.applyDocument(spec.before);
+    host.applyDocument(resolveActiveLayer(spec.before, host.getDocument(), spec));
   };
 
   // Metadata-only changes are safe to coalesce; anything that moves content is
@@ -133,6 +168,7 @@ function mergeInto(current: DocumentCommandSpec, next: Command, host: DocumentCo
       before: current.before,
       after: nextSpec ? nextSpec.after : host.getDocument(),
       mergeKey: current.mergeKey,
+      preserveActiveLayer: current.preserveActiveLayer,
     },
     host,
   );

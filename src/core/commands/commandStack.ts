@@ -30,6 +30,13 @@ export class CommandStack {
   private readonly listeners = new Set<Listener>();
   private readonly limit: number;
   private busy = false;
+  /**
+   * Set when an action outside the command stack ends a merge run. Without it,
+   * two same-keyed commands separated by a non-command action (selecting a
+   * layer, a tool switch) would fold into one undo step even though the user
+   * made two separate gestures.
+   */
+  private mergeBarrier = false;
   private state: CommandStackState = EMPTY_STATE;
 
   constructor(options: CommandStackOptions = {}) {
@@ -54,8 +61,12 @@ export class CommandStack {
     }
     // Consecutive commands that declare the same merge key and know how to
     // combine collapse into the existing top entry. This is what keeps a
-    // slider drag (many tiny changes) to a single undo step.
-    if (this.mergeIntoTop(command)) {
+    // slider drag (many tiny changes) to a single undo step. An explicit
+    // barrier means something happened between the two commands, so this push
+    // must start a new entry even when the key matches.
+    const merged = !this.mergeBarrier && this.mergeIntoTop(command);
+    this.mergeBarrier = false;
+    if (merged) {
       return;
     }
     this.undoStack.push(command);
@@ -64,6 +75,17 @@ export class CommandStack {
       this.undoStack.splice(0, this.undoStack.length - this.limit);
     }
     this.publish();
+  }
+
+  /**
+   * Ends the current merge run.
+   *
+   * Call this from any action that is not part of the same continuous gesture
+   * but does not itself push a command (for example selecting another layer or
+   * changing a tool). The next command always starts a fresh history entry.
+   */
+  breakMerge(): void {
+    this.mergeBarrier = true;
   }
 
   /** Applies a command and records it. */
@@ -108,6 +130,7 @@ export class CommandStack {
   clear(): void {
     this.undoStack.length = 0;
     this.redoStack.length = 0;
+    this.mergeBarrier = false;
     this.publish();
   }
 

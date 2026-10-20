@@ -2186,8 +2186,13 @@ describe("DrawingEngine bucket fill", () => {
 
   it("refuses a document too large to scan and explains why", () => {
     const spy = createSpyRenderer({ compositeImage: framedComposite() });
+    // The document-pixel budget now caps `createDocument` exactly at the fill
+    // scan limit. Build a raw document one row/column over it so the bucket's
+    // own guard (for documents that bypass normal validation) stays covered;
+    // the spy renderer means no surface of that size is ever allocated.
+    const base = createDocument({ name: "Huge", width: 4096, height: 4096 });
     const engine = new DrawingEngine({
-      document: createDocument({ name: "Huge", width: 8192, height: 8192 }),
+      document: { ...base, width: 4097, height: 4097 },
       renderer: spy.renderer,
     });
     engine.setTool("bucket");

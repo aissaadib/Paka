@@ -654,12 +654,18 @@ export class DrawingEngine implements StrokeSource {
    * and restoring it must be one reversible step.
    */
   addLayer(): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     this.commitDocumentChange("Add Layer", before, documentOps.addLayer(before));
   }
 
   /** Copies a layer - metadata and strokes - directly above the original. */
   duplicateLayer(layerId: LayerId): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     const after = documentOps.duplicateLayer(before, layerId);
     if (after === before) {
@@ -680,6 +686,9 @@ export class DrawingEngine implements StrokeSource {
   }
 
   removeLayer(layerId: LayerId): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     const after = documentOps.removeLayer(before, layerId);
     if (after === before) {
@@ -695,6 +704,9 @@ export class DrawingEngine implements StrokeSource {
   }
 
   renameLayer(layerId: LayerId, name: string): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const trimmed = name.trim();
     if (trimmed === "") {
       return;
@@ -704,15 +716,20 @@ export class DrawingEngine implements StrokeSource {
       "Rename Layer",
       before,
       documentOps.updateLayer(before, layerId, { name: trimmed }),
+      { preserveActiveLayer: true },
     );
   }
 
   setLayerVisibility(layerId: LayerId, visible: boolean): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     this.commitDocumentChange(
       "Layer Visibility",
       before,
       documentOps.updateLayer(before, layerId, { visible }),
+      { preserveActiveLayer: true },
     );
   }
 
@@ -724,6 +741,9 @@ export class DrawingEngine implements StrokeSource {
   }
 
   setLayerOpacity(layerId: LayerId, opacity: number): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     // Dragging the opacity slider fires continuously; the merge key collapses
     // the whole drag into one undo step instead of one per tick.
@@ -731,30 +751,49 @@ export class DrawingEngine implements StrokeSource {
       "Layer Opacity",
       before,
       documentOps.updateLayer(before, layerId, { opacity }),
-      { mergeKey: `layer-opacity:${layerId}` },
+      { mergeKey: `layer-opacity:${layerId}`, preserveActiveLayer: true },
     );
   }
 
   setLayerBlendMode(layerId: LayerId, blendMode: LayerBlendMode): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
     this.commitDocumentChange(
       "Layer Blend Mode",
       before,
       documentOps.updateLayer(before, layerId, { blendMode }),
+      { preserveActiveLayer: true },
     );
   }
 
   moveLayer(layerId: LayerId, delta: number): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
     const before = this.doc;
-    this.commitDocumentChange("Reorder Layers", before, documentOps.moveLayer(before, layerId, delta));
+    this.commitDocumentChange(
+      "Reorder Layers",
+      before,
+      documentOps.moveLayer(before, layerId, delta),
+      { preserveActiveLayer: true },
+    );
   }
 
   /**
    * Selects the active layer. This changes no pixels and is not an edit, so it
    * is not undoable and never marks the document dirty - only the renderer and
    * the UI snapshot are refreshed.
+   *
+   * It also ends the current history merge run: changing the layer between two
+   * opacity drags is two gestures, not one.
    */
   selectLayer(layerId: LayerId): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    this.commands.breakMerge();
     this.applyDocumentState(documentOps.setActiveLayer(this.doc, layerId));
   }
 
@@ -787,6 +826,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.brush = next;
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -803,6 +843,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.shapeFill = filled;
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -821,6 +862,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.fillTolerance = next;
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -833,6 +875,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.gradientType = type;
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -847,6 +890,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.gradientEndColor = next;
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -872,6 +916,7 @@ export class DrawingEngine implements StrokeSource {
     if (toolId !== "select") {
       this.resetSelection();
     }
+    this.commands.breakMerge();
     this.publish();
   }
 
@@ -881,6 +926,7 @@ export class DrawingEngine implements StrokeSource {
     if (republishCursor) {
       this.republishCursor();
     }
+    this.commands.breakMerge();
     this.publish();
     this.requestRender();
   }
@@ -913,18 +959,63 @@ export class DrawingEngine implements StrokeSource {
 
   // ------------------------------------------------------------------ history
 
-  undo(): boolean {
-    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
+  /** True while a pointer gesture owns content that is not yet in history. */
+  private isGestureActive(): boolean {
+    return (
+      this.activeStroke !== null ||
+      this.activeFill !== null ||
+      this.activeGradient !== null ||
+      this.selectionGesture !== null
+    );
+  }
+
+  /** True when `layerId` is still part of the current document. */
+  private layerExists(layerId: LayerId): boolean {
+    return this.doc.layers.some((layer) => layer.id === layerId);
+  }
+
+  /**
+   * Refuses a layer change while a gesture is in flight.
+   *
+   * A layer edit at that moment could remove or reorder the layer the preview
+   * is being painted into, so release would commit into a layer that is no
+   * longer part of the document. Refusing is the safe no-op; the notice tells
+   * the user why the click did nothing.
+   */
+  private refuseLayerChangeDuringGesture(): boolean {
+    if (!this.isGestureActive()) {
       return false;
     }
-    return this.recordHistoryChange(() => this.commands.undo());
+    this.raiseNotice("Finish the current stroke or selection before changing layers.");
+    return true;
+  }
+
+  undo(): boolean {
+    if (this.isGestureActive()) {
+      return false;
+    }
+    return this.recordHistoryChange(() => {
+      const changed = this.commands.undo();
+      // Undoing is an action between gesture runs: a later same-keyed change
+      // starts its own history entry instead of folding across the undo.
+      if (changed) {
+        this.commands.breakMerge();
+      }
+      return changed;
+    });
   }
 
   redo(): boolean {
-    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
+    if (this.isGestureActive()) {
       return false;
     }
-    return this.recordHistoryChange(() => this.commands.redo());
+    return this.recordHistoryChange(() => {
+      const changed = this.commands.redo();
+      if (changed) {
+        this.commands.breakMerge();
+      }
+      return changed;
+    });
   }
 
   // ----------------------------------------------------------- stroke capture
@@ -1135,6 +1226,12 @@ export class DrawingEngine implements StrokeSource {
     if (!active) {
       return;
     }
+    if (!this.layerExists(active.patch.layerId)) {
+      // The layer disappeared mid-gesture (only possible through an external
+      // document swap). Discard the preview instead of leaving an orphan patch.
+      this.cancelFill();
+      return;
+    }
     this.activeFill = null;
     // Bumped before the command is recorded so the snapshot the stack publishes
     // already carries the dirty flag.
@@ -1207,7 +1304,7 @@ export class DrawingEngine implements StrokeSource {
   /** Moves the free end of the in-progress gradient and repaints its layer. */
   private updateGradient(sample: PointerSample): void {
     const active = this.activeGradient;
-    if (!active) {
+    if (!active || !this.layerExists(active.gradient.layerId)) {
       return;
     }
     const next = moveGradientEnd(
@@ -1231,6 +1328,16 @@ export class DrawingEngine implements StrokeSource {
    * recorded as an invisible history entry.
    */
   private finishGradient(sample: PointerSample): void {
+    const current = this.activeGradient;
+    if (!current) {
+      return;
+    }
+    if (!this.layerExists(current.gradient.layerId)) {
+      // Same defensive path as a fill: never record geometry into a layer that
+      // is no longer in the document.
+      this.cancelGradient();
+      return;
+    }
     this.updateGradient(sample);
     const active = this.activeGradient;
     if (!active) {
@@ -1267,6 +1374,15 @@ export class DrawingEngine implements StrokeSource {
     this.strokeBuilder = null;
     this.activeStroke = null;
     if (!stroke) {
+      return;
+    }
+
+    if (!this.layerExists(stroke.layerId)) {
+      // A layer mutation is refused during a gesture, so this is a last-resort
+      // guard for an external document swap: discard the preview rather than
+      // inserting its samples into a layer that no longer exists.
+      this.renderer?.cancelStroke();
+      this.publish();
       return;
     }
 
@@ -1318,6 +1434,7 @@ export class DrawingEngine implements StrokeSource {
   /** Drops the selection and its overlay. Not an edit: nothing enters history. */
   clearSelection(): void {
     this.cancelSelectionGesture();
+    this.commands.breakMerge();
     if (!this.selection) {
       this.syncSelectionOverlay();
       return;
@@ -1688,6 +1805,7 @@ export class DrawingEngine implements StrokeSource {
   private setSelection(next: Selection | null): void {
     this.selectionRun += 1;
     this.selection = next;
+    this.commands.breakMerge();
   }
 
   /** Selects the strokes of the active layer that the marquee meets. */
@@ -1841,6 +1959,7 @@ export class DrawingEngine implements StrokeSource {
       readonly mergeKey?: string;
       readonly removedElements?: ElementTransfer;
       readonly addedElements?: ElementTransfer;
+      readonly preserveActiveLayer?: boolean;
     } = {},
   ): void {
     if (after === before) {
