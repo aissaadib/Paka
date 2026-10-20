@@ -73,6 +73,19 @@ function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
 }
 
 /**
+ * A rectangle in the device pixels of the stroke buffer and the layer surface.
+ *
+ * The two share a pixel grid (both are the document at `rasterScale`), so a
+ * region can be blitted from one to the other without resampling.
+ */
+interface StrokeRegion {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
  * True when a layer contributes to the composite at all.
  *
  * Shared by the display/export painter and the colour probe so the two cannot
@@ -740,6 +753,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
     return surface;
   }
 
+  /**
+   * Rasterizes a layer from its stroke list when its pixels are invalid.
+   *
+   * Every element is rasterized into the stroke buffer and blended onto the
+   * surface, one element at a time, in painting order. Only the rectangle the
+   * element can ink is cleared and blended, so the cost of a rebuild follows
+   * the strokes' geometry instead of the document size: a layer of many small
+   * strokes costs a few small rectangles, not a few document-sized ones.
+   */
   private rasterizeLayer(surface: LayerSurface): void {
     this.surfaces.clear(surface);
     this.surfaces.prepare(surface);
@@ -846,10 +868,84 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.globalAlpha = 1;
   }
 
+  /**
+   * Rasterizes one stroke into the stroke buffer, over the rectangle it inks.
+   *
+   * Only that rectangle is cleared: the buffer is a scratch, and the caller
+   * blends the very same rectangle onto the surface, so pixels outside it are
+   * never read. A full clear would make every element cost a document-sized
+   * `clearRect` for nothing.
+   */
   private rasterizeStrokeToBuffer(stroke: StrokeRecord): void {
-    this.clearStrokeBuffer();
+    const region = this.strokeRegion(stroke);
+    if (!region) {
+      // A stroke without samples has no coverage to rasterize.
+      return;
+    }
+    this.clearStrokeBufferRegion(region);
     this.prepareStrokeBuffer();
     rasterizeStroke(this.strokeCtx, stroke, 0);
+  }
+
+  /** Clears the part of the stroke buffer a stroke is about to ink. */
+  private clearStrokeBufferRegion(region: StrokeRegion): void {
+    const { strokeCtx } = this;
+    strokeCtx.setTransform(1, 0, 0, 1, 0, 0);
+    strokeCtx.globalAlpha = 1;
+    strokeCtx.globalCompositeOperation = "source-over";
+    strokeCtx.filter = "none";
+    strokeCtx.clearRect(region.left, region.top, region.width, region.height);
+  }
+
+  /**
+   * The padded sample bounds of a stroke, in document coordinates.
+   *
+   * The padding is the brush radius, the blur spread of a soft edge and one
+   * pixel of margin. It is a superset of the rasterized coverage - round caps
+   * and joins never reach past the brush radius - and of the region the
+   * feather pass reads, so one rectangle serves for all three.
+   */
+  private strokeSampleBounds(
+    stroke: StrokeRecord,
+  ): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const radius = strokeFeatherRadius(stroke.brush);
+    const spread = strokeDiameter(stroke.brush, 1) / 2 + radius * 3 + 1;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < stroke.xs.length; index += 1) {
+      minX = Math.min(minX, stroke.xs[index] - spread);
+      minY = Math.min(minY, stroke.ys[index] - spread);
+      maxX = Math.max(maxX, stroke.xs[index] + spread);
+      maxY = Math.max(maxY, stroke.ys[index] + spread);
+    }
+    if (minX > maxX || minY > maxY) {
+      return null;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  /**
+   * The device-pixel rectangle a stroke inks, in the stroke buffer.
+   *
+   * It is clamped to the buffer, so a stroke that leaves the document is
+   * clipped exactly like the rasterizer clips it.
+   */
+  private strokeRegion(stroke: StrokeRecord): StrokeRegion | null {
+    const bounds = this.strokeSampleBounds(stroke);
+    if (!bounds) {
+      return null;
+    }
+    const scale = this.rasterScale;
+    const left = Math.max(0, Math.floor(bounds.minX * scale));
+    const top = Math.max(0, Math.floor(bounds.minY * scale));
+    const right = Math.min(this.strokeBuffer.width, Math.ceil(bounds.maxX * scale));
+    const bottom = Math.min(this.strokeBuffer.height, Math.ceil(bounds.maxY * scale));
+    if (right <= left || bottom <= top) {
+      return null;
+    }
+    return { left, top, width: right - left, height: bottom - top };
   }
 
   /**
@@ -871,10 +967,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (!doc) {
       return;
     }
+    const region = this.strokeRegion(stroke);
     this.surfaces.prepare(surface);
+    if (!region) {
+      // A stroke without samples has no coverage to composite.
+      return;
+    }
     surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
     surface.ctx.globalCompositeOperation = operation;
-    this.paintStrokeCoverage(surface.ctx, stroke);
+    this.paintStrokeCoverage(surface.ctx, stroke, region);
     surface.ctx.globalAlpha = 1;
     surface.ctx.globalCompositeOperation = "source-over";
   }
@@ -886,8 +987,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * place that decides between the raw full-coverage buffer and its feathered
    * copy - which is what keeps live drawing, layer commits, rebuilds after
    * undo/redo and export pixel-identical for both a hard and a soft brush.
+   *
+   * With a `region`, only that rectangle of the buffer is drawn: the surface
+   * and the buffer share a pixel grid, so the rectangle is blitted one to one
+   * and the pixels outside it - which hold no coverage of this stroke - are
+   * never touched. Without one (the display and eraser paths) the whole
+   * buffer is drawn, because the viewport clips that for us.
    */
-  private paintStrokeCoverage(ctx: CanvasRenderingContext2D, stroke: StrokeRecord): void {
+  private paintStrokeCoverage(
+    ctx: CanvasRenderingContext2D,
+    stroke: StrokeRecord,
+    region?: StrokeRegion,
+  ): void {
     const doc = this.doc;
     if (!doc) {
       return;
@@ -895,6 +1006,25 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const radius = strokeFeatherRadius(stroke.brush);
     const texture = Math.min(Math.max(stroke.brush.texture ?? 0, 0), 1);
     if (radius <= 0 && texture <= 0) {
+      if (region) {
+        // The identity transform keeps the blit on the device pixel grid, so
+        // no resampling can shift the coverage by a fraction of a pixel.
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(
+          this.strokeBuffer,
+          region.left,
+          region.top,
+          region.width,
+          region.height,
+          region.left,
+          region.top,
+          region.width,
+          region.height,
+        );
+        ctx.restore();
+        return;
+      }
       ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
       return;
     }
@@ -1000,20 +1130,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     const scale = this.rasterScale;
-    const spread = strokeDiameter(stroke.brush, 1) / 2 + radius * 3 + 1;
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (let index = 0; index < stroke.xs.length; index += 1) {
-      minX = Math.min(minX, stroke.xs[index] - spread);
-      minY = Math.min(minY, stroke.ys[index] - spread);
-      maxX = Math.max(maxX, stroke.xs[index] + spread);
-      maxY = Math.max(maxY, stroke.ys[index] + spread);
-    }
-    if (minX > maxX || minY > maxY) {
+    const bounds = this.strokeSampleBounds(stroke);
+    if (!bounds) {
       return null;
     }
+    const { minX, minY, maxX, maxY } = bounds;
 
     const left = Math.max(0, Math.floor(minX * scale));
     const top = Math.max(0, Math.floor(minY * scale));

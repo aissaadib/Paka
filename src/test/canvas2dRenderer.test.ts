@@ -613,7 +613,12 @@ describe("Canvas2DRenderer eraser", () => {
     expect(composites[0].alpha).toBe(0.5);
     expect(composites[1].composite).toBe("destination-out");
     expect(composites[1].alpha).toBe(1);
-    expect(composites[1].args.slice(1)).toEqual([0, 0, 100, 80]);
+
+    // Only the rectangle the stroke inks is subtracted: the samples run from
+    // (5, 5) to (45, 5) with a 10 px brush, so the padded bounds are
+    // 0..51 x 0..26 in document pixels. The blit is one to one, so the
+    // source and the destination rectangles are the same.
+    expect(composites[1].args.slice(1)).toEqual([0, 0, 51, 26, 0, 0, 51, 26]);
 
     // The composite operation does not leak into whatever paints next.
     surface.ctx.fillRect(0, 0, 1, 1);
@@ -1504,8 +1509,14 @@ class PixelCanvas {
       alpha: 1,
       composite: "source-over",
       fillStyle: "#000000" as unknown,
+      strokeStyle: "#000000" as unknown,
+      lineWidth: 1,
+      lineCap: "butt" as string,
+      lineJoin: "miter" as string,
       filter: "none",
       lineDash: [] as number[],
+      /** Subpaths of the current path, in user space. */
+      path: [] as number[][][],
     };
     const saved: (typeof state)[] = [];
 
@@ -1521,6 +1532,11 @@ class PixelCanvas {
 
       if (state.composite === "destination-out") {
         target[index + 3] = backdropAlpha * (1 - sourceAlpha);
+        return;
+      }
+      if (state.composite === "destination-in") {
+        // Keeps the destination's colour and scales its alpha by the source.
+        target[index + 3] = backdropAlpha * sourceAlpha;
         return;
       }
       if (sourceAlpha <= 0) {
@@ -1586,6 +1602,81 @@ class PixelCanvas {
       };
     };
 
+    /** Tiles a pattern image over a rectangle, like `fillRect` with a pattern. */
+    const fillPattern = (
+      pattern: {
+        image?: PixelCanvas;
+        transform?: { a: number; b: number; c: number; d: number; e: number; f: number } | null;
+      },
+      area: { left: number; top: number; right: number; bottom: number },
+    ): void => {
+      const image = pattern.image;
+      if (!image) {
+        return;
+      }
+      const transform = pattern.transform ?? { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+      const { a, d, e, f } = transform;
+      if (a === 0 || d === 0) {
+        return;
+      }
+      for (let row = area.top; row < area.bottom; row += 1) {
+        for (let column = area.left; column < area.right; column += 1) {
+          const ux = (column + 0.5 - e) / a;
+          const uy = (row + 0.5 - f) / d;
+          const sourceX = ((Math.floor(ux) % image.width) + image.width) % image.width;
+          const sourceY = ((Math.floor(uy) % image.height) + image.height) % image.height;
+          compositePixel(
+            (row * self._width + column) * 4,
+            image.pixels,
+            (sourceY * image.width + sourceX) * 4,
+            state.alpha,
+          );
+        }
+      }
+    };
+
+    /** Even-odd test of a device point against the current path. */
+    const insidePath = (path: number[][][], x: number, y: number): boolean => {
+      let crossings = 0;
+      for (const subpath of path) {
+        if (subpath.length < 2) {
+          continue;
+        }
+        for (let index = 0; index < subpath.length; index += 1) {
+          const from = subpath[index];
+          const to = subpath[(index + 1) % subpath.length];
+          if (from[1] > y !== to[1] > y) {
+            const t = (y - from[1]) / (to[1] - from[1]);
+            const crossX = from[0] + t * (to[0] - from[0]);
+            if (crossX > x) {
+              crossings += 1;
+            }
+          }
+        }
+      }
+      return crossings % 2 === 1;
+    };
+
+    /** Distance from a device point to a device-space segment. */
+    const distanceToSegment = (
+      x: number,
+      y: number,
+      x0: number,
+      y0: number,
+      x1: number,
+      y1: number,
+    ): number => {
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const lengthSquared = dx * dx + dy * dy;
+      if (lengthSquared === 0) {
+        return Math.hypot(x - x0, y - y0);
+      }
+      let t = ((x - x0) * dx + (y - y0) * dy) / lengthSquared;
+      t = Math.min(1, Math.max(0, t));
+      return Math.hypot(x - (x0 + t * dx), y - (y0 + t * dy));
+    };
+
     const ctx = {
       canvas: this,
       get globalAlpha(): number {
@@ -1621,8 +1712,13 @@ class PixelCanvas {
           alpha: state.alpha,
           composite: state.composite,
           fillStyle: state.fillStyle,
+          strokeStyle: state.strokeStyle,
+          lineWidth: state.lineWidth,
+          lineCap: state.lineCap,
+          lineJoin: state.lineJoin,
           filter: state.filter,
           lineDash: [...state.lineDash],
+          path: state.path,
         });
       },
       restore(): void {
@@ -1632,8 +1728,13 @@ class PixelCanvas {
           state.alpha = previous.alpha;
           state.composite = previous.composite;
           state.fillStyle = previous.fillStyle;
+          state.strokeStyle = previous.strokeStyle;
+          state.lineWidth = previous.lineWidth;
+          state.lineCap = previous.lineCap;
+          state.lineJoin = previous.lineJoin;
           state.filter = previous.filter;
           state.lineDash = previous.lineDash;
+          state.path = previous.path;
         }
       },
       clearRect(x: number, y: number, width: number, height: number): void {
@@ -1649,12 +1750,20 @@ class PixelCanvas {
         }
       },
       fillRect(x: number, y: number, width: number, height: number): void {
+        const area = bounds(x, y, width, height);
+        const pattern = state.fillStyle as {
+          image?: PixelCanvas;
+          transform?: { a: number; b: number; c: number; d: number; e: number; f: number } | null;
+        } | null;
+        if (pattern && typeof pattern === "object" && pattern.image instanceof PixelCanvas) {
+          fillPattern(pattern, area);
+          return;
+        }
         const colour = parsePixelColour(state.fillStyle);
         if (!colour) {
           return;
         }
         const source = [colour[0], colour[1], colour[2], colour[3]];
-        const area = bounds(x, y, width, height);
         for (let row = area.top; row < area.bottom; row += 1) {
           for (let column = area.left; column < area.right; column += 1) {
             compositePixel(
@@ -1723,14 +1832,102 @@ class PixelCanvas {
           }
         }
       },
-      // Path drawing is not part of these tests: coverage is seeded directly.
-      beginPath(): void {},
-      moveTo(): void {},
-      lineTo(): void {},
-      arc(): void {},
-      closePath(): void {},
-      fill(): void {},
-      stroke(): void {},
+      // Path drawing: the stroke rasterizer is a thick polyline, so a capsule
+      // per segment reproduces it. Edges are hard (no antialiasing), which is
+      // enough to compare paths against each other.
+      beginPath(): void {
+        state.path = [];
+      },
+      moveTo(x: number, y: number): void {
+        state.path.push([[x, y]]);
+      },
+      lineTo(x: number, y: number): void {
+        if (state.path.length === 0) {
+          state.path.push([[x, y]]);
+          return;
+        }
+        state.path[state.path.length - 1].push([x, y]);
+      },
+      arc(x: number, y: number, radius: number): void {
+        const points: number[][] = [];
+        const steps = 24;
+        for (let step = 0; step < steps; step += 1) {
+          const angle = (step / steps) * Math.PI * 2;
+          points.push([x + Math.cos(angle) * radius, y + Math.sin(angle) * radius]);
+        }
+        state.path.push(points);
+      },
+      closePath(): void {
+        // The fill rule closes every subpath implicitly.
+      },
+      fill(): void {
+        const colour = parsePixelColour(state.fillStyle);
+        if (!colour || state.path.length === 0) {
+          return;
+        }
+        const source = [colour[0], colour[1], colour[2], colour[3]];
+        const [a, , , d, e, f] = state.transform;
+        const points = state.path.flat();
+        const minX = Math.min(...points.map((point) => a * point[0] + e));
+        const maxX = Math.max(...points.map((point) => a * point[0] + e));
+        const minY = Math.min(...points.map((point) => d * point[1] + f));
+        const maxY = Math.max(...points.map((point) => d * point[1] + f));
+        const left = Math.max(0, Math.floor(minX));
+        const top = Math.max(0, Math.floor(minY));
+        const right = Math.min(self._width, Math.ceil(maxX));
+        const bottom = Math.min(self._height, Math.ceil(maxY));
+        for (let row = top; row < bottom; row += 1) {
+          for (let column = left; column < right; column += 1) {
+            if (!insidePath(state.path, column + 0.5, row + 0.5)) {
+              continue;
+            }
+            compositePixel(
+              (row * self._width + column) * 4,
+              source,
+              0,
+              state.alpha * colour[3],
+            );
+          }
+        }
+      },
+      stroke(): void {
+        const colour = parsePixelColour(state.strokeStyle);
+        if (!colour) {
+          return;
+        }
+        const source = [colour[0], colour[1], colour[2], colour[3]];
+        const [a, , , d, e, f] = state.transform;
+        const radius = (state.lineWidth / 2) * Math.abs(a);
+        for (const subpath of state.path) {
+          for (let index = 1; index < subpath.length; index += 1) {
+            const from = subpath[index - 1];
+            const to = subpath[index];
+            const x0 = a * from[0] + e;
+            const y0 = d * from[1] + f;
+            const x1 = a * to[0] + e;
+            const y1 = d * to[1] + f;
+            const left = Math.max(0, Math.floor(Math.min(x0, x1) - radius));
+            const top = Math.max(0, Math.floor(Math.min(y0, y1) - radius));
+            const right = Math.min(self._width, Math.ceil(Math.max(x0, x1) + radius));
+            const bottom = Math.min(self._height, Math.ceil(Math.max(y0, y1) + radius));
+            for (let row = top; row < bottom; row += 1) {
+              for (let column = left; column < right; column += 1) {
+                if (
+                  distanceToSegment(column + 0.5, row + 0.5, x0, y0, x1, y1) > radius
+                ) {
+                  continue;
+                }
+                compositePixel(
+                  (row * self._width + column) * 4,
+                  source,
+                  0,
+                  state.alpha * colour[3],
+                );
+              }
+            }
+          }
+        }
+      },
       strokeRect(): void {},
       setLineDash(segments: number[] = []): void {
         state.lineDash = [...segments];
@@ -1791,13 +1988,44 @@ class PixelCanvas {
         return { data, width, height, colorSpace: "srgb" } as unknown as ImageData;
       },
       // State the renderer sets but this fake does not consume.
-      strokeStyle: "#000000",
-      lineWidth: 1,
-      lineCap: "butt",
-      lineJoin: "miter",
+      get strokeStyle(): unknown {
+        return state.strokeStyle;
+      },
+      set strokeStyle(value: unknown) {
+        state.strokeStyle = value;
+      },
+      get lineWidth(): number {
+        return state.lineWidth;
+      },
+      set lineWidth(value: number) {
+        state.lineWidth = value;
+      },
+      get lineCap(): string {
+        return state.lineCap;
+      },
+      set lineCap(value: string) {
+        state.lineCap = value;
+      },
+      get lineJoin(): string {
+        return state.lineJoin;
+      },
+      set lineJoin(value: string) {
+        state.lineJoin = value;
+      },
       createLinearGradient: () => ({ addColorStop(): void {} }),
       createRadialGradient: () => ({ addColorStop(): void {} }),
-      createPattern: () => null,
+      createPattern: (image: unknown, repetition: string) => {
+        const object = {
+          kind: "pattern",
+          image,
+          repetition,
+          transform: null as unknown,
+          setTransform(transform: unknown): void {
+            this.transform = transform;
+          },
+        };
+        return object as unknown as CanvasPattern;
+      },
     };
 
     this.ctx = ctx as unknown as CanvasRenderingContext2D;
@@ -1883,6 +2111,8 @@ interface PixelHarness {
   readonly strokeBuffer: PixelCanvas;
   /** Layer surfaces in painting order, bottom-first. */
   readonly surfaces: PixelCanvas[];
+  /** The layer content the renderer rebuilds from. */
+  readonly elements: Map<LayerId, LayerElement[]>;
 }
 
 /**
@@ -1932,6 +2162,7 @@ function withPixels(
       doc,
       strokeBuffer: allocated[0],
       surfaces: allocated.slice(1),
+      elements,
     });
   } finally {
     (globalThis as { document?: unknown }).document = saved;
@@ -2151,6 +2382,272 @@ describe("Canvas2DRenderer preview compositing calls", () => {
     expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
     expect(harness.display.drawnSources).not.toContain(surface);
     expect(harness.display.drawImages).toHaveLength(0);
+  });
+});
+
+/**
+ * The device pixels a canvas's drawing touched.
+ *
+ * A call's area is its destination rectangle scaled by the determinant of the
+ * transform that was live when it was made. That is how a rebuild's cost is
+ * measured: the number of calls stays the same, the area they touch does not.
+ */
+function touchedArea(canvas: RecordingCanvas, only?: "clearRect" | "drawImage"): number {
+  let scale = 1;
+  let area = 0;
+  for (const call of canvas.calls) {
+    if (call.name === "setTransform") {
+      const [a, b, c, d] = call.args as number[];
+      scale = Math.abs(a * d - b * c);
+      continue;
+    }
+    if (only && call.name !== only) {
+      continue;
+    }
+    if (call.name === "clearRect") {
+      const [, , width, height] = call.args as number[];
+      area += width * height * scale;
+      continue;
+    }
+    if (call.name === "drawImage") {
+      const args = call.args as number[];
+      const width = args.length === 5 ? args[3] : args[7];
+      const height = args.length === 5 ? args[4] : args[8];
+      area += width * height * scale;
+    }
+  }
+  return area;
+}
+
+/** True when every covered pixel of a canvas lies inside a rectangle. */
+function coverageInside(
+  canvas: PixelCanvas,
+  left: number,
+  top: number,
+  right: number,
+  bottom: number,
+): boolean {
+  for (let row = 0; row < canvas.height; row += 1) {
+    for (let column = 0; column < canvas.width; column += 1) {
+      if (canvas.pixels[(row * canvas.width + column) * 4 + 3] > 0) {
+        if (column < left || column > right || row < top || row > bottom) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+describe("Canvas2DRenderer bounded layer rasterization", () => {
+  it("clears and blends only the rectangle a stroke inks", () => {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 200, height: 200 });
+    const layerId = doc.layers[0].id;
+    // An off-centre stroke: the cost of a rebuild has to follow the ink, not
+    // the document.
+    const stroke: StrokeRecord = {
+      ...createStroke(layerId),
+      xs: [150, 170],
+      ys: [150, 170],
+      pressures: [1, 1],
+      times: [0, 16],
+    };
+    strokes.set(layerId, [stroke]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 200, 1);
+    // Forget the set-up clears (the document swap drops the stroke buffer) so
+    // the measurement covers the rebuild only.
+    harness.strokeBuffer.calls.length = 0;
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    // A 10 px brush pads the samples by 6 px, so the stroke inks 32 x 32 px.
+    expect(touchedArea(harness.strokeBuffer, "clearRect")).toBe(32 * 32);
+    expect(touchedArea(surface, "drawImage")).toBe(32 * 32);
+    // A full-document clear and blend would have been 200 x 200 each.
+    expect(touchedArea(surface, "drawImage")).toBeLessThan((200 * 200) / 10);
+
+    // The blend is a one-to-one blit of that rectangle: the surface and the
+    // stroke buffer share a pixel grid, so nothing is resampled.
+    const blend = surface.drawImages[0];
+    expect(blend.args.length).toBe(9);
+    expect(blend.args.slice(1)).toEqual([144, 144, 32, 32, 144, 144, 32, 32]);
+  });
+
+  it("keeps the layer's own clear whole but bounds every element", () => {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 200, height: 200 });
+    const layerId = doc.layers[0].id;
+    strokes.set(layerId, [
+      { ...createStroke(layerId), xs: [20, 30], ys: [20, 30], pressures: [1, 1], times: [0, 16] },
+      { ...createStroke(layerId), xs: [150, 160], ys: [150, 160], pressures: [1, 1], times: [0, 16] },
+    ]);
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 200, 1);
+    harness.renderer.render();
+
+    const [surface] = harness.layerSurfaces();
+    // Two elements, two small rectangles - not two document-sized blends.
+    // The samples are 10 px apart, so each stroke inks 22 x 22 px.
+    expect(surface.drawImages).toHaveLength(2);
+    expect(touchedArea(surface, "drawImage")).toBe(2 * 22 * 22);
+    // The layer itself is still cleared once, in full: a rebuild starts from
+    // an empty surface.
+    expect(surface.named("clearRect")).toHaveLength(1);
+    expect(touchedArea(surface, "clearRect")).toBe(200 * 200);
+  });
+});
+
+describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
+  const SAMPLE_X = 16;
+  const SAMPLE_Y = 14;
+
+  function createTestStroke(
+    layerId: LayerId,
+    brush: BrushSettings,
+    id: string,
+    erase = false,
+  ): StrokeRecord {
+    return {
+      id,
+      layerId,
+      brush,
+      erase,
+      xs: [6, SAMPLE_X, 26],
+      ys: [6, SAMPLE_Y, 6],
+      pressures: [1, 1, 1],
+      times: [0, 16, 32],
+      startTime: 0,
+    };
+  }
+
+  /**
+   * Live, commit, rebuild and export must show the same pixels.
+   *
+   * The rebuild is the path the dirty bounds changed: it rasterizes the
+   * stroke into the buffer and blends only the rectangle it inks. The other
+   * three are the reference the user sees.
+   *
+   * The software canvas has no blur, so the soft case checks the feather
+   * path's geometry and placement rather than the kernel; the grain case is
+   * real, because the pattern pass is implemented.
+   */
+  function checkEveryPathAgrees(brush: BrushSettings): void {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stored = createTestStroke(layerId, brush, "stored");
+
+        // 1. The rebuild: the layer is rasterized from the stroke list.
+        harness.elements.set(layerId, [stored]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const rebuilt = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
+        expect(rebuilt[3]).toBe(255);
+
+        // The bounded blit can only replace the old full-surface blit if no
+        // coverage falls outside the rectangle it draws. The coverage stays
+        // within the brush radius of the samples (4 px for an 8 px brush), and
+        // the drawn rectangle is that bound plus the padding the area test
+        // pins.
+        expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
+
+        // A second rebuild must land on the same pixels.
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+
+        // 2. Live: the same stroke drawn through the live path.
+        harness.elements.set(layerId, []);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const live = createTestStroke(layerId, brush, "live");
+        harness.renderer.beginStroke(live);
+        harness.renderer.extendStroke(live, 0);
+        harness.renderer.render();
+        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+
+        // 3. The release: the buffer composites into the layer.
+        harness.renderer.endStroke(live);
+        harness.renderer.render();
+        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+
+        // 4. The export: the same picture at document size.
+        const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
+        expect(readPixel(exported, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+      },
+    );
+  }
+
+  it("agrees for a hard brush", () => {
+    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 1, texture: 0 });
+  });
+
+  it("agrees for a soft brush", () => {
+    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 0.4, texture: 0 });
+  });
+
+  it("agrees for a grain brush", () => {
+    checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 1, texture: 1 });
+  });
+
+  it("does not darken a self-crossing stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // The stroke runs over the same pixels twice. The alpha is applied
+        // once, when the finished coverage composites, so the crossing keeps
+        // the brush's own opacity instead of stacking.
+        const crossing: StrokeRecord = {
+          ...createTestStroke(layerId, { ...BRUSH, size: 8, opacity: 0.5, hardness: 1 }, "cross"),
+          xs: [6, 26, 6],
+          ys: [14, 14, 14],
+        };
+        harness.elements.set(layerId, [crossing]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // Black at 50 % over white paper is 128; stacking it twice would be 64.
+        expectPixel(harness.display, 16, 14, [128, 128, 128], 1);
+      },
+    );
+  });
+
+  it("keeps the eraser green: a rebuild still subtracts the stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const painted = createTestStroke(layerId, { ...BRUSH, size: 16, hardness: 1 }, "painted");
+        const eraser = createTestStroke(
+          layerId,
+          { ...BRUSH, size: 16, hardness: 1 },
+          "erased",
+          true,
+        );
+
+        harness.elements.set(layerId, [painted]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const paintedPixel = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
+        expect(paintedPixel[3]).toBe(255);
+        // The layer itself holds the coverage (the paper behind it is opaque).
+        expect(readPixel(harness.surfaces[0], SAMPLE_X, SAMPLE_Y)[3]).toBe(255);
+
+        // The eraser subtracts the coverage it inks, and nothing else.
+        harness.elements.set(layerId, [painted, eraser]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(readPixel(harness.surfaces[0], SAMPLE_X, SAMPLE_Y)[3]).toBe(0);
+      },
+    );
   });
 });
 
