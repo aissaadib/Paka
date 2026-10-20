@@ -2153,3 +2153,84 @@ describe("Canvas2DRenderer preview compositing calls", () => {
     expect(harness.display.drawImages).toHaveLength(0);
   });
 });
+
+describe("Canvas2DRenderer preview scratch lifetime", () => {
+  /**
+   * The grouped-preview scratch is a full-resolution surface, and the erase
+   * snapshot is another one. The raster budget allows only one of them at a
+   * time, so the scratch may only exist while a preview is being composited.
+   */
+  function createGroupedHarness() {
+    const harness = createHarness();
+    const doc = createDocument({ width: 20, height: 20 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(updateLayer(doc, layerId, { opacity: 0.5 }));
+    harness.renderer.setDisplaySize(20, 20, 1);
+    harness.renderer.render();
+    return { harness, layerId };
+  }
+
+  it("holds the scratch only while a grouped preview is on screen", () => {
+    const { harness, layerId } = createGroupedHarness();
+    expect(harness.renderer.holdsPreviewScratch).toBe(false);
+
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.render();
+    expect(harness.renderer.holdsPreviewScratch).toBe(true);
+
+    // The release is the end of the preview: the scratch is a full-resolution
+    // surface and must not sit next to a later erase snapshot.
+    harness.renderer.endStroke(stroke);
+    expect(harness.renderer.holdsPreviewScratch).toBe(false);
+  });
+
+  it("releases the scratch when the stroke is cancelled", () => {
+    const { harness, layerId } = createGroupedHarness();
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.render();
+    expect(harness.renderer.holdsPreviewScratch).toBe(true);
+
+    harness.renderer.cancelStroke();
+    expect(harness.renderer.holdsPreviewScratch).toBe(false);
+  });
+
+  it("never holds the scratch beside an eraser snapshot", () => {
+    const { harness, layerId } = createGroupedHarness();
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.render();
+    expect(harness.renderer.holdsPreviewScratch).toBe(true);
+    harness.renderer.endStroke(stroke);
+
+    // The eraser takes its own snapshot; the scratch must already be gone, so
+    // the two full-resolution surfaces are alternatives, not neighbours.
+    const eraser = createStroke(layerId, BRUSH, true);
+    harness.renderer.beginStroke(eraser);
+    expect(harness.renderer.holdsPreviewScratch).toBe(false);
+
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    const [surface] = harness.layerSurfaces();
+    expect(harness.display.drawnSources).toEqual([surface]);
+    harness.renderer.cancelStroke();
+  });
+
+  it("does not allocate a scratch for an opaque normal layer", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 20, height: 20 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(20, 20, 1);
+    harness.renderer.render();
+
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.render();
+
+    // The common case groups nothing: the preview composites straight onto
+    // the layer, so no full-resolution scratch is ever allocated.
+    expect(harness.renderer.holdsPreviewScratch).toBe(false);
+  });
+});

@@ -190,6 +190,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
     return this.rasterScale;
   }
 
+  /**
+   * True while the grouped live-preview scratch is held.
+   *
+   * The scratch is a full-resolution surface, and the erase snapshot is
+   * another one; the raster budget in `core/document/document.ts` allows only
+   * one of the two at a time, so the scratch exists only while a preview is
+   * being composited and is released as soon as that preview ends.
+   */
+  get holdsPreviewScratch(): boolean {
+    return this.previewSurface !== null;
+  }
+
   setDocument(doc: DrawingDocument): void {
     if (this.destroyed) {
       return;
@@ -198,6 +210,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const sizeChanged =
       this.doc === null || this.doc.width !== doc.width || this.doc.height !== doc.height;
     this.doc = doc;
+    // No preview is in flight for the new document, so the scratch is released.
+    this.dropPreviewSurface();
 
     if (sizeChanged) {
       this.surfaces.setDocumentSize(doc.width, doc.height, this.rasterScale);
@@ -240,6 +254,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       resizeCanvas(this.strokeBuffer, doc.width * scale, doc.height * scale);
       this.abandonStroke();
     }
+    this.dropPreviewSurface();
     this.requestFrame();
   }
 
@@ -252,6 +267,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.activeStroke = stroke;
     this.clearStrokeBuffer();
     if (stroke.erase === true) {
+      // The erase snapshot and the grouped-preview scratch are mutually
+      // exclusive full-resolution surfaces: an eraser previews by mutating its
+      // own layer, so it never needs a group, and the scratch is released
+      // before the snapshot is taken.
+      this.dropPreviewSurface();
       this.beginErase(stroke.layerId);
     } else {
       this.dropEraseBase();
@@ -332,6 +352,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.dropEraseBase();
       this.clearStrokeBuffer();
       this.activeStroke = null;
+      this.dropPreviewSurface();
       this.requestFrame();
       return;
     }
@@ -340,6 +361,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.compositeStrokeBuffer(surface, stroke);
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    // The preview is over: the group scratch is released so it cannot sit
+    // next to a later erase snapshot (see the raster budget).
+    this.dropPreviewSurface();
     this.requestFrame();
   }
 
@@ -353,6 +377,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.dropEraseBase();
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    this.dropPreviewSurface();
     this.requestFrame();
   }
 
@@ -1114,7 +1139,20 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private abandonStroke(): void {
     this.activeStroke = null;
     this.dropEraseBase();
+    this.dropPreviewSurface();
     this.clearStrokeBuffer();
+  }
+
+  /**
+   * Releases the grouped-preview scratch.
+   *
+   * The scratch is a full-resolution surface, so it is only alive while a
+   * preview is being composited. Releasing it keeps the peak at the raster
+   * budget in `core/document/document.ts`: the erase snapshot and the scratch
+   * are alternatives, never neighbours.
+   */
+  private dropPreviewSurface(): void {
+    this.previewSurface = null;
   }
 
   private prepareStrokeBuffer(): void {
