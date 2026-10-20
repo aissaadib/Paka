@@ -25,4 +25,5 @@ dist-ssr
 
 # Local agent coordination logs (never commit)
 agent group chat.text
+agent group chat.txt
 agent-groupchat.txt
