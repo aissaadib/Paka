@@ -520,22 +520,42 @@ neutral, so it is not a trade-off there.
 | 2048x2048 | 2 | 21,178 | 67,108,864 (0.03 %) | 10 |
 | 3072x3072 | 1 | 4,821 | 37,748,736 (0.03 %) | 27 |
 
-Most likely cause (**hypothesis**, not proven): the scratch *clips* the
-stroke to the region, so the antialiased ring of a round cap or join that
-extends past the region border is cut off, while the shipped path rasterizes
-into the full buffer and keeps it. The region is padded by the brush radius
-+ three blur radii + 1 px, which is apparently not quite enough for
-Chromium's antialiasing bleed.
+**Correction (2026-10-20, after the shipped implementation was measured):**
+this difference was a bug in *my prototype*, not a property of the approach.
+The prototype clipped the rasterization to the scratch; the shipped
+implementation translates the scratch so the coverage lands on the same device
+pixels, and it comes out **byte-identical at rasterScale 1 and within 1/255 on
+at most 44 bytes of 4.2 M at rasterScale 2** — see F7d. The cost numbers in
+the table above stand (they measure the same work); the pixel conclusion above
+does not.
 
-**Consequence for the next slice:** the change is worth doing (85x on the slow
-side of the knee, neutral elsewhere), but it must first solve the clipping —
-widen the region by a measured antialiasing margin, or keep the scratch
-unclipped where the coverage can bleed — and then prove live == commit ==
-rebuild == export with real pixels, exactly as R1 did. A scratch that is too
-small is fast *and wrong*, and only a pixel comparison catches it. (A first
-version of the prototype also blitted the scratch under the surface's scale
-transform, which mis-placed it at 2x; the identity transform fixed it — the
-same trap applies to a real implementation.)
+#### F7d — F1b is pixel-identical to pre-F1b (measured, Chromium)
+
+The open question — does the bounded clear and bounded blit of F1b change any
+pixel? — was settled by a browser A/B on the real renderer (512x512, 20
+strokes, hard / soft / grain / soft+grained, rasterScale 1 and 2), comparing
+the layer surface *and* the display canvas (1,048,576 to 4,194,304 bytes
+each). The pre-F1b reference was emulated faithfully: the document-sized
+buffer path with a **full** clear of the buffer instead of the bounded one.
+
+| Comparison | rasterScale 1 | rasterScale 2 |
+| --- | --- | --- |
+| F1b vs pre-F1b | **0 differing bytes** (all four brushes, surface and display) | **0 differing bytes** (all four brushes, surface and display) |
+| F7 (element scratch) vs F1b | 0 differing bytes (all four brushes) | 44 bytes (max delta 1) hard, 10 (max 1) soft, 40 (max 1) grain, 9 (max 1) soft+grained, out of 4.2 M |
+
+So:
+
+* **F1b, already on main, changes no pixel.** The antialiasing-ring worry
+  behind the F7c warning does not hold for the shipped path.
+* The element-scratch approach is safe: byte-identical at rasterScale 1, and
+  at rasterScale 2 it differs by at most 1/255 on at most 44 bytes of 4.2 M
+  (0.001 %). If a future slice wants zero difference at every raster scale,
+  that 1/255 is the thing to chase, and it is in the scratch blit.
+
+The lesson for the method: a quick prototype can invent a defect that the real
+implementation does not have. An A/B that decides such a question must
+compare **the shipped path** against a **faithful reference**, not a
+hand-written stand-in.
 
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
