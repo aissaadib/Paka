@@ -521,13 +521,17 @@ neutral, so it is not a trade-off there.
 | 3072x3072 | 1 | 4,821 | 37,748,736 (0.03 %) | 27 |
 
 **Correction (2026-10-20, after the shipped implementation was measured):**
-this difference was a bug in *my prototype*, not a property of the approach.
-The prototype clipped the rasterization to the scratch; the shipped
-implementation translates the scratch so the coverage lands on the same device
-pixels, and it comes out **byte-identical at rasterScale 1 and within 1/255 on
-at most 44 bytes of 4.2 M at rasterScale 2** — see F7d. The cost numbers in
-the table above stand (they measure the same work); the pixel conclusion above
-does not.
+this difference was **not a property of the approach and not a real defect** —
+the measurement was taken while another agent's F7 implementation was being
+written in the working tree, and the "shipped" side of the comparison was
+therefore a *moving target* (the renderer was imported with a cache-busting
+query, so it picked up the file as it was on disk at that moment). A
+controlled re-run on the committed tree gives **0 differing bytes** between
+the shipped element-scratch path, the document-buffer path and this very
+prototype (1024x1024, 50 tiny hard strokes, full layer surface). The pixel
+table above is void; the cost numbers above stand, because they measure the
+same work and agree with the F7b mechanism and with the independently
+measured 85x. See F7d.
 
 #### F7d — F1b is pixel-identical to pre-F1b (measured, Chromium)
 
@@ -553,9 +557,11 @@ So:
   that 1/255 is the thing to chase, and it is in the scratch blit.
 
 The lesson for the method: a quick prototype can invent a defect that the real
-implementation does not have. An A/B that decides such a question must
-compare **the shipped path** against a **faithful reference**, not a
-hand-written stand-in.
+implementation does not have, and a cache-busted import of a file another
+agent is actively editing measures their work-in-progress rather than a
+shipped implementation. An A/B that decides such a question must compare
+**the shipped path** against a **faithful reference**, on a **committed
+tree**.
 
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
