@@ -142,6 +142,39 @@ that layer.** The engine marks the layer dirty (`invalidateLayer`), and the
 next `render()` re-does every element. At 2048^2 / 2x that is 3.36 Gpx of
 clear + blend for a 100-element layer.
 
+#### F1b — the touched area, measured (added 2026-10-20, after the F1 order)
+
+The table above is arithmetic. It was later **measured** with an area
+instrument (wrap `clearRect` and `drawImage`, count
+`dest width x dest height x |det(transform)|`), against the committed
+renderer:
+
+| Document | `rasterScale` | Surface | Elements | Area cleared | Area blended | Total touched |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1024x1024 | 1 | 1024x1024 | 25 | 27.3 Mpx | 26.2 Mpx | 53.5 Mpx |
+| 1024x1024 | 1 | 1024x1024 | 100 | 105.9 Mpx | 104.9 Mpx | 210.8 Mpx |
+| 1024x1024 | 2 | 2048x2048 | 25 | 109.1 Mpx | 104.9 Mpx | 213.9 Mpx |
+| 1024x1024 | 2 | 2048x2048 | 100 | 423.6 Mpx | 419.4 Mpx | 843.1 Mpx |
+| 2048x2048 | 1 | 2048x2048 | 25 | 109.1 Mpx | 104.9 Mpx | 213.9 Mpx |
+| 2048x2048 | 1 | 2048x2048 | 100 | 423.6 Mpx | 419.4 Mpx | 843.1 Mpx |
+| 2048x2048 | 2 | 4096x4096 | 25 | 436.2 Mpx | 419.4 Mpx | 855.6 Mpx |
+| 2048x2048 | 2 | 4096x4096 | 100 | 1694.5 Mpx | 1677.7 Mpx | **3372.2 Mpx** |
+
+The model and the measurement agree: a 100-element undo at 2048^2 / 2x touches
+3.37 Gpx, against the 3.36 Gpx predicted. The area is identical for 2-sample
+strokes and for 496-sample document-wide strokes, and identical for equal
+*surface* sizes (1024^2 at 2x equals 2048^2 at 1x) — so the cost follows the
+surface, not the ink.
+
+**Area, not call count, is the metric that shows the R1 win.** The number of
+`clearRect` / `drawImage` calls stays one per element after dirty bounds (the
+calls are the same, their *extent* shrinks), so an acceptance test that only
+counts calls cannot see the improvement. If the per-element clear and blend
+are limited to the inked rectangle, a 32 px stroke at 2048^2 / 2x touches
+~64x64 px instead of 16.8 Mpx — about 4,000x less per element (a calculation
+from the geometry, not a measurement), which would take the 100-element undo
+from 3.37 Gpx to well under 1 Mpx.
+
 ### F2 — Measured rebuild cost (wall clock, indicative)
 
 `rasterizeLayer(surface)` + 1x1 readback sync, 7 interleaved rounds, medians
@@ -291,12 +324,25 @@ document-sized stroke buffer, a feather scratch (up to surface sized), an
 erase snapshot while an eraser is in flight, and a transient document-size
 composite for PNG export / bucket fill.
 
-**This is exactly the risk Agent 4's merged budget addresses**: the document
-is now capped at 16,777,216 px total (`isValidDocumentSize`), so the largest
-legal document is 4096x4096, i.e. 256 MiB per 2x surface and 1 GiB for the
-four surfaces the budget assumes (layer + stroke buffer + erase snapshot +
-headroom). The remaining, *unaddressed* part is that **every additional layer
-adds another full-resolution surface** and is not covered by the budget.
+**This is exactly the risk the shipped budget addresses**: the document is
+capped at 16,777,216 px total (`isValidDocumentSize`), so the largest legal
+document is 4096x4096, i.e. 256 MiB per 2x surface. The budget is now stated
+as a **peak** of 58 bytes per document pixel (three 2x surfaces — the layer
+surface, the stroke buffer, and at most one of the erase snapshot or the
+grouped live-preview scratch — plus a transient scan buffer of about 10
+bytes/px), i.e. 928 MiB at the cap, inside the 1 GiB budget.
+
+That peak was **measured**, not assumed (live canvases of the renderer,
+1024x1024 document at 2x): idle = 2 surfaces (32 B/px), grouped preview active
+= 3 (48 B/px), eraser in flight = 3 (48 B/px, the preview scratch is absent
+because an eraser previews by mutating its own layer), and a grouped preview
+followed by an eraser = 4 (64 B/px, 1.16 GiB at the cap) *unless* the scratch
+is released when no preview is active. The renderer now releases it
+(`holdsPreviewScratch`), so the over-budget peak is closed and 58 B/px holds.
+
+The remaining, *unaddressed* part of the budget is that **every additional
+layer adds another full-resolution surface** (16 B/px at 2x), which the
+document cap does not bound.
 
 ### F6 — The 1x1 readback itself dominates any display-canvas measurement
 
