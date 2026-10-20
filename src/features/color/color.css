@@ -1,0 +1,132 @@
+/** Colour panel: the HSV wheel, its sliders and the colour readout. */
+
+.color-wheel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 2px 6px;
+}
+
+/* The disc: a hue ring with the white-to-transparent saturation overlay on
+   top of it, so the centre is the colour's own grey and the rim is fully
+   saturated. `from 90deg` puts hue 0 at 3 o'clock, which is where
+   `wheelPointToHsv` reads it from. */
+.color-wheel__disc {
+  position: relative;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  cursor: crosshair;
+  touch-action: none;
+  background:
+    radial-gradient(circle at center, #ffffff 0%, rgba(255, 255, 255, 0) 100%),
+    conic-gradient(
+      from 90deg,
+      #ff0000 0deg,
+      #ffff00 60deg,
+      #00ff00 120deg,
+      #00ffff 180deg,
+      #0000ff 240deg,
+      #ff00ff 300deg,
+      #ff0000 360deg
+    );
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+/* The value overlay: the disc is drawn at full brightness and dimmed to the
+   selected value, so the value slider has a visible effect on the disc. */
+.color-wheel__shade {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #000000;
+  pointer-events: none;
+}
+
+.color-wheel__marker {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.65);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.color-wheel__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.color-wheel__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-height-sm);
+}
+
+.color-wheel__slider-label {
+  width: 54px;
+  color: var(--text-dim);
+}
+
+.color-wheel__slider-range {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 16px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+}
+
+.color-wheel__slider-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.color-wheel__slider-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--text-strong);
+}
+
+.color-wheel__slider-range:hover::-webkit-slider-thumb {
+  background: #ffffff;
+}
+
+.color-wheel__slider-value {
+  width: 38px;
+  text-align: right;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.color-wheel__readout {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 4px;
+}
+
+.color-wheel__swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.color-wheel__hex {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

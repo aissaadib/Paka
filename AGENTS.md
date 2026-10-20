@@ -68,8 +68,9 @@ feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
-commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
-`native_environment.rs`, `scripts/generate-app-icon.mjs`,
+commands, tool definitions, `editorStore.ts`, `features/color/wheelGeometry.ts`,
+Rust `lib.rs`/`main.rs`/`native_environment.rs`,
+`scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
 
 ## 4. Task → read only this
@@ -91,6 +92,7 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L655-760, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1291-1780, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
@@ -139,6 +141,9 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | `createDocument` | `core/document/document.ts` | 47 |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
+| `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
+| `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 46, 65, 91 |
+| `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 67, 12 |
 
 ## 6. Docs → section
 
@@ -191,6 +196,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
+| Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |
 
 ## 9. Keep this file useful
 

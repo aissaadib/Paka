@@ -176,6 +176,11 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Versioned `.paka` project file (metadata + ordered strokes, fill patches
       and gradients).
 - [x] PNG export with an honest encoder.
+- [x] HSV colour wheel: a **Colour** panel that picks a hue and a saturation on
+      a disc and a value on a slider, with three keyboard-operable sliders
+      naming the same numbers. It writes the same brush colour the canvas
+      picker and the toolbar's colour input write, so colour has one source of
+      truth, and choosing a colour is not an edit.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
 
