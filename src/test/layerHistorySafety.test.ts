@@ -410,10 +410,21 @@ describe("layer edits during an active gesture", () => {
     engine.setLayerOpacity(topLayerId, 0.75);
     expect(engine.getState().notice).toBeNull();
 
-    // The next gesture explains again on its own.
+    // A cancelled gesture ends the once-state: the next gesture explains again.
     engine.cancelStroke();
     engine.beginStroke(createSample({ docX: 60, docY: 60 }));
     engine.setLayerOpacity(topLayerId, 0.75);
+    expect(engine.getState().notice).toContain("Finish the current stroke or selection");
+    engine.cancelStroke();
+
+    // So does a finished gesture: committing the stroke ends the once-state too.
+    engine.beginStroke(createSample({ docX: 80, docY: 80 }));
+    engine.dismissNotice();
+    engine.finishStroke();
+    expect(engine.getState().notice).toBeNull();
+    engine.beginStroke(createSample({ docX: 100, docY: 100 }));
+    engine.dismissNotice();
+    engine.setLayerOpacity(topLayerId, 0.6);
     expect(engine.getState().notice).toContain("Finish the current stroke or selection");
     engine.cancelStroke();
   });
