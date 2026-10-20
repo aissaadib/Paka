@@ -156,7 +156,11 @@ ones:
    allocated lazily on the first pick and reused after (see
    [Colour sampling](#colour-sampling)). It is kept off the constructor so the
    stroke buffer stays the first canvas created.
-6. **A transient document-resolution composite** - allocated by
+6. **A feather scratch canvas** - holds a blurred copy of a soft stroke's
+   silhouette, sized to that stroke's padded bounding box rather than the whole
+   document, allocated lazily on the first soft stroke and reused after (see
+   [Soft edges (hardness)](#soft-edges-hardness)).
+7. **A transient document-resolution composite** - allocated by
    `composeDocumentImage()` for PNG export and by `readCompositeImage()` for a
    bucket scan. It is not retained, so it never grows the renderer's steady
    memory footprint.
@@ -171,7 +175,8 @@ A frame (`render()`) does, in order:
 5. composite the in-progress stroke buffer on top, at the stroke's own opacity -
    unless the stroke erases, in which case the layer composited in step 4
    *already contains* the erasure, so drawing the buffer would paint the erased
-   coverage back,
+   coverage back. A hard stroke draws the raw buffer; a soft stroke draws its
+   feathered copy through the same path that commits it to the layer,
 6. stroke a hairline document border whose width is `1 / scale`, so it is
    exactly one device pixel at any zoom.
 
@@ -220,6 +225,60 @@ already identical to a full re-rasterization. Live drawing and the pixels that
 undo, reopen and export produce are therefore the same, which is asserted
 against the real display canvas, not just the draw-call stream.
 
+### Soft edges (hardness)
+
+`BrushSettings.hardness` is part of the brush, so every stroke carries the value
+it was drawn with. `1` means the hard, antialiased edge described above; lower
+values soften it. The feather radius is
+`size * SOFT_EDGE_RADIUS_RATIO * (1 - hardness)` in document pixels, with
+`SOFT_EDGE_RADIUS_RATIO = 0.1`, so "soft" is proportional to the brush and a
+4 px pen and a 200 px brush fall off at the same visual rate. At `1` the radius
+is exactly `0`, which is what keeps the hard path byte-identical to the old
+renderer: `paintStrokeCoverage` draws the raw stroke buffer and never allocates
+the scratch canvas.
+
+A soft stroke is produced in **one pass after the silhouette exists**, not by
+lowering per-segment alpha. Segments are still rasterized at full coverage into
+the stroke buffer; when the coverage is drawn - live, on layer commit, during a
+rebuild, or in an eraser's subtract - `paintStrokeCoverage` blurs a copy of the
+whole buffer and submits that instead:
+
+```
+feather = scratch canvas the size of the stroke's padded bounding box
+feather.ctx.filter = blur(radius * rasterScale)
+feather.ctx.drawImage(strokeBuffer, bbox)
+surface @ alpha = strokeOpacity(stroke)   // once, as before
+surface.ctx.drawImage(feather, bbox)
+```
+
+The bounding box is the samples' extent padded by the full-pressure radius plus
+three blur radii, clamped to the document; the pad is where a Gaussian has faded
+out and it keeps the blur from clipping at the scratch canvas edges. The scratch
+is allocated lazily, reused for every soft stroke, and sized to the stroke's
+footprint rather than the document, so the pass costs the stroke's area instead
+of a document-wide blur on every frame. Blur length and rectangle are scaled by
+`rasterScale`, which is why the soft edge measures the same at raster scales 1
+and 2.
+
+Because this is a post-pass over the finished coverage, all the earlier
+invariants survive:
+
+- the interior is still full coverage, and opacity is applied exactly once, so a
+  semi-transparent soft stroke does not darken where it crosses itself;
+- live drawing, layer commit, undo/redo/test rebuild and PNG export all call the
+  same `paintStrokeCoverage`, so they agree pixel for pixel;
+- an eraser subtracts the feathered copy, keeping the snapshot-based
+  "subtract once" rule;
+- a filled shape's polygon is filled at full coverage before the outline, so its
+  interior stays solid and only the outer silhouette softens.
+
+The trade-off is deliberate: this is a Gaussian blur of the silhouette, not an
+exact Photoshop-style hardness cone, so the falloff is smooth and extends a
+little beyond the nominal diameter. The ratio is calibrated from measured
+coverage - the core of even a 4 px stroke stays at full alpha - and a true
+per-pixel hardness profile would require the deferred stamp/distance-field
+engine, not this path.
+
 ### Eraser strokes
 
 An eraser is a brush whose strokes **subtract** coverage instead of adding it.
@@ -263,13 +322,14 @@ composite operation per stroke:
 ```
 for stroke in layer.strokes:
   rasterizeStrokeToBuffer(stroke)
-  compositeStrokeBuffer(surface, strokeOpacity(...),
+  compositeStrokeBuffer(surface, stroke,
                         stroke.erase ? "destination-out" : "source-over")
 ```
 
-Because each stroke composites once, in order, the rebuilt pixels match what
-live drawing produced - the same guarantee the starter-dab rule enforces for
-painting. The cost of the snapshot is one extra surface-sized canvas while an
+`compositeStrokeBuffer` reads the stroke's own brush and pressures, so it also
+picks the feathered copy for a soft brush. Because each stroke composites once,
+in order, the rebuilt pixels match what live drawing produced - the same
+guarantee the starter-dab rule enforces for painting. The cost of the snapshot is one extra surface-sized canvas while an
 erasing stroke is in flight; it is allocated lazily, reused across strokes, and
 dropped when the stroke ends, is cancelled, or the document is replaced.
 
@@ -365,7 +425,8 @@ traced polygon: a `FillPatchRecord` with an opaque colour, a tight bounding box
 and **one coverage byte per pixel in that box**. Strokes, fill patches and
 gradients share one ordered `elements` list per layer, so a stroke drawn after a
 fill paints above it and undo can restore painting order exactly. The project
-format moved to version 4 for that list and version 5 added gradients (see
+format moved to version 4 for that list, version 5 added gradients and version 6
+added per-stroke brush hardness (see
 [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills)).
 
 The gesture is a press, not a drag:
@@ -429,7 +490,8 @@ geometry, so the document stores **the function**, not the pixels. A
 ordered stop list (`offset` plus hex colour) and one opacity. The record is
 self-describing and immutable; re-rendering it is deterministic, so undo, redo,
 save/reopen, layer duplication and export all rebuild the same content without a
-snapshot. The file format moved to version 5 for the new element kind.
+snapshot. The file format moved to version 5 for the new element kind; version 6
+then added per-stroke hardness without changing gradient records.
 
 The gesture is a drag, and the live preview is real layer content:
 
@@ -593,7 +655,9 @@ synchronously from an input handler.
 samples, with diameter and alpha interpolated from the pressure of each pair.
 It works entirely in document coordinates - the caller owns the transform - so
 zoom never affects rasterized pixel data. This is a deliberately small brush
-model: no stamps, no texture, no hardness curve.
+model: no stamps, no texture; hardness is a single post-pass feather over the
+finished silhouette (see [Soft edges (hardness)](#soft-edges-hardness)), not a
+per-dab hardness curve.
 
 A stroke flagged `fill` (a filled rectangle or ellipse) additionally fills the
 closed polygon its samples trace, once, before the outline is traced - and only
@@ -774,10 +838,11 @@ DOM-free by design.
   release commits one step, the radial/colour/opacity options are captured at
   press, zero-length drags and out-of-bounds presses record nothing, cancel and a
   tool switch remove the preview, coordinates clamp to the document, and
-  undo/redo replay the identical record. The format suite asserts a version-5
-  round trip of interleaved strokes, fills and gradients, version-1 to -4
+  undo/redo replay the identical record. The format suite asserts a version-6
+  round trip of interleaved strokes, fills and gradients, version-1 to -5
   compatibility, and rejection of bad boxes, masks, stops, geometry, opacity,
-  gradients in a version-4 file, and the fill pixel ceiling.
+  gradients in a version-4 file, missing or out-of-range hardness in version 6,
+  and the fill pixel ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
   exactly-closed outline, and the degenerate extent. Shape *behaviour* is
@@ -792,13 +857,16 @@ DOM-free by design.
   the draw-call stream: it
   clears the buffer and redraws the whole outline, and the preview composites at
   the stroke's own alpha.
-- `canvas2dStroke` is tested directly: diameter/opacity curves, and - through the
+- `canvas2dStroke` is tested directly: diameter/opacity curves, feather radius
+  (`0` at hardness 1, proportional for soft strokes), and - through the
   recording context - that rasterization is always **full coverage** (which is
   what stops semi-transparent overlap from darkening), that width still follows
   pressure per segment, that `fromIndex` redraws only the new part, and how a
   `fill` stroke draws: the closed polygon is filled once with the brush colour
   *before* the outline is traced, an outline that bounds no area is not filled,
-  and a partial redraw never fills.
+  and a partial redraw never fills. Soft strokes are asserted to use the same
+  full-coverage call shape - the feather is a single later pass, not per-segment
+  alpha.
 - Selection is tested at three levels. `strokeSelection` is pure geometry:
   drag-direction normalization, edge-inclusive containment, inflation and
   translation, and segment-versus-rectangle cases including a segment that
@@ -892,8 +960,9 @@ open drawing is left untouched, while a version-1 file opens with its strokes
 painted (a version-1 file has no erasures to lose). What has and has not been
 verified is reported separately rather than being implied by the test count. The
 format's own round trips are asserted in Vitest: the `erase` and `fill` flags
-survive a save/reopen, an unset flag is absent from the file, version 5 preserves
-an interleaved stroke/fill/gradient order with its mask bytes and geometry, a
+survive a save/reopen, an unset flag is absent from the file, version 6 preserves
+an interleaved stroke/fill/gradient order with its mask bytes, geometry and
+per-stroke hardness, a version-5 file opens with hard strokes, a
 version-4 file still opens with fills and strokes, and a version-1, -2 or -3 file
 opens with its shapes traced rather than filled.
 
@@ -964,6 +1033,12 @@ These are real gaps, not footnotes:
   the brush opacity and the stroke's mean pressure. Pressure can taper width
   within a stroke but not opacity: per-dab opacity without build-up needs
   per-pixel max blending, which Canvas 2D does not expose.
+- **Hardness is a blur of the finished silhouette, not a stamp profile.** The
+  soft edge is a single Gaussian feather, so it extends slightly beyond the
+  nominal diameter and cannot express a multi-zone falloff. A very large soft
+  stroke pays one extra pass over its padded bounding box per repaint; the
+  scratch canvas is reused but grows to that footprint. Spacing, stabilizers and
+  a stamp-based engine are still absent.
 - **Rasterization is per-segment and CPU-side.** Long strokes mean many
   `stroke()` calls. It is fine at the sizes tested and is the first thing to
   move behind the renderer abstraction when it is not.

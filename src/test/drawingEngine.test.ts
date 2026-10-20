@@ -167,6 +167,25 @@ describe("DrawingEngine state", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("treats hardness as editor state: no history step, no dirty flag", () => {
+    const engine = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setBrush({ hardness: 0.5 });
+    expect(engine.getState().brush.hardness).toBe(0.5);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // Out of range is clamped, and a no-op change publishes nothing.
+    engine.setBrush({ hardness: 3 });
+    expect(engine.getState().brush.hardness).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(2);
+    engine.setBrush({ hardness: 1 });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("updates the viewport through zoom commands", () => {
     const engine = createEngine();
     engine.zoomTo(2);
@@ -203,6 +222,29 @@ describe("DrawingEngine stroke capture", () => {
     expect(strokes[0].pressures[0]).toBe(0.7);
     expect(strokes[0].brush).toEqual(engine.getState().brush);
     expect(engine.getState().history).toMatchObject({ depth: 1, canUndo: true, undoLabel: "Stroke" });
+  });
+
+  it("captures the brush's hardness per stroke, so a later change rewrites nothing", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ hardness: 0.4, size: 20 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 40, timeStamp: 16 }));
+    engine.finishStroke();
+
+    expect(engine.listStrokes(layerId)[0].brush.hardness).toBe(0.4);
+
+    // Changing the setting describes the next stroke; it never rewrites an
+    // existing record's brush - which is what makes undo/reopen re-render the
+    // stroke with the softness it was drawn with.
+    engine.setBrush({ hardness: 1 });
+    expect(engine.listStrokes(layerId)[0].brush.hardness).toBe(0.4);
+
+    engine.setBrush({ hardness: 0.2 });
+    expect(engine.undo()).toBe(true);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.hardness).toBe(0.4);
   });
 
   it("records eraser strokes as erasers, and only those", () => {

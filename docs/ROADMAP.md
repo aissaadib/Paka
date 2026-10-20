@@ -134,7 +134,9 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 3 - Brush feel
 
-- [ ] Hardness/texture, spacing controls surfaced in the UI, stabilizers.
+- [x] Hardness (soft edge) surfaced in the UI, captured per stroke, format v6.
+- [ ] Spacing controls surfaced in the UI, stabilizers.
+- [ ] Texture (needs the stamp-based engine).
 - [ ] Stamp-based brush engine behind the existing stroke interface.
 
 ## Phase 4 - Layer system
@@ -170,28 +172,34 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Brush hardness** (the first item of Phase 3's brush-feel work). Phase 2 is
-complete: the bucket fill and gradients both ship as first-class elements in the
-ordered list, and the format has moved to version 5.
+**Brush spacing and a stabilizer** (the remaining Phase 3 brush-feel work).
+Phase 2 is complete and hardness now ships with a verified feather path and
+format version 6.
 
-The next slice should add a **soft edge** to the brush without breaking the rules
-the existing renderer depends on:
+The slice should make the two sampling-time controls real:
 
-- a hardness setting (`0`-`1`) surfaced beside size and opacity, with the same
-  "editor state describes the next stroke" rule as `shapeFill`, `fillTolerance`
-  and `gradientType`;
-- soft coverage produced by the rasterizer, not by lowering every segment's
-  alpha: segments are currently drawn at full coverage and opacity is applied
-  once per stroke, so building a soft edge by overlapping translucent dabs would
-  reintroduce darkening where a stroke crosses itself;
-- a stroke remains one undo step and one self-describing record, so it must
-  rasterize identically live, after undo/redo and after save/reopen;
-- an explicit decision on whether `hardness` is an additive brush field (no
-  version bump if a reader can ignore it and still see the same drawing) or a
-  required field (version 6). The answer depends on the falloff implementation,
-  not on convenience.
+- surface the existing `spacing` brush field (currently in `BrushSettings` and
+  used by `StrokeBuilder`) as a control beside size, opacity and hardness, with
+  a clear unit (fraction of diameter) and a range that includes today's default;
+- add a **stabilizer** setting that smooths the pointer path before samples are
+  captured, with a defined response (no hidden teleporting; the committed stroke
+  must be the path the user sees). Decide whether it applies to shapes or only
+  freehand strokes and document the answer;
+- keep the "editor state describes the next gesture" rule: a change produces no
+  history entry and no dirty flag, and each stroke keeps the values it was drawn
+  with.
 
-Spacing and stabilizers follow after hardness has a verified raster path. A
-stamp-based brush engine remains a later slice behind the existing stroke
-interface; it should not be started until hardness is settled, because the two
-share the same coverage question.
+Spacing and stabilizer differ from hardness in one important way: they change
+the **samples**, and samples are already stored in the file. A reader that
+ignores a new brush field still replays the same points, so the picture does not
+change. That makes these fields additive candidates within version 6 - but the
+implementation must prove it with a format test, and a bump is still required if
+any reader would render a different drawing. Do not bump for convenience.
+
+The acceptance bar matches the hardness slice: the default reproduces today's
+strokes exactly, live drawing, undo/redo and reopen produce the same pixels, one
+gesture is one undo step, and the setting never rewrites old strokes.
+
+A stamp-based brush engine (texture, per-dab spacing, true hardness curves)
+remains a later slice behind the existing stroke interface. Spacing here means
+sample density, not a new stamp rasterizer.

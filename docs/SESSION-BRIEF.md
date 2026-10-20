@@ -6,8 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at commit `dc87f1d` on `main` — clean and in sync
-with `origin/main`.
+Last verified: **2026-10-20**, at the brush-hardness slice on `main` — clean and
+in sync with `origin/main`.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,20 +30,22 @@ with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, `HEAD = origin/main = dc87f1d`, working tree clean.
-- `pnpm test` → **380 tests in 26 files, all pass** (re-run today).
-- `pnpm typecheck` clean; `pnpm build` succeeds (verified for the gradient
+- Branch `main`, working tree clean after the brush-hardness slice.
+- `pnpm test` → **398 tests in 26 files, all pass** (re-run for this slice).
+- `pnpm typecheck` clean; `pnpm build` succeeds (verified for the hardness
   slice).
-- Project file format **version 5** (`PROJECT_VERSION = 5`).
+- Project file format **version 6** (`PROJECT_VERSION = 6`).
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
-  built before the fill and gradient slices); packaged-app verification is
-  still outstanding.
-- Phase 2 (illustration tools) is complete. **Phase 3 has not started.**
+  built before the fill, gradient and hardness slices); packaged-app verification
+  is still outstanding.
+- Phase 2 (illustration tools) is complete. Phase 3 has started: hardness (the
+  first brush-feel item) ships in this slice.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
+| current `main` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, two stops, opacity) in the ordered element list; live preview, one undo step; format v5. |
 | `8b7152b` | **Bucket (flood) fill** (`F`) — `FillPatchRecord` in an ordered per-layer list; composite sampling, tolerance, cancel/undo/redo; format v4. |
 | `84af123` | **Filled shapes** — toolbar **Fill shape** switch for rectangle/ellipse; `fill: true` on the stroke; format v3. |
@@ -56,8 +58,10 @@ with `origin/main`.
 
 - **Drawing**: pointer/pen/touch, pressure-sensitive width and opacity, round
   joins/caps. Each stroke is composited once at its own opacity, so
-  semi-transparent self-overlap never darkens. Presses outside the paper are
-  ignored.
+  semi-transparent self-overlap never darkens. **Hardness** softens the finished
+  stroke's outer edge in one pass: the interior keeps full coverage, self-overlap
+  still cannot darken, and hardness `1` is the unchanged crisp edge. Presses
+  outside the paper are ignored.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
 - **Shapes** (`L` line, `R` rectangle, `O` ellipse): live preview, one stroke =
@@ -81,8 +85,9 @@ with `origin/main`.
   not clipped to it.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
-- **Brushes**: size 1–512 doc px, opacity, colour + 8-swatch palette, pressure
-  size and pressure opacity toggles.
+- **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, captured per
+  stroke and applied to brush, eraser and shapes), colour + 8-swatch palette,
+  pressure size and pressure opacity toggles.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
@@ -121,7 +126,7 @@ src/
     input/      pointer normalization, DOM binder
     rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke
     engine/     DrawingEngine: integration, gestures, history, snapshot
-    project/    format v5, gateway port, file orchestration
+    project/    format v6, gateway port, file orchestration
     export/     PNG export
   types/        shared value types
   utils/        math, colour, ids, paths, store
@@ -129,23 +134,24 @@ src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
 
-Key files for the next slice:
+Key files for the next slice (spacing / stabilizer):
 
-- `src/types/brush.ts` — `BrushSettings` (add `hardness` here).
+- `src/core/brushes/strokeBuilder.ts` — sample capture and spacing logic; this
+  is where a stabilizer and spacing actually change the path.
+- `src/types/brush.ts` — `BrushSettings` (already has `spacing`; a `stabilizer`
+  field would go here).
 - `src/core/brushes/defaults.ts` — `DEFAULT_BRUSH`, `normalizeBrush`,
   `brushSettingsEqual`.
-- `src/core/brushes/strokeBuilder.ts` — `createStrokeRecord` copies the brush
-  into every stroke (that is how per-stroke options survive undo/reopen).
-- `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke`, `stampDot`,
-  `strokeDiameter`, `strokeOpacity`.
-- `src/core/rendering/Canvas2DRenderer.ts` — stroke buffer, `compositeStrokeBuffer`,
-  `applyErase`, layer rebuilds (lines around 704–810 are the relevant paths).
-- `src/core/engine/DrawingEngine.ts` — `EditorSnapshot` (lines 111–153), editor
-  setters, gesture lifecycles, `buildSnapshot`/equality.
+- `src/features/brushes/BrushControls.tsx` — the sliders (`SliderField`).
+- `src/core/engine/DrawingEngine.ts` — editor setters, per-stroke brush capture,
+  `buildSnapshot`.
 - `src/state/editorStore.ts` — `EditorActions` intents.
-- `src/features/brushes/BrushControls.tsx` — brush UI (`SliderField`).
-- `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`
-  (around line 660), serializer, version history comment.
+- `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush` (version
+  aware), serializer. Spacing affects samples, which are already stored, so an
+  additive field may need no bump - decide with tests.
+- `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts` — the shipped
+  hardness reference: `strokeFeatherRadius`, `paintStrokeCoverage`,
+  `featherStroke`; do not change this path for spacing.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
 
 ## 5. How work is done here (non-negotiable)
@@ -186,6 +192,16 @@ Key files for the next slice:
   composites. Segments are always drawn at alpha 1. Never lower per-segment
   alpha to fake softness: overlapping translucent segments reintroduce
   self-overlap darkening.
+- **Hardness is a post-pass feather of the finished silhouette.** The brush
+  field is `0..1`, default `1`; `strokeFeatherRadius = size * 0.1 * (1 -
+  hardness)` document px, and `0` keeps the old raw-buffer path byte-identical.
+  A soft stroke blurs one copy of the stroke buffer in a reused scratch canvas
+  sized to its padded bounding box (radius + three blur radii), scaled by
+  `rasterScale`, then composites it through the same `paintStrokeCoverage` as
+  live drawing, commit, rebuild and eraser. Opacity is still applied once, so a
+  soft stroke cannot darken at self-overlap. The trade-off is a Gaussian edge
+  that extends slightly beyond the nominal diameter; it is not an exact hardness
+  cone or a stamp engine.
 - **Preview vs commit**: press inserts real preview content (or starts a buffer),
   moves update it in place, release records exactly one command, cancel /
   lost capture / tool switch / over-ceiling removes it with **no history and no
@@ -199,12 +215,15 @@ Key files for the next slice:
 - **Editor options describe the next gesture and are not serialized**:
   `shapeFill`, `fillTolerance` (default 24), `gradientType`,
   `gradientEndColor`. Each is read at press time so the committed record keeps
-  the setting it was drawn with. Changing an option is not an edit.
+  the setting it was drawn with. Changing an option is not an edit. The brush is
+  the same: the current brush is session state, while every stroke stores the
+  full brush it was drawn with, `hardness` included.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
-  unknown/newer versions are rejected outright, as are v4 files containing a
-  gradient.
+  v6 requires `hardness` on every stroke brush and reads v1–v5 strokes as hard
+  (`1`); unknown/newer versions are rejected outright, as are v4 files
+  containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
   restores painting order. Undo/redo are refused during a selection gesture.
@@ -223,6 +242,9 @@ Product:
   transparent stop, not selectable (cannot move/duplicate/flip).
 - Fills: binary mask, no feather/gap-closing, no pre-commit preview, not
   selectable.
+- Hardness: a single Gaussian feather of the finished silhouette, so the edge
+  extends slightly beyond the nominal diameter; no stamp profile, no spacing UI,
+  no stabilizer and no texture yet.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no scale/rotate/perspective, no
   copy/paste across layers.
@@ -238,8 +260,11 @@ Verification gaps:
   the real `Canvas2DRenderer`; the live display canvas was not sampled because
   the harness suspends animation frames.
 - Bucket fill was checked on the live display canvas in the browser.
-- **Neither has been verified in the packaged Tauri window**; native
-  save/reopen and high-DPI rendering of the packaged build are unverified.
+- Hardness was checked on the live display canvas (soft edge, history, undo/redo)
+  and its pixels through the real renderer, including self-overlap, eraser,
+  `rasterScale` 1/2 and live-vs-commit equality.
+- **None has been verified in the packaged Tauri window**; native save/reopen and
+  high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
   `pnpm test`.
 
@@ -260,8 +285,10 @@ Verification gaps:
     `window.dispatchEvent(new KeyboardEvent('keydown', ...))`.
   - To get real pixels without the app loop, import the modules through Vite
     (e.g. `await import('/src/core/rendering/canvas2dStroke.ts')`) and
-    rasterize into a fresh canvas. This is how gradient and filled-shape pixels
-    were proven.
+    rasterize into a fresh canvas. This is how gradient, filled-shape and
+    hardness pixels were proven.
+  - The hardness slice also sampled the live display canvas after drawing at
+    100 % zoom; that works when the tab is visible.
   - State checks that always work: status bar (`history N`, `N selected`,
     `● unsaved`), toolbar controls, document title.
 - Shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
@@ -275,98 +302,74 @@ Verification gaps:
   `-C link-arg=-Wl,--exclude-all-symbols` (do not override `RUSTFLAGS`). A cold
   release build takes ~5 minutes.
 
-## 9. Next slice — brush hardness (Phase 3, first item)
+## 9. Next slice — brush spacing and stabilizer (Phase 3)
 
-The goal: a **hardness** setting that gives brush strokes a soft edge without
-breaking the one-alpha-per-stroke model, captured per stroke so live rendering,
-undo/redo, save/reopen and export agree.
+`docs/ROADMAP.md` "Next slice" is the authority. Hardness shipped in the
+previous slice; spacing and a stabilizer are the remaining brush-feel items
+before texture.
 
-### Recommended decisions to make and record
+The goal: surface the existing `spacing` brush field and add a **stabilizer**
+that smooths the pointer path, without changing the one-gesture / one-record
+model. Both act when samples are captured, so they change the stored points
+rather than the rendered record.
 
-1. **Field**: add `hardness: number` to `BrushSettings`, clamped to `[0, 1]`,
-   with `1` meaning the current hard edge. Default **1** preserves every
-   existing stroke and document.
-2. **Format**: **version 6**, because a version-5 reader that ignores `hardness`
-   would render a soft stroke hard — a different picture. Write `hardness` on
-   every stroke; when reading v1–v5, default it to `1`. A v5 reader already
-   rejects a v6 file, so there is no silent misrender. Bump
-   `PROJECT_VERSION`, the version-history comment, the parser, the serializer,
-   and `PROJECT_FORMAT.md`/`README.md` together.
-3. **Raster path**: soft coverage must be produced after the silhouette exists,
-   not by lowering per-segment alpha. Two viable paths:
-   - **Feather the finished stroke buffer once** (canvas `filter = "blur(r)"`
-     on a scratch buffer, or an equivalent single-pass edge falloff), then
-     composite at `strokeOpacity` as today. Cheap, keeps segment rendering, no
-     self-overlap darkening; the trade-off is that it is a blur rather than an
-     exact hardness profile, and the edge extends slightly beyond `size`.
-     Confine the pass to the stroke's bounding box and account for
-     `rasterScale`; verify at `rasterScale` 1 and 2.
-   - **A coverage mask accumulated with per-pixel max** (stamp/distance-field),
-     which gives a true `0..1` hardness profile but is the start of the deferred
-     stamp engine. Do not start this unless the buffer-feather path is proven
-     inadequate — the roadmap explicitly defers it.
-   Whichever is chosen, brightness must stay constant across the stroke: the
-   interior is full coverage and opacity is applied exactly once.
-4. **Where it applies**: brush and eraser; shapes too, since they are strokes
-   (a filled shape's interior should stay solid — only its outer edge softens).
-   Decide explicitly and document.
+### Constraints to keep
+
+1. Both are editor state read at press time, like the rest of the brush, and
+   each stroke keeps the values it was drawn with. Changing either produces no
+   history entry and no dirty flag.
+2. The defaults must reproduce today's strokes and sample density exactly.
+3. A stabilizer must not lag invisibly: the committed path has to be the path
+   the user saw, and it must behave predictably at the start of a stroke.
+4. Spacing here means sample density, not a stamp rasterizer. No texture and no
+   per-dab hardness in this slice.
+5. Format: samples are already stored, so a reader that ignores a new brush
+   field still replays the same points and sees the same picture. An additive
+   field within version 6 is therefore likely - but prove it with format tests,
+   and bump only if a reader would render a different drawing.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts`: add documented `hardness` field.
-- [ ] `src/core/brushes/defaults.ts`: default, clamp in `normalizeBrush`,
-      include in `brushSettingsEqual`; update `brushSettings.test.ts`.
-- [ ] `src/core/brushes/strokeBuilder.ts`: no change needed if the brush is
-      copied wholesale — verify with a capture test.
-- [ ] `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts`: implement
-      the single-pass soft edge, scaled by the surface raster scale; keep
-      incremental live rendering identical to a full rebuild; keep the eraser's
-      snapshot-and-subtract behaviour intact.
-- [ ] `src/core/engine/DrawingEngine.ts`: `setBrush({ hardness })` is editor
-      state — no history entry, no dirty flag; the value is captured when the
-      stroke starts (existing brush copy does this), so changing it later never
-      rewrites old strokes. No new snapshot field is needed if the UI reads
-      `snapshot.brush`.
-- [ ] `src/features/brushes/BrushControls.tsx`: a **Hardness** slider (0–100 %,
-      default 100 %) beside size and opacity.
-- [ ] `src/core/project/projectFormat.ts`: version 6, serializer writes
-      `hardness`, `readBrush` accepts a missing field only for older versions
-      and defaults to 1, rejects out-of-range values in v6.
-- [ ] Tests to add/extend:
-      `brushSettings.test.ts` (clamp/equality),
-      `canvas2dStroke.test.ts` (hard stroke call shape unchanged; soft stroke
-      applies the feather once, not per segment),
-      `canvas2dRenderer.test.ts` (live vs rebuild, opacity once, eraser),
-      `drawingEngine.test.ts` (editor state, per-stroke capture, undo/redo),
-      `projectFormat.test.ts` (v6 round-trip, v1–v5 default to 1, invalid
-      hardness rejected, v5 reader path), `projectLifecycle.test.ts`
-      (save/reopen preserves softness).
-- [ ] Docs in the same commit: README (feature + limitations + version),
-      ARCHITECTURE (hardness/coverage model and trade-off), PROJECT_FORMAT
-      (version history, required field), ROADMAP (tick the item or narrow it,
-      move "Next slice" to spacing/stabilizers), HANDOFF + this brief.
-- [ ] Browser check: press `b`, set hardness low, draw a stroke, sample the edge
-      (soft falloff) and the interior (same colour/brightness as a hard stroke);
-      undo/redo, save/reopen, and the eraser path. Report pixel evidence.
-- [ ] Commit (`git commit -F`) and push.
+- [ ] `src/types/brush.ts` / `defaults.ts`: stabilize the existing `spacing`
+      field (range, default) and add the stabilizer field if the chosen model
+      needs one; clamp it and include it in `brushSettingsEqual`.
+- [ ] `src/core/brushes/strokeBuilder.ts`: apply spacing/resampling and the
+      stabilizer when samples are captured; keep the stored arrays the single
+      source of truth and make live drawing use the same pipeline.
+- [ ] `src/features/brushes/BrushControls.tsx`: **Spacing** and **Stabilizer**
+      sliders beside size, opacity and hardness, with clear units.
+- [ ] `src/core/engine/DrawingEngine.ts` / `src/state/editorStore.ts`: brush
+      setters stay editor state (no history, no dirty); verify the per-stroke
+      brush copy still captures the values.
+- [ ] Tests: `brushSettings.test.ts` (clamp/equality/defaults),
+      `strokeBuilder.test.ts` (spacing and stabilizer behaviour, first sample,
+      degenerate input), `drawingEngine.test.ts` (editor state, capture,
+      undo/redo), `projectFormat.test.ts` (round-trip and old-file defaults),
+      `projectLifecycle.test.ts` (save/reopen).
+- [ ] Docs in the same commit: README (controls + limitations), ARCHITECTURE
+      (where sampling ends and rasterization begins), PROJECT_FORMAT (field
+      version decision), ROADMAP (tick or narrow), HANDOFF + this brief.
+- [ ] Browser check: change spacing and stabilizer, draw freehand and a shape,
+      confirm the expected sample/path behaviour, one undo step, save/reopen and
+      export; report state and pixel evidence honestly.
+- [ ] `pnpm test`, `pnpm typecheck`, `pnpm build`; commit (`git commit -F`) and
+      push.
 
 ### Acceptance criteria
 
-- Hardness `1` renders pixel-identically to today's strokes.
-- A soft stroke has a visible falloff at its edge, full-strength interior, and
-  **no darkening where it crosses itself** (the key regression).
-- Live rendering, undo/redo and reopen produce the same pixels.
-- Changing hardness after drawing does not alter existing strokes; hardness is
-  captured per stroke.
-- No history entry or dirty flag from changing the setting.
-- Old projects open and render exactly as before; new files record the value.
+- Default settings reproduce today's strokes (hardness `1`) pixel for pixel.
+- Spacing changes sample density without changing the nominal stroke width;
+  stabilizer smooths jitter without a hidden offset or a lost start/end.
+- Live drawing, undo/redo, reopen and export agree.
+- One gesture is one undo step; changing a setting never rewrites old strokes.
+- Old projects open unchanged; any new field is read with the current default.
 
 ## 10. First ten minutes of a new session
 
-1. `git status -sb` and `git log --oneline -8` — confirm `main` at `dc87f1d`
-   (or the commit this file names).
+1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
+   brush-hardness commit (or the commit this file names).
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 380 tests in 26 files).
+   anything (expect 398 tests in 26 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

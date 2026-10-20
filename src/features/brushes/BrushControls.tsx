@@ -32,6 +32,16 @@ export function BrushControls() {
         format={(value) => `${Math.round(value * 100)}%`}
         onChange={(opacity) => actions.setBrush({ opacity })}
       />
+      <SliderField
+        label="Hardness"
+        min={0}
+        max={1}
+        step={0.01}
+        value={brush.hardness}
+        title="Edge falloff: 100% is a crisp edge, lower values soften it"
+        format={(value) => `${Math.round(value * 100)}%`}
+        onChange={(hardness) => actions.setBrush({ hardness })}
+      />
       <label
         className="toggle"
         title="Pen pressure controls stroke width (ignored by mouse input)"

@@ -51,11 +51,11 @@ architecture by browsing.
 | Lines | File | What is in it |
 | --- | --- | --- |
 | 2075 | `src/core/engine/DrawingEngine.ts` | snapshot, gestures, history, layers, selection |
-| 2053 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
-| 1162 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
-| 1000 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
-| 839 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, rebuilds |
-| 693 | `src/core/project/projectFormat.ts` | v5 serialize/parse/validate |
+| 2095 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
+| 1342 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
+| 1050 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
+| 961 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
+| 707 | `src/core/project/projectFormat.ts` | v6 serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
@@ -75,11 +75,12 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | --- | --- |
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-102), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
-| Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (147), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
+| Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (165), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
+| Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L758/L793), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L668) |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts`, `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush` |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
 | Undo/redo behaviour | `core/commands/commandStack.ts`, the command in `core/commands/`, `engine.executeDocumentCommand`/`recordHistoryChange` |
-| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L72, `serializeProject` L378, `parseProject` L450, `readBrush` L~662), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
+| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L77, `serializeProject` L384, `parseProject` L456, `readBrush` L668), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L655-760, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1291-1780, `strokeEditCommand.ts` |
@@ -105,14 +106,16 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | `BrushSettings` | `types/brush.ts` | 11 |
 | `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 26, 46 |
 | `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 38, 63, 78 |
-| `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 91, 37, 22, 57 |
+| `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
+| `SOFT_EDGE_RADIUS_RATIO`, `strokeFeatherRadius` | `core/rendering/canvas2dStroke.ts` | 32, 43 |
+| `paintStrokeCoverage`, `featherStroke`, `compositeStrokeBuffer` | `core/rendering/Canvas2DRenderer.ts` | 758, 793, 733 |
 | `Canvas2DRenderer` (class) | `core/rendering/Canvas2DRenderer.ts` | 85 |
 | `StrokeRecord`, `FillPatchRecord`, `GradientRecord`, `LayerElement` | `core/document/types.ts` | 76, 126, 161, 176 |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
-| `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 72, 378, 450 |
-| `readBrush` (format validation) | `core/project/projectFormat.ts` | ~662 |
+| `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 77, 384, 456 |
+| `readBrush` (format validation) | `core/project/projectFormat.ts` | ~668 |
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
 | `Tool`, `ToolContext` | `core/tools/types.ts` | 121, 17 |
@@ -153,6 +156,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
+| Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
 | Stroke raster | `canvas2dStroke.test.ts` |
 | Renderer / layers / compositing | `canvas2dRenderer.test.ts` (grep `it(`) |
 | Engine gestures, history, selection | `drawingEngine.test.ts` (grep `it(`) |

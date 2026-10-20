@@ -27,7 +27,7 @@ import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
-import { rasterizeStroke, strokeOpacity } from "./canvas2dStroke";
+import { rasterizeStroke, strokeDiameter, strokeFeatherRadius, strokeOpacity } from "./canvas2dStroke";
 import type {
   DrawingRenderer,
   RendererKind,
@@ -117,6 +117,17 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * buffer is still the only canvas the constructor creates.
    */
   private probeCanvas: HTMLCanvasElement | null = null;
+  /**
+   * Scratch buffer for a soft stroke's feathered edge, allocated on first use.
+   *
+   * A blurred copy of the stroke buffer is built here and then composited in
+   * its place, so the raw buffer stays pure full coverage (and the hard path
+   * keeps using it directly). It is sized to the stroke's padded bounding box,
+   * not the whole document, so a soft stroke costs a pass over its own
+   * footprint rather than a document-wide blur on every frame. One canvas is
+   * reused for every stroke; the pixels in it are never authoritative.
+   */
+  private featherBuffer: HTMLCanvasElement | null = null;
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
   private rasterScale: number;
@@ -300,7 +311,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     const surface = this.ensureRasterized(stroke.layerId);
-    this.compositeStrokeBuffer(surface, strokeOpacity(stroke.brush, stroke.pressures));
+    this.compositeStrokeBuffer(surface, stroke);
     this.clearStrokeBuffer();
     this.activeStroke = null;
     this.requestFrame();
@@ -360,11 +371,12 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.paintDocument(ctx);
 
     if (this.activeStroke && this.activeStroke.erase !== true) {
-      // The buffer holds full coverage; the stroke's alpha is applied here, once.
+      // The buffer holds full coverage; the stroke's alpha is applied here, once
+      // (and, for a soft brush, its edge is feathered once - never per segment).
       // An erasing stroke is not drawn at all: it was already subtracted from the
       // layer surface, which `paintDocument` just composited.
       ctx.globalAlpha = strokeOpacity(this.activeStroke.brush, this.activeStroke.pressures);
-      ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+      this.paintStrokeCoverage(ctx, this.activeStroke);
       ctx.globalAlpha = 1;
     }
 
@@ -544,6 +556,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.activeStroke = null;
     this.dropEraseBase();
     this.probeCanvas = null;
+    this.featherBuffer = null;
   }
 
   /**
@@ -610,7 +623,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.rasterizeStrokeToBuffer(element);
       this.compositeStrokeBuffer(
         surface,
-        strokeOpacity(element.brush, element.pressures),
+        element,
         element.erase === true ? "destination-out" : "source-over",
       );
     }
@@ -714,11 +727,12 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * operation are set after it and cleared again afterwards: the surface context
    * must not leak state into the next composite. `destination-out` turns the
    * same buffer into an eraser, subtracting the stroke's coverage from whatever
-   * is already on the layer.
+   * is already on the layer. A soft brush submits the feathered copy instead of
+   * the raw buffer, so the committed pixels are the ones the user saw.
    */
   private compositeStrokeBuffer(
     surface: LayerSurface,
-    alpha: number,
+    stroke: StrokeRecord,
     operation: GlobalCompositeOperation = "source-over",
   ): void {
     const doc = this.doc;
@@ -726,11 +740,117 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
     this.surfaces.prepare(surface);
-    surface.ctx.globalAlpha = alpha;
+    surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
     surface.ctx.globalCompositeOperation = operation;
-    surface.ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+    this.paintStrokeCoverage(surface.ctx, stroke);
     surface.ctx.globalAlpha = 1;
     surface.ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Draws the stroke's coverage into the current (already transformed) context.
+   *
+   * The caller owns the alpha and the composite operation, so this is the one
+   * place that decides between the raw full-coverage buffer and its feathered
+   * copy - which is what keeps live drawing, layer commits, rebuilds after
+   * undo/redo and export pixel-identical for both a hard and a soft brush.
+   */
+  private paintStrokeCoverage(ctx: CanvasRenderingContext2D, stroke: StrokeRecord): void {
+    const doc = this.doc;
+    if (!doc) {
+      return;
+    }
+    const radius = strokeFeatherRadius(stroke.brush);
+    if (radius <= 0) {
+      ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+      return;
+    }
+    const feathered = this.featherStroke(stroke, radius);
+    if (feathered) {
+      ctx.drawImage(
+        feathered.canvas,
+        feathered.x,
+        feathered.y,
+        feathered.width,
+        feathered.height,
+      );
+    }
+  }
+
+  /**
+   * Blurs the stroke buffer's silhouette by `radius` document pixels and returns
+   * it together with the document rectangle it occupies.
+   *
+   * Only the stroke's padded bounding box is blurred and drawn, so the cost of
+   * a soft edge follows the stroke's own footprint instead of the document
+   * size. The pad is three blur radii, which is where a Gaussian's contribution
+   * has faded out; it also keeps the blur from clipping against the scratch
+   * canvas, whose edges then fall on transparent pixels. The blur length is
+   * scaled by `rasterScale`, so the soft edge is the same width on screen and in
+   * the rasterized layer, and the returned rectangle is in document coordinates
+   * so both callers can draw it through their own transform.
+   */
+  private featherStroke(
+    stroke: StrokeRecord,
+    radius: number,
+  ): { canvas: HTMLCanvasElement; x: number; y: number; width: number; height: number } | null {
+    const doc = this.doc;
+    if (!doc) {
+      return null;
+    }
+
+    const scale = this.rasterScale;
+    const spread = strokeDiameter(stroke.brush, 1) / 2 + radius * 3 + 1;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (let index = 0; index < stroke.xs.length; index += 1) {
+      minX = Math.min(minX, stroke.xs[index] - spread);
+      minY = Math.min(minY, stroke.ys[index] - spread);
+      maxX = Math.max(maxX, stroke.xs[index] + spread);
+      maxY = Math.max(maxY, stroke.ys[index] + spread);
+    }
+    if (minX > maxX || minY > maxY) {
+      return null;
+    }
+
+    const left = Math.max(0, Math.floor(minX * scale));
+    const top = Math.max(0, Math.floor(minY * scale));
+    const right = Math.min(this.strokeBuffer.width, Math.ceil(maxX * scale));
+    const bottom = Math.min(this.strokeBuffer.height, Math.ceil(maxY * scale));
+    const width = right - left;
+    const height = bottom - top;
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+
+    const canvas = this.ensureFeatherBuffer();
+    resizeCanvas(canvas, width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.filter = `blur(${radius * scale}px)`;
+    ctx.drawImage(this.strokeBuffer, left, top, width, height, 0, 0, width, height);
+    ctx.filter = "none";
+
+    return { canvas, x: left / scale, y: top / scale, width: width / scale, height: height / scale };
+  }
+
+  /** The shared feather scratch canvas, allocated on first use and reused after. */
+  private ensureFeatherBuffer(): HTMLCanvasElement {
+    const existing = this.featherBuffer;
+    if (existing) {
+      return existing;
+    }
+    const canvas = document.createElement("canvas");
+    this.featherBuffer = canvas;
+    return canvas;
   }
 
   /**
@@ -777,7 +897,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     surface.ctx.globalCompositeOperation = "destination-out";
     surface.ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
-    surface.ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
+    this.paintStrokeCoverage(surface.ctx, stroke);
     surface.ctx.globalAlpha = 1;
     surface.ctx.globalCompositeOperation = "source-over";
   }
@@ -827,6 +947,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     strokeCtx.setTransform(this.rasterScale, 0, 0, this.rasterScale, 0, 0);
     strokeCtx.globalAlpha = 1;
     strokeCtx.globalCompositeOperation = "source-over";
+    strokeCtx.filter = "none";
   }
 
   private clearStrokeBuffer(): void {
@@ -834,6 +955,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     strokeCtx.setTransform(1, 0, 0, 1, 0, 0);
     strokeCtx.globalAlpha = 1;
     strokeCtx.globalCompositeOperation = "source-over";
+    strokeCtx.filter = "none";
     strokeCtx.clearRect(0, 0, strokeBuffer.width, strokeBuffer.height);
   }
 }

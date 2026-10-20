@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  brushSettingsEqual,
   DEFAULT_BRUSH,
   MAX_BRUSH_SIZE,
   MIN_BRUSH_SIZE,
@@ -42,6 +43,7 @@ describe("brush configuration", () => {
       size: 10_000,
       opacity: 4,
       color: "  ",
+      hardness: 5,
       pressureSize: -3,
       pressureOpacity: 9,
       minSizeRatio: 0,
@@ -50,6 +52,7 @@ describe("brush configuration", () => {
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
     expect(normalized.color).toBe(DEFAULT_BRUSH.color);
+    expect(normalized.hardness).toBe(1);
     expect(normalized.pressureSize).toBe(0);
     expect(normalized.pressureOpacity).toBe(1);
     expect(normalized.minSizeRatio).toBe(0.02);
@@ -61,6 +64,19 @@ describe("brush configuration", () => {
     expect(next.size).toBe(40);
     expect(next.color).toBe("#ff0000");
     expect(DEFAULT_BRUSH.size).toBe(6);
+  });
+
+  it("defaults to a hard edge and clamps hardness into range", () => {
+    expect(DEFAULT_BRUSH.hardness).toBe(1);
+    expect(normalizeBrush({ ...DEFAULT_BRUSH, hardness: -1 }).hardness).toBe(0);
+    expect(normalizeBrush({ ...DEFAULT_BRUSH, hardness: 4 }).hardness).toBe(1);
+  });
+
+  it("treats hardness as part of the brush identity", () => {
+    const soft = updateBrushSettings(DEFAULT_BRUSH, { hardness: 0.5 });
+    expect(soft.hardness).toBe(0.5);
+    expect(brushSettingsEqual(DEFAULT_BRUSH, soft)).toBe(false);
+    expect(brushSettingsEqual(soft, { ...soft })).toBe(true);
   });
 
   it("steps size finely for small brushes and proportionally for large ones", () => {

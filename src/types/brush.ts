@@ -4,8 +4,8 @@
  * This is *configuration only*. Sampling lives in `core/input`, stroke
  * processing in `core/brushes` and rasterization in `core/rendering`. Every
  * field below is implemented by those modules today; unimplemented concepts
- * (texture, hardness, stabilizers, blending modes) are intentionally absent so
- * the configuration cannot claim capabilities the engine does not have.
+ * (texture, stabilizers, blending modes) are intentionally absent so the
+ * configuration cannot claim capabilities the engine does not have.
  */
 
 export interface BrushSettings {
@@ -15,6 +15,17 @@ export interface BrushSettings {
   readonly opacity: number;
   /** CSS color of the stroke. */
   readonly color: string;
+  /**
+   * Edge falloff of the stroke, in `[0, 1]`.
+   *
+   * `1` is the hard, antialiased edge of a plain stroke; lower values soften
+   * the outer edge by blurring the finished stroke silhouette once, so the
+   * interior keeps full coverage and self-overlap still cannot darken. The
+   * radius is proportional to `size`, so the setting reads the same at any
+   * brush diameter; the cost is that the soft edge extends slightly beyond the
+   * hard diameter (see `strokeFeatherRadius`).
+   */
+  readonly hardness: number;
   /**
    * How strongly pressure modulates diameter, in `[0, 1]`.
    * 0 = constant size, 1 = diameter scales linearly with pressure.

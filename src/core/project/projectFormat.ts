@@ -66,10 +66,15 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * Version 5: elements may be gradients (geometry plus colour stops). A
  * version-4 reader rejects the unknown `gradient` kind, so the version was
  * bumped; version-1 to -4 files still open unchanged.
+ * Version 6: a stroke's `brush` carries `hardness`. A version-5 reader would
+ * ignore the field and render a soft stroke with a hard edge - a different
+ * picture - so the version was bumped; version-1 to -5 files still open, their
+ * strokes defaulting to a hardness of `1` (the hard edge every earlier version
+ * could produce).
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 5;
+export const PROJECT_VERSION = 6;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -240,6 +245,7 @@ function readStroke(
   layerId: LayerId,
   sampleCount: number,
   maxSamples: number,
+  version: number,
 ): StrokeRecord {
   const xs = readSampleArray(raw.xs, `${label} x`, sampleCount, maxSamples);
   const ys = readSampleArray(raw.ys, `${label} y`, sampleCount, maxSamples);
@@ -258,7 +264,7 @@ function readStroke(
   return {
     id: readId(raw.id, "stroke"),
     layerId,
-    brush: readBrush(raw.brush, label),
+    brush: readBrush(raw.brush, label, version),
     // Only eraser strokes carry the flag: `erase: false` and "no flag" mean the
     // same thing, and old files have no flag at all.
     ...(erase ? { erase: true as const } : {}),
@@ -608,6 +614,7 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
         id,
         sampleCount,
         maxSamples,
+        version,
       );
       sampleCount += stroke.xs.length;
       elements.push(stroke);
@@ -658,7 +665,7 @@ function readSampleArray(value: unknown, label: string, pointsSoFar: number, max
   return numbers;
 }
 
-function readBrush(value: unknown, label: string): BrushSettings {
+function readBrush(value: unknown, label: string, version: number): BrushSettings {
   const record = asRecord(value, `${label} brush`);
   const color = readString(record.color, `${label} brush colour`);
   if (color.trim() === "") {
@@ -669,6 +676,13 @@ function readBrush(value: unknown, label: string): BrushSettings {
     size: readNumber(record.size, `${label} brush size`, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE),
     opacity: readNumber(record.opacity, `${label} brush opacity`, 0, 1),
     color,
+    // Hardness became a required brush field in version 6. Earlier files could
+    // only produce a hard edge, so they default to 1 rather than being
+    // mis-rendered as soft.
+    hardness:
+      version >= 6
+        ? readNumber(record.hardness, `${label} brush hardness`, 0, 1)
+        : 1,
     pressureSize: readNumber(record.pressureSize, `${label} brush pressure size`, 0, 1),
     pressureOpacity: readNumber(record.pressureOpacity, `${label} brush pressure opacity`, 0, 1),
     minSizeRatio: readNumber(record.minSizeRatio, `${label} brush minimum size ratio`, 0.02, 1),

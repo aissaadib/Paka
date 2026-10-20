@@ -67,21 +67,22 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, in sync with `origin/main` after the gradient slice.
-- **`pnpm test` → 380 tests in 26 files, all pass.** `pnpm typecheck` clean;
+- Branch `main`, in sync with `origin/main` after the hardness slice.
+- **`pnpm test` → 398 tests in 26 files, all pass.** `pnpm typecheck` clean;
   `pnpm build` succeeds.
-- **Project file format version 5** (`PROJECT_VERSION = 5`).
+- **Project file format version 6** (`PROJECT_VERSION = 6`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
-  non-default manifests` warning (see §8). The executable predates the fill and
-  gradient slices.
+  non-default manifests` warning (see §8). The executable predates the fill,
+  gradient and hardness slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Gradients** — first-class `GradientRecord` (linear/radial, stops, opacity) in the ordered element list; live drag preview, one undo step, format version 5. |
+| current `main` | **Brush hardness** — `hardness` on the brush, captured per stroke; one post-pass feather of the finished silhouette (bounded, reused scratch), soft brush/eraser/shapes; format version 6. |
+| `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, stops, opacity) in the ordered element list; live drag preview, one undo step, format version 5. |
 | `8b7152b` | **Bucket (flood) fill** — `FillPatchRecord` in an ordered per-layer element list; composite sampling, tolerance, cancel/undo/redo; format version 4. |
 | `84af123` | **Filled shapes** — the toolbar **Fill shape** switch (rectangle/ellipse only); `fill: true` on the stroke; format version 3. |
 | `e93c770` | **Bug-hunt round on the transform slice** — three defects each reproduced by a test first (undo/redo mid-drag, no-op flip recording a step, nudge coalescing across a reselect). |
@@ -147,12 +148,14 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   renderer uses a Canvas linear/radial gradient over the full surface, with
   element opacity in `globalAlpha`; zero-length or fully transparent records draw
   nothing.
-- **Project format is version 5.** `layers[].elements` is one ordered list of
+- **Project format is version 6.** `layers[].elements` is one ordered list of
   `kind: "stroke"`, `kind: "fill"` and `kind: "gradient"` entries; versions 1-3
   have only `layers[].strokes`, read as stroke elements in the same order.
   Version-4 files open unchanged and may contain fills; a gradient in a
-  version-4 file is rejected. The bump is required because a version-4 reader
-  cannot read the new kind.
+  version-4 file is rejected. Version-5 files open unchanged and gain
+  `hardness = 1`; every version-6 brush must carry an explicit `0..1` hardness.
+  The bump is required because a version-5 reader would ignore the field and
+  mis-render a soft stroke.
 - **Selection stores only `{ layerId, strokeIds }`.** The dashed frame plus blue
   centreline trace is an overlay: display-only, never in a layer, never exported,
   never serialized.
@@ -167,8 +170,26 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - **Stale selection ids are deliberately kept through an undo** so a redo
   re-selects the restored strokes.
 - **The eraser subtracts coverage** (`destination-out`) and shares the brush's
-  size/opacity/pressure; stroke opacity is composited once, so self-overlap does
-  not darken.
+  size/opacity/pressure/hardness; stroke opacity is composited once, so
+  self-overlap does not darken.
+- **Hardness is a post-pass feather of the finished silhouette**, never a lower
+  per-segment alpha. `strokeFeatherRadius` returns `size * 0.1 * (1 - hardness)`
+  in document pixels; `0` takes the unchanged raw-buffer path. A soft stroke
+  blurs one copy of the stroke buffer in a lazily reused scratch canvas sized to
+  its padded bounding box (full-pressure radius + three blur radii) and
+  composites that instead, through the same `paintStrokeCoverage` used by live
+  drawing, layer commit, rebuild and eraser. Opacity is still applied once.
+- **Hardness is captured by the stroke**, with the rest of the brush copy, so
+  changing the slider never rewrites old strokes and produces no history entry
+  or dirty flag. It applies to brush, eraser and shapes; a filled shape's
+  interior stays solid and only its outer silhouette softens.
+- **Hardness forced format version 6.** A version-5 reader ignores the field and
+  draws a soft stroke hard - a different picture - so it must refuse the file.
+  Version-1 to -5 files read their strokes with `hardness = 1`.
+- **The soft edge is a Gaussian, not an exact hardness cone.** The falloff
+  extends slightly beyond the nominal diameter. `SOFT_EDGE_RADIUS_RATIO = 0.1`
+  was chosen from measured coverage so even a 4 px stroke keeps a full-alpha
+  core; a true per-pixel profile needs the deferred stamp/distance-field engine.
 
 ## 6. Key files
 
@@ -185,27 +206,32 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   filtered stroke view and in-place `replace` for gradient previews.
 - `src/core/commands/fillCommand.ts` — redo replays the committed patch.
 - `src/core/commands/gradientCommand.ts` — redo re-inserts the committed record.
-- `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke`, including the fill
-  branch for filled shapes.
-- `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeFillPatch`,
+- `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke` (including the fill
+  branch for filled shapes), `strokeFeatherRadius` / `SOFT_EDGE_RADIUS_RATIO`.
+- `src/core/rendering/Canvas2DRenderer.ts` — `paintStrokeCoverage`,
+  `featherStroke` (bounded scratch + scaled blur), `rasterizeFillPatch`,
   `rasterizeGradient`, `readCompositeImage`, element-ordered layer rebuilds.
 - `src/core/document/types.ts` — `StrokeRecord` (incl. `fill?: boolean`),
   `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
-  version-history comment, fill and gradient validation.
+  version-history comment, fill/gradient validation, version-aware `readBrush`
+  (required `hardness` in v6, default `1` for v1-v5).
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
+- `src/features/brushes/BrushControls.tsx` — size, opacity and **Hardness**
+  sliders.
 - `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
   `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
-- Tests: `src/test/floodFill.test.ts`, `src/test/fillCommand.test.ts`,
+- Tests: `src/test/brushSettings.test.ts`, `src/test/canvas2dStroke.test.ts`,
+  `src/test/floodFill.test.ts`, `src/test/fillCommand.test.ts`,
   `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
   `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
   `src/test/projectLifecycle.test.ts`, shared fakes in
-  `src/test/support/recordingCanvas.ts` (gradient methods are injected alongside
-  the recorded methods).
+  `src/test/support/recordingCanvas.ts` (gradient methods and `filter` state are
+  injected alongside the recorded methods).
 
 ## 7. Toolchain notes for this Windows machine
 
@@ -282,25 +308,39 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `[128,128,128,255]` at x=50 and `[243,243,243,255]` at x=95. A red→blue radial
   with centre (50,50) and radius 50 sampled `[251,0,3,255]` at the centre and
   blue at the edges.
+- **Hardness check (verified 2026-10-20).** Press `b`; the toolbar shows a
+  **Hardness** range and number input (default `1`). Set size 40 and hardness 0
+  through the number inputs, dispatch a synthetic pen drag at actual size
+  (`Ctrl+1`), and read the live display canvas across the stroke edge: the
+  profile was monotone from paper `255` through `248, 209, 126, 52, 26` to a
+  `22` interior (the brush colour), while the status bar showed `history 1` and
+  `● unsaved`. `Ctrl+Z` returned the sampled pixel to `255` and `history 0`;
+  `Ctrl+Shift+Z` restored the stroke. Renderer-level checks (real
+  `Canvas2DRenderer`, fresh canvas) additionally showed: a hard edge unchanged
+  at the nominal boundary; soft profiles falling off smoothly; interior parity
+  at opacity 0.6 for hardness 1/0.5/0; effective parity at `rasterScale` 1 and
+  2; no darkening at a soft stroke's self-crossing (crossing and single coverage
+  both `0`); a soft eraser removing the core completely; and live preview vs
+  committed layer byte-identical (`differingChannels: 0`).
 
 ## 9. Next move
 
-**Brush hardness** (the first Phase 3 item). The "Next slice" section of
-[ROADMAP.md](ROADMAP.md) is kept current and is the authority; it now describes
-the hardness slice rather than gradients.
+**Brush spacing and a stabilizer** (the remaining Phase 3 brush-feel work). The
+"Next slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the
+authority; it now describes spacing/stabilizers rather than hardness.
 
 The constraints that matter:
 
-- a `hardness` field is editor state for the next stroke, like `shapeFill` and
-  `fillTolerance`, and must be captured per stroke so undo/reopen reproduce it;
-- soft coverage must come from the rasterizer, not from lowering each segment's
-  alpha - stroke opacity is applied once per stroke today, and overlapping
-  translucent dabs would reintroduce self-overlap darkening;
-- decide explicitly whether the brush field is additive (no version bump) or
-  required (version 6), based on whether an older reader ignoring it changes the
-  picture;
-- do not start the stamp-based brush engine until hardness has a verified raster
-  path; they share the coverage question.
+- surface the existing `spacing` brush field and add stabilizer smoothing; both
+  are read at press time and captured per stroke, like the other brush fields;
+- they change the **samples**, which are already stored, so an older reader
+  replaying those samples sees the same picture - an additive field is likely,
+  but prove it with a format test and bump only if a reader would render a
+  different drawing;
+- keep one gesture = one undo step; default values must reproduce today's
+  strokes exactly; changing a setting is not an edit;
+- a stamp-based brush engine (texture, true per-dab spacing/hardness) remains a
+  later slice behind the stroke interface. Spacing here means sample density.
 
 Optional polish, deliberately not done yet:
 
@@ -328,6 +368,12 @@ Optional polish, deliberately not done yet:
   and cancel paths, and the tolerance control was checked (§8). A real-device /
   packaged-window check and a native save/reopen of a fill are still unverified;
   save/reopen is covered by Vitest at the format and lifecycle level.
+- **Hardness was verified on the live display canvas and through the real
+  renderer** (§8), including undo/redo and the soft eraser, but **not in the
+  packaged Tauri window**. Native save/reopen of a soft stroke and high-DPI
+  rendering of the feather remain unverified; save/reopen is covered by Vitest
+  at the format and lifecycle level. The harness edge profile is evidence of
+  falloff and parity, not a perceptual review of the curve.
 - **High-DPI behaviour of the release executable is unverified.** The link warned
   about merged resource manifests; the app launches, its window responds and its
   title updates from the frontend, but DPI scaling of the packaged build was not
@@ -337,7 +383,9 @@ Optional polish, deliberately not done yet:
   not stored in the project file (reopening rebuilds one step per element); no
   autosave or crash recovery; the React layer has no automated tests; `Ctrl+N` is
   not bound (use `File -> New Document...`); fills are binary/unselectable;
-  gradients are two-stop, whole-layer, have no stop editor and are unselectable.
+  gradients are two-stop, whole-layer, have no stop editor and are unselectable;
+  hardness is a Gaussian feather of the stroke silhouette (not a stamp profile),
+  with no spacing UI or stabilizer yet.
 
 ## 11. First five minutes of a new session
 

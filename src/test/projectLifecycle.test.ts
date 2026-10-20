@@ -172,6 +172,31 @@ describe("serialize and loadProject", () => {
     expect(reopened.listStrokes(activeLayerId(reopened))[1].erase).toBe(true);
   });
 
+  it("round-trips a soft brush's hardness through save and reopen", () => {
+    const engine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 40, hardness: 0.3 },
+    });
+    paintStroke(engine, 0);
+    const text = engine.serialize();
+
+    const reopened = new DrawingEngine();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    reopened.loadProject(parsed.project, null);
+
+    const strokes = reopened.listStrokes(activeLayerId(reopened));
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].brush.hardness).toBe(0.3);
+    // The loaded soft stroke stays one undoable step and keeps its softness
+    // through undo and redo, because hardness lives on the stroke record.
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.hardness).toBe(0.3);
+  });
+
   it("rebuilds one undoable step per loaded stroke", () => {
     const engine = new DrawingEngine();
     paintStroke(engine, 0);

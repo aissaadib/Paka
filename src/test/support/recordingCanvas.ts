@@ -41,6 +41,8 @@ export interface DrawCall {
   readonly lineWidth: number;
   /** `lineDash` at the moment of the call; `[]` when solid. */
   readonly lineDash: readonly number[];
+  /** `filter` at the moment of the call; `"none"` when unfiltered. */
+  readonly filter: string;
 }
 
 /** The 8-byte PNG file signature, used as stand-in encoder output. */
@@ -71,6 +73,7 @@ export class RecordingCanvas {
       lineCap: "butt",
       lineJoin: "miter",
       lineDash: [] as number[],
+      filter: "none",
     };
 
     const record =
@@ -85,6 +88,7 @@ export class RecordingCanvas {
           strokeStyle: ctx.strokeStyle,
           lineWidth: ctx.lineWidth,
           lineDash: [...ctx.lineDash],
+          filter: ctx.filter,
         });
       };
 

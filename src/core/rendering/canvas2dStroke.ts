@@ -18,6 +18,36 @@ import type { BrushSettings } from "../../types/brush";
 import type { StrokeRecord } from "../document/types";
 import { clamp } from "../../utils/math";
 
+/**
+ * Blur length applied to a stroke's finished silhouette at hardness `0`, as a
+ * fraction of the stroke's diameter.
+ *
+ * The radius is proportional to `size`, so "soft" means the same thing for a
+ * 6 px pen and a 200 px brush. It is deliberately small: a Gaussian blur
+ * lightens the *interior* of a shape whose width is not much larger than the
+ * blur, so the ratio is chosen from measured coverage - at `0.1` the core of
+ * even a 4 px stroke stays at full alpha, while the outer tenth of the radius
+ * still carries a visible falloff band (see ARCHITECTURE.md).
+ */
+export const SOFT_EDGE_RADIUS_RATIO = 0.1;
+
+/**
+ * Blur length in document pixels for a stroke's soft edge.
+ *
+ * `0` means the stroke is hard and takes the plain segment path unchanged - so
+ * every existing drawing (and every mouse stroke on a default brush) renders
+ * exactly as before. The value is read from the *stroke's own brush*, never
+ * from editor state, which is what makes live drawing, undo/redo, reopen and
+ * export agree.
+ */
+export function strokeFeatherRadius(brush: BrushSettings): number {
+  const softness = 1 - clamp(brush.hardness, 0, 1);
+  if (softness <= 0) {
+    return 0;
+  }
+  return brush.size * SOFT_EDGE_RADIUS_RATIO * softness;
+}
+
 /** Diameter in document pixels for a given pressure. */
 export function strokeDiameter(brush: BrushSettings, pressure: number): number {
   const factor = 1 - brush.pressureSize * (1 - pressure);

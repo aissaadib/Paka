@@ -5,7 +5,7 @@ drawing engine written in React + TypeScript, with HTML Canvas 2D as the current
 raster backend.
 
 This is the **foundation** of the app, not a finished product. You can draw
-pressure-sensitive strokes, change brush size and colour, flood-fill regions,
+pressure-sensitive strokes, change brush size, hardness and colour, flood-fill regions,
 paint linear and radial gradients, pan and zoom, manage layers with working
 undo/redo for strokes, fills and gradients, and **save, reopen and export your
 work as a project file or a PNG**. Several things are explicitly missing; see
@@ -76,9 +76,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   picks the colour actually on screen rather than the colour a stroke was
   authored with. It samples on click (no drag), stays selected afterwards, and
   is not an edit: it adds no history step and never marks the document dirty.
-- **Brush controls**: size (1-512 px, in document pixels), opacity, colour
-  (picker plus an 8-swatch palette), and toggles for pressure-driven size and
-  pressure-driven opacity.
+- **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
+  (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
+  outer edge), colour (picker plus an 8-swatch palette), and toggles for
+  pressure-driven size and pressure-driven opacity. Hardness is captured by each
+  stroke, so changing it later never rewrites existing work; it applies to the
+  brush, the eraser and shapes.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -242,6 +245,12 @@ paste-ready version of the same briefing is in
   the brush opacity and the stroke's mean pressure. Pressure tapers width within
   a stroke but not opacity - per-dab opacity without build-up needs per-pixel
   max blending, which Canvas 2D does not expose.
+- **Hardness is a single-pass feather of the finished stroke, not a true
+  hardness profile.** Lowering it blurs the stroke silhouette once, so the edge
+  is a Gaussian falloff and extends slightly beyond the nominal diameter (the
+  interior stays at full coverage and opacity is still applied once). There is
+  no stamp engine, spacing or stabilizer yet, and a very large soft stroke costs
+  one extra pass over its bounding box per repaint.
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
@@ -252,9 +261,10 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `5`** (`version: 1` to `4` files still
-  open and are written back as 5). Unknown versions, wrong formats and unreadable
-  files are rejected with a message instead of being partially loaded.
+- **The current project version is `6`** (`version: 1` to `5` files still
+  open and are written back as 6; their strokes default to a hardness of 1).
+  Unknown versions, wrong formats and unreadable files are rejected with a
+  message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one
   undoable step per stored element (stroke, fill patch or gradient), so the
   drawing stays editable, but there is no redo of edits made before the save.

@@ -447,6 +447,38 @@ describe("parseProject round trip", () => {
     expect(restored.stops[1]).not.toBe(gradient.stops[1]);
   });
 
+  it("round-trips brush hardness, and opens older files with a hard edge", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const soft = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, hardness: 0.25 } });
+    const text = serializeProject(document, storeOf([[layerId, [soft]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.hardness).toBe(0.25);
+
+    // The value is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.layers[0].elements[0].brush.hardness).toBe(0.25);
+
+    // A version-5 file has no hardness field and could only produce a hard edge,
+    // so it must open hard rather than being mis-read as soft.
+    payload.version = 5;
+    delete payload.layers[0].elements[0].brush.hardness;
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.hardness).toBe(1);
+  });
+
   it("opens version 2 files, whose shapes were all outlines", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -762,6 +794,24 @@ describe("parseProject rejections", () => {
     expect(
       rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = undefined))),
     ).toContain("must be an object");
+  });
+
+  it("refuses a version-6 stroke brush without a hardness in 0-1", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).hardness;
+        }),
+      ),
+    ).toContain("brush hardness");
+
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, hardness: 2 }))),
+    ).toContain("brush hardness");
+
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, hardness: "soft" }))),
+    ).toContain("finite number");
   });
 
   it("refuses an erase flag that is not a boolean", () => {

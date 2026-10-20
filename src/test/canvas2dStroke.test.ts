@@ -14,8 +14,10 @@ import { createStrokeRecord } from "../core/brushes/strokeBuilder";
 import type { BrushSettings } from "../types/brush";
 import {
   rasterizeStroke,
+  SOFT_EDGE_RADIUS_RATIO,
   stampDot,
   strokeDiameter,
+  strokeFeatherRadius,
   strokeOpacity,
 } from "../core/rendering/canvas2dStroke";
 import { RecordingCanvas } from "./support/recordingCanvas";
@@ -52,6 +54,33 @@ describe("strokeDiameter", () => {
     const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 7, pressureSize: 0 };
     expect(strokeDiameter(brush, 0)).toBeCloseTo(7, 10);
     expect(strokeDiameter(brush, 1)).toBeCloseTo(7, 10);
+  });
+});
+
+describe("strokeFeatherRadius", () => {
+  it("is zero for a hard brush, so the hard segment path is untouched", () => {
+    expect(strokeFeatherRadius(DEFAULT_BRUSH)).toBe(0);
+    expect(strokeFeatherRadius({ ...DEFAULT_BRUSH, hardness: 1 })).toBe(0);
+  });
+
+  it("grows with softness and follows the brush diameter", () => {
+    const size = 100;
+    const half = strokeFeatherRadius({ ...DEFAULT_BRUSH, size, hardness: 0.5 });
+    const full = strokeFeatherRadius({ ...DEFAULT_BRUSH, size, hardness: 0 });
+    expect(full).toBeCloseTo(size * SOFT_EDGE_RADIUS_RATIO, 10);
+    expect(half).toBeCloseTo(full / 2, 10);
+    // The radius is proportional to size, so "soft" reads the same at any brush.
+    expect(strokeFeatherRadius({ ...DEFAULT_BRUSH, size: 10, hardness: 0 })).toBeCloseTo(
+      full / 10,
+      10,
+    );
+  });
+
+  it("clamps hardness into range", () => {
+    expect(strokeFeatherRadius({ ...DEFAULT_BRUSH, hardness: -3 })).toBe(
+      strokeFeatherRadius({ ...DEFAULT_BRUSH, hardness: 0 }),
+    );
+    expect(strokeFeatherRadius({ ...DEFAULT_BRUSH, hardness: 4 })).toBe(0);
   });
 });
 
@@ -185,6 +214,22 @@ describe("rasterizeStroke", () => {
     rasterizeStroke(ctx, makeStroke(DEFAULT_BRUSH, [0, 10, 10, 0, 0], [0, 0, 10, 10, 0], [1, 1, 1, 1, 1]));
     expect(canvas.named("fill")).toHaveLength(0);
     expect(canvas.named("closePath")).toHaveLength(0);
+  });
+
+  it("rasterizes a soft brush exactly like a hard one, with no filter", () => {
+    // Hardness is an edge treatment of the finished silhouette, applied once
+    // when the buffer composites. Rasterization itself is unchanged - which is
+    // what keeps the hard path byte-identical and stops the falloff from being
+    // applied (and re-applied) per segment.
+    const hard = context();
+    rasterizeStroke(hard.ctx, makeStroke(DEFAULT_BRUSH));
+    const soft = context();
+    rasterizeStroke(soft.ctx, makeStroke({ ...DEFAULT_BRUSH, hardness: 0 }));
+
+    expect(soft.canvas.calls.map((call) => call.name)).toEqual(
+      hard.canvas.calls.map((call) => call.name),
+    );
+    expect(soft.canvas.calls.every((call) => call.filter === "none")).toBe(true);
   });
 });
 

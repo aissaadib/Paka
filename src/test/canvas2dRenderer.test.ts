@@ -38,6 +38,7 @@ const BRUSH: BrushSettings = {
   size: 10,
   opacity: 1,
   color: "#000000",
+  hardness: 1,
   pressureSize: 0,
   pressureOpacity: 0,
   minSizeRatio: 0,
@@ -745,6 +746,185 @@ describe("Canvas2DRenderer eraser", () => {
     // The buffer itself still carries full coverage: the eraser's opacity is
     // applied once, when the stroke is subtracted, not per segment.
     expect(harness.strokeBuffer.named("stroke").every((call) => call.alpha === 1)).toBe(true);
+  });
+});
+
+describe("Canvas2DRenderer brush hardness", () => {
+  const SOFT: BrushSettings = { ...BRUSH, size: 40, hardness: 0.5 };
+
+  /** The feather scratch: the only canvas that is ever drawn through a filter. */
+  function featherCanvas(): RecordingCanvas | undefined {
+    return recording.allocated.find((canvas) =>
+      canvas.named("drawImage").some((call) => call.filter !== "none"),
+    );
+  }
+
+  function openHarness() {
+    const strokes = new Map<LayerId, StrokeRecord[]>();
+    const harness = createHarness({ strokes });
+    const doc = createDocument({ width: 100, height: 80 });
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+    return { harness, strokes, doc, layerId: doc.layers[0].id };
+  }
+
+  it("keeps a hard stroke on the raw buffer with no filter anywhere", () => {
+    const { harness, doc, layerId } = openHarness();
+    const allocations = recording.allocated.length;
+
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    const images = harness.display.named("drawImage");
+    expect(images.some((call) => call.args[0] === harness.strokeBuffer)).toBe(true);
+    expect(images.every((call) => call.filter === "none")).toBe(true);
+    // Hardness 1 allocates no feather scratch and blurs nothing.
+    expect(recording.allocated.length).toBe(allocations);
+    expect(featherCanvas()).toBeUndefined();
+    expect(doc.layers[0].id).toBe(layerId);
+  });
+
+  it("feathers a soft stroke once, into a bounded scratch, and shows the copy", () => {
+    const { harness, layerId } = openHarness();
+    const stroke = createStroke(layerId, SOFT);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    const feather = featherCanvas();
+    expect(feather).toBeDefined();
+
+    // The buffer holds one segment per gap between samples at full coverage; the
+    // blur is a single pass over the finished silhouette, never one per segment.
+    expect(harness.strokeBuffer.named("stroke").length).toBeGreaterThan(1);
+    const blurred = feather?.named("drawImage").filter((call) => call.filter !== "none") ?? [];
+    expect(blurred).toHaveLength(1);
+    expect(blurred[0].args[0]).toBe(harness.strokeBuffer);
+    expect(blurred[0].filter).toMatch(/^blur\(/);
+
+    // The scratch is the stroke's bounding box, not the whole document: a soft
+    // edge costs a pass over the stroke, not a document-wide blur per frame.
+    const surface = harness.layerSurfaces()[0];
+    expect(feather?.width).toBeLessThan(surface.width);
+    expect(feather?.height).toBeLessThan(surface.height);
+
+    // The display shows the feathered copy, at the stroke's own alpha, exactly
+    // once - the raw buffer never reaches the screen.
+    const shown = harness.display.named("drawImage").filter((call) => call.args[0] === feather);
+    expect(shown).toHaveLength(1);
+    expect(shown[0].alpha).toBe(1);
+    expect(
+      harness.display.named("drawImage").some((call) => call.args[0] === harness.strokeBuffer),
+    ).toBe(false);
+  });
+
+  it("composites the feathered copy into the layer when the stroke commits", () => {
+    const { harness, strokes, layerId } = openHarness();
+    const stroke = createStroke(layerId, SOFT);
+
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+
+    const surface = harness.layerSurfaces()[0];
+    surface.calls.length = 0;
+    strokes.set(layerId, [stroke]);
+    harness.renderer.endStroke(stroke);
+
+    const composites = surface.drawImages;
+    expect(composites).toHaveLength(1);
+    const feather = composites[0].args[0] as RecordingCanvas;
+    expect(feather).not.toBe(harness.strokeBuffer);
+    expect(composites[0].alpha).toBe(1);
+    expect(composites[0].composite).toBe("source-over");
+    // Still no blur on the surface itself: the falloff lives in the scratch,
+    // which was built with one filtered pass over the stroke's silhouette.
+    expect(composites[0].filter).toBe("none");
+    expect(feather.named("drawImage").filter((call) => call.filter !== "none")).toHaveLength(1);
+  });
+
+  it("rebuilds a committed soft stroke through the same feathered path", () => {
+    const { harness, strokes, layerId } = openHarness();
+    strokes.set(layerId, [createStroke(layerId, SOFT)]);
+
+    harness.renderer.invalidateLayer(layerId);
+    harness.renderer.render();
+
+    const feather = featherCanvas();
+    expect(feather).toBeDefined();
+    const blurred = feather?.named("drawImage").filter((call) => call.filter !== "none") ?? [];
+    expect(blurred).toHaveLength(1);
+
+    const surface = harness.layerSurfaces()[0];
+    const paint = surface.named("drawImage").find((call) => call.args[0] === feather);
+    expect(paint?.composite).toBe("source-over");
+    expect(paint?.alpha).toBe(1);
+  });
+
+  it("subtracts a soft eraser's feathered copy from the snapshot base", () => {
+    const { harness, layerId } = openHarness();
+    const surface = harness.layerSurfaces()[0];
+
+    const erase = createStroke(layerId, SOFT, true);
+    harness.renderer.beginStroke(erase);
+    const snapshot = recording.allocated[recording.allocated.length - 1];
+    expect(snapshot).not.toBe(harness.strokeBuffer);
+
+    surface.calls.length = 0;
+    harness.renderer.extendStroke(erase, 0);
+
+    const feather = featherCanvas();
+    expect(feather).toBeDefined();
+    const images = surface.drawImages;
+    expect(images[0].args[0]).toBe(snapshot);
+    expect(images[0].composite).toBe("source-over");
+    expect(images[1].args[0]).toBe(feather);
+    expect(images[1].composite).toBe("destination-out");
+    expect(
+      images.some((call) => call.args[0] === harness.strokeBuffer),
+    ).toBe(false);
+
+    // The erasure is already in the layer, so the display paints the layer alone.
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    expect(harness.display.drawnSources).toEqual([surface]);
+  });
+
+  it("reuses one feather scratch across frames instead of allocating per frame", () => {
+    const { harness, layerId } = openHarness();
+    const stroke = createStroke(layerId, SOFT);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.renderer.render();
+
+    const allocations = recording.allocated.length;
+    const feather = featherCanvas();
+    harness.renderer.render();
+    harness.renderer.render();
+
+    expect(recording.allocated.length).toBe(allocations);
+    expect(featherCanvas()).toBe(feather);
+  });
+
+  it("reads hardness from the stroke's own brush, not from editor state", () => {
+    const { harness, layerId } = openHarness();
+    // A hard stroke stays hard even while the toolbar's brush is soft.
+    const stroke = createStroke(layerId, BRUSH);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    expect(featherCanvas()).toBeUndefined();
+    const shown = harness.display.named("drawImage").find(
+      (call) => call.args[0] === harness.strokeBuffer,
+    );
+    expect(shown).toBeDefined();
   });
 });
 

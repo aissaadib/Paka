@@ -16,6 +16,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   size: 6,
   opacity: 1,
   color: "#16181c",
+  hardness: 1,
   pressureSize: 0.6,
   pressureOpacity: 0,
   minSizeRatio: 0.12,
@@ -28,6 +29,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     size: clamp(brush.size, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE),
     opacity: clamp(brush.opacity, 0, 1),
     color: brush.color.trim() === "" ? DEFAULT_BRUSH.color : brush.color,
+    hardness: clamp(brush.hardness, 0, 1),
     pressureSize: clamp(brush.pressureSize, 0, 1),
     pressureOpacity: clamp(brush.pressureOpacity, 0, 1),
     minSizeRatio: clamp(brush.minSizeRatio, 0.02, 1),
@@ -48,6 +50,7 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.size === b.size &&
     a.opacity === b.opacity &&
     a.color === b.color &&
+    a.hardness === b.hardness &&
     a.pressureSize === b.pressureSize &&
     a.pressureOpacity === b.pressureOpacity &&
     a.minSizeRatio === b.minSizeRatio &&

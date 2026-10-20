@@ -98,6 +98,10 @@ export class LayerSurfaceStore {
     ctx.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    // A soft stroke blurs its own scratch buffer, never the surface, but the
+    // filter is part of the context state - reset it so no layer can ever be
+    // composited through a filter left behind by another path.
+    ctx.filter = "none";
   }
 
   clear(surface: LayerSurface): void {
@@ -105,6 +109,7 @@ export class LayerSurfaceStore {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 

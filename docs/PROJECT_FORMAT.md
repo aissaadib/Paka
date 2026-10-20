@@ -39,7 +39,9 @@ What is deliberately **not** in the file is editor state: the undo history, the
 zoom/pan viewport, the current tool, brush, shape-fill, bucket-tolerance and
 gradient-option settings, and the current selection. A project stores the
 *drawing*, so reopening restores the elements and their layers rather than the
-editing session that produced them. (Selection is derived from strokes at run
+editing session that produced them. (The current brush selection is session
+state; each stroke stores its own full brush, including `hardness`. Selection is
+derived from strokes at run
 time anyway - see
 [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no
 field; the fill setting is stored per stroke, not per document, so the shapes
@@ -62,7 +64,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 5,
+  "version": 6,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -86,6 +88,7 @@ added without changing the model.
             "size": 6,
             "opacity": 1,
             "color": "#16181c",
+            "hardness": 1,
             "pressureSize": 0.6,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
@@ -105,6 +108,7 @@ added without changing the model.
             "size": 24,
             "opacity": 1,
             "color": "#16181c",
+            "hardness": 1,
             "pressureSize": 0,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
@@ -124,6 +128,7 @@ added without changing the model.
             "size": 6,
             "opacity": 1,
             "color": "#16181c",
+            "hardness": 1,
             "pressureSize": 0.6,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
@@ -224,7 +229,7 @@ reader must not reorder or drop elements.
 | --- | --- | --- |
 | `kind` | `"stroke"` | Element discriminator. Required in version 4. |
 | `id` | string | Stroke id. |
-| `brush` | object | The brush used, captured per stroke so later brush changes do not alter it. |
+| `brush` | object | The brush used, including `hardness`, captured per stroke so later brush changes do not alter it. |
 | `erase` | boolean? | `true` only for eraser strokes, which subtract coverage from the layer instead of painting. Absent means paint. |
 | `fill` | boolean? | `true` only for filled shapes, whose samples bound the area to fill rather than a path to trace. Absent means trace. |
 | `startTime` | number | Timestamp of the first sample, for diagnostics; not used for rendering. |
@@ -327,6 +332,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `size` | 1-512 | Diameter in document pixels at full pressure. |
 | `opacity` | 0-1 | Alpha for the whole stroke, applied once when it composites. |
 | `color` | non-empty string | CSS colour. |
+| `hardness` | 0-1 | Edge falloff: `1` is the hard edge, lower values feather the finished silhouette. Required in version 6; version-1 to -5 files have no field and read as `1`. |
 | `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
 | `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
@@ -352,7 +358,8 @@ looks like:
 - a non-boolean `fill` flag on a stroke;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
-- brush fields outside their ranges;
+- brush fields outside their ranges, including a version-6 `hardness` that is
+  missing or outside `0..1` (older versions have no field and default to `1`);
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -400,7 +407,8 @@ Two further guarantees:
 | 2 | Adds `erase` on strokes. Reads version-1 files unchanged. | - |
 | 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | - |
 | 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | - |
-| 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | The current version; what this build always writes. |
+| 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
+| 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -428,6 +436,12 @@ Two further guarantees:
   element kind, so it would refuse the file rather than mis-read it, but the
   schema still gained a required new element shape. Version-1 to -4 files contain
   no gradient and open unchanged.
+- **Hardness is why version 6 exists.** It is not an ignorable extra: a
+  version-5 reader would skip the field, draw every stroke with a hard edge, and
+  produce a visibly different picture for any soft stroke. Every version-6 brush
+  must therefore carry `hardness` in `0..1`; version-1 to -5 files predate the
+  field and are read with `hardness = 1`, which is exactly what those files could
+  have produced.
 - **Stroke flags are still written only when set.** A stroke that paints and
   traces carries no `erase` or `fill` field; the only new mandatory stroke field
   in version 4 is `kind: "stroke"`, which distinguishes it from the other element
