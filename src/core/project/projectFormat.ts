@@ -74,9 +74,14 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * samples captured at draw time, and stored samples already reproduce the
  * picture, so an older version-6 file without the field reads as `0`.
  *
+ * Version 7: a stroke's `brush` carries `texture`, the deterministic grain
+ * strength. A version-6 reader ignores it and draws a textured stroke plain, so
+ * the field is required and the version was bumped. Version-1 to -6 files open
+ * unchanged with `texture = 0`.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 6;
+export const PROJECT_VERSION = 7;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -695,6 +700,10 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
       record.stabilizer === undefined
         ? 0
         : readNumber(record.stabilizer, `${label} brush stabilizer`, 0, 1),
+    // Texture changes how stored samples are rasterized, so it became a
+    // required field in version 7; earlier files had no texture.
+    texture:
+      version >= 7 ? readNumber(record.texture, `${label} brush texture`, 0, 1) : 0,
   });
 }
 

@@ -5,7 +5,7 @@ drawing engine written in React + TypeScript, with HTML Canvas 2D as the current
 raster backend.
 
 This is the **foundation** of the app, not a finished product. You can draw
-pressure-sensitive strokes, tune brush size, hardness, spacing and stabilization, flood-fill regions,
+pressure-sensitive strokes, tune brush size, hardness, spacing, stabilization and grain texture, flood-fill regions,
 paint linear and radial gradients, pan and zoom, manage layers with working
 undo/redo for strokes, fills and gradients, and **save, reopen and export your
 work as a project file or a PNG**. Several things are explicitly missing; see
@@ -81,11 +81,13 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   outer edge), **spacing** (2-200 % of the brush diameter: how densely fast
   movements are interpolated), **stabilizer** (0-100 %: smooths the captured
   pointer path; the line lags while moving and settles on the release point),
-  colour (picker plus an 8-swatch palette), and toggles for pressure-driven size
-  and pressure-driven opacity. Every brush setting is captured by each stroke, so
-  changing one later never rewrites existing work; hardness applies to the
-  brush, the eraser and shapes, while spacing and stabilizer apply to the brush
-  and eraser (a shape's geometry comes from the drag, not the freehand path).
+  **texture** (0-100 %: deterministic grain over the finished coverage), colour
+  (picker plus an 8-swatch palette), and toggles for pressure-driven size and
+  pressure-driven opacity. Every brush setting is captured by each stroke, so
+  changing one later never rewrites existing work; hardness and texture apply to
+  the brush, the eraser and shapes, while spacing and stabilizer apply to the
+  brush and eraser (a shape's geometry comes from the drag, not the freehand
+  path).
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -253,14 +255,19 @@ paste-ready version of the same briefing is in
   hardness profile.** Lowering it blurs the stroke silhouette once, so the edge
   is a Gaussian falloff and extends slightly beyond the nominal diameter (the
   interior stays at full coverage and opacity is still applied once). There is
-  no stamp engine or texture yet, and a very large soft stroke costs one extra
-  pass over its bounding box per repaint.
+  no stamp engine, so a very large soft stroke costs one extra pass over its
+  bounding box per repaint.
+- **Texture is one deterministic grain pass over the finished coverage, not a
+  stamped or per-dab texture.** It darkens no more than the plain stroke, is
+  anchored to document coordinates (so it survives zoom, undo/redo and export),
+  and `0` leaves the hard/soft pixels unchanged. Directional, image-based and
+  per-dab textures still need the stamp engine.
 - **Spacing is sample density, not stamp spacing.** It only controls how many
   interpolated points a fast movement produces, so a lower value costs memory
-  but does not change the brush's width or texture. **Stabilizer is an
-  exponential follow filter**: at high strength the line visibly lags the
-  pointer and settles with one final segment on release; it has no look-ahead or
-  rope-style catch-up, and shape tools ignore it. There is no texture brush.
+  but does not change the brush's width or grain. **Stabilizer is an exponential
+  follow filter**: at high strength the line visibly lags the pointer and
+  settles with one final segment on release; it has no look-ahead or rope-style
+  catch-up, and shape tools ignore it.
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
@@ -271,9 +278,10 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `6`** (`version: 1` to `5` files still
-  open and are written back as 6; their strokes default to a hardness of 1, and
-  a missing stabilizer reads as 0 because it was added additively within 6).
+- **The current project version is `7`** (`version: 1` to `6` files still
+  open and are written back as 7; their strokes default to a hardness of 1,
+  texture 0, and a missing stabilizer reads as 0 because it was added additively
+  within version 6).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

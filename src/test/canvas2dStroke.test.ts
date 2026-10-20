@@ -19,6 +19,7 @@ import {
   strokeDiameter,
   strokeFeatherRadius,
   strokeOpacity,
+  textureCoverage,
 } from "../core/rendering/canvas2dStroke";
 import { RecordingCanvas } from "./support/recordingCanvas";
 
@@ -243,5 +244,31 @@ describe("stampDot", () => {
     const fills = canvas.named("fill");
     expect(fills).toHaveLength(1);
     expect(fills[0].alpha).toBe(1);
+  });
+});
+
+describe("textureCoverage", () => {
+  it("leaves the stroke exactly opaque at strength 0", () => {
+    expect(textureCoverage(0, 0)).toBe(1);
+    expect(textureCoverage(1234, 0)).toBe(1);
+  });
+
+  it("is deterministic for a tile index and stays inside 0-1", () => {
+    for (let index = 0; index < 500; index += 1) {
+      const value = textureCoverage(index, 0.7);
+      expect(value).toBe(textureCoverage(index, 0.7));
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThanOrEqual(1);
+    }
+    expect(textureCoverage(17, 0.7)).not.toBe(textureCoverage(18, 0.7));
+  });
+
+  it("keeps at least a usable floor of coverage at full strength", () => {
+    for (let index = 0; index < 500; index += 1) {
+      expect(textureCoverage(index, 1)).toBeGreaterThanOrEqual(0.28);
+      const half = textureCoverage(index, 0.5);
+      expect(half).toBeGreaterThanOrEqual(0.64);
+      expect(half).toBeLessThanOrEqual(1);
+    }
   });
 });

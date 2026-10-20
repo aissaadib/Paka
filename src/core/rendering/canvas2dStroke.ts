@@ -48,6 +48,36 @@ export function strokeFeatherRadius(brush: BrushSettings): number {
   return brush.size * SOFT_EDGE_RADIUS_RATIO * softness;
 }
 
+/** Edge length of the repeating grain tile, in document pixels. */
+export const TEXTURE_TILE_SIZE = 128;
+/** Strongest grain leaves a little less than a third of the coverage. */
+const TEXTURE_MIN_COVERAGE = 0.28;
+
+/**
+ * Deterministic coverage multiplier for one grain-tile pixel.
+ *
+ * The tile is generated once per strength and repeats in document space, so
+ * the result depends only on the strength and the fixed tile index - never on
+ * time, zoom or a random seed. `0` returns exactly `1`, preserving the plain
+ * stroke, and `1` leaves a visible grain without punching holes through the
+ * whole stroke.
+ */
+export function textureCoverage(index: number, strength: number): number {
+  const amount = clamp(strength, 0, 1);
+  if (amount <= 0) {
+    return 1;
+  }
+  let hash = (index + 0x9e3779b9) >>> 0;
+  hash ^= hash << 13;
+  hash >>>= 0;
+  hash ^= hash >>> 17;
+  hash ^= hash << 5;
+  hash >>>= 0;
+  const noise = hash / 0xffffffff;
+  const floor = 1 - (1 - TEXTURE_MIN_COVERAGE) * amount;
+  return floor + (1 - floor) * noise;
+}
+
 /** Diameter in document pixels for a given pressure. */
 export function strokeDiameter(brush: BrushSettings, pressure: number): number {
   const factor = 1 - brush.pressureSize * (1 - pressure);

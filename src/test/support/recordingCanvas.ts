@@ -143,6 +143,24 @@ export class RecordingCanvas {
       };
     (ctx as unknown as Record<string, unknown>).createLinearGradient = gradient("linear");
     (ctx as unknown as Record<string, unknown>).createRadialGradient = gradient("radial");
+    // The texture pass fills a scratch canvas with a repeating pattern under
+    // `destination-in`; tests inspect the recorded pattern and its transform.
+    (ctx as unknown as Record<string, unknown>).createPattern = (
+      image: unknown,
+      repetition: string,
+    ): CanvasPattern => {
+      const object = {
+        kind: "pattern",
+        image,
+        repetition,
+        transform: null as unknown,
+        setTransform(transform: unknown): void {
+          this.transform = transform;
+        },
+      };
+      record("createPattern")(image, repetition);
+      return object as unknown as CanvasPattern;
+    };
     // Fill patches upload their own RGBA pixels before being drawn onto a
     // surface, so the test harness needs both halves of that path.
     (ctx as unknown as Record<string, unknown>).createImageData = (

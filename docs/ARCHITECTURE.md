@@ -26,7 +26,7 @@ of the app.
 - **Command-based undo/redo.** No per-move snapshots. An episode of drawing
   becomes exactly one undoable command.
 - **Nothing is configurable that is not implemented.** There are no dead
-  sliders, no blend-mode dropdown with one option, no texture controls.
+  sliders and no blend-mode dropdown with only one real option.
 
 ## Data flow
 
@@ -279,6 +279,37 @@ coverage - the core of even a 4 px stroke stays at full alpha - and a true
 per-pixel hardness profile would require the deferred stamp/distance-field
 engine, not this path.
 
+### Grain texture
+
+`BrushSettings.texture` is a **post-pass over the finished coverage**, in the
+same place as the hardness feather. It is not a stamp engine and it does not
+change the samples. `0` takes the existing raw-buffer path byte for byte; a
+value above `0` makes `paintStrokeCoverage` copy the stroke (feathering it first
+when hardness is below `1`) and fills that scratch copy with a repeating grain
+pattern under `destination-in`:
+
+```
+grain = white 128x128 tile, alpha = 0.28..1 scaled by texture strength
+grain.ctx.globalCompositeOperation = "destination-in"
+grain.ctx.fillStyle = pattern(grainTile, repeat)
+grain.ctx.fillRect(scratch)
+```
+
+`destination-in` multiplies the scratch's existing alpha by the tile's alpha, so
+it cannot expand the silhouette, add colour, or darken where the stroke crosses
+itself. A hard textured stroke still uses the scratch path with a zero-radius
+copy, which leaves the raw stroke buffer as the input for the next extend.
+
+The tile is generated once per strength from `textureCoverage(index, strength)`
+- a fixed 32-bit hash, never `Math.random()` or time - and cached. The pattern's
+transform maps document coordinates to scratch pixels, so the same document
+point gets the same grain regardless of the stroke's bounding box, zoom,
+`rasterScale`, or whether the pixels come from live drawing, a layer rebuild,
+undo/redo, reopen or PNG export. The grain applies to brush, eraser and shapes
+through the shared coverage path; a filled shape's interior grains along with
+its outline. It is a visible surface texture, not per-dab spacing or a true
+texture brush, and it still composites at the stroke opacity once.
+
 ### Eraser strokes
 
 An eraser is a brush whose strokes **subtract** coverage instead of adding it.
@@ -425,8 +456,8 @@ traced polygon: a `FillPatchRecord` with an opaque colour, a tight bounding box
 and **one coverage byte per pixel in that box**. Strokes, fill patches and
 gradients share one ordered `elements` list per layer, so a stroke drawn after a
 fill paints above it and undo can restore painting order exactly. The project
-format moved to version 4 for that list, version 5 added gradients and version 6
-added per-stroke brush hardness (see
+format moved to version 4 for that list, version 5 added gradients, version 6
+added per-stroke brush hardness and version 7 added texture (see
 [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills)).
 
 The gesture is a press, not a drag:
@@ -655,9 +686,10 @@ synchronously from an input handler.
 samples, with diameter and alpha interpolated from the pressure of each pair.
 It works entirely in document coordinates - the caller owns the transform - so
 zoom never affects rasterized pixel data. This is a deliberately small brush
-model: no stamps, no texture; hardness is a single post-pass feather over the
-finished silhouette (see [Soft edges (hardness)](#soft-edges-hardness)), not a
-per-dab hardness curve. Spacing changes how densely the input path is sampled
+model: no stamps; hardness and grain are post-passes over the finished
+silhouette (see [Soft edges (hardness)](#soft-edges-hardness) and
+[Grain texture](#grain-texture)), not per-dab curves. Spacing changes how
+densely the input path is sampled
 (see [Sampling, spacing and the stabilizer](#sampling-spacing-and-the-stabilizer));
 it is not stamp spacing and does not alter the rasterizer.
 
@@ -877,11 +909,11 @@ DOM-free by design.
   release commits one step, the radial/colour/opacity options are captured at
   press, zero-length drags and out-of-bounds presses record nothing, cancel and a
   tool switch remove the preview, coordinates clamp to the document, and
-  undo/redo replay the identical record. The format suite asserts a version-6
-  round trip of interleaved strokes, fills and gradients, version-1 to -5
+  undo/redo replay the identical record. The format suite asserts a version-7
+  round trip of interleaved strokes, fills and gradients, version-1 to -6
   compatibility, and rejection of bad boxes, masks, stops, geometry, opacity,
   gradients in a version-4 file, missing or out-of-range hardness in version 6,
-  and the fill pixel ceiling.
+  missing or out-of-range texture in version 7, and the fill pixel ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
   exactly-closed outline, and the degenerate extent. Shape *behaviour* is
@@ -999,11 +1031,12 @@ open drawing is left untouched, while a version-1 file opens with its strokes
 painted (a version-1 file has no erasures to lose). What has and has not been
 verified is reported separately rather than being implied by the test count. The
 format's own round trips are asserted in Vitest: the `erase` and `fill` flags
-survive a save/reopen, an unset flag is absent from the file, version 6 preserves
-an interleaved stroke/fill/gradient order with its mask bytes, geometry and
-per-stroke hardness, a version-5 file opens with hard strokes, a
-version-4 file still opens with fills and strokes, and a version-1, -2 or -3 file
-opens with its shapes traced rather than filled.
+survive a save/reopen, an unset flag is absent from the file, version 7 preserves
+an interleaved stroke/fill/gradient order with its mask bytes, geometry,
+per-stroke hardness and texture, a version-6 file opens with no texture, a
+version-5 file opens with hard strokes, a version-4 file still opens with fills
+and strokes, and a version-1, -2 or -3 file opens with its shapes traced rather
+than filled.
 
 ## Known limitations
 
@@ -1077,8 +1110,9 @@ These are real gaps, not footnotes:
   nominal diameter and cannot express a multi-zone falloff. A very large soft
   stroke pays one extra pass over its padded bounding box per repaint; the
   scratch canvas is reused but grows to that footprint. Spacing and the
-  stabilizer are sampling-time controls, not raster features; a texture brush and
-  a stamp-based engine are still absent.
+  stabilizer are sampling-time controls, not raster features; texture is a
+  single post-pass grain, not a stamp engine, so per-dab spacing, true hardness
+  curves and directional/stamp textures are still absent.
 - **Rasterization is per-segment and CPU-side.** Long strokes mean many
   `stroke()` calls. It is fine at the sizes tested and is the first thing to
   move behind the renderer abstraction when it is not.

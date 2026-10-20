@@ -67,6 +67,16 @@ export function BrushControls() {
         format={(value) => `${Math.round(value * 100)}%`}
         onChange={(stabilizer) => actions.setBrush({ stabilizer })}
       />
+      <SliderField
+        label="Texture"
+        min={0}
+        max={1}
+        step={0.01}
+        value={brush.texture}
+        title="Document-anchored grain over the finished stroke; 0% is the plain edge"
+        format={(value) => `${Math.round(value * 100)}%`}
+        onChange={(texture) => actions.setBrush({ texture })}
+      />
       <label
         className="toggle"
         title="Pen pressure controls stroke width (ignored by mouse input)"

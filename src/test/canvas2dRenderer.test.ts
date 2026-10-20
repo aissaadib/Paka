@@ -44,6 +44,7 @@ const BRUSH: BrushSettings = {
   minSizeRatio: 0,
   spacing: 0.1,
   stabilizer: 0,
+  texture: 0,
 };
 
 let recording: RecordingDocument;
@@ -910,6 +911,48 @@ describe("Canvas2DRenderer brush hardness", () => {
 
     expect(recording.allocated.length).toBe(allocations);
     expect(featherCanvas()).toBe(feather);
+  });
+
+  it("applies one document-anchored grain pass to a hard stroke without touching the buffer", () => {
+    const { harness, layerId } = openHarness();
+    const textured: BrushSettings = { ...BRUSH, size: 40, texture: 0.8 };
+    const stroke = createStroke(layerId, textured);
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.display.calls.length = 0;
+
+    harness.renderer.render();
+
+    const grain = recording.allocated.find((canvas) =>
+      canvas
+        .named("fillRect")
+        .some(
+          (call) =>
+            call.composite === "destination-in" &&
+            (call.fillStyle as { kind?: string }).kind === "pattern",
+        ),
+    );
+    expect(grain).toBeDefined();
+    expect(grain).not.toBe(harness.strokeBuffer);
+
+    const pass = grain?.named("fillRect").find((call) => call.composite === "destination-in");
+    const pattern = pass?.fillStyle as
+      | { kind: string; repetition: string; transform: Record<string, number> }
+      | undefined;
+    expect(pattern?.kind).toBe("pattern");
+    expect(pattern?.repetition).toBe("repeat");
+    expect(pattern?.transform).toMatchObject({ a: 1, b: 0, c: 0, d: 1 });
+    expect(pattern?.transform.e).toBeLessThanOrEqual(0);
+    expect(pattern?.transform.f).toBeLessThanOrEqual(0);
+
+    // The display shows the grain copy; the raw stroke buffer is still the
+    // input for the next extend, never modified by the texture pass.
+    expect(
+      harness.display
+        .named("drawImage")
+        .some((call) => call.args[0] === grain),
+    ).toBe(true);
+    expect(harness.strokeBuffer.named("fillRect")).toHaveLength(0);
   });
 
   it("reads hardness from the stroke's own brush, not from editor state", () => {

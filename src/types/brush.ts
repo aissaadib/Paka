@@ -54,4 +54,15 @@ export interface BrushSettings {
    * not shape tools, whose geometry comes from the drag rather than the path.
    */
   readonly stabilizer: number;
+  /**
+   * Deterministic grain over the finished stroke coverage, in `[0, 1]`.
+   *
+   * `0` keeps the plain coverage byte-identical. Higher values multiply the
+   * stroke's coverage by a document-anchored noise tile once, after the
+   * hardness feather, so the grain is the same in live drawing, layer rebuilds,
+   * undo/redo, reopen and PNG export. It is not a per-dab texture and cannot
+   * change with zoom or `rasterScale`. It applies to the brush, eraser and
+   * shapes through the same coverage path.
+   */
+  readonly texture: number;
 }

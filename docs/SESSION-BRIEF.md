@@ -6,8 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at the brush spacing/stabilizer slice on `main` —
-clean and in sync with `origin/main`.
+Last verified: **2026-10-20**, at the grain-texture slice on `main` — clean and
+in sync with `origin/main`.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,22 +30,23 @@ clean and in sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, working tree clean after the brush spacing/stabilizer slice.
-- `pnpm test` → **411 tests in 26 files, all pass** (re-run for this slice).
+- Branch `main`, working tree clean after the grain-texture slice.
+- `pnpm test` → **417 tests in 26 files, all pass** (re-run for this slice).
 - `pnpm typecheck` clean; `pnpm build` succeeds (verified for this slice).
-- Project file format **version 6** (`PROJECT_VERSION = 6`); `stabilizer` was
-  added additively within v6, and a missing field reads as `0`.
+- Project file format **version 7** (`PROJECT_VERSION = 7`); `stabilizer` was
+  additive within v6 (missing = 0), and `texture` is required from v7.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
-  built before the fill, gradient, hardness and spacing/stabilizer slices);
-  packaged-app verification is still outstanding.
-- Phase 2 (illustration tools) is complete. Phase 3 has two brush-feel items
-  shipped (hardness, then spacing + stabilizer); texture/stamp engine remains.
+  built before the fill, gradient, hardness, spacing/stabilizer and texture
+  slices); packaged-app verification is still outstanding.
+- Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
+  stabilizer and grain texture shipped; the stamp engine remains.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Brush spacing and stabilizer** — spacing exposed as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) with a visible release settle; brush/eraser only; captured per stroke; additive within format v6. |
+| current `main` | **Grain texture** — deterministic document-anchored grain post-pass over the finished coverage (0-100 %); one `destination-in` pass, cached strength tiles, no self-darkening; brush/eraser/shapes; format v7. |
+| `567a091` | **Brush spacing and stabilizer** — spacing exposed as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) with a visible release settle; brush/eraser only; captured per stroke; additive within format v6. |
 | `56b12ab` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, two stops, opacity) in the ordered element list; live preview, one undo step; format v5. |
 | `8b7152b` | **Bucket (flood) fill** (`F`) — `FillPatchRecord` in an ordered per-layer list; composite sampling, tolerance, cancel/undo/redo; format v4. |
@@ -88,8 +89,10 @@ clean and in sync with `origin/main`.
   selected, is not an edit.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
   eraser and shapes), spacing (2–200 % of diameter, sample density), stabilizer
-  (0–100 %, brush and eraser only), colour + 8-swatch palette, pressure size and
-  pressure opacity toggles. All settings are captured per stroke.
+  (0–100 %, brush and eraser only), texture (0–100 %, deterministic grain over
+  the finished coverage, applied to brush/eraser/shapes), colour + 8-swatch
+  palette, pressure size and pressure opacity toggles. All settings are captured
+  per stroke.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
@@ -128,7 +131,7 @@ src/
     input/      pointer normalization, DOM binder
     rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke
     engine/     DrawingEngine: integration, gestures, history, snapshot
-    project/    format v6, gateway port, file orchestration
+    project/    format v7, gateway port, file orchestration
     export/     PNG export
   types/        shared value types
   utils/        math, colour, ids, paths, store
@@ -136,22 +139,23 @@ src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
 
-Key files for the next slice (stamp engine / texture):
+Key files for the next slice (stamp engine):
 
-- `src/core/rendering/canvas2dStroke.ts` — current segment rasterizer;
-  `rasterizeStroke` is the function a stamp path must sit behind or beside
+- `src/core/rendering/canvas2dStroke.ts` — current segment rasterizer and grain
+  tile; `rasterizeStroke` is the function a stamp path must sit behind or beside
   without changing default output.
 - `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStrokeToBuffer`,
-  `compositeStrokeBuffer`, `paintStrokeCoverage`, `featherStroke`; the stroke
-  buffer and single-alpha composite are the invariants a stamp engine must keep.
+  `compositeStrokeBuffer`, `paintStrokeCoverage`, `featherStroke`,
+  `applyStrokeTexture`; the stroke buffer, single-alpha composite and
+  post-dab grain are the invariants a stamp engine must keep.
 - `src/types/brush.ts` / `src/core/brushes/defaults.ts` — brush fields
-  (`texture`, stamp spacing if separate) and defaults/clamping/equality.
-- `src/features/brushes/BrushControls.tsx` — the real texture control.
+  (stamp spacing/hardness/texture) and defaults/clamping/equality.
+- `src/features/brushes/BrushControls.tsx` — controls for real stamp settings.
 - `src/core/document/types.ts` — `StrokeRecord`/`brush`, the authoritative record.
 - `src/core/engine/DrawingEngine.ts` — per-stroke brush capture and renderer
   begin/extend/finish lifecycle.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
-  serializer; a non-default texture should force v7.
+  serializer; appearance-changing stamp fields need v8.
 - Tests: `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`,
   `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
@@ -220,6 +224,15 @@ Key files for the next slice (stamp engine / texture):
 - **`stabilizer` is additive within format v6.** It shapes samples that are
   already stored, so an older v6 reader ignoring it still renders the same
   picture; a missing field reads as `0`. `spacing` was already in v6.
+- **Texture is one deterministic grain post-pass.** `texture` is `0..1`, default
+  `0`; above `0`, `paintStrokeCoverage` copies the stroke (feathering first) and
+  fills the copy with a cached 128×128 white grain tile under `destination-in`.
+  The tile comes from `textureCoverage(index, strength)` (fixed hash, no random),
+  and the pattern transform anchors it to document coordinates, so live,
+  commit, rebuild, undo/redo, reopen and export agree at every bbox, zoom and
+  `rasterScale`. Alpha is multiplied once, so self-overlap cannot darken. It
+  applies to brush/eraser/shapes; a filled shape's interior grains too. It is not
+  a stamp/per-dab or directional texture.
 - **Preview vs commit**: press inserts real preview content (or starts a buffer),
   moves update it in place, release records exactly one command, cancel /
   lost capture / tool switch / over-ceiling removes it with **no history and no
@@ -235,14 +248,15 @@ Key files for the next slice (stamp engine / texture):
   `gradientEndColor`. Each is read at press time so the committed record keeps
   the setting it was drawn with. Changing an option is not an edit. The brush is
   the same: the current brush is session state, while every stroke stores the
-  full brush it was drawn with, including `hardness`, `spacing` and
-  `stabilizer`.
+  full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`
+  and `texture`.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
   v6 requires `hardness` on every stroke brush and reads v1–v5 strokes as hard
   (`1`); `stabilizer` was added additively within v6 (missing = `0`) because the
-  smoothed path is already stored in the samples; unknown/newer versions are
+  smoothed path is already stored in the samples; v7 requires `texture` because
+  an older reader would draw a textured stroke plain; unknown/newer versions are
   rejected outright, as are v4 files containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
@@ -265,9 +279,10 @@ Product:
 - Hardness: a single Gaussian feather of the finished silhouette, so the edge
   extends slightly beyond the nominal diameter; no stamp profile.
 - Spacing: sample density only, not stamp spacing; lower values cost memory but
-  do not add texture. Stabilizer: exponential follow with visible lag, no
-  look-ahead or rope catch-up; shapes ignore it. No texture brush or stamp engine
-  yet.
+  do not add grain. Stabilizer: exponential follow with visible lag, no
+  look-ahead or rope catch-up; shapes ignore it.
+- Texture: one grain post-pass, not a stamp/per-dab, directional or image-based
+  texture. No stamp engine yet.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no scale/rotate/perspective, no
   copy/paste across layers.
@@ -292,6 +307,13 @@ Verification gaps:
   cleared it to paper. Exact lag math, spacing density, format round-trip and
   save/reopen were checked by Vitest; no pixel-level stabilizer comparison was
   made.
+- Texture was checked on the live display canvas: the control defaulted to 0, a
+  texture-0 drag had one interior colour, the same drag at 100 % had multiple
+  colours and `history 1`, undo cleared it, and two strokes with different start
+  points but overlapping document pixels produced identical grain colours
+  (document anchoring). The renderer's pattern/`destination-in` pass and format
+  v7 round-trip/defaults are covered by Vitest; there is no automated pixel test
+  of the grain.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
@@ -333,70 +355,70 @@ Verification gaps:
 
 ## 9. Next slice — stamp-based brush engine (Phase 3)
 
-`docs/ROADMAP.md` "Next slice" is the authority. Hardness, spacing and the
-stabilizer shipped; texture and the stamp engine are the remaining Phase 3
-items.
+`docs/ROADMAP.md` "Next slice" is the authority. Hardness, spacing, stabilizer
+and grain texture shipped; the stamp/dab engine is the remaining Phase 3 item.
 
-The goal: add a stamp/dab rasterizer behind the existing stroke interface,
-with **texture as its first user-visible output**, without changing what current
-files look like.
+The goal: add a stamp rasterizer behind the existing stroke interface for
+**per-dab spacing, true hardness curves and directional/image textures**, without
+changing what current hard, soft and grain files look like.
 
 ### Constraints to keep
 
 1. `DrawingRenderer` and `StrokeRecord` stay the boundary. Stamps are a
    rasterization strategy; the vector samples remain authoritative for undo,
    reopen and export.
-2. Keep the existing segment path as the default. Hard/soft strokes with no
-   texture must stay pixel-identical, including the single-alpha composite and
-   the no-self-darkening invariant.
+2. Keep the existing segment path and grain post-pass as the default. Default
+   hard/soft/grain strokes must stay pixel-identical, including the single-alpha
+   composite and the no-self-darkening invariant.
 3. Accumulate per-dab coverage into one stroke buffer (max/union, not repeated
-   source-over), then composite once at the stroke opacity.
-4. Grain must be deterministic from document coordinates so live, rebuild,
-   undo/redo, reopen and PNG export agree at every zoom and `rasterScale`.
-5. Capture texture settings per stroke. A non-default texture changes the
-   picture, so a reader that ignores it must not open the file: expect **format
-   version 7** and prove it with tests. Do not add a required field within v6.
+   source-over), then composite once at the stroke opacity. Grain stays a
+   post-dab pass unless the format records per-dab texture.
+4. Any grain/stamp randomness must be deterministic from document coordinates so
+   live, rebuild, undo/redo, reopen and PNG export agree at every zoom and
+   `rasterScale`.
+5. Capture stamp settings per stroke. Appearance-changing fields that a v7
+   reader cannot ignore require **format version 8**; prove it with tests.
 6. Keep `spacing` (sample density) distinct from stamp spacing, or document an
    explicit migration if they are merged.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts` / `defaults.ts`: texture field(s), defaults, clamp and
+- [ ] `src/types/brush.ts` / `defaults.ts`: stamp fields, defaults, clamp and
       equality.
 - [ ] `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts`: stamp
       rasterizer behind the existing buffer/composite path; default unchanged.
-- [ ] `src/features/brushes/BrushControls.tsx`: a real texture choice and
-      strength control, no placeholder.
+- [ ] `src/features/brushes/BrushControls.tsx`: real stamp controls, no
+      placeholders.
 - [ ] `src/core/engine/DrawingEngine.ts`: per-stroke capture and brush setters
       stay editor state (no history, no dirty).
-- [ ] `src/core/project/projectFormat.ts`: format v7, validate the new fields,
-      read v1-v6 unchanged with no texture.
-- [ ] Tests: segment parity at default, textured live/commit equality,
-      self-overlap/no-darkening, deterministic grain at different zoom/scale,
+- [ ] `src/core/project/projectFormat.ts`: format v8 if appearance changes,
+      validate the new fields, read v1-v7 unchanged.
+- [ ] Tests: segment/grain parity at default, stamped live/commit equality,
+      self-overlap/no-darkening, deterministic pattern at different zoom/scale,
       format round-trip and old-file defaults.
 - [ ] Docs in the same commit: README, ARCHITECTURE, PROJECT_FORMAT, ROADMAP,
       HANDOFF + this brief.
-- [ ] Browser check: default hard/soft strokes unchanged, texture visible,
-      one undo step, save/reopen and export agree; report automated/browser
-      evidence separately.
+- [ ] Browser check: default hard/soft/grain strokes unchanged, stamp effect
+      visible, one undo step, save/reopen and export agree; report
+      automated/browser evidence separately.
 - [ ] `pnpm test`, `pnpm typecheck`, `pnpm build`; commit (`git commit -F`) and
       push.
 
 ### Acceptance criteria
 
-- Default hard and soft output is unchanged pixel for pixel.
-- A textured stroke is one undo step; it never rewrites existing strokes.
-- Live drawing, undo/redo, reopen and export produce the same textured pixels.
-- Overlapping dabs and a self-crossing textured stroke do not darken.
-- Old projects open unchanged; a v7 file requires the texture fields and an
-  older reader refuses it rather than drawing a plain stroke.
+- Default hard, soft and grain output is unchanged pixel for pixel.
+- A stamped stroke is one undo step; it never rewrites existing strokes.
+- Live drawing, undo/redo, reopen and export produce the same stamped pixels.
+- Overlapping dabs and a self-crossing stamped stroke do not darken.
+- Old projects open unchanged; a v8 file requires the new fields and an older
+  reader refuses it rather than drawing the wrong look.
 
 ## 10. First ten minutes of a new session
 
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
-   spacing/stabilizer commit (or the commit this file names).
+   texture commit (or the commit this file names).
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 411 tests in 26 files).
+   anything (expect 417 tests in 26 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

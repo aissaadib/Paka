@@ -190,24 +190,26 @@ describe("DrawingEngine state", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
-  it("treats spacing and stabilizer as editor state: no history step, no dirty flag", () => {
+  it("treats spacing, stabilizer and texture as editor state: no history step, no dirty flag", () => {
     const engine = createEngine();
     const listener = vi.fn();
     engine.subscribe(listener);
 
-    engine.setBrush({ spacing: 0.4, stabilizer: 0.7 });
+    engine.setBrush({ spacing: 0.4, stabilizer: 0.7, texture: 0.5 });
     expect(engine.getState().brush.spacing).toBe(0.4);
     expect(engine.getState().brush.stabilizer).toBe(0.7);
+    expect(engine.getState().brush.texture).toBe(0.5);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
     expect(engine.getState().file.dirty).toBe(false);
 
     // Out-of-range values are clamped, and a no-op change publishes nothing.
-    engine.setBrush({ spacing: 0.001, stabilizer: 4 });
+    engine.setBrush({ spacing: 0.001, stabilizer: 4, texture: 3 });
     expect(engine.getState().brush.spacing).toBe(0.02);
     expect(engine.getState().brush.stabilizer).toBe(1);
+    expect(engine.getState().brush.texture).toBe(1);
     expect(listener).toHaveBeenCalledTimes(2);
-    engine.setBrush({ spacing: 0.02, stabilizer: 1 });
+    engine.setBrush({ spacing: 0.02, stabilizer: 1, texture: 1 });
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
@@ -272,11 +274,11 @@ describe("DrawingEngine stroke capture", () => {
     expect(engine.listStrokes(layerId)[0].brush.hardness).toBe(0.4);
   });
 
-  it("captures spacing and stabilizer per stroke", () => {
+  it("captures spacing, stabilizer and texture per stroke", () => {
     const engine = createEngine();
     const layerId = engine.getState().document.activeLayerId as string;
 
-    engine.setBrush({ size: 100, spacing: 0.3, stabilizer: 0.8 });
+    engine.setBrush({ size: 100, spacing: 0.3, stabilizer: 0.8, texture: 0.6 });
     engine.beginStroke(createSample({ docX: 10, docY: 10 }));
     engine.extendStroke(createSample({ docX: 110, docY: 10, timeStamp: 16 }));
     engine.finishStroke();
@@ -284,10 +286,12 @@ describe("DrawingEngine stroke capture", () => {
     const stroke = engine.listStrokes(layerId)[0];
     expect(stroke.brush.spacing).toBe(0.3);
     expect(stroke.brush.stabilizer).toBe(0.8);
+    expect(stroke.brush.texture).toBe(0.6);
 
-    engine.setBrush({ spacing: 0.05, stabilizer: 0 });
+    engine.setBrush({ spacing: 0.05, stabilizer: 0, texture: 0 });
     expect(engine.listStrokes(layerId)[0].brush.spacing).toBe(0.3);
     expect(engine.listStrokes(layerId)[0].brush.stabilizer).toBe(0.8);
+    expect(engine.listStrokes(layerId)[0].brush.texture).toBe(0.6);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {

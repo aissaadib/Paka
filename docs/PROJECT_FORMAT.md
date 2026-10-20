@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 6,
+  "version": 7,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -94,7 +94,8 @@ added without changing the model.
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
             "spacing": 0.12,
-            "stabilizer": 0
+            "stabilizer": 0,
+            "texture": 0
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -115,7 +116,8 @@ added without changing the model.
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
             "spacing": 0.12,
-            "stabilizer": 0
+            "stabilizer": 0,
+            "texture": 0
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -136,7 +138,8 @@ added without changing the model.
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
             "spacing": 0.12,
-            "stabilizer": 0
+            "stabilizer": 0,
+            "texture": 0
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -342,6 +345,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
+| `texture` | 0-1 | Strength of the deterministic, document-anchored grain applied once to the finished stroke coverage. `0` is the plain coverage. Required in version 7; version-1 to -6 files have no field and read as `0`. |
 
 ## Validation policy
 
@@ -365,7 +369,8 @@ looks like:
   values;
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
-  and a `stabilizer` present but outside `0..1`;
+  a `stabilizer` present but outside `0..1`, and a version-7 `texture` that is
+  missing or outside `0..1`;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -392,7 +397,9 @@ looks like:
   version-1 and -2 shape does);
 - a missing `stabilizer` → `0`. This is an additive field within version 6: the
   stored samples already describe the smoothed path, so old version-6 files and
-  all earlier versions render exactly as they did.
+  all earlier versions render exactly as they did;
+- a missing `texture` in a version-1 to -6 file → `0`. Version 7 requires it
+  because a version-6 reader would ignore a textured stroke and draw it plain.
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
@@ -417,7 +424,8 @@ Two further guarantees:
 | 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | - |
 | 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | - |
 | 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
-| 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | The current version; what this build always writes, including the additive `stabilizer` field. |
+| 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | Writes the additive `stabilizer` field too. |
+| 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -425,9 +433,11 @@ Two further guarantees:
 - **`stabilizer` is the first field added under that rule.** It shapes the
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
-  as `0`; when present it must still be a number in `0..1`. In contrast,
-  `hardness` changed how stored samples are rasterized, which is why it required
-  version 6.
+  as `0`; when present it must still be a number in `0..1`.
+- **`texture` required version 7.** It changes how stored samples are
+  rasterized, so a version-6 reader that ignored it would draw a textured stroke
+  plain. That is the same reason `hardness` required version 6; neither field
+  could be added additively.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

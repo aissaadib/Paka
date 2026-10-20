@@ -197,9 +197,9 @@ describe("serialize and loadProject", () => {
     expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.hardness).toBe(0.3);
   });
 
-  it("round-trips spacing and stabilizer through save and reopen", () => {
+  it("round-trips spacing, stabilizer and texture through save and reopen", () => {
     const engine = new DrawingEngine({
-      brush: { ...DEFAULT_BRUSH, size: 40, spacing: 0.35, stabilizer: 0.65 },
+      brush: { ...DEFAULT_BRUSH, size: 40, spacing: 0.35, stabilizer: 0.65, texture: 0.55 },
     });
     paintStroke(engine, 0);
     const text = engine.serialize();
@@ -216,9 +216,11 @@ describe("serialize and loadProject", () => {
     expect(strokes).toHaveLength(1);
     expect(strokes[0].brush.spacing).toBe(0.35);
     expect(strokes[0].brush.stabilizer).toBe(0.65);
+    expect(strokes[0].brush.texture).toBe(0.55);
     expect(reopened.undo()).toBe(true);
     expect(reopened.redo()).toBe(true);
     expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.stabilizer).toBe(0.65);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.texture).toBe(0.55);
   });
 
   it("rebuilds one undoable step per loaded stroke", () => {

@@ -479,11 +479,11 @@ describe("parseProject round trip", () => {
     expect(legacy.project.strokes[0].brush.hardness).toBe(1);
   });
 
-  it("round-trips spacing and stabilizer, defaulting a missing stabilizer to 0", () => {
+  it("round-trips spacing, stabilizer and texture at version 7", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const stroke = strokeFor(layerId, {
-      brush: { ...DEFAULT_BRUSH, spacing: 0.4, stabilizer: 0.6 },
+      brush: { ...DEFAULT_BRUSH, spacing: 0.4, stabilizer: 0.6, texture: 0.35 },
     });
     const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
 
@@ -494,15 +494,30 @@ describe("parseProject round trip", () => {
     }
     expect(parsed.project.strokes[0].brush.spacing).toBe(0.4);
     expect(parsed.project.strokes[0].brush.stabilizer).toBe(0.6);
+    expect(parsed.project.strokes[0].brush.texture).toBe(0.35);
 
     const payload = JSON.parse(text) as {
       version: number;
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
-    expect(payload.version).toBe(6);
-    // Additive within v6: an older v6 file has no stabilizer and must still
-    // open, with the default that reproduces its already-stored samples.
+    expect(payload.version).toBe(PROJECT_VERSION);
+  });
+
+  it("opens version 6 files with stabilizer 0 and texture 0", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, spacing: 0.4, stabilizer: 0.6, texture: 0.35 },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 6;
     delete payload.layers[0].elements[0].brush.stabilizer;
+    delete payload.layers[0].elements[0].brush.texture;
+
     const legacy = parseProject(JSON.stringify(payload));
     expect(legacy.ok).toBe(true);
     if (!legacy.ok) {
@@ -510,6 +525,7 @@ describe("parseProject round trip", () => {
     }
     expect(legacy.project.strokes[0].brush.spacing).toBe(0.4);
     expect(legacy.project.strokes[0].brush.stabilizer).toBe(0);
+    expect(legacy.project.strokes[0].brush.texture).toBe(0);
   });
 
   it("opens version 2 files, whose shapes were all outlines", () => {
@@ -865,6 +881,24 @@ describe("parseProject rejections", () => {
           };
         }),
       ),
+    ).toContain("finite number");
+  });
+
+  it("refuses a version-7 stroke brush without a texture in 0-1", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).texture;
+        }),
+      ),
+    ).toContain("brush texture");
+
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, texture: 1.5 }))),
+    ).toContain("brush texture");
+
+    expect(
+      rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, texture: "grain" }))),
     ).toContain("finite number");
   });
 

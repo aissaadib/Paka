@@ -27,7 +27,14 @@ import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
-import { rasterizeStroke, strokeDiameter, strokeFeatherRadius, strokeOpacity } from "./canvas2dStroke";
+import {
+  rasterizeStroke,
+  strokeDiameter,
+  strokeFeatherRadius,
+  strokeOpacity,
+  TEXTURE_TILE_SIZE,
+  textureCoverage,
+} from "./canvas2dStroke";
 import type {
   DrawingRenderer,
   RendererKind,
@@ -93,6 +100,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private readonly strokeBuffer: HTMLCanvasElement;
   private readonly strokeCtx: CanvasRenderingContext2D;
   private readonly requestFrame: () => void;
+  /** Grain tiles keyed by quantized strength; generated once and reused. */
+  private readonly textureTiles = new Map<number, HTMLCanvasElement>();
 
   private doc: DrawingDocument | null = null;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
@@ -761,20 +770,88 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
     const radius = strokeFeatherRadius(stroke.brush);
-    if (radius <= 0) {
+    const texture = Math.min(Math.max(stroke.brush.texture ?? 0, 0), 1);
+    if (radius <= 0 && texture <= 0) {
       ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
       return;
     }
+    // A zero-radius copy is the scratch path for a hard textured stroke; it
+    // keeps the raw stroke buffer untouched for the next extend.
     const feathered = this.featherStroke(stroke, radius);
-    if (feathered) {
-      ctx.drawImage(
+    if (!feathered) {
+      return;
+    }
+    if (texture > 0) {
+      const scale = this.rasterScale;
+      this.applyStrokeTexture(
         feathered.canvas,
-        feathered.x,
-        feathered.y,
-        feathered.width,
-        feathered.height,
+        Math.round(feathered.x * scale),
+        Math.round(feathered.y * scale),
+        texture,
       );
     }
+    ctx.drawImage(feathered.canvas, feathered.x, feathered.y, feathered.width, feathered.height);
+  }
+
+  /**
+   * Multiplies a copied stroke's coverage by the document-anchored grain tile.
+   *
+   * `destination-in` keeps the existing silhouette and only scales its alpha,
+   * so the grain cannot bleed outside the stroke or darken at self-overlap.
+   * The pattern transform anchors the tile to the document origin rather than
+   * the stroke's bounding box, which makes a rebuild at a different bbox or
+   * `rasterScale` produce the same grain.
+   */
+  private applyStrokeTexture(
+    canvas: HTMLCanvasElement,
+    left: number,
+    top: number,
+    strength: number,
+  ): void {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    const pattern = ctx.createPattern(this.textureTile(strength), "repeat");
+    if (!pattern) {
+      return;
+    }
+    const scale = this.rasterScale;
+    pattern.setTransform({ a: scale, b: 0, c: 0, d: scale, e: -left, f: -top });
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "destination-in";
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  /** Lazily builds (and caches) the white grain tile for one strength. */
+  private textureTile(strength: number): HTMLCanvasElement {
+    const key = Math.round(Math.min(Math.max(strength, 0), 1) * 20) / 20;
+    const cached = this.textureTiles.get(key);
+    if (cached) {
+      return cached;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = TEXTURE_TILE_SIZE;
+    canvas.height = TEXTURE_TILE_SIZE;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      const image = ctx.createImageData(TEXTURE_TILE_SIZE, TEXTURE_TILE_SIZE);
+      for (let index = 0; index < TEXTURE_TILE_SIZE * TEXTURE_TILE_SIZE; index += 1) {
+        const coverage = textureCoverage(index, key);
+        const offset = index * 4;
+        image.data[offset] = 255;
+        image.data[offset + 1] = 255;
+        image.data[offset + 2] = 255;
+        image.data[offset + 3] = Math.round(coverage * 255);
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+    this.textureTiles.set(key, canvas);
+    return canvas;
   }
 
   /**
@@ -835,7 +912,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.filter = `blur(${radius * scale}px)`;
+    ctx.filter = radius > 0 ? `blur(${radius * scale}px)` : "none";
     ctx.drawImage(this.strokeBuffer, left, top, width, height, 0, 0, width, height);
     ctx.filter = "none";
 
