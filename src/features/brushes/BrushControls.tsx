@@ -1,6 +1,11 @@
 /** Brush size, opacity and pressure mapping controls. */
 
-import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../../core/brushes/defaults";
+import {
+  MAX_BRUSH_SIZE,
+  MAX_SPACING,
+  MIN_BRUSH_SIZE,
+  MIN_SPACING,
+} from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 
@@ -41,6 +46,26 @@ export function BrushControls() {
         title="Edge falloff: 100% is a crisp edge, lower values soften it"
         format={(value) => `${Math.round(value * 100)}%`}
         onChange={(hardness) => actions.setBrush({ hardness })}
+      />
+      <SliderField
+        label="Spacing"
+        min={MIN_SPACING * 100}
+        max={MAX_SPACING * 100}
+        step={1}
+        value={brush.spacing * 100}
+        title="Gap between interpolated samples as a percentage of brush size; lower values smooth fast strokes at a memory cost"
+        format={(value) => `${Math.round(value)}%`}
+        onChange={(spacing) => actions.setBrush({ spacing: spacing / 100 })}
+      />
+      <SliderField
+        label="Stabilizer"
+        min={0}
+        max={1}
+        step={0.01}
+        value={brush.stabilizer}
+        title="Smooths the pointer path; 0% follows the pointer exactly and 100% lags the most"
+        format={(value) => `${Math.round(value * 100)}%`}
+        onChange={(stabilizer) => actions.setBrush({ stabilizer })}
       />
       <label
         className="toggle"

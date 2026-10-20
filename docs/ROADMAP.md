@@ -135,7 +135,9 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 ## Phase 3 - Brush feel
 
 - [x] Hardness (soft edge) surfaced in the UI, captured per stroke, format v6.
-- [ ] Spacing controls surfaced in the UI, stabilizers.
+- [x] Spacing control and stabilizer surfaced in the UI, captured per stroke;
+      stabilizer is additive within v6 because stored samples already describe
+      the smoothed path.
 - [ ] Texture (needs the stamp-based engine).
 - [ ] Stamp-based brush engine behind the existing stroke interface.
 
@@ -172,34 +174,34 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Brush spacing and a stabilizer** (the remaining Phase 3 brush-feel work).
-Phase 2 is complete and hardness now ships with a verified feather path and
-format version 6.
+**Stamp-based brush engine behind the existing stroke interface** (the last
+Phase 3 item; texture is its first user-visible output). The current rasterizer
+draws segments between samples, and `spacing` means sample density. A stamp
+engine must not silently change what existing files look like.
 
-The slice should make the two sampling-time controls real:
+Non-negotiable constraints:
 
-- surface the existing `spacing` brush field (currently in `BrushSettings` and
-  used by `StrokeBuilder`) as a control beside size, opacity and hardness, with
-  a clear unit (fraction of diameter) and a range that includes today's default;
-- add a **stabilizer** setting that smooths the pointer path before samples are
-  captured, with a defined response (no hidden teleporting; the committed stroke
-  must be the path the user sees). Decide whether it applies to shapes or only
-  freehand strokes and document the answer;
-- keep the "editor state describes the next gesture" rule: a change produces no
-  history entry and no dirty flag, and each stroke keeps the values it was drawn
-  with.
+- `DrawingRenderer` and `StrokeRecord` remain the boundary. Stamps are a
+  rasterization strategy, not a new element kind; the vector samples stay the
+  authoritative record for undo, reopen and export.
+- Keep the existing segment path as the default. Hard and soft strokes drawn
+  with no texture must stay pixel-identical, including the single-alpha and
+  no-self-darkening invariants.
+- Accumulate per-dab coverage into **one** stroke buffer (max/union, not
+  repeated source-over), then composite once at the stroke opacity. A textured
+  self-crossing must not darken.
+- Grain must be deterministic from document coordinates, so live drawing, layer
+  rebuild, undo/redo, reopen and PNG export agree at every zoom and
+  `rasterScale`. No `Math.random()` in a repaint path.
+- Capture the texture settings per stroke. Adding a non-default texture means a
+  reader that ignores it draws a visibly different picture, so this slice should
+  expect **format version 7**; do not add a required field within v6. Prove the
+  bump with a format test, and keep `spacing` (sample density) distinct from
+  stamp spacing or document an explicit migration if they are merged.
+- UI: a real texture choice plus any strength control, with no placeholder
+  option. Decide and document whether the eraser honours texture (it should
+  follow the same coverage model if it does).
 
-Spacing and stabilizer differ from hardness in one important way: they change
-the **samples**, and samples are already stored in the file. A reader that
-ignores a new brush field still replays the same points, so the picture does not
-change. That makes these fields additive candidates within version 6 - but the
-implementation must prove it with a format test, and a bump is still required if
-any reader would render a different drawing. Do not bump for convenience.
-
-The acceptance bar matches the hardness slice: the default reproduces today's
-strokes exactly, live drawing, undo/redo and reopen produce the same pixels, one
-gesture is one undo step, and the setting never rewrites old strokes.
-
-A stamp-based brush engine (texture, per-dab spacing, true hardness curves)
-remains a later slice behind the existing stroke interface. Spacing here means
-sample density, not a new stamp rasterizer.
+Acceptance bar: default output unchanged; one gesture remains one undo step;
+changing texture never rewrites committed strokes; live, committed, reopened and
+exported textured pixels match; self-overlap and overlapping dabs do not darken.

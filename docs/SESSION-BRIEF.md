@@ -6,8 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at the brush-hardness slice on `main` — clean and
-in sync with `origin/main`.
+Last verified: **2026-10-20**, at the brush spacing/stabilizer slice on `main` —
+clean and in sync with `origin/main`.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,22 +30,23 @@ in sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, working tree clean after the brush-hardness slice.
-- `pnpm test` → **398 tests in 26 files, all pass** (re-run for this slice).
-- `pnpm typecheck` clean; `pnpm build` succeeds (verified for the hardness
-  slice).
-- Project file format **version 6** (`PROJECT_VERSION = 6`).
+- Branch `main`, working tree clean after the brush spacing/stabilizer slice.
+- `pnpm test` → **411 tests in 26 files, all pass** (re-run for this slice).
+- `pnpm typecheck` clean; `pnpm build` succeeds (verified for this slice).
+- Project file format **version 6** (`PROJECT_VERSION = 6`); `stabilizer` was
+  added additively within v6, and a missing field reads as `0`.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
-  built before the fill, gradient and hardness slices); packaged-app verification
-  is still outstanding.
-- Phase 2 (illustration tools) is complete. Phase 3 has started: hardness (the
-  first brush-feel item) ships in this slice.
+  built before the fill, gradient, hardness and spacing/stabilizer slices);
+  packaged-app verification is still outstanding.
+- Phase 2 (illustration tools) is complete. Phase 3 has two brush-feel items
+  shipped (hardness, then spacing + stabilizer); texture/stamp engine remains.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
+| current `main` | **Brush spacing and stabilizer** — spacing exposed as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) with a visible release settle; brush/eraser only; captured per stroke; additive within format v6. |
+| `56b12ab` | **Brush hardness** — soft edges via one post-pass feather of the finished stroke silhouette; `hardness` captured per stroke, applies to brush/eraser/shapes; format v6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, two stops, opacity) in the ordered element list; live preview, one undo step; format v5. |
 | `8b7152b` | **Bucket (flood) fill** (`F`) — `FillPatchRecord` in an ordered per-layer list; composite sampling, tolerance, cancel/undo/redo; format v4. |
 | `84af123` | **Filled shapes** — toolbar **Fill shape** switch for rectangle/ellipse; `fill: true` on the stroke; format v3. |
@@ -85,9 +86,10 @@ in sync with `origin/main`.
   not clipped to it.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
-- **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, captured per
-  stroke and applied to brush, eraser and shapes), colour + 8-swatch palette,
-  pressure size and pressure opacity toggles.
+- **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
+  eraser and shapes), spacing (2–200 % of diameter, sample density), stabilizer
+  (0–100 %, brush and eraser only), colour + 8-swatch palette, pressure size and
+  pressure opacity toggles. All settings are captured per stroke.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
@@ -134,24 +136,24 @@ src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
 
-Key files for the next slice (spacing / stabilizer):
+Key files for the next slice (stamp engine / texture):
 
-- `src/core/brushes/strokeBuilder.ts` — sample capture and spacing logic; this
-  is where a stabilizer and spacing actually change the path.
-- `src/types/brush.ts` — `BrushSettings` (already has `spacing`; a `stabilizer`
-  field would go here).
-- `src/core/brushes/defaults.ts` — `DEFAULT_BRUSH`, `normalizeBrush`,
-  `brushSettingsEqual`.
-- `src/features/brushes/BrushControls.tsx` — the sliders (`SliderField`).
-- `src/core/engine/DrawingEngine.ts` — editor setters, per-stroke brush capture,
-  `buildSnapshot`.
-- `src/state/editorStore.ts` — `EditorActions` intents.
-- `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush` (version
-  aware), serializer. Spacing affects samples, which are already stored, so an
-  additive field may need no bump - decide with tests.
-- `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts` — the shipped
-  hardness reference: `strokeFeatherRadius`, `paintStrokeCoverage`,
-  `featherStroke`; do not change this path for spacing.
+- `src/core/rendering/canvas2dStroke.ts` — current segment rasterizer;
+  `rasterizeStroke` is the function a stamp path must sit behind or beside
+  without changing default output.
+- `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStrokeToBuffer`,
+  `compositeStrokeBuffer`, `paintStrokeCoverage`, `featherStroke`; the stroke
+  buffer and single-alpha composite are the invariants a stamp engine must keep.
+- `src/types/brush.ts` / `src/core/brushes/defaults.ts` — brush fields
+  (`texture`, stamp spacing if separate) and defaults/clamping/equality.
+- `src/features/brushes/BrushControls.tsx` — the real texture control.
+- `src/core/document/types.ts` — `StrokeRecord`/`brush`, the authoritative record.
+- `src/core/engine/DrawingEngine.ts` — per-stroke brush capture and renderer
+  begin/extend/finish lifecycle.
+- `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
+  serializer; a non-default texture should force v7.
+- Tests: `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`,
+  `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
 
 ## 5. How work is done here (non-negotiable)
@@ -202,6 +204,22 @@ Key files for the next slice (spacing / stabilizer):
   soft stroke cannot darken at self-overlap. The trade-off is a Gaussian edge
   that extends slightly beyond the nominal diameter; it is not an exact hardness
   cone or a stamp engine.
+- **Spacing means sample density, not stamp spacing.** `spacing` is
+  `0.02..2` of the diameter, default `0.12`; the builder interpolates with
+  `max(0.75 px, spacing * size)`, capped at 96 points per event and skipped for
+  jumps over `MAX_INTERPOLATION_DISTANCE`. It changes stored samples and
+  pressure-ramp smoothness, never the nominal width.
+- **Stabilizer is an exponential follow.** `stabilizer` is `0..1`, default `0`;
+  `follow = 1 - 0.75 * strength` is applied to x/y/pressure from the previous
+  captured point. At `0` the factor is exactly `1`, so raw input is unchanged.
+  `finish()` appends the last raw point when it differs, and the engine previews
+  that settle segment before `endStroke`; the committed path ends on release
+  with no hidden post-process. It applies to brush and eraser, not shapes. The
+  trade-off is visible lag at high strength; there is no look-ahead or rope
+  catch-up.
+- **`stabilizer` is additive within format v6.** It shapes samples that are
+  already stored, so an older v6 reader ignoring it still renders the same
+  picture; a missing field reads as `0`. `spacing` was already in v6.
 - **Preview vs commit**: press inserts real preview content (or starts a buffer),
   moves update it in place, release records exactly one command, cancel /
   lost capture / tool switch / over-ceiling removes it with **no history and no
@@ -217,13 +235,15 @@ Key files for the next slice (spacing / stabilizer):
   `gradientEndColor`. Each is read at press time so the committed record keeps
   the setting it was drawn with. Changing an option is not an edit. The brush is
   the same: the current brush is session state, while every stroke stores the
-  full brush it was drawn with, `hardness` included.
+  full brush it was drawn with, including `hardness`, `spacing` and
+  `stabilizer`.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
   v6 requires `hardness` on every stroke brush and reads v1–v5 strokes as hard
-  (`1`); unknown/newer versions are rejected outright, as are v4 files
-  containing a gradient.
+  (`1`); `stabilizer` was added additively within v6 (missing = `0`) because the
+  smoothed path is already stored in the samples; unknown/newer versions are
+  rejected outright, as are v4 files containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
   restores painting order. Undo/redo are refused during a selection gesture.
@@ -243,8 +263,11 @@ Product:
 - Fills: binary mask, no feather/gap-closing, no pre-commit preview, not
   selectable.
 - Hardness: a single Gaussian feather of the finished silhouette, so the edge
-  extends slightly beyond the nominal diameter; no stamp profile, no spacing UI,
-  no stabilizer and no texture yet.
+  extends slightly beyond the nominal diameter; no stamp profile.
+- Spacing: sample density only, not stamp spacing; lower values cost memory but
+  do not add texture. Stabilizer: exponential follow with visible lag, no
+  look-ahead or rope catch-up; shapes ignore it. No texture brush or stamp engine
+  yet.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no scale/rotate/perspective, no
   copy/paste across layers.
@@ -263,6 +286,12 @@ Verification gaps:
 - Hardness was checked on the live display canvas (soft edge, history, undo/redo)
   and its pixels through the real renderer, including self-overlap, eraser,
   `rasterScale` 1/2 and live-vs-commit equality.
+- Spacing/stabilizer were checked in the browser at state level: the controls
+  appeared with defaults, a stabilized drag produced `history 1`/unsaved, the
+  display showed brush pixels at the release point (settle segment), and undo
+  cleared it to paper. Exact lag math, spacing density, format round-trip and
+  save/reopen were checked by Vitest; no pixel-level stabilizer comparison was
+  made.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
@@ -302,74 +331,72 @@ Verification gaps:
   `-C link-arg=-Wl,--exclude-all-symbols` (do not override `RUSTFLAGS`). A cold
   release build takes ~5 minutes.
 
-## 9. Next slice — brush spacing and stabilizer (Phase 3)
+## 9. Next slice — stamp-based brush engine (Phase 3)
 
-`docs/ROADMAP.md` "Next slice" is the authority. Hardness shipped in the
-previous slice; spacing and a stabilizer are the remaining brush-feel items
-before texture.
+`docs/ROADMAP.md` "Next slice" is the authority. Hardness, spacing and the
+stabilizer shipped; texture and the stamp engine are the remaining Phase 3
+items.
 
-The goal: surface the existing `spacing` brush field and add a **stabilizer**
-that smooths the pointer path, without changing the one-gesture / one-record
-model. Both act when samples are captured, so they change the stored points
-rather than the rendered record.
+The goal: add a stamp/dab rasterizer behind the existing stroke interface,
+with **texture as its first user-visible output**, without changing what current
+files look like.
 
 ### Constraints to keep
 
-1. Both are editor state read at press time, like the rest of the brush, and
-   each stroke keeps the values it was drawn with. Changing either produces no
-   history entry and no dirty flag.
-2. The defaults must reproduce today's strokes and sample density exactly.
-3. A stabilizer must not lag invisibly: the committed path has to be the path
-   the user saw, and it must behave predictably at the start of a stroke.
-4. Spacing here means sample density, not a stamp rasterizer. No texture and no
-   per-dab hardness in this slice.
-5. Format: samples are already stored, so a reader that ignores a new brush
-   field still replays the same points and sees the same picture. An additive
-   field within version 6 is therefore likely - but prove it with format tests,
-   and bump only if a reader would render a different drawing.
+1. `DrawingRenderer` and `StrokeRecord` stay the boundary. Stamps are a
+   rasterization strategy; the vector samples remain authoritative for undo,
+   reopen and export.
+2. Keep the existing segment path as the default. Hard/soft strokes with no
+   texture must stay pixel-identical, including the single-alpha composite and
+   the no-self-darkening invariant.
+3. Accumulate per-dab coverage into one stroke buffer (max/union, not repeated
+   source-over), then composite once at the stroke opacity.
+4. Grain must be deterministic from document coordinates so live, rebuild,
+   undo/redo, reopen and PNG export agree at every zoom and `rasterScale`.
+5. Capture texture settings per stroke. A non-default texture changes the
+   picture, so a reader that ignores it must not open the file: expect **format
+   version 7** and prove it with tests. Do not add a required field within v6.
+6. Keep `spacing` (sample density) distinct from stamp spacing, or document an
+   explicit migration if they are merged.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts` / `defaults.ts`: stabilize the existing `spacing`
-      field (range, default) and add the stabilizer field if the chosen model
-      needs one; clamp it and include it in `brushSettingsEqual`.
-- [ ] `src/core/brushes/strokeBuilder.ts`: apply spacing/resampling and the
-      stabilizer when samples are captured; keep the stored arrays the single
-      source of truth and make live drawing use the same pipeline.
-- [ ] `src/features/brushes/BrushControls.tsx`: **Spacing** and **Stabilizer**
-      sliders beside size, opacity and hardness, with clear units.
-- [ ] `src/core/engine/DrawingEngine.ts` / `src/state/editorStore.ts`: brush
-      setters stay editor state (no history, no dirty); verify the per-stroke
-      brush copy still captures the values.
-- [ ] Tests: `brushSettings.test.ts` (clamp/equality/defaults),
-      `strokeBuilder.test.ts` (spacing and stabilizer behaviour, first sample,
-      degenerate input), `drawingEngine.test.ts` (editor state, capture,
-      undo/redo), `projectFormat.test.ts` (round-trip and old-file defaults),
-      `projectLifecycle.test.ts` (save/reopen).
-- [ ] Docs in the same commit: README (controls + limitations), ARCHITECTURE
-      (where sampling ends and rasterization begins), PROJECT_FORMAT (field
-      version decision), ROADMAP (tick or narrow), HANDOFF + this brief.
-- [ ] Browser check: change spacing and stabilizer, draw freehand and a shape,
-      confirm the expected sample/path behaviour, one undo step, save/reopen and
-      export; report state and pixel evidence honestly.
+- [ ] `src/types/brush.ts` / `defaults.ts`: texture field(s), defaults, clamp and
+      equality.
+- [ ] `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts`: stamp
+      rasterizer behind the existing buffer/composite path; default unchanged.
+- [ ] `src/features/brushes/BrushControls.tsx`: a real texture choice and
+      strength control, no placeholder.
+- [ ] `src/core/engine/DrawingEngine.ts`: per-stroke capture and brush setters
+      stay editor state (no history, no dirty).
+- [ ] `src/core/project/projectFormat.ts`: format v7, validate the new fields,
+      read v1-v6 unchanged with no texture.
+- [ ] Tests: segment parity at default, textured live/commit equality,
+      self-overlap/no-darkening, deterministic grain at different zoom/scale,
+      format round-trip and old-file defaults.
+- [ ] Docs in the same commit: README, ARCHITECTURE, PROJECT_FORMAT, ROADMAP,
+      HANDOFF + this brief.
+- [ ] Browser check: default hard/soft strokes unchanged, texture visible,
+      one undo step, save/reopen and export agree; report automated/browser
+      evidence separately.
 - [ ] `pnpm test`, `pnpm typecheck`, `pnpm build`; commit (`git commit -F`) and
       push.
 
 ### Acceptance criteria
 
-- Default settings reproduce today's strokes (hardness `1`) pixel for pixel.
-- Spacing changes sample density without changing the nominal stroke width;
-  stabilizer smooths jitter without a hidden offset or a lost start/end.
-- Live drawing, undo/redo, reopen and export agree.
-- One gesture is one undo step; changing a setting never rewrites old strokes.
-- Old projects open unchanged; any new field is read with the current default.
+- Default hard and soft output is unchanged pixel for pixel.
+- A textured stroke is one undo step; it never rewrites existing strokes.
+- Live drawing, undo/redo, reopen and export produce the same textured pixels.
+- Overlapping dabs and a self-crossing textured stroke do not darken.
+- Old projects open unchanged; a v7 file requires the texture fields and an
+  older reader refuses it rather than drawing a plain stroke.
 
 ## 10. First ten minutes of a new session
 
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
-   brush-hardness commit (or the commit this file names).
+   spacing/stabilizer commit (or the commit this file names).
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 398 tests in 26 files).
+   anything (expect 411 tests in 26 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

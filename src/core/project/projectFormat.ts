@@ -70,7 +70,9 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * ignore the field and render a soft stroke with a hard edge - a different
  * picture - so the version was bumped; version-1 to -5 files still open, their
  * strokes defaulting to a hardness of `1` (the hard edge every earlier version
- * could produce).
+ * could produce). Within version 6, `stabilizer` is additive: it changes the
+ * samples captured at draw time, and stored samples already reproduce the
+ * picture, so an older version-6 file without the field reads as `0`.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
@@ -687,6 +689,12 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     pressureOpacity: readNumber(record.pressureOpacity, `${label} brush pressure opacity`, 0, 1),
     minSizeRatio: readNumber(record.minSizeRatio, `${label} brush minimum size ratio`, 0.02, 1),
     spacing: readNumber(record.spacing, `${label} brush spacing`, 0.02, 2),
+    // Additive within version 6: files written before the field existed (and
+    // every older version) behave exactly as their stored samples did.
+    stabilizer:
+      record.stabilizer === undefined
+        ? 0
+        : readNumber(record.stabilizer, `${label} brush stabilizer`, 0, 1),
   });
 }
 

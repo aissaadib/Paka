@@ -657,7 +657,9 @@ It works entirely in document coordinates - the caller owns the transform - so
 zoom never affects rasterized pixel data. This is a deliberately small brush
 model: no stamps, no texture; hardness is a single post-pass feather over the
 finished silhouette (see [Soft edges (hardness)](#soft-edges-hardness)), not a
-per-dab hardness curve.
+per-dab hardness curve. Spacing changes how densely the input path is sampled
+(see [Sampling, spacing and the stabilizer](#sampling-spacing-and-the-stabilizer));
+it is not stamp spacing and does not alter the rasterizer.
 
 A stroke flagged `fill` (a filled rectangle or ellipse) additionally fills the
 closed polygon its samples trace, once, before the outline is traced - and only
@@ -750,6 +752,43 @@ React render. Behaviour:
 Pressure policy (`core/input/pointer.ts`): a pen reporting pressure is used
 as-is; a pen reporting zero falls back to `0.5`; mouse, touch and unknown
 devices report `1.0` so that moving the size slider changes width exactly.
+
+### Sampling, spacing and the stabilizer
+
+`StrokeBuilder` turns pointer samples into the `StrokeRecord` that is stored,
+rendered and saved. Two sampling-time settings shape that record; both are
+captured in the stroke's own brush, so changing a slider later never rewrites
+existing work, and neither creates a history entry or dirties the document.
+
+- **Spacing** is a fraction of the brush diameter (`0.02..2`, default `0.12`,
+  shown as 2-200 %). The builder interpolates a long move with a step of
+  `max(0.75 px, spacing * size)`, capped at 96 points per input event and skipped
+  for jumps beyond `MAX_INTERPOLATION_DISTANCE`. It therefore controls sample
+  density and pressure-ramp smoothness, not brush width; the renderer still
+  draws segments between samples.
+- **Stabilizer** (`0..1`, default `0`, shown as 0-100 %) applies an exponential
+  follow to incoming x, y and pressure: `follow = 1 - 0.75 * strength`. The
+  first sample is exact; each later captured point moves that fraction of the
+  way from the previous captured point to the raw pointer. At `0` the follow
+  factor is exactly `1`, preserving the raw path byte for byte.
+- **The release point is part of the path.** Smoothing lags the pointer while it
+  moves, so `finish()` appends the last raw point when it differs from the
+  captured tail. The engine feeds that final point to the renderer before
+  `endStroke`, which means the settled segment is previewed, committed and later
+  replayed like any other sample. There is no hidden post-process and no lost
+  start or end.
+- **Brush and eraser only.** Shapes derive their geometry from the drag corners,
+  not the freehand path, so the stabilizer is deliberately not applied to them.
+- **Additive in the file.** Stabilizer changes only the samples captured at draw
+  time; a reader that ignores the field still replays those samples and produces
+  the same picture. It was therefore added within format version 6, and a
+  missing field reads as `0` (see
+  [PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
+
+The trade-off is honest: at high strength the line visibly trails the pointer
+and closes with one settle segment on release. There is no look-ahead, rope
+physics or time-based catch-up, and the stored smoothed samples mean undo,
+reopen and export replay exactly the previewed path.
 
 ## React integration
 
@@ -1037,7 +1076,8 @@ These are real gaps, not footnotes:
   soft edge is a single Gaussian feather, so it extends slightly beyond the
   nominal diameter and cannot express a multi-zone falloff. A very large soft
   stroke pays one extra pass over its padded bounding box per repaint; the
-  scratch canvas is reused but grows to that footprint. Spacing, stabilizers and
+  scratch canvas is reused but grows to that footprint. Spacing and the
+  stabilizer are sampling-time controls, not raster features; a texture brush and
   a stamp-based engine are still absent.
 - **Rasterization is per-segment and CPU-side.** Long strokes mean many
   `stroke()` calls. It is fine at the sizes tested and is the first thing to

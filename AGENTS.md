@@ -76,18 +76,19 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-102), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (165), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
-| Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L758/L793), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L668) |
-| Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts`, `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush` |
+| Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L758/L793), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L670) |
+| Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1254), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
+| Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts`, `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
 | Undo/redo behaviour | `core/commands/commandStack.ts`, the command in `core/commands/`, `engine.executeDocumentCommand`/`recordHistoryChange` |
-| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L77, `serializeProject` L384, `parseProject` L456, `readBrush` L668), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
+| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L77, `serializeProject` L384, `parseProject` L456, `readBrush` L670), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L655-760, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1291-1780, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
-| Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` L171-197 only |
+| Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
 
 ## 5. Symbol → file (grep the symbol)
 
@@ -102,10 +103,11 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Gradient lifecycle | `core/engine/DrawingEngine.ts` | 1169-1251 |
 | Selection lifecycle | `core/engine/DrawingEngine.ts` | 1490-1650 |
 | `setBrush`, editor setters | `core/engine/DrawingEngine.ts` | 774-850 |
-| `buildSnapshot` | `core/engine/DrawingEngine.ts` | 2033 |
+| `buildSnapshot` | `core/engine/DrawingEngine.ts` | 2045 |
 | `BrushSettings` | `types/brush.ts` | 11 |
-| `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 26, 46 |
-| `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 38, 63, 78 |
+| `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 28, 50 |
+| `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 46, 71, 86 |
+| `STABILIZER_MAX_LAG`, `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | 39, 114, 193 |
 | `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
 | `SOFT_EDGE_RADIUS_RATIO`, `strokeFeatherRadius` | `core/rendering/canvas2dStroke.ts` | 32, 43 |
 | `paintStrokeCoverage`, `featherStroke`, `compositeStrokeBuffer` | `core/rendering/Canvas2DRenderer.ts` | 758, 793, 733 |
@@ -115,7 +117,7 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 77, 384, 456 |
-| `readBrush` (format validation) | `core/project/projectFormat.ts` | ~668 |
+| `readBrush` (format validation) | `core/project/projectFormat.ts` | ~670 |
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
 | `Tool`, `ToolContext` | `core/tools/types.ts` | 121, 17 |
@@ -156,6 +158,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
+| Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
 | Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
 | Stroke raster | `canvas2dStroke.test.ts` |
 | Renderer / layers / compositing | `canvas2dRenderer.test.ts` (grep `it(`) |

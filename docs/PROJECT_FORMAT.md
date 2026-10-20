@@ -40,7 +40,8 @@ zoom/pan viewport, the current tool, brush, shape-fill, bucket-tolerance and
 gradient-option settings, and the current selection. A project stores the
 *drawing*, so reopening restores the elements and their layers rather than the
 editing session that produced them. (The current brush selection is session
-state; each stroke stores its own full brush, including `hardness`. Selection is
+state; each stroke stores its own full brush, including `hardness` and the
+sampling settings `spacing` and `stabilizer`. Selection is
 derived from strokes at run
 time anyway - see
 [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform) - so it needs no
@@ -92,7 +93,8 @@ added without changing the model.
             "pressureSize": 0.6,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
-            "spacing": 0.12
+            "spacing": 0.12,
+            "stabilizer": 0
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -112,7 +114,8 @@ added without changing the model.
             "pressureSize": 0,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
-            "spacing": 0.12
+            "spacing": 0.12,
+            "stabilizer": 0
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -132,7 +135,8 @@ added without changing the model.
             "pressureSize": 0.6,
             "pressureOpacity": 0,
             "minSizeRatio": 0.12,
-            "spacing": 0.12
+            "spacing": 0.12,
+            "stabilizer": 0
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -229,7 +233,7 @@ reader must not reorder or drop elements.
 | --- | --- | --- |
 | `kind` | `"stroke"` | Element discriminator. Required in version 4. |
 | `id` | string | Stroke id. |
-| `brush` | object | The brush used, including `hardness`, captured per stroke so later brush changes do not alter it. |
+| `brush` | object | The brush used, including `hardness`, `spacing` and `stabilizer`, captured per stroke so later brush changes do not alter it. |
 | `erase` | boolean? | `true` only for eraser strokes, which subtract coverage from the layer instead of painting. Absent means paint. |
 | `fill` | boolean? | `true` only for filled shapes, whose samples bound the area to fill rather than a path to trace. Absent means trace. |
 | `startTime` | number | Timestamp of the first sample, for diagnostics; not used for rendering. |
@@ -336,7 +340,8 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
 | `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
-| `spacing` | 0.02-2 | Sample spacing as a fraction of the diameter (used when smoothing). |
+| `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
+| `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
 
 ## Validation policy
 
@@ -359,7 +364,8 @@ looks like:
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
 - brush fields outside their ranges, including a version-6 `hardness` that is
-  missing or outside `0..1` (older versions have no field and default to `1`);
+  missing or outside `0..1` (older versions have no field and default to `1`),
+  and a `stabilizer` present but outside `0..1`;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -383,7 +389,10 @@ looks like:
 - a missing `erase` flag → the stroke paints (which is what every version-1
   stroke does);
 - a missing `fill` flag → the stroke traces its outline (which is what every
-  version-1 and -2 shape does).
+  version-1 and -2 shape does);
+- a missing `stabilizer` → `0`. This is an additive field within version 6: the
+  stored samples already describe the smoothed path, so old version-6 files and
+  all earlier versions render exactly as they did.
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
@@ -408,11 +417,17 @@ Two further guarantees:
 | 3 | Adds `fill` on strokes. Reads version-1 and -2 files unchanged (their shapes all trace their outline). | - |
 | 4 | Reads `layers[].elements` with `kind: "stroke"` and `kind: "fill"`; reads version-1 to -3 files through their `strokes` array. | - |
 | 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
-| 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | The current version; what this build always writes. |
+| 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | The current version; what this build always writes, including the additive `stabilizer` field. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
   what makes the format easy to extend.
+- **`stabilizer` is the first field added under that rule.** It shapes the
+  samples at draw time, and those samples are already stored, so a version-6
+  reader that skips the field still renders the identical picture. Missing reads
+  as `0`; when present it must still be a number in `0..1`. In contrast,
+  `hardness` changed how stored samples are rasterized, which is why it required
+  version 6.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

@@ -29,6 +29,14 @@ export const MAX_INTERPOLATION_DISTANCE = 2048;
 export const MIN_SAMPLE_DISTANCE = 0.05;
 /** Smallest spacing step in document px, regardless of brush size. */
 export const MIN_SPACING_STEP = 0.75;
+/**
+ * Fraction of the remaining distance a fully stabilized pointer leaves per
+ * input sample. At strength `1` the captured path follows 25% of the way to
+ * each new pointer position, which removes hand jitter at the cost of a short
+ * visible lag; `finish()` settles the path back to the release point. At
+ * strength `0` the follow factor is exactly `1`, so the raw path is unchanged.
+ */
+export const STABILIZER_MAX_LAG = 0.75;
 
 /**
  * Creates an empty stroke. The brush configuration is copied into the record
@@ -81,6 +89,11 @@ export class StrokeBuilder {
   private lastY = 0;
   private lastPressure = 1;
   private lastTime = 0;
+  /** Latest raw pointer position, kept separately so `finish()` can settle. */
+  private lastRawX = 0;
+  private lastRawY = 0;
+  private lastRawPressure = 1;
+  private lastRawTime = 0;
   private count = 0;
 
   constructor(stroke: StrokeRecord) {
@@ -112,36 +125,73 @@ export class StrokeBuilder {
 
     if (this.count === 0) {
       this.stroke.startTime = time;
+      this.lastRawX = sample.x;
+      this.lastRawY = sample.y;
+      this.lastRawPressure = pressure;
+      this.lastRawTime = time;
       this.append(sample.x, sample.y, pressure, time);
       return 0;
     }
 
-    const segmentLength = distance(this.lastX, this.lastY, sample.x, sample.y);
-    if (segmentLength < MIN_SAMPLE_DISTANCE) {
-      return this.count;
-    }
+    const rawSegment = distance(this.lastRawX, this.lastRawY, sample.x, sample.y);
+    const stabilizer = clamp(this.stroke.brush.stabilizer ?? 0, 0, 1);
+    const follow = 1 - STABILIZER_MAX_LAG * stabilizer;
+    // At strength 0 these are the raw values, so the legacy path is unchanged.
+    const x = stabilizer > 0 ? lerp(this.lastX, sample.x, follow) : sample.x;
+    const y = stabilizer > 0 ? lerp(this.lastY, sample.y, follow) : sample.y;
+    const smoothedPressure =
+      stabilizer > 0 ? lerp(this.lastPressure, pressure, follow) : pressure;
 
     const firstIndex = this.count;
     const step = Math.max(MIN_SPACING_STEP, this.stroke.brush.spacing * this.stroke.brush.size);
+    const segmentLength = distance(this.lastX, this.lastY, x, y);
 
-    if (segmentLength > step && segmentLength <= MAX_INTERPOLATION_DISTANCE) {
+    if (segmentLength > step && rawSegment <= MAX_INTERPOLATION_DISTANCE) {
       const steps = Math.min(MAX_INTERPOLATED_POINTS, Math.floor(segmentLength / step));
       for (let index = 1; index <= steps; index += 1) {
         const t = index / (steps + 1);
         this.append(
-          lerp(this.lastX, sample.x, t),
-          lerp(this.lastY, sample.y, t),
-          lerp(this.lastPressure, pressure, t),
+          lerp(this.lastX, x, t),
+          lerp(this.lastY, y, t),
+          lerp(this.lastPressure, smoothedPressure, t),
           lerp(this.lastTime, time, t),
         );
       }
     }
 
-    this.append(sample.x, sample.y, pressure, time);
+    // Keep the latest raw point for `finish()`. The append decision below uses
+    // the distance from the last *appended* point, so sub-pixel motion
+    // accumulates instead of stalling when every event is small.
+    this.lastRawX = sample.x;
+    this.lastRawY = sample.y;
+    this.lastRawPressure = pressure;
+    this.lastRawTime = time;
+
+    if (segmentLength < MIN_SAMPLE_DISTANCE) {
+      return firstIndex;
+    }
+    this.append(x, y, smoothedPressure, time);
     return firstIndex;
   }
 
+  /**
+   * Ends the stroke, settling a stabilized path on the last raw pointer point.
+   *
+   * Smoothing deliberately lags the pointer while it moves, but the line must
+   * still end where the user released. Appending the raw point here makes the
+   * final segment part of the stored (and therefore rendered) samples rather
+   * than a hidden post-process. At strength 0 this is a no-op, so the legacy
+   * sample sequence is unchanged.
+   */
   finish(): StrokeRecord {
+    const stabilizer = clamp(this.stroke.brush.stabilizer ?? 0, 0, 1);
+    if (
+      stabilizer > 0 &&
+      this.count > 0 &&
+      distance(this.lastX, this.lastY, this.lastRawX, this.lastRawY) >= MIN_SAMPLE_DISTANCE
+    ) {
+      this.append(this.lastRawX, this.lastRawY, this.lastRawPressure, this.lastRawTime);
+    }
     return this.stroke;
   }
 

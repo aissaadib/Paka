@@ -479,6 +479,39 @@ describe("parseProject round trip", () => {
     expect(legacy.project.strokes[0].brush.hardness).toBe(1);
   });
 
+  it("round-trips spacing and stabilizer, defaulting a missing stabilizer to 0", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, spacing: 0.4, stabilizer: 0.6 },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.spacing).toBe(0.4);
+    expect(parsed.project.strokes[0].brush.stabilizer).toBe(0.6);
+
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(6);
+    // Additive within v6: an older v6 file has no stabilizer and must still
+    // open, with the default that reproduces its already-stored samples.
+    delete payload.layers[0].elements[0].brush.stabilizer;
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.spacing).toBe(0.4);
+    expect(legacy.project.strokes[0].brush.stabilizer).toBe(0);
+  });
+
   it("opens version 2 files, whose shapes were all outlines", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -811,6 +844,27 @@ describe("parseProject rejections", () => {
 
     expect(
       rejectionOf(mutate((project) => (project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, hardness: "soft" }))),
+    ).toContain("finite number");
+  });
+
+  it("refuses a v6 stroke brush with an invalid stabilizer", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stabilizer: 2 };
+        }),
+      ),
+    ).toContain("brush stabilizer");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            stabilizer: "smooth" as unknown as number,
+          };
+        }),
+      ),
     ).toContain("finite number");
   });
 

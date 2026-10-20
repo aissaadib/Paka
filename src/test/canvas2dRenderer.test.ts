@@ -43,6 +43,7 @@ const BRUSH: BrushSettings = {
   pressureOpacity: 0,
   minSizeRatio: 0,
   spacing: 0.1,
+  stabilizer: 0,
 };
 
 let recording: RecordingDocument;

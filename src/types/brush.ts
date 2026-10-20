@@ -4,8 +4,8 @@
  * This is *configuration only*. Sampling lives in `core/input`, stroke
  * processing in `core/brushes` and rasterization in `core/rendering`. Every
  * field below is implemented by those modules today; unimplemented concepts
- * (texture, stabilizers, blending modes) are intentionally absent so the
- * configuration cannot claim capabilities the engine does not have.
+ * (texture, blending modes) are intentionally absent so the configuration
+ * cannot claim capabilities the engine does not have.
  */
 
 export interface BrushSettings {
@@ -43,4 +43,15 @@ export interface BrushSettings {
    * Lower values produce smoother curves for fast input at a memory cost.
    */
   readonly spacing: number;
+  /**
+   * Pointer smoothing strength in `[0, 1]`.
+   *
+   * `0` follows the pointer exactly. Higher values apply an exponential average
+   * to the incoming path before samples are captured: the line lags behind the
+   * pointer while moving and settles to the release point on `finish()`. The
+   * stored samples are the smoothed path, so live drawing, undo/redo, reopen and
+   * export all replay exactly what was shown. It affects the brush and eraser,
+   * not shape tools, whose geometry comes from the drag rather than the path.
+   */
+  readonly stabilizer: number;
 }

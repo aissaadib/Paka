@@ -48,6 +48,7 @@ describe("brush configuration", () => {
       pressureOpacity: 9,
       minSizeRatio: 0,
       spacing: 100,
+      stabilizer: -4,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -57,6 +58,7 @@ describe("brush configuration", () => {
     expect(normalized.pressureOpacity).toBe(1);
     expect(normalized.minSizeRatio).toBe(0.02);
     expect(normalized.spacing).toBe(2);
+    expect(normalized.stabilizer).toBe(0);
   });
 
   it("applies a patch without mutating the current settings", () => {
@@ -77,6 +79,18 @@ describe("brush configuration", () => {
     expect(soft.hardness).toBe(0.5);
     expect(brushSettingsEqual(DEFAULT_BRUSH, soft)).toBe(false);
     expect(brushSettingsEqual(soft, { ...soft })).toBe(true);
+  });
+
+  it("defaults spacing and stabilizer, and treats both as brush identity", () => {
+    expect(DEFAULT_BRUSH.spacing).toBe(0.12);
+    expect(DEFAULT_BRUSH.stabilizer).toBe(0);
+    expect(normalizeBrush({ ...DEFAULT_BRUSH, stabilizer: 3 }).stabilizer).toBe(1);
+
+    const spacing = updateBrushSettings(DEFAULT_BRUSH, { spacing: 0.4 });
+    const stabilized = updateBrushSettings(DEFAULT_BRUSH, { stabilizer: 0.7 });
+    expect(brushSettingsEqual(DEFAULT_BRUSH, spacing)).toBe(false);
+    expect(brushSettingsEqual(DEFAULT_BRUSH, stabilized)).toBe(false);
+    expect(brushSettingsEqual(stabilized, { ...stabilized })).toBe(true);
   });
 
   it("steps size finely for small brushes and proportionally for large ones", () => {

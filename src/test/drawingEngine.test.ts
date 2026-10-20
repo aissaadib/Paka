@@ -55,6 +55,7 @@ function createSpyRenderer(
   const invalidated: string[] = [];
   const sampled: Array<{ x: number; y: number }> = [];
   const began: StrokeRecord[] = [];
+  const extended: Array<{ stroke: StrokeRecord; fromIndex: number }> = [];
   const replaced: Array<{ xs: number[]; ys: number[] }> = [];
   const ended: StrokeRecord[] = [];
   const selections: Array<RendererSelection | null> = [];
@@ -79,7 +80,9 @@ function createSpyRenderer(
     beginStroke: (stroke) => {
       began.push(stroke);
     },
-    extendStroke: () => {},
+    extendStroke: (stroke, fromIndex) => {
+      extended.push({ stroke, fromIndex });
+    },
     replaceStroke: (stroke) => {
       replaced.push({ xs: [...stroke.xs], ys: [...stroke.ys] });
     },
@@ -115,6 +118,7 @@ function createSpyRenderer(
     invalidated,
     sampled,
     began,
+    extended,
     replaced,
     ended,
     selections,
@@ -186,6 +190,27 @@ describe("DrawingEngine state", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("treats spacing and stabilizer as editor state: no history step, no dirty flag", () => {
+    const engine = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setBrush({ spacing: 0.4, stabilizer: 0.7 });
+    expect(engine.getState().brush.spacing).toBe(0.4);
+    expect(engine.getState().brush.stabilizer).toBe(0.7);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // Out-of-range values are clamped, and a no-op change publishes nothing.
+    engine.setBrush({ spacing: 0.001, stabilizer: 4 });
+    expect(engine.getState().brush.spacing).toBe(0.02);
+    expect(engine.getState().brush.stabilizer).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(2);
+    engine.setBrush({ spacing: 0.02, stabilizer: 1 });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
   it("updates the viewport through zoom commands", () => {
     const engine = createEngine();
     engine.zoomTo(2);
@@ -245,6 +270,62 @@ describe("DrawingEngine stroke capture", () => {
     expect(engine.undo()).toBe(true);
     expect(engine.redo()).toBe(true);
     expect(engine.listStrokes(layerId)[0].brush.hardness).toBe(0.4);
+  });
+
+  it("captures spacing and stabilizer per stroke", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ size: 100, spacing: 0.3, stabilizer: 0.8 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 110, docY: 10, timeStamp: 16 }));
+    engine.finishStroke();
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.spacing).toBe(0.3);
+    expect(stroke.brush.stabilizer).toBe(0.8);
+
+    engine.setBrush({ spacing: 0.05, stabilizer: 0 });
+    expect(engine.listStrokes(layerId)[0].brush.spacing).toBe(0.3);
+    expect(engine.listStrokes(layerId)[0].brush.stabilizer).toBe(0.8);
+  });
+
+  it("settles a stabilized stroke on the release point before committing", () => {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(
+      createSample({ phase: "down", docX: 10, docY: 10, pressure: 0.2, timeStamp: 0 }),
+    );
+    engine.extendStroke(createSample({ docX: 110, docY: 10, pressure: 1, timeStamp: 16 }));
+    engine.finishStroke();
+
+    // follow = 0.25: 10 -> 35, then finish settles on the raw release point.
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs).toEqual([10, 35, 110]);
+    expect(stroke.pressures).toEqual([0.2, 0.4, 1]);
+    // The settle was previewed through the renderer before the stroke ended.
+    expect(spy.extended.map((entry) => entry.fromIndex)).toEqual([0, 1, 2]);
+    expect(spy.ended[0]).toBe(stroke);
+  });
+
+  it("does not append a settle point when the pointer stopped exactly on the path", () => {
+    const builderEngine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
+    });
+    const layerId = builderEngine.getState().document.activeLayerId as string;
+
+    builderEngine.beginStroke(createSample({ phase: "down", docX: 50, docY: 50 }));
+    builderEngine.finishStroke();
+
+    const stroke = builderEngine.listStrokes(layerId)[0];
+    expect(stroke.xs).toEqual([50]);
+    expect(stroke.ys).toEqual([50]);
   });
 
   it("records eraser strokes as erasers, and only those", () => {

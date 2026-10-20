@@ -1252,11 +1252,23 @@ export class DrawingEngine implements StrokeSource {
   }
 
   finishStroke(): void {
+    const builder = this.strokeBuilder;
     const stroke = this.activeStroke;
     this.strokeBuilder = null;
     this.activeStroke = null;
     if (!stroke) {
       return;
+    }
+
+    if (builder) {
+      // A stabilized stroke ends where the pointer was released: `finish()`
+      // appends that raw point so the settled segment is previewed and then
+      // committed like any other sample.
+      const fromIndex = builder.pointCount;
+      builder.finish();
+      if (builder.pointCount > fromIndex) {
+        this.renderer?.extendStroke(stroke, fromIndex);
+      }
     }
 
     this.renderer?.endStroke(stroke);

@@ -67,21 +67,22 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-20)
 
-- Branch `main`, in sync with `origin/main` after the hardness slice.
-- **`pnpm test` → 398 tests in 26 files, all pass.** `pnpm typecheck` clean;
+- Branch `main`, in sync with `origin/main` after the spacing/stabilizer slice.
+- **`pnpm test` → 411 tests in 26 files, all pass.** `pnpm typecheck` clean;
   `pnpm build` succeeds.
 - **Project file format version 6** (`PROJECT_VERSION = 6`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
   non-default manifests` warning (see §8). The executable predates the fill,
-  gradient and hardness slices.
+  gradient, hardness and spacing/stabilizer slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
-| current `main` | **Brush hardness** — `hardness` on the brush, captured per stroke; one post-pass feather of the finished silhouette (bounded, reused scratch), soft brush/eraser/shapes; format version 6. |
+| current `main` | **Brush spacing and stabilizer** — spacing surfaced as sample density (2-200 % of diameter); exponential stabilizer (0-100 %) captured per stroke, with the release point appended as a visible settle segment; brush/eraser only; additive within format version 6. |
+| `56b12ab` | **Brush hardness** — `hardness` on the brush, captured per stroke; one post-pass feather of the finished silhouette (bounded, reused scratch), soft brush/eraser/shapes; format version 6. |
 | `dc87f1d` | **Gradients** — first-class `GradientRecord` (linear/radial, stops, opacity) in the ordered element list; live drag preview, one undo step, format version 5. |
 | `8b7152b` | **Bucket (flood) fill** — `FillPatchRecord` in an ordered per-layer element list; composite sampling, tolerance, cancel/undo/redo; format version 4. |
 | `84af123` | **Filled shapes** — the toolbar **Fill shape** switch (rectangle/ellipse only); `fill: true` on the stroke; format version 3. |
@@ -155,7 +156,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   version-4 file is rejected. Version-5 files open unchanged and gain
   `hardness = 1`; every version-6 brush must carry an explicit `0..1` hardness.
   The bump is required because a version-5 reader would ignore the field and
-  mis-render a soft stroke.
+  mis-render a soft stroke. `stabilizer` is additive within v6: it only shapes
+  the samples at draw time, and those samples are stored, so a missing field
+  reads as `0` and older v6 files render identically.
 - **Selection stores only `{ layerId, strokeIds }`.** The dashed frame plus blue
   centreline trace is an overlay: display-only, never in a layer, never exported,
   never serialized.
@@ -170,8 +173,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - **Stale selection ids are deliberately kept through an undo** so a redo
   re-selects the restored strokes.
 - **The eraser subtracts coverage** (`destination-out`) and shares the brush's
-  size/opacity/pressure/hardness; stroke opacity is composited once, so
-  self-overlap does not darken.
+  size/opacity/pressure/hardness/spacing/stabilizer; stroke opacity is composited
+  once, so self-overlap does not darken.
 - **Hardness is a post-pass feather of the finished silhouette**, never a lower
   per-segment alpha. `strokeFeatherRadius` returns `size * 0.1 * (1 - hardness)`
   in document pixels; `0` takes the unchanged raw-buffer path. A soft stroke
@@ -186,6 +189,23 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - **Hardness forced format version 6.** A version-5 reader ignores the field and
   draws a soft stroke hard - a different picture - so it must refuse the file.
   Version-1 to -5 files read their strokes with `hardness = 1`.
+- **Spacing is sample density, not stamp spacing.** The builder interpolates a
+  long move with a step of `max(0.75 px, spacing * size)`, capped at 96 points
+  per input event and skipped for jumps over `MAX_INTERPOLATION_DISTANCE`.
+  Exposed as 2-200 % of diameter; default `0.12` (12 %) preserves the old
+  behaviour. It changes stored samples, not brush width.
+- **Stabilizer is an exponential follow, not a rope.** `follow = 1 - 0.75 *
+  strength`; the first point is exact and each later captured point moves that
+  fraction from the previous captured point toward the raw sample. At `0` the
+  factor is exactly `1`, so the legacy path is unchanged. `finish()` appends the
+  last raw point when it differs from the captured tail, and the engine sends
+  that settle segment to the renderer before `endStroke`; the committed stroke
+  therefore ends on the release point instead of hiding a post-process. At high
+  strength the line visibly lags while moving. Shapes ignore it.
+- **Spacing and stabilizer are captured per stroke**, like the rest of the
+  brush, so changing either never rewrites existing work, adds history or dirties
+  the document. `stabilizer` is additive within v6 because the stored samples
+  already describe the smoothed path; `spacing` was already in the format.
 - **The soft edge is a Gaussian, not an exact hardness cone.** The falloff
   extends slightly beyond the nominal diameter. `SOFT_EDGE_RADIUS_RATIO = 0.1`
   was chosen from measured coverage so even a 4 px stroke keeps a full-alpha
@@ -202,6 +222,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/fill/fillPatch.ts` — `FillPatchRecord` creation and deep cloning.
 - `src/core/gradient/gradientRecord.ts` — gradient creation, endpoint movement,
   length/degeneracy and cloning.
+- `src/core/brushes/strokeBuilder.ts` — `StrokeBuilder` sample capture,
+  spacing interpolation, `STABILIZER_MAX_LAG` exponential follow and
+  `finish()` settle point.
 - `src/core/document/strokeStore.ts` — ordered `LayerElement` list plus the
   filtered stroke view and in-place `replace` for gradient previews.
 - `src/core/commands/fillCommand.ts` — redo replays the committed patch.
@@ -215,11 +238,12 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
   version-history comment, fill/gradient validation, version-aware `readBrush`
-  (required `hardness` in v6, default `1` for v1-v5).
+  (required `hardness` in v6, default `1` for v1-v5; optional `stabilizer`
+  defaulting to `0`).
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
-- `src/features/brushes/BrushControls.tsx` — size, opacity and **Hardness**
-  sliders.
+- `src/features/brushes/BrushControls.tsx` — size, opacity, **Hardness**,
+  **Spacing** and **Stabilizer** sliders.
 - `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
@@ -322,25 +346,42 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   2; no darkening at a soft stroke's self-crossing (crossing and single coverage
   both `0`); a soft eraser removing the core completely; and live preview vs
   committed layer byte-identical (`differingChannels: 0`).
+- **Spacing/stabilizer check (verified 2026-10-20).** The brush panel shows
+  **Spacing** (default `12 %`) and **Stabilizer** (default `0 %`). Setting size
+  80, spacing 100 % and stabilizer 100 %, then dispatching a synthetic pen drag
+  at actual size, produced `history 1` and `● unsaved`; the live display had the
+  brush colour `[22,24,28]` at both the stroke middle and the release point
+  (proving the settle segment was painted), and `Ctrl+Z` returned that pixel to
+  paper `[255,255,255]` with `history 0`. Exact lag/settle math, spacing density,
+  per-stroke capture, editor-state/no-dirty behaviour, format round-trip
+  (including a missing stabilizer defaulting to 0) and save/reopen are covered
+  by Vitest; no stabilizer pixel-difference measurement was made.
+- **Brush-row layout check (verified 2026-10-20).** The five sliders plus the
+  pressure toggles no longer sit in a clipped single row: `.brush-controls`
+  wraps into a dedicated toolbar row and `.app-shell` sizes that row to its
+  content. At a 688 px viewport all controls were visible, the toolbar was about
+  151 px tall, and `document.scrollWidth` equalled the viewport (no horizontal
+  overflow). A 900 px screenshot confirmed Size/Opacity/Hardness/Spacing/
+  Stabilizer and both pressure toggles.
 
 ## 9. Next move
 
-**Brush spacing and a stabilizer** (the remaining Phase 3 brush-feel work). The
-"Next slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the
-authority; it now describes spacing/stabilizers rather than hardness.
+**Stamp-based brush engine behind the existing stroke interface** (the remaining
+Phase 3 work; texture is its first visible output). The "Next slice" section of
+[ROADMAP.md](ROADMAP.md) is kept current and is the authority.
 
 The constraints that matter:
 
-- surface the existing `spacing` brush field and add stabilizer smoothing; both
-  are read at press time and captured per stroke, like the other brush fields;
-- they change the **samples**, which are already stored, so an older reader
-  replaying those samples sees the same picture - an additive field is likely,
-  but prove it with a format test and bump only if a reader would render a
-  different drawing;
-- keep one gesture = one undo step; default values must reproduce today's
-  strokes exactly; changing a setting is not an edit;
-- a stamp-based brush engine (texture, true per-dab spacing/hardness) remains a
-  later slice behind the stroke interface. Spacing here means sample density.
+- keep `DrawingRenderer`/`StrokeRecord` as the boundary; samples stay the
+  authoritative record for undo, reopen and export;
+- keep the segment path as the default and preserve hard/soft output; accumulate
+  per-dab coverage into one buffer so overlapping dabs cannot darken;
+- make grain deterministic from document coordinates so live, rebuild, undo/redo,
+  reopen and PNG export agree at every zoom and `rasterScale`;
+- a non-default texture cannot be ignored by a v6 reader without changing the
+  picture, so expect **format version 7**; do not sneak a required field into v6;
+- keep `spacing` (sample density) distinct from stamp spacing, or document an
+  explicit migration if they are merged.
 
 Optional polish, deliberately not done yet:
 
@@ -384,8 +425,10 @@ Optional polish, deliberately not done yet:
   autosave or crash recovery; the React layer has no automated tests; `Ctrl+N` is
   not bound (use `File -> New Document...`); fills are binary/unselectable;
   gradients are two-stop, whole-layer, have no stop editor and are unselectable;
-  hardness is a Gaussian feather of the stroke silhouette (not a stamp profile),
-  with no spacing UI or stabilizer yet.
+  hardness is a Gaussian feather of the stroke silhouette (not a stamp profile);
+  spacing controls sample density rather than stamp spacing; the stabilizer is an
+  exponential follow filter with visible lag and no look-ahead/rope catch-up;
+  there is no texture brush or stamp engine yet.
 
 ## 11. First five minutes of a new session
 

@@ -21,6 +21,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   pressureOpacity: 0,
   minSizeRatio: 0.12,
   spacing: 0.12,
+  stabilizer: 0,
 };
 
 /** Clamps and validates a brush configuration. */
@@ -34,6 +35,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     pressureOpacity: clamp(brush.pressureOpacity, 0, 1),
     minSizeRatio: clamp(brush.minSizeRatio, 0.02, 1),
     spacing: clamp(brush.spacing, MIN_SPACING, MAX_SPACING),
+    stabilizer: clamp(brush.stabilizer, 0, 1),
   };
 }
 
@@ -54,7 +56,8 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.pressureSize === b.pressureSize &&
     a.pressureOpacity === b.pressureOpacity &&
     a.minSizeRatio === b.minSizeRatio &&
-    a.spacing === b.spacing
+    a.spacing === b.spacing &&
+    a.stabilizer === b.stabilizer
   );
 }
 
