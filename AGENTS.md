@@ -39,6 +39,7 @@ architecture by browsing.
 | `.agents/skills/**` | Vendored skill docs, not this project |
 | `public/` | Static icons only |
 | `src-tauri/gen/` | Generated Tauri schemas, if present |
+| `licenses/*.txt` | Verbatim third-party licence texts; regenerate the notice file, do not read them |
 | All 26 test files | Use the test map in §8 |
 | `README.md` end to end | Feature prose duplicates SESSION-BRIEF; open only for user-facing wording |
 | `docs/HANDOFF.md` and `docs/SESSION-BRIEF.md` both, end to end | Read SESSION-BRIEF first; HANDOFF only §7/§8 when you need toolchain or verification detail |
@@ -67,7 +68,8 @@ feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
-`native_environment.rs`.
+`native_environment.rs`, `scripts/generate-app-icon.mjs`,
+`scripts/generate-third-party-notices.mjs`.
 
 ## 4. Task → read only this
 
@@ -90,6 +92,7 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
+| Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `reuse-decision.md`, `provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
 
 ## 5. Symbol → file (grep the symbol)
 
@@ -139,6 +142,9 @@ commands, tool definitions, `editorStore.ts`, Rust `lib.rs`/`main.rs`/
 | `docs/HANDOFF.md` | §7 toolchain, §8 verification recipes, §9 next move; skip the rest |
 | `docs/ARCHITECTURE.md` | `## Rendering pipeline` (141), `### Why a stroke buffer` (186), `### Eraser strokes` (223), `### Shape tools` (309), `### Bucket` (360), `### Gradients` (424), `### Selection` (465), `## Undo / redo` (606), `## Testing` (749) |
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
+| `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
+| `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
+| `THIRD_PARTY_NOTICES.md` | The notice file. Generated - read it, do not edit it; edit `scripts/generate-third-party-notices.mjs` or `licenses/dependency-inventory.json` |
 | `README.md` | Only for user-facing wording or the limitations list |
 
 ## 7. Search recipes
