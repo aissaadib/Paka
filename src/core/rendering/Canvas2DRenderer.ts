@@ -141,6 +141,19 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * reused for every stroke; the pixels in it are never authoritative.
    */
   private featherBuffer: HTMLCanvasElement | null = null;
+  /**
+   * Scratch canvas that groups the active layer with its in-progress stroke.
+   *
+   * Layer opacity and blend mode apply to the *finished* layer, so a preview
+   * cannot be painted element-by-element on top of the layer: a half-opacity
+   * layer would apply its alpha twice, and `multiply`/`screen` would blend the
+   * preview with the backdrop instead of with the layer beneath it. When either
+   * is non-default the layer surface and the stroke buffer are combined here
+   * first, exactly as a commit would combine them, and the group is then drawn
+   * once with the layer's opacity and composite operation. Committed pixels are
+   * only ever read, never written, and the canvas is reused across frames.
+   */
+  private previewSurface: HTMLCanvasElement | null = null;
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
   private rasterScale: number;
@@ -381,17 +394,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       viewport.offsetY * devicePixelRatio,
     );
 
-    this.paintDocument(ctx);
-
-    if (this.activeStroke && this.activeStroke.erase !== true) {
-      // The buffer holds full coverage; the stroke's alpha is applied here, once
-      // (and, for a soft brush, its edge is feathered once - never per segment).
-      // An erasing stroke is not drawn at all: it was already subtracted from the
-      // layer surface, which `paintDocument` just composited.
-      ctx.globalAlpha = strokeOpacity(this.activeStroke.brush, this.activeStroke.pressures);
-      this.paintStrokeCoverage(ctx, this.activeStroke);
-      ctx.globalAlpha = 1;
-    }
+    this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
 
     this.paintSelection(ctx, scale);
 
@@ -570,13 +573,21 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.dropEraseBase();
     this.probeCanvas = null;
     this.featherBuffer = null;
+    this.previewSurface = null;
   }
 
   /**
    * Paper plus every visible layer with `opacity > 0`, bottom-first. The caller
    * owns the transform, so display rendering and export share this exactly.
+   *
+   * `preview` is the in-progress (non-erasing) stroke. It is drawn in its own
+   * layer's slot - after that layer's committed content and before any layer
+   * above it - so releasing a stroke never changes its stacking. Erasing
+   * strokes are not passed here: they are already subtracted from the layer
+   * surface, which is what this loop composites. Export passes no preview, so
+   * an in-flight stroke never leaks into a PNG.
    */
-  private paintDocument(ctx: CanvasRenderingContext2D): void {
+  private paintDocument(ctx: CanvasRenderingContext2D, preview: StrokeRecord | null = null): void {
     const doc = this.doc;
     if (!doc) {
       return;
@@ -590,13 +601,96 @@ export class Canvas2DRenderer implements DrawingRenderer {
         continue;
       }
       const surface = this.ensureRasterized(layer.id);
+      const previewHere = preview !== null && preview.layerId === layer.id;
+
+      if (previewHere && (layer.opacity < 1 || layer.blendMode !== "normal")) {
+        // Group first, then apply the layer's opacity and blend once: the same
+        // order a commit takes. A hidden or zero-opacity layer was skipped
+        // above, so its preview is hidden with it.
+        const group = this.buildPreviewGroup(surface, preview);
+        if (group) {
+          ctx.globalAlpha = layer.opacity;
+          ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+          ctx.drawImage(group, 0, 0, doc.width, doc.height);
+          continue;
+        }
+      }
+
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
       ctx.drawImage(surface.canvas, 0, 0, doc.width, doc.height);
+
+      if (previewHere) {
+        // An opaque `normal` layer needs no scratch: source-over is associative,
+        // so painting the preview straight after its layer is identical to
+        // grouping the two first. This is the common case and costs no canvas.
+        // The buffer holds full coverage; the stroke's alpha is applied here,
+        // once (and, for a soft brush, its edge is feathered once - never per
+        // segment).
+        ctx.globalAlpha = strokeOpacity(preview.brush, preview.pressures);
+        ctx.globalCompositeOperation = "source-over";
+        this.paintStrokeCoverage(ctx, preview);
+      }
     }
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Draws a layer surface plus the in-progress stroke into one scratch canvas.
+   *
+   * Read-only with respect to the layer: the group is assembled in `preview`'s
+   * own scratch, so no committed pixel or document state changes before the
+   * release. Drawing the layer at document scale keeps `rasterScale` and the
+   * feathered/textured stroke path consistent with `compositeStrokeBuffer`.
+   */
+  private buildPreviewGroup(
+    surface: LayerSurface,
+    stroke: StrokeRecord,
+  ): HTMLCanvasElement | null {
+    const doc = this.doc;
+    if (!doc) {
+      return null;
+    }
+    const canvas = this.ensurePreviewSurface();
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scale = this.rasterScale;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.drawImage(surface.canvas, 0, 0, doc.width, doc.height);
+    ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
+    this.paintStrokeCoverage(ctx, stroke);
+    ctx.globalAlpha = 1;
+    ctx.filter = "none";
+    return canvas;
+  }
+
+  /** The group scratch, sized like a layer surface; allocated on first use. */
+  private ensurePreviewSurface(): HTMLCanvasElement {
+    const existing = this.previewSurface;
+    if (existing) {
+      const doc = this.doc;
+      if (doc) {
+        resizeCanvas(existing, doc.width * this.rasterScale, doc.height * this.rasterScale);
+      }
+      return existing;
+    }
+    const canvas = document.createElement("canvas");
+    const doc = this.doc;
+    canvas.width = Math.max(1, Math.round((doc?.width ?? 1) * this.rasterScale));
+    canvas.height = Math.max(1, Math.round((doc?.height ?? 1) * this.rasterScale));
+    this.previewSurface = canvas;
+    return canvas;
   }
 
   /** The 1x1 colour-probe canvas, allocated on first use and reused after. */

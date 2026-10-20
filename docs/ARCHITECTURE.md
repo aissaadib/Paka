@@ -164,6 +164,12 @@ ones:
    `composeDocumentImage()` for PNG export and by `readCompositeImage()` for a
    bucket scan. It is not retained, so it never grows the renderer's steady
    memory footprint.
+8. **A preview group scratch** - a layer-sized canvas used only while a layer
+   has a non-default opacity or blend mode. It combines that layer's surface
+   with the in-progress stroke so the preview composites exactly like the
+   commit will (see
+   [Live preview compositing](#live-preview-compositing)). It is allocated
+   lazily, reused across frames and dropped when the renderer is destroyed.
 
 A frame (`render()`) does, in order:
 
@@ -171,12 +177,15 @@ A frame (`render()`) does, in order:
 2. set the document transform (`scale = zoom * dpr`, `translate = offset * dpr`),
 3. fill the paper with the document background,
 4. composite each **visible** layer with `opacity > 0`, bottom-first, applying
-   the layer's blend mode and alpha,
-5. composite the in-progress stroke buffer on top, at the stroke's own opacity -
-   unless the stroke erases, in which case the layer composited in step 4
-   *already contains* the erasure, so drawing the buffer would paint the erased
-   coverage back. A hard stroke draws the raw buffer; a soft stroke draws its
-   feathered copy through the same path that commits it to the layer,
+   the layer's blend mode and alpha. The in-progress stroke, when it belongs to
+   that layer, is composited in the **same slot** - after the layer's committed
+   content and before any layer above it - so the preview keeps the stacking the
+   release will produce. A hard stroke draws the raw buffer; a soft stroke
+   draws its feathered copy through the same path that commits it to the layer
+   (see [Live preview compositing](#live-preview-compositing)),
+5. an erasing stroke is not drawn at all: the erasure was already subtracted
+   from the layer surface that step 4 composites, so drawing the buffer would
+   paint the erased coverage back,
 6. stroke a hairline document border whose width is `1 / scale`, so it is
    exactly one device pixel at any zoom.
 
@@ -208,6 +217,38 @@ document-size PNG export and `readCompositeImage` (the bucket's source), and
 `readCompositePixel` (the colour picker) follows the same order, so all four
 agree. There is no per-stroke blend mode, group/clipping blend context or alpha
 inheritance yet.
+
+### Live preview compositing
+
+An in-progress stroke is **part of its layer**, not a decoration drawn on top of
+the picture. The renderer therefore hands the live stroke to the same
+`paintDocument` loop that composites the committed layers, and the stroke is
+drawn in its own layer's slot: after that layer's committed surface and before
+any layer above it. Releasing the stroke does not change the stacking, and the
+picture the user watched is the picture the layer ends up holding. A layer that
+is hidden (`visible === false`) or fully transparent (`opacity === 0`) is
+skipped entirely, which hides its preview with it.
+
+A layer's opacity and blend mode apply to the **finished** layer, so a preview
+cannot simply be painted over the layer - a half-opacity layer would apply its
+alpha twice, and `multiply` / `screen` would blend the stroke with the
+backdrop instead of with the layer beneath it. Two paths cover that:
+
+- **Fast path** - an opaque `normal` layer: the surface is drawn, then the
+  stroke buffer is drawn with `source-over` at the stroke's own opacity.
+  `source-over` is associative, so the result is identical to grouping the two
+  first and no extra canvas is needed. This is the common case.
+- **Grouped path** - a layer with `opacity < 1` or a `multiply` / `screen`
+  blend mode: the layer surface and the stroke buffer are combined in a reused
+  layer-sized scratch canvas, exactly as a commit combines them, and the group
+  is drawn once with the layer's alpha and composite operation.
+
+The group scratch only ever *reads* the committed surface, so a preview never
+mutates layer pixels or the document. `composeDocumentImage` (PNG export) and
+`readCompositeImage` (bucket sampling) pass no preview, so an in-flight stroke
+never leaks into an export or into a fill boundary. The eraser is unchanged:
+it subtracts from its own layer surface, so it has no separate preview to
+draw.
 
 ### Why a stroke buffer
 

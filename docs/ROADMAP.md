@@ -39,6 +39,10 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       its buffer composites.
 - [x] Live rendering and re-rasterization agree pixel for pixel (the starter dab
       is discarded when a stroke grows past its first sample).
+- [x] The live preview composites **inside its own layer**: it honours the
+      active layer's stacking, visibility, opacity and blend mode, so a stroke
+      is never previewed above a layer it does not belong to, and the release
+      produces the same picture the user watched.
 - [x] Transactional document/layer mutations: every layer edit is a reversible
       command; deleting a layer no longer discards its strokes irrecoverably.
 - [x] Reject invalid or unsupported project files before touching the live

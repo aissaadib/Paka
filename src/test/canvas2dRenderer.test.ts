@@ -16,6 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { addLayer, createDocument, moveLayer, updateLayer } from "../core/document/document";
 import type {
+  DrawingDocument,
   FillPatchRecord,
   GradientRecord,
   LayerElement,
@@ -557,16 +558,18 @@ describe("Canvas2DRenderer shape preview", () => {
     expect(afterClear.filter((name) => name === "stroke")).toHaveLength(4);
   });
 
-  it("shows the replaced outline above the layers at the stroke's opacity", () => {
+  it("shows the replaced outline in its own layer, at the stroke's opacity", () => {
     const strokes = new Map<LayerId, StrokeRecord[]>();
     const harness = createHarness({ strokes });
-    const doc = createDocument({ width: 100, height: 80 });
+    let doc = createDocument({ width: 100, height: 80 });
+    doc = addLayer(doc);
+    const bottomId = doc.layers[0].id;
     const brush: BrushSettings = { ...BRUSH, opacity: 0.5 };
 
     harness.renderer.setDocument(doc);
     harness.renderer.setDisplaySize(100, 80, 1);
 
-    const stroke = createStroke(doc.layers[0].id, brush);
+    const stroke = createStroke(bottomId, brush);
     harness.renderer.beginStroke(stroke);
     harness.renderer.replaceStroke(stroke);
     harness.renderer.render();
@@ -575,6 +578,13 @@ describe("Canvas2DRenderer shape preview", () => {
       (call) => call.args[0] === harness.strokeBuffer,
     );
     expect(inProgress?.alpha).toBe(0.5);
+
+    // The preview belongs to the bottom layer, so it is painted after that
+    // layer's surface and before the layer above it - not after every layer.
+    const sources = harness.display.drawnSources;
+    const surfaces = harness.layerSurfaces();
+    expect(sources.indexOf(harness.strokeBuffer)).toBeGreaterThan(sources.indexOf(surfaces[0]));
+    expect(sources.indexOf(harness.strokeBuffer)).toBeLessThan(sources.indexOf(surfaces[1]));
   });
 });
 
@@ -1426,5 +1436,720 @@ describe("Canvas2DRenderer selection overlay", () => {
     const composed = harness.composeDocument();
     expect(composed.named("stroke")).toHaveLength(0);
     expect(composed.named("strokeRect")).toHaveLength(0);
+  });
+});
+
+/**
+ * A tiny software Canvas 2D for the preview-compositing regression tests.
+ *
+ * The recording canvas proves *which* canvas was painted, in what order and
+ * with what state, but it cannot answer "what colour is on screen". These
+ * tests need the latter, so this stand-in keeps real straight-alpha pixels and
+ * implements the slice of the spec the renderer uses to composite: `fillRect`,
+ * `clearRect`, 1:1 `drawImage`, transforms, `save`/`restore`, and the
+ * `source-over`, `destination-out`, `multiply` and `screen` operations.
+ *
+ * Stroke rasterization (paths, arcs) is deliberately a no-op: coverage is
+ * seeded straight into the stroke buffer, because these tests are about where
+ * that coverage is composited, not how it was rasterized.
+ */
+
+type PixelColour = readonly [number, number, number, number];
+
+const PIXEL_BLACK: PixelColour = [0, 0, 0, 255];
+const PIXEL_RED: PixelColour = [255, 0, 0, 255];
+const PIXEL_GREEN: PixelColour = [0, 255, 0, 255];
+const PIXEL_YELLOW: PixelColour = [255, 255, 0, 255];
+
+function parsePixelColour(value: unknown): PixelColour | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const text = value.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(text);
+  if (hex) {
+    const digits =
+      hex[1].length === 3
+        ? hex[1]
+            .split("")
+            .map((digit) => digit + digit)
+            .join("")
+        : hex[1];
+    return [
+      parseInt(digits.slice(0, 2), 16) / 255,
+      parseInt(digits.slice(2, 4), 16) / 255,
+      parseInt(digits.slice(4, 6), 16) / 255,
+      1,
+    ];
+  }
+  const rgb = /^rgba?\(([^)]+)\)$/i.exec(text);
+  if (rgb) {
+    const parts = rgb[1].split(",").map((part) => Number.parseFloat(part));
+    return [(parts[0] ?? 0) / 255, (parts[1] ?? 0) / 255, (parts[2] ?? 0) / 255, parts[3] ?? 1];
+  }
+  return null;
+}
+
+class PixelCanvas {
+  private _width = 0;
+  private _height = 0;
+  /** Straight-alpha RGBA, one float per channel in `[0, 1]`. */
+  pixels = new Float32Array(0);
+  readonly ctx: CanvasRenderingContext2D;
+
+  constructor() {
+    const self = this;
+    const state = {
+      transform: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number],
+      alpha: 1,
+      composite: "source-over",
+      fillStyle: "#000000" as unknown,
+      filter: "none",
+      lineDash: [] as number[],
+    };
+    const saved: (typeof state)[] = [];
+
+    const compositePixel = (
+      index: number,
+      source: ArrayLike<number>,
+      sourceIndex: number,
+      alpha: number,
+    ): void => {
+      const target = this.pixels;
+      const sourceAlpha = source[sourceIndex + 3] * alpha;
+      const backdropAlpha = target[index + 3];
+
+      if (state.composite === "destination-out") {
+        target[index + 3] = backdropAlpha * (1 - sourceAlpha);
+        return;
+      }
+      if (sourceAlpha <= 0) {
+        return;
+      }
+
+      const sourceR = source[sourceIndex];
+      const sourceG = source[sourceIndex + 1];
+      const sourceB = source[sourceIndex + 2];
+      const backdropR = target[index];
+      const backdropG = target[index + 1];
+      const backdropB = target[index + 2];
+      const outAlpha = sourceAlpha + backdropAlpha * (1 - sourceAlpha);
+      if (outAlpha <= 0) {
+        target[index] = 0;
+        target[index + 1] = 0;
+        target[index + 2] = 0;
+        target[index + 3] = 0;
+        return;
+      }
+
+      let outR: number;
+      let outG: number;
+      let outB: number;
+      if (state.composite === "multiply" || state.composite === "screen") {
+        const blend = (backdrop: number, sourceColour: number): number =>
+          state.composite === "multiply"
+            ? backdrop * sourceColour
+            : backdrop + sourceColour - backdrop * sourceColour;
+        const mix = (backdrop: number, sourceColour: number): number =>
+          (sourceAlpha * (1 - backdropAlpha) * sourceColour +
+            sourceAlpha * backdropAlpha * blend(backdrop, sourceColour) +
+            (1 - sourceAlpha) * backdropAlpha * backdrop) /
+          outAlpha;
+        outR = mix(backdropR, sourceR);
+        outG = mix(backdropG, sourceG);
+        outB = mix(backdropB, sourceB);
+      } else {
+        outR = (sourceR * sourceAlpha + backdropR * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
+        outG = (sourceG * sourceAlpha + backdropG * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
+        outB = (sourceB * sourceAlpha + backdropB * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
+      }
+
+      target[index] = outR;
+      target[index + 1] = outG;
+      target[index + 2] = outB;
+      target[index + 3] = outAlpha;
+    };
+
+    /** Device-pixel bounds of a drawn rectangle, clipped to the canvas. */
+    const bounds = (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+    ): { left: number; top: number; right: number; bottom: number } => {
+      const [a, , , d, e, f] = state.transform;
+      return {
+        left: Math.max(0, Math.floor(a * x + e)),
+        top: Math.max(0, Math.floor(d * y + f)),
+        right: Math.min(this._width, Math.ceil(a * (x + width) + e)),
+        bottom: Math.min(this._height, Math.ceil(d * (y + height) + f)),
+      };
+    };
+
+    const ctx = {
+      canvas: this,
+      get globalAlpha(): number {
+        return state.alpha;
+      },
+      set globalAlpha(value: number) {
+        state.alpha = value;
+      },
+      get globalCompositeOperation(): string {
+        return state.composite;
+      },
+      set globalCompositeOperation(value: string) {
+        state.composite = value;
+      },
+      get fillStyle(): unknown {
+        return state.fillStyle;
+      },
+      set fillStyle(value: unknown) {
+        state.fillStyle = value;
+      },
+      get filter(): string {
+        return state.filter;
+      },
+      set filter(value: string) {
+        state.filter = value;
+      },
+      setTransform(a = 1, b = 0, c = 0, d = 1, e = 0, f = 0): void {
+        state.transform = [a, b, c, d, e, f];
+      },
+      save(): void {
+        saved.push({
+          transform: [...state.transform] as [number, number, number, number, number, number],
+          alpha: state.alpha,
+          composite: state.composite,
+          fillStyle: state.fillStyle,
+          filter: state.filter,
+          lineDash: [...state.lineDash],
+        });
+      },
+      restore(): void {
+        const previous = saved.pop();
+        if (previous) {
+          state.transform = previous.transform;
+          state.alpha = previous.alpha;
+          state.composite = previous.composite;
+          state.fillStyle = previous.fillStyle;
+          state.filter = previous.filter;
+          state.lineDash = previous.lineDash;
+        }
+      },
+      clearRect(x: number, y: number, width: number, height: number): void {
+        const area = bounds(x, y, width, height);
+        for (let row = area.top; row < area.bottom; row += 1) {
+          for (let column = area.left; column < area.right; column += 1) {
+            const index = (row * self._width + column) * 4;
+            self.pixels[index] = 0;
+            self.pixels[index + 1] = 0;
+            self.pixels[index + 2] = 0;
+            self.pixels[index + 3] = 0;
+          }
+        }
+      },
+      fillRect(x: number, y: number, width: number, height: number): void {
+        const colour = parsePixelColour(state.fillStyle);
+        if (!colour) {
+          return;
+        }
+        const source = [colour[0], colour[1], colour[2], colour[3]];
+        const area = bounds(x, y, width, height);
+        for (let row = area.top; row < area.bottom; row += 1) {
+          for (let column = area.left; column < area.right; column += 1) {
+            compositePixel(
+              (row * self._width + column) * 4,
+              source,
+              0,
+              state.alpha * colour[3],
+            );
+          }
+        }
+      },
+      drawImage(source: unknown, ...args: number[]): void {
+        if (!(source instanceof PixelCanvas)) {
+          return;
+        }
+        const image = source;
+        let sourceX = 0;
+        let sourceY = 0;
+        let sourceWidth = image.width;
+        let sourceHeight = image.height;
+        let destX: number;
+        let destY: number;
+        let destWidth: number;
+        let destHeight: number;
+        if (args.length === 2) {
+          [destX, destY] = args;
+          destWidth = sourceWidth;
+          destHeight = sourceHeight;
+        } else if (args.length === 4) {
+          [destX, destY, destWidth, destHeight] = args;
+        } else if (args.length === 8) {
+          [sourceX, sourceY, sourceWidth, sourceHeight, destX, destY, destWidth, destHeight] = args;
+        } else {
+          return;
+        }
+        if (sourceWidth <= 0 || sourceHeight <= 0 || destWidth <= 0 || destHeight <= 0) {
+          return;
+        }
+
+        const [a, , , d, e, f] = state.transform;
+        const area = bounds(destX, destY, destWidth, destHeight);
+        for (let row = area.top; row < area.bottom; row += 1) {
+          const v = (row + 0.5 - (d * destY + f)) / (d * destHeight);
+          if (v < 0 || v >= 1) {
+            continue;
+          }
+          const imageY = Math.min(
+            image.height - 1,
+            Math.max(0, Math.floor(sourceY + v * sourceHeight)),
+          );
+          for (let column = area.left; column < area.right; column += 1) {
+            const u = (column + 0.5 - (a * destX + e)) / (a * destWidth);
+            if (u < 0 || u >= 1) {
+              continue;
+            }
+            const imageX = Math.min(
+              image.width - 1,
+              Math.max(0, Math.floor(sourceX + u * sourceWidth)),
+            );
+            compositePixel(
+              (row * self._width + column) * 4,
+              image.pixels,
+              (imageY * image.width + imageX) * 4,
+              state.alpha,
+            );
+          }
+        }
+      },
+      // Path drawing is not part of these tests: coverage is seeded directly.
+      beginPath(): void {},
+      moveTo(): void {},
+      lineTo(): void {},
+      arc(): void {},
+      closePath(): void {},
+      fill(): void {},
+      stroke(): void {},
+      strokeRect(): void {},
+      setLineDash(segments: number[] = []): void {
+        state.lineDash = [...segments];
+      },
+      createImageData(width: number, height: number): ImageData {
+        return {
+          data: new Uint8ClampedArray(width * height * 4),
+          width,
+          height,
+          colorSpace: "srgb",
+        } as unknown as ImageData;
+      },
+      putImageData(image: ImageData, x: number, y: number): void {
+        for (let row = 0; row < image.height; row += 1) {
+          for (let column = 0; column < image.width; column += 1) {
+            const targetX = x + column;
+            const targetY = y + row;
+            if (
+              targetX < 0 ||
+              targetY < 0 ||
+              targetX >= self._width ||
+              targetY >= self._height
+            ) {
+              continue;
+            }
+            const sourceIndex = (row * image.width + column) * 4;
+            const targetIndex = (targetY * self._width + targetX) * 4;
+            self.pixels[targetIndex] = image.data[sourceIndex] / 255;
+            self.pixels[targetIndex + 1] = image.data[sourceIndex + 1] / 255;
+            self.pixels[targetIndex + 2] = image.data[sourceIndex + 2] / 255;
+            self.pixels[targetIndex + 3] = image.data[sourceIndex + 3] / 255;
+          }
+        }
+      },
+      getImageData(x: number, y: number, width: number, height: number): ImageData {
+        const data = new Uint8ClampedArray(width * height * 4);
+        for (let row = 0; row < height; row += 1) {
+          for (let column = 0; column < width; column += 1) {
+            const sourceX = x + column;
+            const sourceY = y + row;
+            if (
+              sourceX < 0 ||
+              sourceY < 0 ||
+              sourceX >= self._width ||
+              sourceY >= self._height
+            ) {
+              continue;
+            }
+            const sourceIndex = (sourceY * self._width + sourceX) * 4;
+            const targetIndex = (row * width + column) * 4;
+            for (let channel = 0; channel < 4; channel += 1) {
+              data[targetIndex + channel] = Math.round(
+                Math.min(1, Math.max(0, self.pixels[sourceIndex + channel])) * 255,
+              );
+            }
+          }
+        }
+        return { data, width, height, colorSpace: "srgb" } as unknown as ImageData;
+      },
+      // State the renderer sets but this fake does not consume.
+      strokeStyle: "#000000",
+      lineWidth: 1,
+      lineCap: "butt",
+      lineJoin: "miter",
+      createLinearGradient: () => ({ addColorStop(): void {} }),
+      createRadialGradient: () => ({ addColorStop(): void {} }),
+      createPattern: () => null,
+    };
+
+    this.ctx = ctx as unknown as CanvasRenderingContext2D;
+  }
+
+  get width(): number {
+    return this._width;
+  }
+
+  set width(value: number) {
+    this._width = Math.max(0, Math.round(value));
+    this.pixels = new Float32Array(this._width * this._height * 4);
+  }
+
+  get height(): number {
+    return this._height;
+  }
+
+  set height(value: number) {
+    this._height = Math.max(0, Math.round(value));
+    this.pixels = new Float32Array(this._width * this._height * 4);
+  }
+
+  getContext(): CanvasRenderingContext2D {
+    return this.ctx;
+  }
+
+  asElement(): HTMLCanvasElement {
+    return this as unknown as HTMLCanvasElement;
+  }
+}
+
+function paintPixels(
+  canvas: PixelCanvas,
+  colour: PixelColour,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  for (let row = y; row < y + height; row += 1) {
+    for (let column = x; column < x + width; column += 1) {
+      if (column < 0 || row < 0 || column >= canvas.width || row >= canvas.height) {
+        continue;
+      }
+      const index = (row * canvas.width + column) * 4;
+      canvas.pixels[index] = colour[0] / 255;
+      canvas.pixels[index + 1] = colour[1] / 255;
+      canvas.pixels[index + 2] = colour[2] / 255;
+      canvas.pixels[index + 3] = colour[3] / 255;
+    }
+  }
+}
+
+function readPixel(canvas: PixelCanvas, x: number, y: number): [number, number, number, number] {
+  const index = (y * canvas.width + x) * 4;
+  const pixel: [number, number, number, number] = [0, 0, 0, 0];
+  for (let channel = 0; channel < 4; channel += 1) {
+    pixel[channel] = Math.round(canvas.pixels[index + channel] * 255);
+  }
+  return pixel;
+}
+
+function expectPixel(
+  canvas: PixelCanvas,
+  x: number,
+  y: number,
+  expected: readonly [number, number, number],
+  tolerance = 2,
+): void {
+  const [r, g, b] = readPixel(canvas, x, y);
+  const message = `pixel (${x}, ${y}) is rgb(${r}, ${g}, ${b}), expected rgb(${expected.join(", ")})`;
+  expect(Math.abs(r - expected[0]), message).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(g - expected[1]), message).toBeLessThanOrEqual(tolerance);
+  expect(Math.abs(b - expected[2]), message).toBeLessThanOrEqual(tolerance);
+}
+
+interface PixelHarness {
+  readonly renderer: Canvas2DRenderer;
+  readonly display: PixelCanvas;
+  readonly doc: DrawingDocument;
+  /** The renderer's in-progress stroke buffer (first canvas it allocates). */
+  readonly strokeBuffer: PixelCanvas;
+  /** Layer surfaces in painting order, bottom-first. */
+  readonly surfaces: PixelCanvas[];
+}
+
+/**
+ * Runs `body` with a pixel-accurate document/window, then restores the global
+ * `document` so the recording-canvas tests are unaffected.
+ *
+ * The first render allocates and rasterizes the (empty) layer surfaces; tests
+ * then seed committed pixels directly into those surfaces and into the stroke
+ * buffer, which is what keeps these tests about compositing rather than about
+ * the stroke rasterizer.
+ */
+function withPixels(
+  build: (doc: DrawingDocument) => DrawingDocument,
+  body: (harness: PixelHarness) => void,
+): void {
+  const saved = (globalThis as { document?: unknown }).document;
+  const allocated: PixelCanvas[] = [];
+  (globalThis as { document?: unknown }).document = {
+    createElement: () => {
+      const canvas = new PixelCanvas();
+      allocated.push(canvas);
+      return canvas;
+    },
+  };
+
+  try {
+    const display = new PixelCanvas();
+    const elements = new Map<LayerId, LayerElement[]>();
+    const strokeSource: StrokeSource = {
+      listStrokes: (layerId) => (elements.get(layerId) ?? []).filter(isStroke),
+      listElements: (layerId) => elements.get(layerId) ?? [],
+    };
+    const renderer = new Canvas2DRenderer({
+      canvas: display.asElement(),
+      strokeSource,
+      rasterScale: 1,
+      scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
+    });
+    const doc = build(createDocument({ width: 32, height: 32, background: "#ffffff" }));
+    renderer.setDocument(doc);
+    renderer.setDisplaySize(32, 32, 1);
+    renderer.render();
+
+    body({
+      renderer,
+      display,
+      doc,
+      strokeBuffer: allocated[0],
+      surfaces: allocated.slice(1),
+    });
+  } finally {
+    (globalThis as { document?: unknown }).document = saved;
+  }
+}
+
+describe("Canvas2DRenderer live preview compositing (real pixels)", () => {
+  it("keeps a brush preview beneath an opaque layer above it", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const [bottom, top] = harness.surfaces;
+        paintPixels(top, PIXEL_RED, 0, 0, 32, 32);
+
+        const stroke = createStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_BLACK, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // The layer above is opaque: the preview must be behind it, not on top
+        // of the whole document (the old behaviour painted black here).
+        expectPixel(harness.display, 16, 16, [255, 0, 0]);
+        // Nothing was committed while the stroke is in flight.
+        expect(readPixel(bottom, 16, 16)).toEqual([0, 0, 0, 0]);
+        expect(readPixel(top, 16, 16)).toEqual([255, 0, 0, 255]);
+      },
+    );
+  });
+
+  it("keeps a shape preview beneath a translucent layer above it", () => {
+    withPixels(
+      (doc) => {
+        const withTop = addLayer(doc);
+        return updateLayer(withTop, withTop.layers[1].id, { opacity: 0.5 });
+      },
+      (harness) => {
+        const [bottom, top] = harness.surfaces;
+        paintPixels(top, PIXEL_RED, 0, 0, 32, 32);
+
+        const stroke = createStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_GREEN, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // Red at 50 % over the green preview: the preview is below the upper
+        // layer. Painting the preview last would show pure green here.
+        expectPixel(harness.display, 16, 16, [128, 128, 0]);
+        expect(readPixel(bottom, 16, 16)).toEqual([0, 0, 0, 0]);
+      },
+    );
+  });
+
+  it("applies active-layer opacity to the preview once, not per element", () => {
+    withPixels(
+      (doc) => updateLayer(doc, doc.layers[0].id, { opacity: 0.5 }),
+      (harness) => {
+        const [surface] = harness.surfaces;
+        paintPixels(surface, PIXEL_RED, 0, 0, 32, 32);
+
+        const stroke = createStroke(harness.doc.layers[0].id, { ...BRUSH, opacity: 0.5 });
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_YELLOW, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // Group first: yellow at 50 % over red = (255, 128, 0); then the whole
+        // layer at 50 % over white paper = (255, 191, 128). Applying the layer
+        // alpha to each element separately would leave the blue channel at 64.
+        expectPixel(harness.display, 16, 16, [255, 191, 128]);
+      },
+    );
+  });
+
+  it("multiplies the preview with the backdrop instead of painting over it", () => {
+    withPixels(
+      (doc) => {
+        const bottom = updateLayer(doc, doc.layers[0].id, { blendMode: "multiply" });
+        return { ...bottom, background: "#3366cc" };
+      },
+      (harness) => {
+        const stroke = createStroke(harness.doc.layers[0].id, { ...BRUSH, opacity: 0.5 });
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_YELLOW, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // Yellow at 50 % under `multiply` over #3366cc. Painted with
+        // `source-over` on top of the paper it would be (153, 178, 102).
+        expectPixel(harness.display, 16, 16, [51, 102, 102]);
+      },
+    );
+  });
+
+  it("screens the preview with the backdrop", () => {
+    withPixels(
+      (doc) => {
+        const bottom = updateLayer(doc, doc.layers[0].id, { blendMode: "screen" });
+        return { ...bottom, background: "#3366cc" };
+      },
+      (harness) => {
+        const stroke = createStroke(harness.doc.layers[0].id, { ...BRUSH, opacity: 0.5 });
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_YELLOW, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // Painting over the paper would leave the blue channel at 102.
+        expectPixel(harness.display, 16, 16, [153, 179, 204]);
+      },
+    );
+  });
+
+  it("hides the preview with a hidden active layer", () => {
+    withPixels(
+      (doc) => updateLayer(doc, doc.layers[0].id, { visible: false }),
+      (harness) => {
+        const stroke = createStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_BLACK, 0, 0, 32, 32);
+        harness.renderer.render();
+
+        expectPixel(harness.display, 16, 16, [255, 255, 255]);
+      },
+    );
+  });
+
+  it("hides the preview with a zero-opacity active layer", () => {
+    withPixels(
+      (doc) => updateLayer(doc, doc.layers[0].id, { opacity: 0 }),
+      (harness) => {
+        const stroke = createStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_BLACK, 0, 0, 32, 32);
+        harness.renderer.render();
+
+        expectPixel(harness.display, 16, 16, [255, 255, 255]);
+      },
+    );
+  });
+
+  it("shows the same pixels before release as after, and commits nothing early", () => {
+    withPixels(
+      (doc) => {
+        let next = updateLayer(doc, doc.layers[0].id, { opacity: 0.5 });
+        next = updateLayer(next, next.layers[0].id, { blendMode: "multiply" });
+        return next;
+      },
+      (harness) => {
+        const [surface] = harness.surfaces;
+        paintPixels(surface, PIXEL_RED, 0, 0, 32, 32);
+
+        const stroke = createStroke(harness.doc.layers[0].id, { ...BRUSH, opacity: 0.4 });
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_YELLOW, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        const preview = readPixel(harness.display, 16, 16);
+        // The preview was assembled in the renderer's scratch: the layer still
+        // holds exactly the pixels it had before the gesture started.
+        expect(readPixel(surface, 16, 16)).toEqual([255, 0, 0, 255]);
+
+        harness.renderer.endStroke(stroke);
+        harness.renderer.render();
+        expect(readPixel(harness.display, 16, 16)).toEqual(preview);
+      },
+    );
+  });
+});
+
+describe("Canvas2DRenderer preview compositing calls", () => {
+  it("groups the preview before applying a non-default layer opacity and blend", () => {
+    const harness = createHarness();
+    let doc = createDocument({ width: 20, height: 20 });
+    const layerId = doc.layers[0].id;
+    doc = updateLayer(doc, layerId, { opacity: 0.5, blendMode: "multiply" });
+
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(20, 20, 1);
+    harness.renderer.render();
+    const [surface] = harness.layerSurfaces();
+
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    const group = harness.display.drawnSources.find((source) => source !== surface);
+    expect(group).toBeDefined();
+    expect(group).not.toBe(harness.strokeBuffer);
+
+    const draw = harness.display.drawImages.find((call) => call.args[0] === group);
+    expect(draw?.alpha).toBe(0.5);
+    expect(draw?.composite).toBe("multiply");
+
+    // The group receives the committed layer first, then the live coverage.
+    const scratch = group as RecordingCanvas;
+    expect(scratch.drawImages).toHaveLength(2);
+    expect(scratch.drawImages[0].args[0]).toBe(surface);
+    expect(scratch.drawImages[1].args[0]).toBe(harness.strokeBuffer);
+
+    // Only read: the layer surface never received the live buffer.
+    expect(surface.drawImages).toEqual([]);
+  });
+
+  it("skips the preview for a hidden layer instead of drawing it on top", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 20, height: 20 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(updateLayer(doc, layerId, { visible: false }));
+    harness.renderer.setDisplaySize(20, 20, 1);
+    harness.renderer.render();
+    const [surface] = harness.layerSurfaces();
+
+    const stroke = createStroke(layerId);
+    harness.renderer.beginStroke(stroke);
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    expect(harness.display.drawnSources).not.toContain(harness.strokeBuffer);
+    expect(harness.display.drawnSources).not.toContain(surface);
+    expect(harness.display.drawImages).toHaveLength(0);
   });
 });
