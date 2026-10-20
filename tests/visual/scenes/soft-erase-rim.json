@@ -1,0 +1,46 @@
+{
+    "id":  "soft-erase-rim",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#16181c",
+                                                          "size":  24
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       60,
+                                                       60
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  0.4,
+                                                          "color":  "#16181c",
+                                                          "size":  24
+                                                      },
+                                            "xs":  [
+                                                       60,
+                                                       62
+                                                   ],
+                                            "ys":  [
+                                                       60,
+                                                       60
+                                                   ],
+                                            "erase":  true
+                                        }
+                                    ]
+                   }
+               ]
+}

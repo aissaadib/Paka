@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Paka visual harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #808080;
+      }
+      /*
+        The golden canvas is the subject of the screenshot, so it must carry
+        no border, no shadow, no margin and no surrounding chrome, and its
+        CSS size must match its pixel size one to one.
+      */
+      #golden {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="golden"></canvas>
+    <script type="module">
+      import { mount } from "/tests/visual/harness.ts";
+      mount();
+    </script>
+  </body>
+</html>

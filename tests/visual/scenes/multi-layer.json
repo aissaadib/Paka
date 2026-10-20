@@ -1,0 +1,73 @@
+{
+    "id":  "multi-layer",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "One",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#e5484d",
+                                                          "size":  16
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       25,
+                                                       25
+                                                   ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "id":  "Two",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#e8a33d",
+                                                          "size":  16
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       60,
+                                                       60
+                                                   ]
+                                        }
+                                    ],
+                       "opacity":  0.75
+                   },
+                   {
+                       "id":  "Three",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#3fb950",
+                                                          "size":  16
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       95,
+                                                       95
+                                                   ]
+                                        }
+                                    ],
+                       "visible":  false
+                   }
+               ]
+}

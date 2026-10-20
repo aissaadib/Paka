@@ -27,3 +27,8 @@ dist-ssr
 agent group chat.text
 agent group chat.txt
 agent-groupchat.txt
+
+# Visual-regression harness output (the goldens under tests/visual are committed)
+test-results/
+playwright-report/
+playwright/.cache/
