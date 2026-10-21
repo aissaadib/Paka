@@ -37,6 +37,15 @@ assumed.
 **The reported API was unchanged**, but the line numbers in the brief were not
 used: every reference below was re-read at `a1c9c1d`.
 
+### 1.1 Where this slice sits in the factory's plan
+
+| Question | Answer |
+| --- | --- |
+| Is there a roadmap row for it? | **No.** `Paka-feature-factory/audit/12-roadmap.md` has rows `T-01`…`T-58`+; none of them is "fixed-step transforms in the Selection menu". The brief gave no task id, and neither the roadmap nor `STATE.md` records this slice. |
+| What is it a follow-on to? | **T-12** — *"Scale + rotate with angle snap (bake-on-apply)"*, which is the merged handle feature (`1622517`, merged as `a42e67f`). This slice adds the **menu** route to that same transform, not a new capability. |
+| Which id namespace does it use? | The factory's own convention (`docs/FEATURE-FACTORY-MATRIX.md` §0.2) separates **feature** (`FF-nn`), **analyst-test** (`AT-nn`) and **task** (`TASK-nn`) ids, and says explicitly that the three "never overlap". This slice has no id in any of them, so **this report does not invent one** — it is identified by its branch and its commit. If the coordinator wants it tracked, `TASK-nn` is the namespace that fits, and the roadmap would need a row. |
+| A related note | That same §0.2 already adopts the `AT-nn` rename that the T-06 settings/autosave discovery recommended for the `T-01`…`T-32` analyst-test ids. The two ids that collided (`T-06` as a task and as an analyst test) are now separated upstream. |
+
 ---
 
 ## 2. Design note — the geometry of each operation
@@ -324,6 +333,38 @@ asserts.
   native window, the native file dialogs and the Tauri IPC are untouched by
   the change, and the menu is ordinary React.
 * **The Rust side was not touched**, so there is nothing to verify there.
+
+### 5.2 The packaged verification, handed over
+
+The packaged check is Agent 1's, and the recipe below is theirs, adapted to
+this branch. It is written out so it can be run without re-deriving
+anything.
+
+```powershell
+cd C:\Users\aissa\Desktop\Paka-feature-factory\worktrees\ff-fixed-step
+pnpm install --frozen-lockfile                    # a fresh worktree has no node_modules
+$env:PATH = "<WinLibs mingw64\bin>;$env:PATH"     # rustc calls dlltool.exe by name
+$env:CARGO_TARGET_DIR = "C:\Users\aissa\Desktop\Paka\src-tauri\target"
+pnpm tauri build --no-bundle
+```
+
+The shared `CARGO_TARGET_DIR` keeps the build to a recompile of Paka's own
+crate — **this slice changes no Rust code at all**, so the Rust side of the
+build is byte-identical to the one Agent 1 already has warm.
+
+**What to look for in the packaged app**, to match the browser evidence in
+§4.1:
+
+1. Open the **Selection** menu with nothing selected: the three new entries
+   are greyed out.
+2. Draw a stroke (`B`), press `M`, marquee over it, and open **Selection**
+   again: the three entries are live.
+3. Choose **Scale by 150 %**: the undo button reads **"Undo Scale 150 %"** and
+   the status bar shows **unsaved**.
+4. Choose **Rotate 15° Clockwise** and **Rotate 15° Counter-Clockwise**: the
+   undo button reads **"Undo Rotate 15°"** and **"Undo Rotate -15°"**.
+5. `Ctrl+Z` restores the drawing **exactly** — the undo button's label goes
+   back to "Undo Stroke" and the pixels return.
 
 ---
 
