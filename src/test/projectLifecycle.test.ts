@@ -144,6 +144,35 @@ describe("serialize and loadProject", () => {
     expect(reopened.getState().file).toEqual({ path: "C:\\art\\cat.paka", dirty: false });
   });
 
+  it("round-trips every added layer blend mode through save and reopen", () => {
+    const modes = [
+      "multiply",
+      "screen",
+      "overlay",
+      "soft-light",
+      "hard-light",
+      "color-dodge",
+      "difference",
+    ] as const;
+
+    for (const mode of modes) {
+      const engine = new DrawingEngine();
+      const layerId = activeLayerId(engine);
+      engine.setLayerBlendMode(layerId, mode);
+      expect(engine.getState().document.layers[0].blendMode, mode).toBe(mode);
+
+      const parsed = parseProject(engine.serialize());
+      expect(parsed.ok, mode).toBe(true);
+      if (!parsed.ok) {
+        continue;
+      }
+
+      const reopened = new DrawingEngine();
+      reopened.loadProject(parsed.project, null);
+      expect(reopened.getState().document.layers[0].blendMode, mode).toBe(mode);
+    }
+  });
+
   it("round-trips eraser strokes as erasers", () => {
     const engine = new DrawingEngine();
     paintStroke(engine, 0);

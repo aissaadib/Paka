@@ -14,12 +14,18 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  blendChannel,
+  isLayerBlendMode,
+  LAYER_BLEND_MODES,
+} from "../core/document/blendModes";
 import { addLayer, createDocument, moveLayer, updateLayer } from "../core/document/document";
 import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
   Guide,
+  LayerBlendMode,
   LayerElement,
   LayerId,
   StrokeRecord,
@@ -245,35 +251,35 @@ describe("Canvas2DRenderer compositing", () => {
     expect(harness.display.named("strokeRect")[0].alpha).toBe(1);
   });
 
-  it("maps multiply and screen layer modes to the canvas composite operation", () => {
+  it("maps every layer mode to its canvas composite operation", () => {
     const harness = createHarness();
-    let doc = createDocument({ width: 20, height: 20 });
-    doc = addLayer(doc);
+    const doc = addLayer(createDocument({ width: 20, height: 20 }));
     const topId = doc.layers[1].id;
-    harness.renderer.setDocument(doc);
     harness.renderer.setDisplaySize(40, 40, 1);
 
-    harness.renderer.render();
-    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
-      "source-over",
-      "source-over",
-    ]);
+    const cases = [
+      ["normal", "source-over"],
+      ["multiply", "multiply"],
+      ["screen", "screen"],
+      ["overlay", "overlay"],
+      ["soft-light", "soft-light"],
+      ["hard-light", "hard-light"],
+      ["color-dodge", "color-dodge"],
+      ["darken", "darken"],
+      ["lighten", "lighten"],
+      ["difference", "difference"],
+      ["exclusion", "exclusion"],
+    ] as const;
 
-    harness.renderer.setDocument(updateLayer(doc, topId, { blendMode: "multiply" }));
-    harness.display.calls.length = 0;
-    harness.renderer.render();
-    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
-      "source-over",
-      "multiply",
-    ]);
-
-    harness.renderer.setDocument(updateLayer(doc, topId, { blendMode: "screen" }));
-    harness.display.calls.length = 0;
-    harness.renderer.render();
-    expect(harness.display.drawImages.map((image) => image.composite)).toEqual([
-      "source-over",
-      "screen",
-    ]);
+    for (const [mode, operation] of cases) {
+      harness.renderer.setDocument(updateLayer(doc, topId, { blendMode: mode }));
+      harness.display.calls.length = 0;
+      harness.renderer.render();
+      expect(harness.display.drawImages.map((image) => image.composite), mode).toEqual([
+        "source-over",
+        operation,
+      ]);
+    }
 
     // The mode is reset between layers and after the pass: the paper fill and
     // the document border are never blended.
@@ -284,7 +290,7 @@ describe("Canvas2DRenderer compositing", () => {
     // so the document-size export must carry the mode too.
     expect(harness.composeDocument().drawImages.map((image) => image.composite)).toEqual([
       "source-over",
-      "screen",
+      "exclusion",
     ]);
     expect(harness.renderer.readCompositePixel(1, 1)).not.toBeNull();
   });
@@ -1656,8 +1662,8 @@ describe("Canvas2DRenderer composition guides", () => {
  * tests need the latter, so this stand-in keeps real straight-alpha pixels and
  * implements the slice of the spec the renderer uses to composite: `fillRect`,
  * `clearRect`, 1:1 `drawImage`, transforms, `save`/`restore`, pattern tiling
- * for the grain pass, and the `source-over`, `destination-out`, `destination-in`,
- * `multiply` and `screen` operations.
+ * for the grain pass, the `source-over`, `destination-out` and `destination-in`
+ * operations, and every layer blend mode the renderer can select.
  *
  * It also rasterizes paths: `arc` is a 24-gon, `fill` is a point-in-polygon test
  * per pixel, and `stroke` is a capsule per segment, so a stroke's coverage is
@@ -1766,27 +1772,15 @@ class PixelCanvas {
         return;
       }
 
-      let outR: number;
-      let outG: number;
-      let outB: number;
-      if (state.composite === "multiply" || state.composite === "screen") {
-        const blend = (backdrop: number, sourceColour: number): number =>
-          state.composite === "multiply"
-            ? backdrop * sourceColour
-            : backdrop + sourceColour - backdrop * sourceColour;
-        const mix = (backdrop: number, sourceColour: number): number =>
-          (sourceAlpha * (1 - backdropAlpha) * sourceColour +
-            sourceAlpha * backdropAlpha * blend(backdrop, sourceColour) +
-            (1 - sourceAlpha) * backdropAlpha * backdrop) /
-          outAlpha;
-        outR = mix(backdropR, sourceR);
-        outG = mix(backdropG, sourceG);
-        outB = mix(backdropB, sourceB);
-      } else {
-        outR = (sourceR * sourceAlpha + backdropR * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
-        outG = (sourceG * sourceAlpha + backdropG * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
-        outB = (sourceB * sourceAlpha + backdropB * backdropAlpha * (1 - sourceAlpha)) / outAlpha;
-      }
+      const mode = isLayerBlendMode(state.composite) ? state.composite : "normal";
+      const mix = (backdrop: number, sourceColour: number): number =>
+        (sourceAlpha * (1 - backdropAlpha) * sourceColour +
+          sourceAlpha * backdropAlpha * blendChannel(mode, backdrop, sourceColour) +
+          (1 - sourceAlpha) * backdropAlpha * backdrop) /
+        outAlpha;
+      const outR = mix(backdropR, sourceR);
+      const outG = mix(backdropG, sourceG);
+      const outB = mix(backdropB, sourceB);
 
       target[index] = outR;
       target[index + 1] = outG;
@@ -2533,6 +2527,156 @@ describe("Canvas2DRenderer live preview compositing (real pixels)", () => {
 
         // Painting over the paper would leave the blue channel at 102.
         expectPixel(harness.display, 16, 16, [153, 179, 204]);
+      },
+    );
+  });
+
+  it("composites every added layer mode with exact pixels and exports the same", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        // Backdrop #6699cc, source #cc6633 - both opaque, so the expected
+        // values are the blend function itself.
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        paintPixels(harness.surfaces[1], [204, 102, 51, 255], 0, 0, 32, 32);
+
+        const cases: ReadonlyArray<readonly [LayerBlendMode, readonly [number, number, number]]> = [
+          ["normal", [204, 102, 51]],
+          ["multiply", [82, 61, 41]],
+          ["screen", [224, 194, 214]],
+          ["overlay", [163, 133, 173]],
+          ["soft-light", [138, 141, 180]],
+          ["hard-light", [194, 122, 82]],
+          ["color-dodge", [255, 255, 255]],
+          ["darken", [102, 102, 51]],
+          ["lighten", [204, 153, 204]],
+          ["difference", [102, 51, 153]],
+          ["exclusion", [143, 133, 173]],
+        ];
+
+        for (const [mode, expected] of cases) {
+          harness.renderer.setDocument(updateLayer(harness.doc, topId, { blendMode: mode }));
+          harness.renderer.render();
+          expectPixel(harness.display, 16, 16, expected);
+
+          const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
+          expect(readPixel(exported, 16, 16), mode).toEqual(readPixel(harness.display, 16, 16));
+          expectSameCanvas(
+            snapshotCanvas(exported),
+            snapshotCanvas(harness.display),
+            `${mode} export vs display`,
+          );
+        }
+      },
+    );
+  });
+
+  it("applies layer opacity before the blend, not after it", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        paintPixels(harness.surfaces[1], [204, 102, 51, 255], 0, 0, 32, 32);
+        harness.renderer.setDocument(
+          updateLayer(harness.doc, topId, { opacity: 0.5, blendMode: "difference" }),
+        );
+        harness.renderer.render();
+
+        // Difference gives (0.4, 0.2, 0.6); half source alpha mixes that with
+        // the backdrop: (0.4, 0.4, 0.7) = (102, 102, 179).
+        expectPixel(harness.display, 16, 16, [102, 102, 179]);
+      },
+    );
+  });
+
+  it("honours partial source alpha in a blended layer", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        // 128/255 = 0.50196 straight-alpha source, not a layer-opacity multiply.
+        paintPixels(harness.surfaces[1], [204, 102, 51, 128], 0, 0, 32, 32);
+        harness.renderer.setDocument(updateLayer(harness.doc, topId, { blendMode: "difference" }));
+        harness.renderer.render();
+
+        expectPixel(harness.display, 16, 16, [102, 102, 178]);
+      },
+    );
+  });
+
+  it("mixes a semi-transparent top layer in each added blend mode", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        // Backdrop #6699cc and source #cc6633, both opaque, then the whole top
+        // layer at 50 %. Over an opaque backdrop the result is
+        // 0.5 * B(Cb, Cs) + 0.5 * Cb, per channel.
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        paintPixels(harness.surfaces[1], [204, 102, 51, 255], 0, 0, 32, 32);
+
+        const cases: ReadonlyArray<readonly [LayerBlendMode, readonly [number, number, number]]> = [
+          ["overlay", [133, 143, 189]],
+          ["soft-light", [120, 147, 192]],
+          ["hard-light", [148, 138, 143]],
+          ["color-dodge", [179, 204, 230]],
+          ["difference", [102, 102, 179]],
+        ];
+
+        for (const [mode, expected] of cases) {
+          harness.renderer.setDocument(
+            updateLayer(harness.doc, topId, { opacity: 0.5, blendMode: mode }),
+          );
+          harness.renderer.render();
+          expectPixel(harness.display, 16, 16, expected);
+        }
+      },
+    );
+  });
+
+  it("leaves a transparent source untouched for every blend mode", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        // Only the top-left quadrant is painted; the rest of the top layer is
+        // transparent, so no blend formula may invent coverage there.
+        paintPixels(harness.surfaces[1], [204, 102, 51, 255], 0, 0, 16, 16);
+
+        for (const mode of LAYER_BLEND_MODES) {
+          harness.renderer.setDocument(updateLayer(harness.doc, topId, { blendMode: mode }));
+          harness.renderer.render();
+          expectPixel(harness.display, 24, 24, [102, 153, 204]);
+        }
+      },
+    );
+  });
+
+  it("differences the preview with the backdrop and keeps it after release", () => {
+    withPixels(
+      (doc) => {
+        const bottom = updateLayer(doc, doc.layers[0].id, { blendMode: "difference" });
+        return { ...bottom, background: "#6699cc" };
+      },
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stroke = createStroke(layerId, { ...BRUSH, opacity: 0.5 });
+        harness.renderer.beginStroke(stroke);
+        paintPixels(harness.strokeBuffer, PIXEL_YELLOW, 8, 8, 16, 16);
+        harness.renderer.render();
+
+        // Yellow at 50 % under difference over #6699cc:
+        // 0.5 * |Cb - Cs| + 0.5 * Cb = (0.5, 0.5, 0.8).
+        expectPixel(harness.display, 16, 16, [128, 128, 204]);
+        const preview = readPixel(harness.display, 16, 16);
+
+        harness.renderer.endStroke(stroke);
+        harness.renderer.render();
+        expect(readPixel(harness.display, 16, 16)).toEqual(preview);
       },
     );
   });

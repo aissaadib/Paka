@@ -78,6 +78,11 @@ The corpus covers the current feature set, not only the brush:
 | `layer-opacity` | a layer at partial opacity |
 | `blend-multiply` | the `multiply` blend mode |
 | `blend-screen` | the `screen` blend mode |
+
+`blend-modes.spec.ts` is a pixel test rather than a screenshot: it asks the
+bundled Chromium for each layer mode's composite result and compares it with the
+reference formulas. It covers every mode the layer menu offers, plus partial
+source alpha and a transparent source.
 | `fill-patch` | a bucket-fill patch, with a stroke over it |
 | `gradient` | a linear gradient, with a stroke over it |
 | `multi-layer` | a three-layer stack, one of them hidden |
