@@ -83,8 +83,8 @@ line, applied in the engine's single pointer entry point. Both are view state:
 no pixels, no history step, no dirty flag, nothing in an export, remembered in
 the settings file. No project-format change.
 
-**N6 — blend modes.** `overlay`, `soft-light`, `hard-light`, `color-dodge`,
-`color-burn`, `darken`, `lighten`, `difference`, `exclusion` join `normal` /
+**N6 - blend modes.** `overlay`, `soft-light`, `hard-light`, `color-dodge`,
+`darken`, `lighten`, `difference`, `exclusion` join `normal` /
 `multiply` / `screen`. `normal`, `multiply` and `screen` are pixel-identical to
 before. Expected-pixel tests per mode, alpha cases, and save/reopen coverage.
 
@@ -124,14 +124,46 @@ No test was run concurrently with the Rust build.
 
 ## 6. Packaged desktop
 
-The packaged section is completed after the build slot; see the closure note at
-the end of this file.
+Rebuilt from the integrated source and driven on the real window:
+
+- **Build:** `pnpm tauri build --no-bundle`, 5m40s, `src-tauri/target/release/paka.exe`
+  (4,812,800 bytes), from `fdba3eb`; the only later commit is documentation.
+- **Window fit:** outer **1818×1020** at (102, 0) on first launch and (64, 0) after
+  a restart; work area 1920×1020 at 125 %; bottom/right overhang **0**; client
+  1800×973 physical = **1440×778.4 CSS**, matching `innerWidth` 1440. The phase-1
+  work-area clamp is intact in this binary.
+- **Brush presets, end to end:** the picker read "No saved presets" on a v1
+  settings file that has no `presets` key (backward compatibility, observed).
+  Saving "Wave Test" from the UI wrote `presets[1]` into
+  `%APPDATA%\com.paka.drawing\settings.json` through the real settings command,
+  with the full brush (`size 37`, `stampTexture 0`, ...); after closing and
+  relaunching, the picker showed **"Wave Test"** and had it selected. The
+  pre-wave settings file was restored afterwards.
+- **Grid:** toggling **Grid** wrote `gridVisible: true`; after a restart the
+  switch was on and the status bar read **"grid 50 px"**. `APP` capture shows the
+  lattice drawn over the paper, scaled with it.
+- **Colour:** the readout showed `#cc3366` on paper `#ffffff` as **Contrast
+  5.0:1**, "Meets AA body text (4.5:1)", **ΔE00 47.28** and the nearest swatch
+  `#d946a0` at ΔE 12.45. Typing into the colour field: `oklch(0.7 0.15 30)` →
+  `#ed7665`; `hsl(210 50% 40%)` → `#336699`; `#3366cc80` → refused with
+  **"Not a solid colour (alpha below 1) - kept #336699"** and `aria-invalid`;
+  `nonsense-value` → reverted to the last valid colour. No throw.
+- **Blend modes:** the layer blend select in the packaged UI lists the eleven
+  modes.
+
+Bounded: this run did **not** save and reopen a v11 project through the native
+dialogs, and did not exercise 100 % or 150 % scaling (the machine is configured
+at 125 %). Those stay in §7.
 
 ## 7. Bounded, unverified
 
+- **Native-dialog save and reopen of a v11 project** was not driven in the
+  packaged app; the format contract is covered by unit tests only.
 - **Physical-desktop interaction** is only as good as the harness. Page-level
   interaction through the WebView2 debug protocol is not the same as an OS mouse
   click; window geometry and screenshots are OS-level.
+- **Scaling other than 125 %** was not exercised: this machine has one monitor
+  configuration.
 - **Rust unit tests** (`cargo test --lib`) cannot run on this machine: the test
   binary fails to load with `0xC0000139` (`STATUS_ENTRYPOINT_NOT_FOUND`) while a
   minimal crate on the same toolchain runs. The geometry tests compile but have

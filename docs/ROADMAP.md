@@ -211,8 +211,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 ## Phase 4 - Layer system
 
 - [x] Blend modes beyond `normal`: eleven modes on a layer - `multiply`,
-      `screen`, `overlay`, `soft-light`, `hard-light`, `color-dodge`,
-      `color-burn`, `darken`, `lighten`, `difference` and `exclusion` - applied
+      `screen`, `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`,
+      `lighten`, `difference` and `exclusion` - applied
       when the finished layer composites over the paper and the layers below it.
       Changing the mode is one undoable step and does not re-rasterize layer
       pixels - it only changes the final composite. Display, PNG export, bucket
