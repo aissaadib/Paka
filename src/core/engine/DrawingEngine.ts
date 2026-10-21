@@ -28,6 +28,14 @@ import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import {
+  brushPresetsEqual,
+  createPresetId,
+  normalizePresetName,
+  reservePresetId,
+  uniquePresetName,
+  type BrushPreset,
+} from "../brushes/presets";
 import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
 import {
@@ -154,6 +162,14 @@ export interface EditorSnapshot {
   readonly document: DrawingDocument;
   readonly viewport: Viewport;
   readonly brush: BrushSettings;
+  /**
+   * The named brush presets the user has saved.
+   *
+   * Editor preference, like the brush itself: applying, saving, renaming or
+   * deleting a preset never touches the document, the revision or history.
+   * The settings store persists the list.
+   */
+  readonly presets: readonly BrushPreset[];
   readonly toolId: ToolId;
   readonly history: CommandStackState;
   readonly file: DocumentFileState;
@@ -462,6 +478,7 @@ export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private brush: BrushSettings;
+  private presets: readonly BrushPreset[] = [];
   private currentToolId: ToolId;
   private readonly tools: ToolRegistry;
   private readonly commands: CommandStack;
@@ -1024,6 +1041,123 @@ export class DrawingEngine implements StrokeSource {
     this.brush = next;
     this.commands.breakMerge();
     this.publish();
+  }
+
+  /**
+   * Replaces the preset library.
+   *
+   * The settings store calls this once while applying a file. It is editor
+   * state, so it publishes without touching the document, the revision or
+   * history.
+   */
+  setPresets(presets: readonly BrushPreset[]): void {
+    const next: BrushPreset[] = [];
+    const ids = new Set<string>();
+    for (const candidate of presets) {
+      if (typeof candidate.name !== "string") {
+        continue;
+      }
+      const name = normalizePresetName(candidate.name);
+      if (name === "") {
+        continue;
+      }
+      let id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+      if (id === "" || ids.has(id)) {
+        id = createPresetId();
+      }
+      while (ids.has(id)) {
+        id = createPresetId();
+      }
+      reservePresetId(id);
+      ids.add(id);
+      next.push({
+        id,
+        name: uniquePresetName(name, next),
+        brush: normalizeBrush(candidate.brush),
+      });
+    }
+    if (brushPresetsEqual(this.presets, next)) {
+      return;
+    }
+    this.presets = next;
+    this.publish();
+  }
+
+  /**
+   * Saves the current brush as a new preset and returns it.
+   *
+   * Editor state only: no history entry, no revision bump and no dirty flag.
+   * An empty name is rejected (`null`); a duplicate name gets a numeric
+   * suffix so the picker can tell the entries apart.
+   */
+  saveBrushPreset(name: string): BrushPreset | null {
+    const trimmed = normalizePresetName(name);
+    if (trimmed === "") {
+      return null;
+    }
+    const preset: BrushPreset = {
+      id: createPresetId(),
+      name: uniquePresetName(trimmed, this.presets),
+      brush: { ...this.brush },
+    };
+    this.presets = [...this.presets, preset];
+    this.commands.breakMerge();
+    this.publish();
+    return preset;
+  }
+
+  /**
+   * Renames a preset and returns the stored entry, or `null` when the id is
+   * unknown or the name is empty. A duplicate name gets a numeric suffix.
+   */
+  renameBrushPreset(id: string, name: string): BrushPreset | null {
+    const trimmed = normalizePresetName(name);
+    if (trimmed === "") {
+      return null;
+    }
+    const index = this.presets.findIndex((preset) => preset.id === id);
+    if (index === -1) {
+      return null;
+    }
+    const current = this.presets[index];
+    const renamed: BrushPreset = {
+      ...current,
+      name: uniquePresetName(trimmed, this.presets, id),
+    };
+    if (renamed.name === current.name) {
+      return renamed;
+    }
+    this.presets = this.presets.map((preset) => (preset.id === id ? renamed : preset));
+    this.commands.breakMerge();
+    this.publish();
+    return renamed;
+  }
+
+  /** Deletes a preset. Returns whether the id was found. */
+  deleteBrushPreset(id: string): boolean {
+    const next = this.presets.filter((preset) => preset.id !== id);
+    if (next.length === this.presets.length) {
+      return false;
+    }
+    this.presets = next;
+    this.commands.breakMerge();
+    this.publish();
+    return true;
+  }
+
+  /**
+   * Applies a preset through the normal brush setter.
+   *
+   * The brush values are exactly what the preset stored; the setter keeps this
+   * an editor-only change, so applying a preset cannot dirty the drawing.
+   */
+  applyBrushPreset(id: string): boolean {
+    const preset = this.presets.find((candidate) => candidate.id === id);
+    if (!preset) {
+      return false;
+    }
+    this.setBrush(preset.brush);
+    return true;
   }
 
   /**
@@ -3084,6 +3218,7 @@ export class DrawingEngine implements StrokeSource {
       document: this.doc,
       viewport: this.viewport,
       brush: this.brush,
+      presets: this.presets,
       toolId: this.currentToolId,
       history: this.commands.getState(),
       file: this.fileState,
@@ -3110,6 +3245,7 @@ export class DrawingEngine implements StrokeSource {
       previous.document === next.document &&
       previous.viewport === next.viewport &&
       previous.brush === next.brush &&
+      previous.presets === next.presets &&
       previous.toolId === next.toolId &&
       previous.history === next.history &&
       previous.file === next.file &&

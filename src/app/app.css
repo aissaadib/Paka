@@ -159,6 +159,51 @@
   gap: 4px 12px;
 }
 
+.brush-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  width: 100%;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.brush-presets__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brush-presets__label {
+  color: var(--text-dim);
+  min-width: 46px;
+}
+
+.brush-presets__select {
+  width: 140px;
+  height: var(--control-height);
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+.brush-presets__select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.brush-presets__name {
+  width: 150px;
+}
+
+.brush-presets__action {
+  padding: 0 8px;
+}
+
 .color-controls {
   flex-wrap: wrap;
   gap: 8px;

@@ -16,6 +16,7 @@ import type { LayerBlendMode, LayerId } from "../core/document/types";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
+import type { BrushPreset } from "../core/brushes/presets";
 import type { BrushSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
 import type { FlipAxis } from "../types/transform";
@@ -24,6 +25,14 @@ import type { Listener } from "../utils/store";
 export interface EditorActions {
   setTool(toolId: ToolId): void;
   setBrush(patch: Partial<BrushSettings>): void;
+  /** Saves the current brush under a name; `null` when the name is empty. */
+  saveBrushPreset(name: string): BrushPreset | null;
+  /** Renames a preset; `null` when the id is unknown or the name is empty. */
+  renameBrushPreset(id: string, name: string): BrushPreset | null;
+  /** Deletes a preset. Editor state only: no history entry, no dirty flag. */
+  deleteBrushPreset(id: string): boolean;
+  /** Applies a preset through the normal brush setter. */
+  applyBrushPreset(id: string): boolean;
   /** Whether the shape tools fill their outline instead of tracing it. */
   setShapeFill(filled: boolean): void;
   /** Sides of the next polygon, and points of the next star (3-24). */
@@ -108,6 +117,10 @@ export function createEditor(options: EditorOptions = {}): Editor {
   const actions: EditorActions = {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
+    saveBrushPreset: (name) => engine.saveBrushPreset(name),
+    renameBrushPreset: (id, name) => engine.renameBrushPreset(id, name),
+    deleteBrushPreset: (id) => engine.deleteBrushPreset(id),
+    applyBrushPreset: (id) => engine.applyBrushPreset(id),
     setShapeFill: (filled) => engine.setShapeFill(filled),
     setShapeSides: (sides) => engine.setShapeSides(sides),
     setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),

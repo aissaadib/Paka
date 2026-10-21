@@ -23,6 +23,14 @@
  */
 
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush } from "../brushes/defaults";
+import {
+  brushPresetsEqual,
+  createPresetId,
+  normalizePresetName,
+  reservePresetId,
+  uniquePresetName,
+  type BrushPreset,
+} from "../brushes/presets";
 import { DEFAULT_GRADIENT_END_COLOR } from "../gradient/gradientRecord";
 import { DEFAULT_SHAPE_OPTIONS, normalizeShapeOptions } from "../tools/shapeGeometry";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
@@ -45,6 +53,8 @@ export interface AppSettings {
   readonly version: typeof SETTINGS_VERSION;
   /** The brush the editor starts with. */
   readonly brush: BrushSettings;
+  /** Named brush presets. Missing in older files, which load as an empty list. */
+  readonly presets: readonly BrushPreset[];
   /** The tool the editor starts with. */
   readonly toolId: ToolId;
   /** Whether the shape tools fill their outline. */
@@ -67,6 +77,7 @@ export interface AppSettings {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
   brush: DEFAULT_BRUSH,
+  presets: [],
   toolId: "brush",
   shapeFill: false,
   shapeSides: DEFAULT_SHAPE_OPTIONS.sides,
@@ -157,6 +168,47 @@ function brushOr(value: unknown): BrushSettings {
 }
 
 /**
+ * The preset library, validated entry by entry.
+ *
+ * A missing or non-array `presets` is an empty list, so files written before
+ * presets existed load unchanged. One malformed entry (not an object, no
+ * usable name) is skipped rather than allowed to lose the rest; a bad field
+ * inside a preset's brush takes its default through `brushOr`, exactly like
+ * the top-level brush. Duplicate or missing ids are replaced, and duplicate
+ * names get a numeric suffix, so the picker always has distinct entries.
+ */
+function presetsOr(value: unknown): readonly BrushPreset[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const presets: BrushPreset[] = [];
+  const ids = new Set<string>();
+  for (const entry of value) {
+    const record = asRecord(entry);
+    if (record === null || typeof record.name !== "string") {
+      continue;
+    }
+    const name = normalizePresetName(record.name);
+    if (name === "") {
+      continue;
+    }
+    const rawId = typeof record.id === "string" ? record.id.trim() : "";
+    let id = rawId === "" || ids.has(rawId) ? createPresetId() : rawId;
+    while (ids.has(id)) {
+      id = createPresetId();
+    }
+    reservePresetId(id);
+    ids.add(id);
+    presets.push({
+      id,
+      name: uniquePresetName(name, presets),
+      brush: brushOr(record.brush),
+    });
+  }
+  return presets;
+}
+
+/**
  * Turns whatever was in the file into usable settings.
  *
  * Never throws and never rejects: a value it cannot make sense of takes its
@@ -184,6 +236,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   return {
     version: SETTINGS_VERSION,
     brush: brushOr(record.brush),
+    presets: presetsOr(record.presets),
     toolId: toolIdOr(record.toolId),
     shapeFill: booleanOr(record.shapeFill, DEFAULT_APP_SETTINGS.shapeFill),
     shapeSides: shape.sides,
@@ -220,6 +273,7 @@ export function serializeAppSettings(settings: AppSettings): string {
     {
       version: SETTINGS_VERSION,
       brush: settings.brush,
+      presets: settings.presets,
       toolId: settings.toolId,
       shapeFill: settings.shapeFill,
       shapeSides: settings.shapeSides,
@@ -239,6 +293,7 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
   return (
     a.version === b.version &&
     brushSettingsEqual(a.brush, b.brush) &&
+    brushPresetsEqual(a.presets, b.presets) &&
     a.toolId === b.toolId &&
     a.shapeFill === b.shapeFill &&
     a.shapeSides === b.shapeSides &&
