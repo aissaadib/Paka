@@ -8,6 +8,15 @@
 **Subject:** the *packaged* desktop application — the thing the project has
 never run against the current tree.
 
+> **ERRATUM - "Defect 1" is withdrawn.** Section 5 found the app clipped on a
+> scaled display and blamed `wry` for passing physical pixels to a DIP API.
+> That finding is **invalid**: the geometry was read from a DPI-unaware process,
+> which Windows reports in DIPs. The app renders correctly at 125 %. The
+> original text is preserved below as the record of what was claimed and why.
+> See [`PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md`](PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md).
+> Section 6 - the default window does not fit the work area - is **not**
+> affected and stands as a real defect.
+
 > **How to read the evidence labels.** Every result is tagged with where it
 > came from:
 > **PACKAGED** = the real desktop executable (`paka.exe`, release build);
