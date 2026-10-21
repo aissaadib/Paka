@@ -31,23 +31,30 @@ visual-regression harness.
 
 ## 2. Current state (verified today)
 
-- Branch `integration/phase1-settings-texture-transforms`, cut from
-  `feat/stamp-brush-engine` at `fac6441`: the **fixed-step scale/rotate
-  transforms**, **T-06 settings persistence** and the **FF-01 per-dab
-  directional texture**, on top of the live-preview compositing, layer-safety,
-  raster-budget, bounded-rasterization, **stamp (dab) brush engine**, **HSV
-  colour wheel**, **composition guides**, **polygon and star** and
-  **scale/rotate** slices. The feature branches remain; nothing was rewritten.
-- Measured on this branch: `pnpm test` **791 tests in 37 files, all pass**;
+- Branch `integration/next-build-wave`, cut from the phase-1 integration tip
+  `38efc1f`: the **brush preset library**, the **contrast and colour-difference
+  readout** with **wider colour input**, the **grid and pointer snapping**, and
+  eight new **layer blend modes** (project format 11), on top of the fixed-step
+  transforms, settings persistence, per-dab directional texture, live-preview
+  compositing, layer-safety, raster-budget, bounded-rasterization, **stamp (dab)
+  brush engine**, **HSV colour wheel**, **composition guides**, **polygon and
+  star** and **scale/rotate** slices. The feature branches remain; nothing was
+  rewritten.
+- Measured on this branch: `pnpm test` **967 tests in 44 files, all pass**;
   `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual`
-  **25 tests, all pass**. `docs/qa/INTEGRATION-PHASE1.md` records the exact
-  commands, the packaged run and the ownership of the branch.
-- Project file format **version 10** (`PROJECT_VERSION = 10`); `stabilizer` was
+  **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
+  by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
+  commands, the merge SHAs and the ownership of each branch.
+- Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
   `stampSpacing` and `stampHardness` are required from v9. `stampTexture` is
-  required from v10. `document.guides` is **additive within v9 and later**
-  (missing = no guides), because the guides are display-only.
+  required from v10. **v11 widens `blendMode`**: `overlay`, `soft-light`,
+  `hard-light`, `color-dodge`, `color-burn`, `darken`, `lighten`, `difference`
+  and `exclusion` join `normal` / `multiply` / `screen`, and a v10 reader
+  refuses a v11 file rather than rendering an unknown mode as `normal`.
+  `document.guides` is **additive within v9 and later** (missing = no guides),
+  because the guides are display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
   built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
   mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
@@ -55,17 +62,23 @@ visual-regression harness.
   commands, which were verified in a release build driven through UI
   Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
-  stabilizer, grain texture, the stamp (dab) engine and the per-dab directional
-  texture shipped; brush-tip and image-based stamp textures remain. Phase 4 has
-  `normal` / `multiply` / `screen` layer blend modes; masks and groups remain.
-  Phase 0 gained three more correctness items: live-preview compositing inside
-  its own layer, layer/history safety during a gesture, and a bounded document
-  raster budget.
+  stabilizer, grain texture, the stamp (dab) engine, the per-dab directional
+  texture, the **brush preset library** and the **grid and snapping** shipped;
+  brush-tip and image-based stamp textures remain. Phase 4 has the eleven layer
+  blend modes (`normal` / `multiply` / `screen` plus eight separable modes),
+  masks and groups remain. The colour panel gained the **contrast and
+  colour-difference readout** and **wider input formats** (8-digit hex, `hsl()`,
+  `oklch()`). Phase 0 gained three more correctness items: live-preview
+  compositing inside its own layer, layer/history safety during a gesture, and a
+  bounded document raster budget.
 
 ### Shipped slices (newest first)
 
 | Commit | Slice |
 | --- | --- |
+| `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
+| `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
+| `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `color-burn`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
 | `feat/t06-settings-persistence` | **Settings persistence** - the nine editor preferences (brush, tool, shape fill, shape sides, star inner ratio, shape rotation, fill tolerance, gradient type, gradient end colour) live in a per-user settings file in the OS configuration folder and are restored at startup. The file holds preferences only - never a drawing - and changing one is not an edit, so it adds no history step and never marks the document unsaved. A missing, corrupt or future-versioned file starts the app with the defaults and no error. The **autosave** machinery and its policy seam exist and are covered by tests, but the decisions that govern autosaving are the owner's, so nothing is enabled and no recovery file is ever written. |
 | `feat/ff01-directional-texture` | **Per-dab directional texture** — a stamped stroke can carry **bristle lanes that run along the path**: each dab's coverage is multiplied by a lane pattern laid out in the dab's own frame, so the streaks rotate with the stroke. The lanes are measured against the brush's **centre line** (so every dab on a path sees the same offset at the same pixel, the union preserves the lanes instead of filling them in, and drawing a stroke backwards gives the same picture) and against the brush's **nominal size** (so the pattern is the same in document pixels at every `rasterScale`). The texture is multiplied in **before** the per-pixel maximum union, so it can only remove ink and a stroke still cannot darken. `stampTexture` is `0` by default, so every existing stroke is byte for byte unchanged. Format v10. |
 | `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
@@ -754,7 +767,7 @@ mask rather than a radial falloff.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 791 tests in 37 files).
+   anything (expect 967 tests in 44 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

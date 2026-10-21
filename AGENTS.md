@@ -51,41 +51,53 @@ architecture by browsing.
 
 | Lines | File | What is in it |
 | --- | --- | --- |
-| 2703 | `src/core/engine/DrawingEngine.ts` | snapshot, gestures, history, layers, selection |
-| 2953 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
-| 3451 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
-| 1417 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
-| 1562 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
-| 865 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
+| 3441 | `src/core/engine/DrawingEngine.ts` | snapshot, gestures, history, layers, selection, grid and snapping |
+| 3503 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
+| 3684 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
+| 1555 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
+| 1752 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
+| 890 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
-`floodFill`, `document/types.ts`, `document/guides.ts`, `document/grid.ts`,
+`floodFill`, `document/types.ts`, `document/guides.ts`,
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`,
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
-`core/settings/appSettings.ts`, `core/settings/settingsStore.ts`,
+`core/brushes/presets.ts` (161: the preset model, its validation and its equality),
+`features/brushes/BrushPresets.tsx` (176),
+`core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
+`utils/colorPair.ts` (179),
+`features/color/ContrastReadout.tsx` (198),
+`core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
 rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
-(~300: the work-area clamp, the physical-pixel arithmetic and the cases).
+(~300: the work-area clamp, the physical-pixel arithmetic and the cases),
+`core/document/grid.ts` (283: the grid lattice, the snap candidates and the
+document-space tolerance), `core/settings/appSettings.ts` (269: the settings
+document, its readers and its per-field validation).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
-shape geometry), `core/rendering/stampCoverage.ts` (501: the dab plan, the
+shape geometry), `core/rendering/stampCoverage.ts` (533: the dab plan, the
 per-dab profile, the per-dab directional texture and the coverage union),
+`src/utils/colorMetrics.ts` (607: WCAG luminance and contrast, sRGB to CIELAB,
+CIEDE2000, the nearest palette entry, and the total/never-throws rules),
 `src/test/stampCoverage.test.ts` (508: the dab plan, the texture, the union
 and the budget).
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
+`features/color/ColorField.tsx`, `features/color/colorInput.ts`,
+`features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
 `core/autosave/recovery.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
@@ -117,6 +129,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
+| Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
@@ -230,6 +243,8 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
+| Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
+| Colour input formats | `colorInput.test.ts` (8-digit hex, `hsl()`, `oklch()`, the gamut clamp, the round trip, garbage and translucent input) |
 | Settings persistence | `settings.test.ts` (the round trip, the defaults, the malformed and future-versioned file, the clamping, the no-dirty contract, a failed write) |
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
