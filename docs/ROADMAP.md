@@ -117,7 +117,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       **baked on apply**: the transform moves the selected strokes' samples and
       nothing else, so the brush, the colour, the opacity and the pressure are
       untouched, a scaled stroke is still the same stroke, and the project format
-      did not move (version 9). Each transform is one undo step, through the
+      did not move (version 9 when this shipped; the format is 10 now). Each
+      transform is one undo step, through the
       same command as a move. The handles belong to the committed selection and
       are display-only: they never reach a layer surface or a PNG export. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).

@@ -38,6 +38,10 @@ visual-regression harness.
   raster-budget, bounded-rasterization, **stamp (dab) brush engine**, **HSV
   colour wheel**, **composition guides**, **polygon and star** and
   **scale/rotate** slices. The feature branches remain; nothing was rewritten.
+- Measured on this branch: `pnpm test` **791 tests in 37 files, all pass**;
+  `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual`
+  **25 tests, all pass**. `docs/qa/INTEGRATION-PHASE1.md` records the exact
+  commands, the packaged run and the ownership of the branch.
 - Project file format **version 10** (`PROJECT_VERSION = 10`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
@@ -733,7 +737,7 @@ mask rather than a radial falloff.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 728 tests in 34 files).
+   anything (expect 791 tests in 37 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

@@ -67,13 +67,14 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-21)
 
-- Branch `integration/t10-hsv-color-wheel` at `bc062c7`, after the
+- Branch `integration/phase1-settings-texture-transforms`, after the
   live-preview compositing, layer-safety, raster-budget, bounded-rasterization,
-  **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
-  slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
-  merged; nothing is waiting in the working tree.
-- **`pnpm test` → 711 tests in 34 files, all pass** (the scale/rotate slice: 653
-  before it).
+  **stamp (dab) brush engine**, **HSV colour wheel**, **composition guides**,
+  **polygon and star**, **scale/rotate**, **fixed-step transforms**, **settings
+  persistence** and **per-dab directional texture** slices. All of those are
+  committed and merged on that branch; nothing is waiting in the working tree.
+- **`pnpm test` → 791 tests in 37 files, all pass** (the scale/rotate slice: 653,
+  the settings slice: 742). `pnpm test:visual` 25 tests pass.
   `pnpm typecheck` clean; `pnpm build` succeeds.
 - **Project file format version 10** (`PROJECT_VERSION = 10`). `document.guides` is
   additive within version 9 and later.

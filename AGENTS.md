@@ -74,7 +74,8 @@ feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
-rotation, the shape options and their clamps).
+rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
+(~300: the work-area clamp, the physical-pixel arithmetic and the cases).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
 shape geometry), `core/rendering/stampCoverage.ts` (501: the dab plan, the
@@ -117,6 +118,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
+| Window sizing / DPI | `src-tauri/src/window_fit.rs` (the clamp), `src-tauri/src/lib.rs` (`.setup`), `src-tauri/tauri.conf.json` (the default size), `docs/qa/PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md` (the measurement rule) |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
 | Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `docs/g1/reuse-decision.md`, `docs/g1/provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
 
