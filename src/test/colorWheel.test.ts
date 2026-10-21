@@ -4,6 +4,7 @@ import {
   resolveWheelHsv,
   wheelPointToHsv,
 } from "../features/color/wheelGeometry";
+import { createWheelState, reduceWheelState } from "../features/color/wheelState";
 
 const SIZE = 148;
 const CENTRE = SIZE / 2;
@@ -115,5 +116,62 @@ describe("which colour the wheel shows", () => {
 
   it("falls back to the stored colour when the wheel has written nothing", () => {
     expect(resolveWheelHsv(stored, requested, null, "#16181c")).toBe(stored);
+  });
+});
+
+describe("the wheel's own state", () => {
+  const requested = { h: 205, s: 0.21, v: 0.11 };
+  /** The 8-bit colour the wheel writes for that request; its own hue is 200. */
+  const wheelColour = "#161a1c";
+  const stored = { h: 200, s: 0.215, v: 0.11 };
+
+  it("keeps the request while the brush holds the colour the wheel wrote", () => {
+    const picked = reduceWheelState(createWheelState("#16181c"), {
+      kind: "picked",
+      hsv: requested,
+      color: wheelColour,
+    });
+    expect(picked.requested).toEqual(requested);
+    expect(picked.written).toBe(wheelColour);
+
+    const settled = reduceWheelState(picked, { kind: "brush-changed", color: wheelColour });
+    expect(settled.requested).toEqual(requested);
+    expect(resolveWheelHsv(stored, settled.requested, settled.written, wheelColour)).toBe(
+      requested,
+    );
+  });
+
+  it("drops the request when the colour is changed somewhere else", () => {
+    const picked = reduceWheelState(createWheelState("#16181c"), {
+      kind: "picked",
+      hsv: requested,
+      color: wheelColour,
+    });
+    const elsewhere = reduceWheelState(picked, { kind: "brush-changed", color: "#ff0000" });
+    expect(elsewhere.requested).toBeNull();
+    expect(elsewhere.written).toBeNull();
+    expect(resolveWheelHsv(stored, elsewhere.requested, elsewhere.written, "#ff0000")).toBe(
+      stored,
+    );
+  });
+
+  it("does not resurrect the request when the colour returns to the wheel's colour", () => {
+    // The round trip that used to leave the wheel on hue 205 while the brush
+    // held a colour whose own hue is 200.
+    const picked = reduceWheelState(createWheelState("#16181c"), {
+      kind: "picked",
+      hsv: requested,
+      color: wheelColour,
+    });
+    const away = reduceWheelState(picked, { kind: "brush-changed", color: "#ff0000" });
+    const back = reduceWheelState(away, { kind: "brush-changed", color: wheelColour });
+    expect(back.requested).toBeNull();
+    expect(back.written).toBeNull();
+    expect(resolveWheelHsv(stored, back.requested, back.written, wheelColour)).toBe(stored);
+  });
+
+  it("leaves the state alone when the brush colour did not change", () => {
+    const state = createWheelState("#16181c");
+    expect(reduceWheelState(state, { kind: "brush-changed", color: "#16181c" })).toBe(state);
   });
 });

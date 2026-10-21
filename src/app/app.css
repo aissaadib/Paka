@@ -30,6 +30,11 @@
 
 .side-panels__layers > .panel {
   flex: 1 1 auto;
+  /* `min-width: 0` is load-bearing: the flex base size of the panel is its
+     max-content width (the layer rows), and the automatic minimum size would
+     keep it from shrinking, so the panel grew past the fixed 216 px grid
+     column and the side panels clipped its header buttons off the window. */
+  min-width: 0;
   min-height: 0;
 }
 

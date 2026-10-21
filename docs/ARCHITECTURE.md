@@ -554,13 +554,19 @@ a *view* of the brush colour, not a second source of truth:
   chosen on the wheel is the colour the next stroke is painted with.
 - The conversion is exact. `rgbToHsv` and `hsvToRgb` are inverses over the
   whole 8-bit sRGB cube, so a colour that came from the app comes back as the
-  same three bytes (verified over all 16,777,216 of them), and the hue a grey
-  has - none - is reported as hue `0` with saturation `0`.
+  same three bytes (verified over all 16,777,216 of them, by the sweep in
+  `src/test/color.test.ts`), and the hue a grey has - none - is reported as hue
+  `0` with saturation `0`.
 - The disc's geometry is fixed in `src/features/color/wheelGeometry.ts` and
   shared with the CSS: hue `0` is at 3 o'clock, the hue grows clockwise (the
   CSS `conic-gradient` is rotated `from 90deg` to match), the centre is
   saturation `0` and the rim is saturation `1`. A drag that leaves the disc
   keeps tracking the pointer's angle and clamps the saturation at the rim.
+  The CSS keeps the same contract: the white overlay is a `closest-side`
+  radial gradient, so it reaches zero exactly at the disc's radius - the
+  radius at which the saturation is `1` - and the colour the disc draws at a
+  point is the colour a click at that point produces. (The outermost
+  one-pixel ring of the disc is the decorative inset, not the hue.)
 
 One subtlety is worth stating, because it is the difference between a control
 that feels right and one that fights the user: the stored colour is 8-bit
@@ -571,6 +577,13 @@ saturation the user *asked for* while the brush holds the colour the wheel
 wrote, and falls back to the stored colour as soon as the colour is changed
 from anywhere else. Without that, dragging the hue slider on a dark colour
 would snap the slider back to a nearby hue on every step.
+
+"Changed from anywhere else" is decided by `src/features/color/wheelState.ts`,
+not by comparing colours. A colour changed elsewhere and then changed back to
+the wheel's last colour is indistinguishable from the wheel's own write, so
+the wheel's state remembers the colour it was last reconciled against, and
+any change of the brush colour that the wheel did not write drops the request
+- once and for good, so a stale hue cannot come back.
 
 Like the rest of the brush, the wheel is session state for the next gesture:
 choosing a colour is not an edit, adds no history step and never marks the

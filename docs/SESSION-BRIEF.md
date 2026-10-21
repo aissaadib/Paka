@@ -6,9 +6,8 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at `ad2ef11` on `main` — the live-preview
-compositing, layer-safety, raster-budget and bounded-rasterization slices — in
-sync with `origin/main`.
+Last verified: **2026-10-21**, at `dbcb446` - the **HSV colour wheel**
+slice, merged into the development branch.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -31,12 +30,12 @@ sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `feat/t10-hsv-color-wheel` (from `feat/stamp-brush-engine` at
-  `9b0a885`), after the live-preview compositing, layer-safety, raster-budget,
-  bounded-rasterization, **stamp (dab) brush engine** and **HSV colour wheel**
-  slices. The colour wheel slice is committed on its own branch, ready for
-  review; it is not merged into `feat/stamp-brush-engine` yet.
-- `pnpm test` → **549 tests in 31 files, all pass** (the colour wheel slice).
+- Branch `integration/t10-hsv-color-wheel` at `bc062c7` — a merge of the
+  colour wheel branch (`dbcb446`) into the development branch — after the
+  live-preview compositing, layer-safety, raster-budget, bounded-
+  rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
+  The colour wheel slice is integrated, not a branch waiting for review.
+- `pnpm test` → **554 tests in 31 files, all pass** (the colour wheel slice).
 - `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
@@ -44,8 +43,8 @@ sync with `origin/main`.
   `stampSpacing` and `stampHardness` are required from v9.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
   built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
-  mode, raster-budget, bounded-rasterization and stamp slices); packaged-app
-  verification is still outstanding.
+  mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
+  packaged-app verification is still outstanding.
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
   stabilizer, grain texture and the stamp (dab) engine shipped; directional or
   per-dab stamp textures remain. Phase 4 has
@@ -58,7 +57,7 @@ sync with `origin/main`.
 
 | Commit | Slice |
 | --- | --- |
-| *(this branch)* | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
+| `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. The reverted commit stays in the history. |
 | `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |
@@ -589,7 +588,7 @@ without changing what current hard, soft, grain and stamped files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 524 tests in 30 files).
+   anything (expect 554 tests in 31 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

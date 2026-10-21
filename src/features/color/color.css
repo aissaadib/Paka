@@ -11,7 +11,13 @@
 /* The disc: a hue ring with the white-to-transparent saturation overlay on
    top of it, so the centre is the colour's own grey and the rim is fully
    saturated. `from 90deg` puts hue 0 at 3 o'clock, which is where
-   `wheelPointToHsv` reads it from. */
+   `wheelPointToHsv` reads it from.
+
+   The overlay is a `closest-side` circle on purpose: its transparent stop
+   then sits exactly on the disc's radius, which is the radius at which the
+   saturation is 1, so the colour the disc draws at a point is the colour a
+   click at that point produces. The default (`farthest-corner`) would put the
+   stop on the corner, 104.65 px out, and leave the rim 29 % white. */
 .color-wheel__disc {
   position: relative;
   width: 148px;
@@ -20,7 +26,7 @@
   cursor: crosshair;
   touch-action: none;
   background:
-    radial-gradient(circle at center, #ffffff 0%, rgba(255, 255, 255, 0) 100%),
+    radial-gradient(circle closest-side at center, #ffffff 0%, rgba(255, 255, 255, 0) 100%),
     conic-gradient(
       from 90deg,
       #ff0000 0deg,

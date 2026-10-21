@@ -65,13 +65,14 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 | `pnpm tauri build --no-bundle` | Release executable only → `src-tauri/target/release/paka.exe`. |
 | `pnpm tauri build` | The above plus MSI/NSIS installers (needs WiX/NSIS downloads). |
 
-## 4. Current state (verified 2026-10-20)
+## 4. Current state (verified 2026-10-21)
 
-- Branch `feat/stamp-brush-engine` (from `main` at `ad2ef11`), after the
-  live-preview compositing, layer-safety, raster-budget, bounded-rasterization
-  and **stamp (dab) brush engine** slices. The stamp slice is **uncommitted**:
-  it is in the working tree, ready for review.
-- **`pnpm test` → 524 tests in 30 files, all pass** (the stamp slice).
+- Branch `integration/t10-hsv-color-wheel` at `bc062c7`, after the
+  live-preview compositing, layer-safety, raster-budget, bounded-rasterization,
+  **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
+  slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
+  merged; nothing is waiting in the working tree.
+- **`pnpm test` → 554 tests in 31 files, all pass** (the colour wheel slice).
   `pnpm typecheck` clean; `pnpm build` succeeds.
 - **Project file format version 9** (`PROJECT_VERSION = 9`).
 - A release executable has been built and launched successfully:
@@ -85,7 +86,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
-| *(this branch)* | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
+| `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. |
 | `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |

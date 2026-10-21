@@ -96,6 +96,28 @@ describe("HSV conversion", () => {
     }
   });
 
+  it("round-trips every one of the 16,777,216 colours of the cube exactly", () => {
+    // The whole cube, not a sample of it: this is the sweep the architecture
+    // note claims, so it has to be here or the claim is not backed. The check
+    // is a plain comparison rather than 16.7M `expect` calls, because the
+    // matcher costs far more than the conversion does.
+    let checked = 0;
+    for (let r = 0; r < 256; r++) {
+      for (let g = 0; g < 256; g++) {
+        for (let b = 0; b < 256; b++) {
+          const back = hsvToRgb(rgbToHsv({ r, g, b }));
+          if (back.r !== r || back.g !== g || back.b !== b) {
+            throw new Error(
+              `rgb(${r}, ${g}, ${b}) came back as rgb(${back.r}, ${back.g}, ${back.b})`,
+            );
+          }
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBe(16_777_216);
+  });
+
   it("wraps a hue into one turn", () => {
     expect(normalizeHue(0)).toBe(0);
     expect(normalizeHue(360)).toBe(0);

@@ -40,7 +40,7 @@ architecture by browsing.
 | `public/` | Static icons only |
 | `src-tauri/gen/` | Generated Tauri schemas, if present |
 | `licenses/*.txt` | Verbatim third-party licence texts; regenerate the notice file, do not read them |
-| All 26 test files | Use the test map in §8 |
+| All 31 test files | Use the test map in §8 |
 | `README.md` end to end | Feature prose duplicates SESSION-BRIEF; open only for user-facing wording |
 | `docs/HANDOFF.md` and `docs/SESSION-BRIEF.md` both, end to end | Read SESSION-BRIEF first; HANDOFF only §7/§8 when you need toolchain or verification detail |
 | `docs/ARCHITECTURE.md` end to end (976 lines) | Read the named section in §6 |
@@ -63,12 +63,12 @@ architecture by browsing.
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
 `floodFill`, `document/types.ts`, `canvas2dStroke`, `stampCoverage`,
 `shapeGeometry`, `strokeBuilder`, `strokeSelection`, `commandStack`,
-`types.ts` (tools),
+`types.ts` (tools), `features/color/wheelGeometry.ts` (102),
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
-commands, tool definitions, `editorStore.ts`, `features/color/wheelGeometry.ts`,
+commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 `scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
@@ -92,7 +92,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L655-760, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1291-1780, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
-| Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
+| Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
@@ -142,8 +142,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
 | `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
-| `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 46, 65, 91 |
-| `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 67, 12 |
+| `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 47, 66, 92 |
+| `createWheelState`, `reduceWheelState` | `features/color/wheelState.ts` | 41, 53 |
+| `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
 
 ## 6. Docs → section
 
@@ -179,6 +180,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
+| Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
 | Brush texture / grain | `canvas2dStroke.test.ts` (`textureCoverage`), `canvas2dRenderer.test.ts` (pattern pass), `projectFormat.test.ts`, `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
 | Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |

@@ -21,6 +21,8 @@ import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { hexToHsv, hsvToHex } from "../../utils/color";
 import type { Hsv } from "../../utils/color";
 import { hsvToWheelPoint, resolveWheelHsv, wheelPointToHsv } from "./wheelGeometry";
+import { createWheelState, reduceWheelState } from "./wheelState";
+import type { WheelState } from "./wheelState";
 
 /** The disc's diameter in CSS pixels; the marker is placed in percentages, so
  * the disc may be restyled to another size without touching the maths. */
@@ -77,16 +79,26 @@ export function ColorWheel() {
   // The hue and saturation the *user* asked for, which are not always the
   // ones the colour can hold; `resolveWheelHsv` decides which of the two the
   // wheel shows.
-  const [requested, setRequested] = useState<Hsv | null>(null);
-  const written = useRef<string | null>(null);
-  const hsv: Hsv = resolveWheelHsv(stored, requested, written.current, brush.color);
+  const [state, setState] = useState<WheelState>(() => createWheelState(brush.color));
+
+  // The brush colour is the authority. When it changes and the wheel did not
+  // write the change, another source did - the toolbar's colour input, a
+  // swatch, the canvas picker - and the request is stale: the wheel would be
+  // showing a hue the brush does not have. The state is reconciled here,
+  // during the render, so the wheel never shows the stale hue at all.
+  let current = state;
+  if (current.observed !== brush.color) {
+    current = reduceWheelState(current, { kind: "brush-changed", color: brush.color });
+    setState(current);
+  }
+
+  const hsv: Hsv = resolveWheelHsv(stored, current.requested, current.written, brush.color);
 
   const marker = hsvToWheelPoint(hsv.h, hsv.s, WHEEL_SIZE);
 
   const apply = (next: Hsv) => {
     const color = hsvToHex(next);
-    written.current = color;
-    setRequested(next);
+    setState((previous) => reduceWheelState(previous, { kind: "picked", hsv: next, color }));
     actions.setBrush({ color });
   };
 
