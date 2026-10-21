@@ -1446,6 +1446,52 @@ describe("Canvas2DRenderer selection overlay", () => {
     expect(composed.named("stroke")).toHaveLength(0);
     expect(composed.named("strokeRect")).toHaveLength(0);
   });
+
+  it("draws the transform handles on the display canvas only", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const harness = createHarness();
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection({
+      bounds: { x: 2, y: 3, width: 40, height: 20 },
+      strokes: [],
+      handles: {
+        corners: [
+          { x: 2, y: 3 },
+          { x: 42, y: 3 },
+          { x: 42, y: 23 },
+          { x: 2, y: 23 },
+        ],
+        rotate: { x: 22, y: -21 },
+      },
+    });
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    // A square on each corner, in the accent colour, eight device pixels wide.
+    const fills = harness.display
+      .named("fillRect")
+      .filter((call) => call.args[2] === 8);
+    expect(fills).toHaveLength(4);
+    expect(fills[0].args).toEqual([-2, -1, 8, 8]);
+    expect(fills[0].fillStyle).toBe("#ffffff");
+    const outlines = harness.display
+      .named("strokeRect")
+      .filter((call) => call.strokeStyle === "#2f7bff" && call.args[2] === 8);
+    expect(outlines).toHaveLength(4);
+
+    // The rotation handle is a circle above the frame's top edge.
+    const arcs = harness.display.named("arc");
+    expect(arcs).toHaveLength(1);
+    expect(arcs[0].args[0]).toBe(22);
+    expect(arcs[0].args[1]).toBe(-21);
+    expect(arcs[0].args[2]).toBe(5);
+
+    // And none of it reaches the export.
+    const composed = harness.composeDocument();
+    expect(composed.named("fillRect").filter((call) => call.args[2] === 8)).toHaveLength(0);
+    expect(composed.named("arc")).toHaveLength(0);
+  });
 });
 
 /**

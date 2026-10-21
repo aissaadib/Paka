@@ -12,6 +12,7 @@ import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
 import type { Guide, GuideAxis, LayerId } from "../document/types";
+import type { SelectionHandleId } from "../document/selectionHandles";
 import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
@@ -65,10 +66,27 @@ export interface ToolContext {
    * `false`, so "no selection" needs no separate query.
    */
   isInsideSelection(docX: number, docY: number): boolean;
+  /**
+   * The transform handle a press grabs, or `null` when it grabs none.
+   *
+   * The select tool asks this **first**: a press on a corner handle starts a
+   * scale and a press on the rotation handle starts a rotation, so the handles
+   * take precedence over the move gesture that a press inside the frame would
+   * otherwise start.
+   */
+  findSelectionHandleAt(docX: number, docY: number): SelectionHandleId | null;
   /** Starts a marquee gesture; the selection itself is decided on release. */
   beginSelection(sample: PointerSample): void;
   /** Starts translating the current selection, dragging from inside it. */
   beginSelectionMove(sample: PointerSample): void;
+  /**
+   * Starts a scale or a rotation, from the handle the press grabbed.
+   *
+   * The transform is about the centre of the selection's frame at this moment,
+   * and it moves the selected strokes' samples only - the brush, the colour and
+   * the pressure are untouched.
+   */
+  beginSelectionTransform(sample: PointerSample, handle: SelectionHandleId): void;
   /**
    * Applies the active selection gesture to a sample: a marquee rubber-band
    * while selecting, or a live translation while moving.

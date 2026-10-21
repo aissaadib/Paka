@@ -8,6 +8,7 @@
  */
 
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
+import type { SelectionHandles } from "../document/selectionHandles";
 import type { Viewport } from "../../types/viewport";
 import type { Bounds } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
@@ -16,7 +17,8 @@ export type RendererKind = "canvas2d" | "webgl" | "webgpu";
 
 /**
  * What the renderer draws *on top of* the document to show a selection: the
- * marquee rectangle and the strokes it currently holds.
+ * marquee rectangle, the strokes it currently holds and the transform handles
+ * they offer.
  *
  * This is UI overlay, not document content - it never appears in an export, and
  * the renderer owns no selection state of its own: the engine decides what is
@@ -28,6 +30,15 @@ export interface RendererSelection {
   readonly bounds: Bounds | null;
   /** Strokes to trace as an accent overlay. */
   readonly strokes: readonly StrokeRecord[];
+  /**
+   * The transform handles, in document space, or `null` when the selection
+   * offers none.
+   *
+   * Overlay only, like the frame and the trace: they are painted on the
+   * display canvas and never reach a layer surface, the document or
+   * `composeDocumentImage`.
+   */
+  readonly handles?: SelectionHandles | null;
 }
 
 /**

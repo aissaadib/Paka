@@ -36,8 +36,8 @@ visual-regression harness.
   live-preview compositing, layer-safety, raster-budget, bounded-
   rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
   The colour wheel slice is integrated, not a branch waiting for review.
-- `pnpm test` → **653 tests in 32 files, all pass** (the composition-guides
-  slice: 588 before it).
+- `pnpm test` → **711 tests in 34 files, all pass** (the scale/rotate slice: 653
+  before it).
 - `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
@@ -61,6 +61,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
 | `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
@@ -128,11 +129,27 @@ visual-regression harness.
   preview element, one undo step, cancel removes it. Two stops only; paints the
   whole layer in element order; no stop editor, no angle snapping.
 - **Selection/transform** (`M`): marquee or click selects whole strokes of the
-  active layer; drag moves them; arrow keys nudge (1 px, `Shift` 10 px,
-  coalesced); `Ctrl+D` duplicates; `Ctrl+Shift+H`/`V` flips; `Delete` removes;
-  `Esc` cancels; all one undo step each and mirrored in the **Selection** menu.
+  active layer; drag moves them; the four **corner handles** scale the
+  selection and the **rotation handle** above the frame turns it; arrow keys
+  nudge (1 px, `Shift` 10 px, coalesced); `Ctrl+D` duplicates;
+  `Ctrl+Shift+H`/`V` flips; `Delete` removes; `Esc` cancels; all one undo step
+  each and mirrored in the **Selection** menu.
   Selection is an overlay only, never serialized or exported, and painting is
   not clipped to it.
+  A **scale** is uniform and about the centre of the selection's frame: the
+  corner keeps its direction from the centre, so dragging away from the centre
+  grows the selection and dragging towards it shrinks it, and the factor is
+  clamped so a selection can never collapse or invert (5 % is the floor). A
+  **rotation** is about the same centre; the angle is the pointer's compass
+  angle clockwise from "up", it **snaps to 15 degrees** while the pointer is
+  held down, and **`Shift` turns the snap off** for a free turn. Both are
+  measured **from where the press landed**, so a press that misses the handle
+  by a little does not jump the content. Both are
+  **baked on apply**: the transform moves the strokes' samples and nothing else,
+  so the brush, the colour, the opacity and the pressure are untouched, a
+  scaled stroke is still the same stroke, and there is **no project-format
+  change**. The handles belong to the **committed selection**: they appear on
+  its frame and never on a marquee's rubber band.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
 - **Composition guides** (`U`): a dedicated **Guides** tool. Drag on empty canvas
@@ -202,7 +219,9 @@ src/
   state/        editorStore (snapshot + intents) and context
   core/
     document/   document/layer metadata, ordered element store, selection,
-                guides (the guide model, geometry and document operations)
+                guides (the guide model, geometry and document operations),
+                selectionTransform (the scale/rotate geometry) and
+                selectionHandles (the transform handles)
     brushes/    defaults/normalization, strokeBuilder (sample capture)
     fill/       pure flood scan, fill-patch record
     gradient/   gradient geometry/stops/cloning
@@ -456,8 +475,10 @@ Product:
   to re-rasterize; the planner stops after a fixed work budget, so an extreme
   stroke is cut short rather than stalling the app.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
-  switch/tool switch, not a painting mask, no scale/rotate/perspective, no
-  copy/paste across layers.
+  switch/tool switch, not a painting mask, no perspective and no non-uniform
+  scale, no copy/paste across layers. A transform is **baked on apply**, so
+  there is no persistent transform to edit afterwards, and the painted width is
+  not scaled with the path.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; no autosave/crash

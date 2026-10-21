@@ -72,8 +72,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
   slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
   merged; nothing is waiting in the working tree.
-- **`pnpm test` → 653 tests in 32 files, all pass** (the composition-guides
-  slice: 588 before it).
+- **`pnpm test` → 711 tests in 34 files, all pass** (the scale/rotate slice: 653
+  before it).
   `pnpm typecheck` clean; `pnpm build` succeeds.
 - **Project file format version 9** (`PROJECT_VERSION = 9`). `document.guides` is
   additive within version 9.
@@ -88,6 +88,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
+| `feat/ff26-transform` | **Scale and rotate a selection** — the select tool's overlay grows four **corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame; the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off**. The transform is **baked on apply** (it moves the strokes' samples and nothing else), so there is **no format change**. One undo step per transform, through the same command as a move. The geometry is pure (`core/document/selectionTransform.ts`, `core/document/selectionHandles.ts`) and unit tested; the handles are display-only. |
 | `feat/t11-guides` | **Composition guides** — a **Guides** tool (`U`) places a vertical or horizontal guide by dragging on empty canvas and moves an existing guide by dragging it; a click selects it, `Delete` removes it, `Esc` cancels a drag. The guide model, the axis heuristic, the rounding, the screen-space grab radius, the hit-test and the duplicate rule live in a pure module (`core/document/guides.ts`). The guides are document state but **display-only**, so the format change is additive and the version stays 9. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
@@ -294,10 +295,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 6. Key files
 
-- `src/core/engine/DrawingEngine.ts` — snapshot/publish, tools, selection state,
-  gesture guards, `shapeFill`, `fillTolerance`, `gradientType`,
-  `gradientEndColor`, and the begin/finish/cancel lifecycles for fills and
-  gradients.
+- `src/core/engine/DrawingEngine.ts` — snapshot/publish, tools, selection state
+  (including the scale and rotation gestures), gesture guards, `shapeFill`,
+  `fillTolerance`, `gradientType`, `gradientEndColor`, and the begin/finish/cancel
+  lifecycles for fills and gradients.
 - `src/core/fill/floodFill.ts` — pure 4-connected scan, tolerance rule,
   transparency rule and `MAX_FILL_SCAN_PIXELS`.
 - `src/core/fill/fillPatch.ts` — `FillPatchRecord` creation and deep cloning.
@@ -329,6 +330,12 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/document/guides.ts` — the pure guide rules: the axis heuristic, the
   integer rounding, the screen-space grab radius, the hit-test, the duplicate
   rule and the document operations.
+- `src/core/document/selectionTransform.ts` — the pure transform geometry: the
+  scale and rotation maps, the factor a pointer asks for, `MIN_SCALE_FACTOR`,
+  the 15-degree angle snap and the selection's frame rule.
+- `src/core/document/selectionHandles.ts` — the pure handle layout: the four
+  corner handles, the rotation handle above the frame, the screen-space grab
+  radius, the hit-test and the cursors.
 - `src/core/tools/guidesTool.ts` — the guides tool: the two gestures (create by
   drag, move by drag) and the click that selects.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
@@ -583,6 +590,23 @@ Optional polish, deliberately not done yet:
   save/reopen of a document with guides is unverified; save/reopen is covered by
   Vitest at the format and lifecycle level. Snapping to guides, grids and rulers
   are not implemented at all.
+- **The scale and rotate of a selection were verified in the browser app**: the
+  four corner handles and the rotation handle appear on the selected frame, the
+  cursor becomes a diagonal resize cursor over a corner and a grab cursor over
+  the rotation handle, dragging a corner out doubles the ink's extent about the
+  frame's centre, dragging the rotation handle a quarter turn turns the ink by a
+  quarter turn, the snapped turn lands on 15 degrees while a `Shift` turn keeps
+  the free angle, a press that misses a handle does not jump the content, and
+  the history depth rises by exactly one per transform. The **packaged Tauri
+  window is unverified**. The PNG export **cannot run in a browser at all** -
+  `File -> Export PNG...` asks the Tauri save dialog, which is absent outside
+  the desktop shell, so the status bar reports *"The export dialog could not be
+  shown"* and no PNG is written. The "the handles never reach an export"
+  property is therefore covered by the **Vitest renderer suite** (the composed
+  image records no handle call) and by the code's structure
+  (`composeDocumentImage()` calls `paintDocument()` only), not by a browser
+  measurement. A native save/reopen of a transformed selection is covered by
+  Vitest at the format level, not by a native round trip.
 - **`cargo test --lib` cannot run** on this toolchain (§7).
 - Product limitations documented in ROADMAP and not planned yet: undo history is
   not stored in the project file (reopening rebuilds one step per element); no

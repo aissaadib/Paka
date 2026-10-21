@@ -120,7 +120,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
-| `src/core/document` | Document and layer metadata, ordered element store | types, utils |
+| `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
@@ -827,12 +827,18 @@ that could drift. Selection is editor state, not document state: it is not
 serialized, it adds no history step, and it never marks the document dirty.
 
 The overlay is **display-only**. The engine hands the renderer
-`{ bounds, strokes }` through `setSelection(...)`; the renderer traces the
-centrelines in blue and draws the frame as a dashed rectangle, after the layers
-and the in-progress stroke and before the document border. It never reaches a
+`{ bounds, strokes, handles }` through `setSelection(...)`; the renderer traces
+the centrelines in blue and draws the frame as a dashed rectangle, after the
+layers and the in-progress stroke and before the document border. It never reaches a
 layer surface and `composeDocumentImage` (and therefore PNG export) never sees it.
 
-Two gestures, chosen on press by `isInsideSelection`:
+The **handles belong to the committed selection**, never to the marquee's rubber
+band: while a band is being dragged the overlay shows the band and no handles,
+and the handles appear only for a real selection, on the frame derived from the
+strokes. A handle drawn on the band would be a lie anyway - the hit test uses
+the committed selection, so it could not be grabbed.
+
+Four gestures, chosen on press:
 
 - **Marquee** - drag anywhere outside the frame. The rubber band is live in the
   overlay; the committed selection is decided on release and re-derived from the
@@ -848,6 +854,67 @@ Two gestures, chosen on press by `isInsideSelection`:
   accumulation drift. Cancelling (a lost capture, a tool switch, `Esc`) writes
   the originals back and records nothing, and a press inside the frame that never
   moved records nothing either.
+- **Scale** - drag one of the four **corner handles**. The scale is **uniform**
+  and is about the **centre of the selection's frame**, taken when the gesture
+  starts. The corner keeps its direction from the centre: the factor is the
+  pointer's distance *along that direction* relative to the corner's own
+  distance, so dragging away from the centre grows the selection, dragging
+  towards it shrinks it, and dragging across the diagonal changes nothing. That
+  is the rule a proportional corner handle follows in a vector editor, and it is
+  what keeps the scale uniform. The factor is clamped to `MIN_SCALE_FACTOR`
+  (5 %): a drag through the centre must not collapse the selection or mirror it.
+- **Rotate** - drag the **rotation handle**, the circle above the frame's top
+  edge. The rotation is about the same centre, and the angle is the pointer's
+  compass angle measured clockwise from "up". The angle **snaps to 15 degrees**
+  while the pointer is held down, and **Shift turns the snap off** so the turn
+  can be free.
+
+Both transforms are measured **from where the press landed**, not from the
+pointer alone. The grab radius is 10 screen pixels, so a press may land up to
+that far from the handle it grabs; reading the pointer's angle or factor
+directly would jump the content at the press, before the user has moved
+anything. The scale is therefore `1 + (the pointer's factor − the press's
+factor)` and the rotation is the *change* of the compass angle since the press
+(wrapped to the shortest way round). The rates are unchanged: dragging the
+pointer one corner-distance further out still doubles the selection.
+
+The handles win over the move: they sit on the frame's corners, which are
+inside the frame, so a press on a corner would otherwise start a translation.
+Grabbing a handle is an explicit "transform this", and it is checked first.
+
+A scale and a rotation are **baked on apply**, exactly like a move: the
+transform is a coordinate map over the selected strokes' *samples*, and the
+strokes are committed as they are. There is no persistent transform, no new
+element kind and no project-format change, because a stroke stays
+self-describing: the same brush, the same colour, the same opacity, the same
+pressure and the same number of samples, just at new positions. A transform
+never changes a stroke's brush, so the painted width is *not* scaled with it -
+the frame of a scaled selection is the scaled frame of its samples plus the
+same padding, not the scaled frame.
+
+The transform geometry is **pure and DOM-free**
+(`core/document/selectionTransform.ts`): the scale and rotation maps, the
+factor and the angle a pointer asks for, the two rules that measure a drag
+**from the press** (`scaleFactorFrom`, `rotationAngleFrom`), the clamps, the
+angle snap, and the rule that says where the selection's frame is.
+`core/document/selectionHandles.ts` owns the handles' layout and their hit
+test. The engine holds no transform state of its own: the frame it draws is
+**derived from the strokes**, so after a transform the overlay shows the new
+frame and the handles sit on its new corners.
+
+The snap's tie - exactly 7.5 degrees between two steps - breaks **away from
+zero**, so +7.5 degrees snaps to +15 and -7.5 to -15: a clockwise turn and its
+counter-clockwise twin must not land on different angles. A factor that is not
+a number at all is refused differently from a small one: the selection
+**stays where it is** (the identity) rather than being shrunk to 5 %, because a
+selection that suddenly shrank is a surprise and one that did not move is not.
+
+A transform is one undo step, through the same command as the move and the
+flip: `createTransformStrokesCommand` runs the map over the copies taken
+before the gesture, so `apply` is the committed result and `revert` writes the
+originals back. A transform that moves nothing is **refused** rather than
+recorded - a scale or a turn of a single dab maps every sample onto itself, and
+an undo step whose undo does nothing reads as a broken undo button.
 
 Three menu/keyboard transforms reuse the same "copy the originals, edit stroke
 data, push one command" machinery:
@@ -904,7 +971,23 @@ does not exist.
 The cost of the live move is honest: one full layer re-rasterization per pointer
 move. That is the price of never showing a preview that could differ from the
 committed result; caching the moved strokes' pixels is the obvious optimisation
-if a heavy layer makes dragging lag.
+if a heavy layer makes dragging lag. A scale and a rotation cost the same: the
+transform is written over the samples and the layer is re-rasterized, so the
+pixels on screen are always what a re-rasterization would produce.
+
+Two limits are worth stating plainly, because they follow from baking the
+transform on apply:
+
+- **A transform is about the frame's centre at the moment the gesture starts.**
+  A rotation can move that centre - the axis-aligned envelope of a turned
+  selection is not centred on the point it turned around - so a *second*
+  rotation is about the new frame's centre, not the first one's. The same is
+  true of the flip, which has always had this property.
+- **A scaled stroke is not literally the stroke redrawn at the new size.** A
+  redraw samples the path at the brush's spacing, so it would have more
+  samples. What *is* guaranteed is that the scaled stroke is an ordinary
+  stroke whose samples are the transformed ones, so it re-rasterizes, reopens,
+  undoes, redoes and exports exactly like any other.
 
 ### Composition guides
 
@@ -1242,7 +1325,12 @@ keep it from churning. Two things deliberately bypass React:
 
 - **Cursor position and pressure** are written imperatively through
   `engine.subscribeCursor`, because they change on every pointer move.
-- **The canvas cursor style** is applied in an effect keyed on the tool id.
+- **The canvas cursor style** is applied from the same cursor stream, because a
+  tool can ask for a more specific cursor than its own: the select tool's
+  transform handles want a diagonal resize cursor and the rotation handle a grab
+  cursor. The engine recomputes that answer on every pointer move **and on
+  every viewport change** - a zoom moves the handles, so a cursor that still
+  claimed a resize cursor would be lying.
 
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
@@ -1387,9 +1475,24 @@ DOM-free by design.
   refused instead of recorded, undo and redo refusing to run mid-drag, and every
   transform refusing to run with
   nothing selected. The
+  transform geometry has its own pure suite: the scale about a centre, the
+  rotation about a centre, the clamps (a selection can neither collapse nor
+  invert), the 15-degree angle snap and the free angle `Shift` asks for, the
+  factor a pointer asks for, and the selection's frame **after** a transform -
+  which is the frame of the transformed samples plus the same padding, because a
+  transform never changes a stroke's brush. The handle suite pins the corner
+  positions, the rotation handle on the centre's ray, the grab radius and the
+  nearest-handle-wins rule. The engine suite drives the scale and the rotation
+  through the same pointer entry point: one undo step, exact undo and redo, the
+  brush and the pressures untouched, the frame and the handles following the
+  transformed strokes, a cancel restoring the originals and recording nothing, a
+  transform that would change nothing being refused, and the transformed stroke
+  surviving a save and reopen.
+  The
   renderer suite asserts the overlay stream: the trace and the dashed frame come
   after the layers and before the solid border, `setSelection(null)` leaves only
-  the border, and the exported composite contains neither.
+  the border, the handles are painted on the display canvas only, and the
+  exported composite contains neither the frame nor the handles.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
@@ -1425,7 +1528,19 @@ dragging from inside the frame moves the ink to the new position and leaves the
 old position as paper while the history depth rises by exactly one, `Esc` clears
 the frame and the trace without moving anything, `Delete` removes the selected
 strokes and undo restores them, and undo/redo of the move returns the ink to the
-exact original and moved positions. Stroke compositing is verified that way
+exact original and moved positions. The transform handles are verified the same
+way: the four corner squares and the rotation circle appear on the selected
+frame, the cursor becomes a diagonal resize cursor over a corner and a grab
+cursor over the rotation handle, dragging a corner out doubles the ink's extent
+about the frame's centre and the history depth rises by exactly one, dragging
+the rotation handle a quarter turn turns the ink by a quarter turn, the
+snapped turn lands on 15 degrees while a `Shift` turn keeps the free angle,
+and a press that misses a handle does not jump the content. The PNG export
+**cannot run in a browser** - it asks the Tauri save dialog, which is absent
+outside the desktop shell - so "the handles never reach an export" is covered
+by the renderer unit suite and by `composeDocumentImage()` calling
+`paintDocument()` only, not by a browser measurement.
+Stroke compositing is verified that way
 against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
 that retraces itself is pixel-identical in its retraced and single-covered
 parts, two separate strokes that overlap do build up, and the live composite
@@ -1474,21 +1589,26 @@ These are real gaps, not footnotes:
   text tool. A bucket
   fill writes a region; a gradient is a two-stop linear/radial colour function,
   not an editable gradient with draggable stops.
-- **Selection is stroke-level, layer-scoped and limited to translation,
-  duplication and reflection.** A marquee
+- **Selection is stroke-level, layer-scoped and limited to translation, scaling,
+  rotation, duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
   layer or the tool changes. **Fill patches and gradients are not selectable** -
   the stroke-only view deliberately filters them out - so they can only be
   undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
   feathering,
-  no clipping, and no scale, rotate or perspective; duplicate stays on the layer
-  (there is no cross-layer copy/paste). The frame is the selected strokes'
+  no clipping, no perspective and no non-uniform scale; duplicate stays on the
+  layer (there is no cross-layer copy/paste). The frame is the selected strokes'
   bounding box, not the region that was dragged.
+- **A transform is baked on apply.** A scaled or turned selection is committed
+  as new sample positions, so there is no persistent transform to edit later,
+  and the painted width is not scaled with the path - a transform changes where
+  a stroke was drawn, not how wide it is.
 - **A live selection move re-rasterizes the whole layer per pointer move.** The
   element list stays authoritative and the pixels are rebuilt from it, which is
   why the drag can never drift from the committed result; caching the moved
   strokes is the optimisation to reach for if a heavy layer makes dragging lag.
+  A scale and a rotation cost the same.
 - **Shapes are stroke outlines, not vectors.** A committed shape is stored as
   ordinary stroke samples and cannot be recognised or edited as a rectangle
   afterwards; a filled shape is the same samples plus a `fill` flag, so there is

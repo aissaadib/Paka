@@ -71,6 +71,27 @@ import {
   roundGuidePosition,
   setGuidePosition,
 } from "../document/guides";
+import {
+  cornerOf,
+  findSelectionHandle,
+  HANDLE_CURSORS,
+  HANDLE_GRAB_RADIUS_PX,
+  ROTATION_HANDLE_OFFSET_PX,
+  selectionHandles,
+  type SelectionHandleId,
+  type SelectionHandles,
+} from "../document/selectionHandles";
+import {
+  boundsCentre,
+  clampScaleFactor,
+  createRotateTransform,
+  createScaleTransform,
+  rotationAngleFrom,
+  scaleFactorFrom,
+  selectionFrame,
+  snapRotationAngle,
+  type SampleTransform,
+} from "../document/selectionTransform";
 import { StrokeStore } from "../document/strokeStore";
 import {
   boundsContainPoint,
@@ -111,9 +132,9 @@ import type { DrawingRenderer, StrokeSource } from "../rendering/types";
 import {
   ZOOM_STEP,
   centerOn,
-  docToScreen,
   fitToViewport,
   panBy,
+  screenToDoc,
   zoomAt,
   zoomToAt,
 } from "../rendering/viewport";
@@ -274,32 +295,13 @@ function shapeBrush(brush: BrushSettings): BrushSettings {
 }
 
 /**
- * Union of the *painted* bounds of `strokes`, or `null` when there are none.
+ * The union of the painted bounds of `strokes`, or `null` when there are none.
  *
- * Each stroke is widened by half its maximum diameter, because the pixels of a
- * stroke reach that far from its centreline and a frame hugging the centreline
- * would cut through wide brush work. The result is derived on demand from the
- * strokes rather than remembered, which is what keeps the frame correct after a
- * move, an undo or a redo without any state to keep in step.
+ * The rule itself lives in `core/document/selectionTransform.ts`, which is
+ * pure; the brush knowledge stays here, where the diameter is known.
  */
 function boundsOfStrokes(strokes: readonly StrokeRecord[]): Bounds | null {
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  for (const stroke of strokes) {
-    const padding = strokeDiameter(stroke.brush, 1) / 2;
-    for (let index = 0; index < stroke.xs.length; index += 1) {
-      minX = Math.min(minX, stroke.xs[index] - padding);
-      minY = Math.min(minY, stroke.ys[index] - padding);
-      maxX = Math.max(maxX, stroke.xs[index] + padding);
-      maxY = Math.max(maxY, stroke.ys[index] + padding);
-    }
-  }
-  if (minX > maxX || minY > maxY) {
-    return null;
-  }
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  return selectionFrame(strokes, (stroke) => strokeDiameter(stroke.brush, 1) / 2);
 }
 
 /**
@@ -320,21 +322,78 @@ interface Selection {
 /**
  * An in-flight selection gesture.
  *
- * `marquee` carries a live rubber-band rectangle; `move` carries the strokes
- * being translated together with their pre-gesture coordinates, which is what
- * makes the move both previewable and exactly reversible.
+ * Four gestures, one per thing the select tool can do with a selection:
+ *
+ *  - `marquee` carries a live rubber-band rectangle;
+ *  - `move` carries the strokes being translated together with their
+ *    pre-gesture coordinates, which is what makes the move both previewable
+ *    and exactly reversible;
+ *  - `scale` and `rotate` carry the same pre-gesture copies plus the frame
+ *    the transform is about. The frame is captured when the gesture starts,
+ *    so the centre of the transform cannot drift while the drag runs.
  */
-interface SelectionGesture {
-  readonly mode: "marquee" | "move";
+interface MarqueeGesture {
+  readonly mode: "marquee";
   readonly anchor: Point;
-  /** Marquee only: the rubber band, replaced on every move. */
+  /** The rubber band, replaced on every move. */
   bounds: Bounds | null;
-  /** Move only: the selected strokes and their original coordinates. */
+}
+
+interface MoveGesture {
+  readonly mode: "move";
+  readonly anchor: Point;
+  /** The selected strokes and their original coordinates. */
   readonly entries: readonly MoveEntry[];
-  /** Move only: the translation applied so far, in document pixels. */
+  /** The translation applied so far, in document pixels. */
   dx: number;
   dy: number;
 }
+
+interface ScaleGesture {
+  readonly mode: "scale";
+  /** The selected strokes and their original coordinates. */
+  readonly entries: readonly MoveEntry[];
+  /** The centre of the frame the gesture started on: the point it scales about. */
+  readonly centre: Point;
+  /** The corner the press grabbed, at gesture start. */
+  readonly corner: Point;
+  /** The handle the press grabbed, for the cursor and the overlay. */
+  readonly handle: SelectionHandleId;
+  /**
+   * Where the press landed, in document space.
+   *
+   * The drag is measured from here, so a press that missed the handle by a
+   * little does not jump the content.
+   */
+  readonly press: Point;
+  /** The factor applied so far. */
+  factor: number;
+  /** The pointer's document position, for the handle that follows it. */
+  pointer: Point;
+}
+
+interface RotateGesture {
+  readonly mode: "rotate";
+  /** The selected strokes and their original coordinates. */
+  readonly entries: readonly MoveEntry[];
+  /** The centre of the frame the gesture started on: the point it turns about. */
+  readonly centre: Point;
+  /** The handle the press grabbed, for the cursor and the overlay. */
+  readonly handle: SelectionHandleId;
+  /**
+   * Where the press landed, in document space.
+   *
+   * The drag is measured from here, so a press that missed the handle by a
+   * little does not jump the content.
+   */
+  readonly press: Point;
+  /** The angle applied so far, in radians, clockwise from up. */
+  angle: number;
+  /** The pointer's document position, for the handle that follows it. */
+  pointer: Point;
+}
+
+type SelectionGesture = MarqueeGesture | MoveGesture | ScaleGesture | RotateGesture;
 
 /**
  * A fill whose pixels are already on the layer but whose history step has not
@@ -531,8 +590,11 @@ export class DrawingEngine implements StrokeSource {
       cancelShape: () => engine.cancelShape(),
       isStrokeActive: () => engine.activeStroke !== null,
       isInsideSelection: (docX, docY) => engine.isInsideSelection(docX, docY),
+      findSelectionHandleAt: (docX, docY) => engine.findSelectionHandleAt(docX, docY),
       beginSelection: (sample) => engine.beginSelection(sample),
       beginSelectionMove: (sample) => engine.beginSelectionMove(sample),
+      beginSelectionTransform: (sample, handle) =>
+        engine.beginSelectionTransform(sample, handle),
       updateSelection: (sample) => engine.updateSelection(sample),
       finishSelection: () => engine.finishSelection(),
       cancelSelection: () => engine.cancelSelection(),
@@ -1667,6 +1729,22 @@ export class DrawingEngine implements StrokeSource {
     return bounds !== null && boundsContainPoint(bounds, docX, docY);
   }
 
+  /**
+   * The transform handle a press grabs, or `null` when it grabs none.
+   *
+   * The grab radius is screen-space, so the engine converts it with the live
+   * zoom: a handle is equally easy to grab at 2 % and at 6400 %. There are no
+   * handles without a selection, so a press on empty canvas never starts a
+   * transform by accident.
+   */
+  findSelectionHandleAt(docX: number, docY: number): SelectionHandleId | null {
+    const handles = this.selectionHandleLayout(this.selectionBounds());
+    if (!handles) {
+      return null;
+    }
+    return findSelectionHandle(handles, docX, docY, this.handleGrabRadius());
+  }
+
   /** Drops the selection and its overlay. Not an edit: nothing enters history. */
   clearSelection(): void {
     this.cancelSelectionGesture();
@@ -1872,9 +1950,6 @@ export class DrawingEngine implements StrokeSource {
       mode: "marquee",
       anchor: { x: sample.docX, y: sample.docY },
       bounds: { x: sample.docX, y: sample.docY, width: 0, height: 0 },
-      entries: [],
-      dx: 0,
-      dy: 0,
     };
     this.syncSelectionOverlay();
     this.requestRender();
@@ -1904,10 +1979,78 @@ export class DrawingEngine implements StrokeSource {
     this.selectionGesture = {
       mode: "move",
       anchor: { x: sample.docX, y: sample.docY },
-      bounds: null,
       entries,
       dx: 0,
       dy: 0,
+    };
+  }
+
+  /**
+   * Starts a scale or a rotation, from the handle the press grabbed.
+   *
+   * The frame is captured **now**, and it is the frame the transform is about:
+   * the centre of that frame is the point the content turns or grows around,
+   * and the corner the press grabbed is the point the scale is measured
+   * against. Neither may move while the drag runs, or the content would drift
+   * under the pointer.
+   *
+   * As with the move, each selected stroke's coordinates are copied up front:
+   * the copies are the live preview's reference and, on release, the history
+   * command's revert value. A transform moves the samples and nothing else -
+   * the brush, the colour, the opacity and the pressure are untouched - so a
+   * scaled stroke is still an ordinary stroke.
+   */
+  private beginSelectionTransform(sample: PointerSample, handle: SelectionHandleId): void {
+    const selection = this.selection;
+    if (!selection || !this.usableSelectionPoint(sample)) {
+      return;
+    }
+    this.cancelSelectionGesture();
+    const entries: MoveEntry[] = [];
+    for (const stroke of this.selectedStrokes()) {
+      entries.push({ stroke, original: copyStrokeSamples(stroke) });
+    }
+    if (entries.length === 0) {
+      return;
+    }
+    const frame = this.selectionBounds();
+    if (!frame) {
+      return;
+    }
+    const handles = selectionHandles(frame, this.rotationHandleOffset());
+    if (!handles) {
+      // A frame with no area has no corner to pull and no direction to turn
+      // around, so there is nothing to transform.
+      return;
+    }
+    const centre = boundsCentre(frame);
+    const pointer = { x: sample.docX, y: sample.docY };
+    this.beginGesture();
+    if (handle === "rotate") {
+      this.selectionGesture = {
+        mode: "rotate",
+        entries,
+        centre,
+        handle,
+        press: pointer,
+        angle: 0,
+        pointer,
+      };
+      return;
+    }
+    const corner = cornerOf(handles, handle);
+    if (!corner) {
+      return;
+    }
+    this.selectionGesture = {
+      mode: "scale",
+      entries,
+      centre,
+      corner,
+      handle,
+      press: pointer,
+      factor: 1,
+      pointer,
     };
   }
 
@@ -1921,6 +2064,10 @@ export class DrawingEngine implements StrokeSource {
    * committed until release. The cost is a full layer re-rasterization per
    * pointer move; it is the price of never showing a preview that could differ
    * from the committed result (see the limitations in `docs/ARCHITECTURE.md`).
+   *
+   * A scale and a rotation write the transform's map over the same copies, so
+   * the preview is the committed result: the transform is always recomputed
+   * from the originals, never from the current state, and it cannot drift.
    */
   private updateSelection(sample: PointerSample): void {
     const gesture = this.selectionGesture;
@@ -1932,6 +2079,40 @@ export class DrawingEngine implements StrokeSource {
       gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
       this.syncSelectionOverlay();
       this.requestRender();
+      return;
+    }
+
+    if (gesture.mode === "scale") {
+      const pointer = { x: sample.docX, y: sample.docY };
+      // Measured from where the press landed: the pointer may be up to a grab
+      // radius off the handle, and an absolute reading would jump the content
+      // at the press.
+      const factor = clampScaleFactor(
+        scaleFactorFrom(gesture.centre, gesture.corner, gesture.press, pointer),
+      );
+      gesture.pointer = pointer;
+      if (factor === gesture.factor) {
+        return;
+      }
+      gesture.factor = factor;
+      this.applyTransformGesture(gesture.entries, createScaleTransform(gesture.centre, factor));
+      return;
+    }
+
+    if (gesture.mode === "rotate") {
+      const pointer = { x: sample.docX, y: sample.docY };
+      // The turn since the press, not the pointer's angle: a press that missed
+      // the handle must not turn the content.
+      const turn = rotationAngleFrom(gesture.centre, gesture.press, pointer);
+      // The snap is on by default and Shift turns it **off**, so the user can
+      // turn freely when the 15 degree steps get in the way.
+      const angle = sample.modifiers.shift ? turn : snapRotationAngle(turn);
+      gesture.pointer = pointer;
+      if (angle === gesture.angle) {
+        return;
+      }
+      gesture.angle = angle;
+      this.applyTransformGesture(gesture.entries, createRotateTransform(gesture.centre, angle));
       return;
     }
 
@@ -1950,6 +2131,24 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
+   * Writes a transform's map over the gesture's copies and repaints.
+   *
+   * The map runs over the **originals**, so the preview is always the result
+   * the history command would produce and repeated pointer moves cannot
+   * compound a rounding error.
+   */
+  private applyTransformGesture(
+    entries: readonly MoveEntry[],
+    transform: SampleTransform,
+  ): void {
+    for (const entry of entries) {
+      transformStrokeSamples(entry.stroke, entry.original, transform);
+    }
+    this.refreshStrokeLayers(entries);
+    this.syncSelectionOverlay();
+  }
+
+  /**
    * Commits the in-flight gesture.
    *
    * A marquee selects every stroke of the active layer it meets, or clears the
@@ -1958,6 +2157,11 @@ export class DrawingEngine implements StrokeSource {
    * A move records one history step; a press inside the selection that never
    * moved records nothing at all, so a stray click cannot leave an undo step
    * that appears to do nothing.
+   *
+   * A scale and a rotation record one history step too, and only when they
+   * moved something: a turn of a symmetric selection, or a scale of a single
+   * dab, maps every sample onto itself, and an undo step whose undo does
+   * nothing reads as a broken undo button.
    */
   private finishSelection(): void {
     const gesture = this.selectionGesture;
@@ -1972,6 +2176,26 @@ export class DrawingEngine implements StrokeSource {
       );
       this.syncSelectionOverlay();
       this.publish();
+      this.requestRender();
+      return;
+    }
+
+    if (gesture.mode === "scale" || gesture.mode === "rotate") {
+      const transform =
+        gesture.mode === "scale"
+          ? createScaleTransform(gesture.centre, gesture.factor)
+          : createRotateTransform(gesture.centre, gesture.angle);
+      if (!transformChangesSamples(gesture.entries, transform)) {
+        this.syncSelectionOverlay();
+        this.requestRender();
+        return;
+      }
+      this.revision += 1;
+      this.commands.push(
+        createTransformStrokesCommand(gesture.entries, transform, this.commandHost),
+      );
+      this.publish();
+      this.syncSelectionOverlay();
       this.requestRender();
       return;
     }
@@ -1992,9 +2216,10 @@ export class DrawingEngine implements StrokeSource {
    * Aborts the in-flight gesture.
    *
    * A marquee simply disappears - the committed selection was never touched, so
-   * there is nothing to put back. A move restores every stroke's original
-   * coordinates and re-rasterizes, which is exact because the originals were
-   * copied rather than derived.
+   * there is nothing to put back. A move, a scale and a rotation restore every
+   * stroke's original coordinates and re-rasterize, which is exact because the
+   * originals were copied rather than derived. A cancelled transform records
+   * nothing at all.
    */
   private cancelSelection(): void {
     const gesture = this.selectionGesture;
@@ -2002,7 +2227,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.selectionGesture = null;
-    if (gesture.mode === "move") {
+    if (gesture.mode !== "marquee") {
       for (const entry of gesture.entries) {
         writeStrokeSamples(entry.stroke, entry.original);
       }
@@ -2135,6 +2360,14 @@ export class DrawingEngine implements StrokeSource {
    * about to replace. Otherwise the committed strokes are traced inside their
    * own bounds. Strokes are passed as data: the renderer traces what it is
    * given and never looks the selection up itself.
+   *
+   * The transform **handles** come with it. They belong to the **committed
+   * selection**, never to the marquee's rubber band: while a band is being
+   * dragged the overlay shows the band, and the handles appear only for a real
+   * selection - on the frame derived from the strokes, so after a transform
+   * they sit on the selection's new corners. While a transform gesture runs,
+   * the handle the pointer grabbed follows the pointer, which is what makes
+   * the drag feel attached to the cursor.
    */
   private syncSelectionOverlay(): void {
     const renderer = this.renderer;
@@ -2147,7 +2380,64 @@ export class DrawingEngine implements StrokeSource {
       renderer.setSelection(null);
       return;
     }
-    renderer.setSelection({ bounds: marquee ?? boundsOfStrokes(strokes), strokes });
+    // The committed selection's own frame. It is the frame the handles belong
+    // to, and it is not the rubber band.
+    const selectionFrame = boundsOfStrokes(strokes);
+    renderer.setSelection({
+      bounds: marquee ?? selectionFrame,
+      strokes,
+      handles: marquee === null ? this.selectionHandleLayout(selectionFrame) : null,
+    });
+  }
+
+  /**
+   * The transform handles of the current selection, in document space.
+   *
+   * There are none without a selection, and none for a frame with no area: a
+   * single point has no corner to pull and no direction to turn around.
+   */
+  private selectionHandleLayout(bounds: Bounds | null): SelectionHandles | null {
+    if (!bounds) {
+      return null;
+    }
+    const handles = selectionHandles(bounds, this.rotationHandleOffset());
+    if (!handles) {
+      return null;
+    }
+    const gesture = this.selectionGesture;
+    if (!gesture || (gesture.mode !== "scale" && gesture.mode !== "rotate")) {
+      return handles;
+    }
+    // The grabbed handle follows the pointer while the drag runs.
+    if (gesture.mode === "rotate") {
+      return { corners: handles.corners, rotate: gesture.pointer };
+    }
+    const ids: SelectionHandleId[] = ["scale-nw", "scale-ne", "scale-se", "scale-sw"];
+    const index = ids.indexOf(gesture.handle);
+    if (index < 0) {
+      return handles;
+    }
+    const corners = [...handles.corners];
+    corners[index] = gesture.pointer;
+    return { corners, rotate: handles.rotate };
+  }
+
+  /** The rotation handle's distance above the frame, in document units. */
+  private rotationHandleOffset(): number {
+    const zoom = this.viewport.zoom;
+    if (!Number.isFinite(zoom) || zoom <= 0) {
+      return ROTATION_HANDLE_OFFSET_PX;
+    }
+    return ROTATION_HANDLE_OFFSET_PX / zoom;
+  }
+
+  /** The grab radius of a handle, in document units. */
+  private handleGrabRadius(): number {
+    const zoom = this.viewport.zoom;
+    if (!Number.isFinite(zoom) || zoom <= 0) {
+      return HANDLE_GRAB_RADIUS_PX;
+    }
+    return HANDLE_GRAB_RADIUS_PX / zoom;
   }
 
   /**
@@ -2618,17 +2908,55 @@ export class DrawingEngine implements StrokeSource {
       kind: sample.kind,
       pressure: sample.pressure,
       hasPressure: sample.hasPressure,
+      cursor: this.cursorFor(sample.docX, sample.docY),
     };
     this.emitCursor(this.cursor);
   }
 
+  /**
+   * The CSS cursor to show at a document position.
+   *
+   * The tool's own cursor, except under the select tool's transform handles:
+   * a corner handle asks for the diagonal resize cursor and the rotation
+   * handle for a grab cursor, which is what tells the user that the press
+   * will transform rather than move. While a transform gesture runs the
+   * grabbed handle keeps its cursor, so it does not flicker when the pointer
+   * leaves the handle.
+   */
+  private cursorFor(docX: number, docY: number): string {
+    const tool = this.activeTool();
+    if (this.currentToolId !== "select") {
+      return tool.cursor;
+    }
+    const gesture = this.selectionGesture;
+    if (gesture?.mode === "scale" || gesture?.mode === "rotate") {
+      return HANDLE_CURSORS[gesture.handle];
+    }
+    const handle = this.findSelectionHandleAt(docX, docY);
+    return handle === null ? tool.cursor : HANDLE_CURSORS[handle];
+  }
+
+  /**
+   * Re-emits the cursor after a viewport change.
+   *
+   * The pointer has not moved, but the viewport has: the document point under
+   * it is a different one now, and so is the answer to "is a handle under the
+   * pointer?". A zoom moves the handles, so a cursor that still claimed a
+   * resize cursor would be lying. Both the position and the cursor are
+   * therefore recomputed from the pointer's *screen* position.
+   */
   private republishCursor(): void {
     const cursor = this.cursor;
     if (!cursor) {
       return;
     }
-    const screen = docToScreen(this.viewport, cursor.docX, cursor.docY);
-    this.cursor = { ...cursor, screenX: screen.x, screenY: screen.y };
+    const doc = screenToDoc(this.viewport, cursor.screenX, cursor.screenY);
+    this.cursor = {
+      ...cursor,
+      docX: doc.x,
+      docY: doc.y,
+      cursor: this.cursorFor(doc.x, doc.y),
+    };
     this.emitCursor(this.cursor);
   }
 

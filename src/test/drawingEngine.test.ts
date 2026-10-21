@@ -17,11 +17,13 @@ import {
 } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
+import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
 import { isFillPatch, isGradient } from "../core/document/types";
 import type { Guide } from "../core/document/types";
-import type { PointerSample } from "../types/pointer";
+import type { CursorReport, PointerSample } from "../types/pointer";
+import type { Bounds, Point } from "../types/geometry";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {  return {
     phase: "move",
@@ -1849,6 +1851,414 @@ describe("DrawingEngine selection", () => {
     // The centre line is y = 125, so y becomes 250 - y and x is untouched.
     expectClose(engine.listStrokes(layerId)[0].xs, originalXs);
     expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => 250 - y));
+  });
+
+  /** The painted frame of a stroke: its samples' bounds plus half the brush. */
+  function paintedFrame(xs: readonly number[], ys: readonly number[]): Bounds {
+    const padding = DEFAULT_BRUSH.size / 2;
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return {
+      x: minX - padding,
+      y: minY - padding,
+      width: maxX - minX + padding * 2,
+      height: maxY - minY + padding * 2,
+    };
+  }
+
+  /** Presses a handle, drags it to `to` and releases it. */
+  function dragHandle(
+    engine: DrawingEngine,
+    from: Point,
+    to: Point,
+    modifiers: PointerSample["modifiers"] = { shift: false, alt: false, ctrl: false, meta: false },
+  ): void {
+    engine.handlePointerSample(createSample({ phase: "down", docX: from.x, docY: from.y }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to.x, docY: to.y, modifiers }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to.x, docY: to.y, modifiers }),
+    );
+  }
+
+  /** A selected horizontal stroke, ready to be transformed. */
+  function selectStroke(): {
+    engine: DrawingEngine;
+    spy: ReturnType<typeof createSpyRenderer>;
+    layerId: string;
+    frame: Bounds;
+    centre: Point;
+    xs: number[];
+    ys: number[];
+    /** The brush and the pressures, copied before the gesture. */
+    brush: StrokeRecord["brush"];
+    pressures: number[];
+    /** The stroke's identity, copied before the gesture. */
+    id: string;
+    startTime: number;
+    depth: number;
+  } {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    const stroke = engine.listStrokes(layerId)[0];
+    const xs = [...stroke.xs];
+    const ys = [...stroke.ys];
+    const frame = paintedFrame(xs, ys);
+    return {
+      engine,
+      spy,
+      layerId,
+      frame,
+      centre: { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 },
+      xs,
+      ys,
+      brush: { ...stroke.brush },
+      pressures: [...stroke.pressures],
+      id: stroke.id,
+      startTime: stroke.startTime,
+      depth: engine.getState().history.depth,
+    };
+  }
+
+  it("scales the selection about its frame's centre and records one undo step", () => {
+    const { engine, layerId, frame, centre, xs, ys, brush, pressures, id, startTime, depth } =
+      selectStroke();
+    // The south-east corner handle.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+
+    const scaled = engine.listStrokes(layerId)[0];
+    scaled.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(centre.x + (xs[index] - centre.x) * 2, 6);
+    });
+    scaled.ys.forEach((y, index) => {
+      expect(y).toBeCloseTo(centre.y + (ys[index] - centre.y) * 2, 6);
+    });
+    // One step for the whole drag.
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    // The transform moves the samples and nothing else: the brush, the
+    // pressures and the sample count are the ones the stroke was drawn with.
+    // The comparison is against the copies taken *before* the gesture, not
+    // against the stroke itself, which would be true by construction.
+    expect(scaled.brush).toEqual(brush);
+    expect(scaled.pressures).toEqual(pressures);
+    expect(scaled.times).toHaveLength(xs.length);
+    expect(scaled.id).toBe(id);
+    expect(scaled.startTime).toBe(startTime);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+
+    engine.redo();
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(
+      centre.x + (xs[0] - centre.x) * 2,
+      6,
+    );
+  });
+
+  it("does not jump the content when the press misses the handle", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    // A press four pixels short of the corner, still inside the grab radius.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    const press = { x: corner.x - 4, y: corner.y - 4 };
+    // One pixel further along the corner's own ray.
+    const moved = { x: press.x + 1, y: press.y + 1 };
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: press.x, docY: press.y }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: moved.x, docY: moved.y }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: moved.x, docY: moved.y }));
+
+    // The content has barely moved: the drag is measured from the press, not
+    // read from the pointer.
+    const after = engine.listStrokes(layerId)[0];
+    after.xs.forEach((x, index) => {
+      expect(Math.abs(x - xs[index])).toBeLessThan(2);
+    });
+    after.ys.forEach((y, index) => {
+      expect(Math.abs(y - ys[index])).toBeLessThan(2);
+    });
+    // And the centre is still the centre: a scale about it moves both ends
+    // the same way.
+    expect(centre.x).toBeCloseTo((xs[0] + xs[xs.length - 1]) / 2, 6);
+  });
+
+  it("does not jump the content when the press misses the rotation handle", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    // The rotation handle rests above the frame's top edge; the press lands
+    // six pixels to its left, still inside the grab radius.
+    const rotate = { x: centre.x, y: frame.y - 24 };
+    const press = { x: rotate.x - 6, y: rotate.y };
+    const moved = { x: press.x + 1, y: press.y };
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: press.x, docY: press.y }));
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: moved.x,
+        docY: moved.y,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+    engine.handlePointerSample(
+      createSample({
+        phase: "up",
+        docX: moved.x,
+        docY: moved.y,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+
+    // A pixel of movement is a fraction of a degree, not the four degrees an
+    // absolute reading would have asked for.
+    const after = engine.listStrokes(layerId)[0];
+    after.xs.forEach((x, index) => {
+      expect(Math.abs(x - xs[index])).toBeLessThan(2);
+    });
+    after.ys.forEach((y, index) => {
+      expect(Math.abs(y - ys[index])).toBeLessThan(2);
+    });
+  });
+
+  it("rotates the selection about its frame's centre", () => {
+    const { engine, layerId, frame, centre, xs, ys, depth } = selectStroke();
+    // The rotation handle rests above the frame's top edge.
+    const rotate = { x: centre.x, y: frame.y - 24 };
+
+    // A pointer to the right of the centre asks for a quarter turn.
+    dragHandle(engine, rotate, { x: centre.x + 40, y: centre.y });
+
+    const turned = engine.listStrokes(layerId)[0];
+    turned.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(centre.x - (ys[index] - centre.y), 6);
+    });
+    turned.ys.forEach((y, index) => {
+      expect(y).toBeCloseTo(centre.y + (xs[index] - centre.x), 6);
+    });
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+  });
+
+  it("snaps the rotation to 15 degrees, and Shift turns the snap off", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    const rotate = { x: centre.x, y: frame.y - 24 };
+    // A pointer that asks for about 104 degrees.
+    const to = { x: centre.x + 40, y: centre.y + 10 };
+
+    dragHandle(engine, rotate, to);
+    const snapped = engine.listStrokes(layerId)[0];
+    const snappedXs = [...snapped.xs];
+    const snappedAngle = Math.round(Math.atan2(40, -10) / (Math.PI / 12)) * (Math.PI / 12);
+    snappedXs.forEach((x, index) => {
+      const dx = xs[index] - centre.x;
+      const dy = ys[index] - centre.y;
+      expect(x).toBeCloseTo(
+        centre.x + dx * Math.cos(snappedAngle) - dy * Math.sin(snappedAngle),
+        6,
+      );
+    });
+
+    // With Shift held the snap is off, so the free angle is kept.
+    engine.undo();
+    dragHandle(engine, rotate, to, {
+      shift: true,
+      alt: false,
+      ctrl: false,
+      meta: false,
+    });
+    const free = engine.listStrokes(layerId)[0];
+    const freeAngle = Math.atan2(40, -10);
+    free.xs.forEach((x, index) => {
+      const dx = xs[index] - centre.x;
+      const dy = ys[index] - centre.y;
+      expect(x).toBeCloseTo(
+        centre.x + dx * Math.cos(freeAngle) - dy * Math.sin(freeAngle),
+        6,
+      );
+    });
+    // The free angle is not a multiple of 15 degrees, so the two differ.
+    expect(free.xs[0]).not.toBeCloseTo(snappedXs[0], 3);
+  });
+
+  it("shows the new frame and the handles after a transform", () => {
+    const { engine, spy, frame, centre } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+
+    const overlay = spy.selections[spy.selections.length - 1];
+    // The frame follows the strokes: the samples doubled, the padding did not.
+    expect(overlay?.bounds?.width).toBeCloseTo(frame.width * 2 - DEFAULT_BRUSH.size, 6);
+    expect(overlay?.bounds?.height).toBeCloseTo(frame.height, 6);
+    // The handles are on the frame's new corners.
+    expect(overlay?.handles?.corners).toHaveLength(4);
+    expect(overlay?.handles?.corners[2].x).toBeCloseTo(
+      overlay?.bounds?.x as number + (overlay?.bounds?.width as number),
+      6,
+    );
+  });
+
+  it("puts the handles on the selected frame and never on the rubber band", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+
+    // A marquee drag with nothing selected shows the band and nothing else:
+    // the handles belong to a selection, and there is none.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 60, docY: 50 }));
+    const band = spy.selections[spy.selections.length - 1];
+    expect(band?.bounds).toEqual({ x: 20, y: 20, width: 40, height: 30 });
+    expect(band?.handles).toBeNull();
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 50 }));
+
+    // A marquee that meets the stroke selects it: the handles sit on its
+    // frame, and the frame is the one derived from the strokes.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 250, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 250, docY: 150 }));
+    const selected = spy.selections[spy.selections.length - 1];
+    const bounds = selected?.bounds;
+    expect(selected?.handles?.corners).toHaveLength(4);
+    expect(selected?.handles?.corners[0]).toEqual({ x: bounds?.x, y: bounds?.y });
+    expect(selected?.handles?.corners[2]).toEqual({
+      x: (bounds?.x ?? 0) + (bounds?.width ?? 0),
+      y: (bounds?.y ?? 0) + (bounds?.height ?? 0),
+    });
+
+    // A new marquee replaces the frame with the band, and the handles go with
+    // it: they are never drawn on the rubber band.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 30, docY: 30 }));
+    const second = spy.selections[spy.selections.length - 1];
+    expect(second?.bounds).toEqual({ x: 20, y: 20, width: 10, height: 10 });
+    expect(second?.handles).toBeNull();
+  });
+
+  it("recomputes the cursor when the viewport changes", () => {
+    const { engine, frame } = selectStroke();
+    const reports: CursorReport[] = [];
+    engine.subscribeCursor((report) => reports.push(report));
+
+    // Put the pointer on the south-east corner handle. The screen position is
+    // the same point, so the pointer is where the report says it is.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: corner.x,
+        docY: corner.y,
+        screenX: corner.x,
+        screenY: corner.y,
+      }),
+    );
+    expect(reports[reports.length - 1].cursor).toBe("nwse-resize");
+
+    // Zoom without moving the pointer: the document point under it is a
+    // different one, so the answer must be recomputed rather than kept.
+    engine.setViewport({ zoom: 4, offsetX: 0, offsetY: 0 });
+    expect(reports[reports.length - 1].cursor).toBe("default");
+  });
+
+  it("records no step for a transform that changes nothing", () => {
+    const { engine, layerId } = createSelectingEngine();
+    // A single dab: the frame's centre is the dab itself, so a scale and a
+    // rotation both map it onto itself.
+    handle(engine, [[100, 100]], "up");
+    engine.setTool("select");
+    handle(engine, [
+      [90, 90],
+      [110, 110],
+    ], "up");
+    const depth = engine.getState().history.depth;
+    const frame = paintedFrame([100], [100]);
+    const centre = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
+
+    dragHandle(engine, { x: frame.x + frame.width, y: frame.y + frame.height }, {
+      x: centre.x + 40,
+      y: centre.y + 40,
+    });
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.listStrokes(layerId)[0].xs.every((x) => x === 100)).toBe(true);
+    expect(engine.listStrokes(layerId)[0].ys.every((y) => y === 100)).toBe(true);
+  });
+
+  it("cancels a transform in flight and records nothing", () => {
+    const { engine, layerId, frame, centre, xs, ys, depth } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    engine.handlePointerSample(createSample({ phase: "down", docX: corner.x, docY: corner.y }));
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: centre.x + (corner.x - centre.x) * 3,
+        docY: centre.y + (corner.y - centre.y) * 3,
+      }),
+    );
+    // The preview moved.
+    expect(engine.listStrokes(layerId)[0].xs[0]).not.toBeCloseTo(xs[0], 3);
+
+    engine.handlePointerSample(createSample({ phase: "cancel", docX: 0, docY: 0 }));
+    // The originals are back and nothing was recorded.
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("survives a save and reopen", () => {
+    const { engine, layerId, frame, centre } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+    const transformedXs = [...engine.listStrokes(layerId)[0].xs];
+    const transformedYs = [...engine.listStrokes(layerId)[0].ys];
+
+    // The transform is a change of the samples, so the project file carries it
+    // like any other stroke: reopening it gives the same stroke back.
+    const parsed = parseProject(engine.serialize());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const reopened = parsed.project.strokes[0];
+    expect(reopened.xs).toEqual(transformedXs);
+    expect(reopened.ys).toEqual(transformedYs);
+    expect(reopened.brush).toEqual(engine.listStrokes(layerId)[0].brush);
   });
 
   it("refuses undo and redo while a selection drag is in flight", () => {

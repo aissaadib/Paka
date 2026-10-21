@@ -29,6 +29,19 @@ export function CanvasStage() {
     }
   }, [engine, toolId]);
 
+  // The cursor follows the pointer where the tool has something specific to
+  // say: the select tool's transform handles ask for a resize cursor. The
+  // report is a high-frequency stream, so it is written straight to the DOM.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    return engine.subscribeCursor((report) => {
+      canvas.style.cursor = report.cursor;
+    });
+  }, [engine]);
+
   useEffect(() => {
     const frame = frameRef.current;
     const canvas = canvasRef.current;

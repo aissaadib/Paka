@@ -23,6 +23,8 @@ import type {
   StrokeRecord,
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
+import type { SelectionHandles } from "../document/selectionHandles";
+import type { Bounds } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
@@ -67,6 +69,11 @@ const SELECTION_TRACE_ALPHA = 0.85;
 /** Device pixels; divided by the display scale so it is constant at any zoom. */
 const SELECTION_TRACE_WIDTH = 1.5;
 const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
+/** Screen pixels; divided by the display scale so the handles never change size. */
+const HANDLE_SIZE_PX = 8;
+const ROTATION_HANDLE_RADIUS_PX = 5;
+/** The handle's own fill, so a handle reads on top of dark ink as well. */
+const HANDLE_FILL_COLOR = "#ffffff";
 /**
  * Accent used for the composition guides.
  *
@@ -573,7 +580,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
   /**
    * Draws the selection overlay: the selected strokes traced in the accent
-   * colour, then the rubber-band rectangle.
+   * colour, then the rubber-band rectangle and the transform handles.
    *
    * Strokes are traced along their centrelines rather than re-rasterized with
    * their brush, because the overlay answers one question - "what will a
@@ -624,7 +631,55 @@ export class Canvas2DRenderer implements DrawingRenderer {
       ctx.setLineDash([]);
     }
 
+    if (selection.handles) {
+      this.paintSelectionHandles(ctx, scale, selection.handles, bounds);
+    }
+
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Draws the transform handles: a square on each corner of the frame and a
+   * circle above it that turns the selection.
+   *
+   * Overlay only, like the frame and the trace: the handles are painted on the
+   * display canvas and never reach a layer surface, the document or a PNG
+   * export. Their **positions** are in document space, so they sit on the
+   * selection's corners exactly; their **size** is in screen pixels, so they
+   * stay the same size on screen at any zoom.
+   */
+  private paintSelectionHandles(
+    ctx: CanvasRenderingContext2D,
+    scale: number,
+    handles: SelectionHandles,
+    bounds: Bounds | null,
+  ): void {
+    const size = HANDLE_SIZE_PX / scale;
+    const half = size / 2;
+    const radius = ROTATION_HANDLE_RADIUS_PX / scale;
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = SELECTION_COLOR;
+    ctx.fillStyle = HANDLE_FILL_COLOR;
+    ctx.lineWidth = 1 / scale;
+
+    for (const corner of handles.corners) {
+      ctx.fillRect(corner.x - half, corner.y - half, size, size);
+      ctx.strokeRect(corner.x - half, corner.y - half, size, size);
+    }
+
+    // The rotation handle: a circle above the frame's top edge, tied to it by
+    // a short stem so it reads as part of the frame.
+    if (bounds) {
+      ctx.beginPath();
+      ctx.moveTo(handles.rotate.x, handles.rotate.y + radius);
+      ctx.lineTo(handles.rotate.x, bounds.y);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(handles.rotate.x, handles.rotate.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   /**

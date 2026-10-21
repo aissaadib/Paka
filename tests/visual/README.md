@@ -85,6 +85,7 @@ The corpus covers the current feature set, not only the brush:
 | `polygon` | a **filled** five-sided polygon, inscribed in the dragged box's ellipse |
 | `star` | a **filled** five-point star, with the inner radius at 50 % |
 | `guides` | a document with **composition guides**: a vertical and a horizontal one |
+| `transformed-selection` | a **scaled and rotated** stroke: the picture a transformed selection draws |
 
 `polygon` and `star` are the shape tools' pictures. A shape is an ordinary
 stroke whose samples trace the outline, so a scene states the outline as the
@@ -106,6 +107,15 @@ the display (which contains the two guide lines). The harness also asserts the
 two properties the format depends on: the guides change the display and do
 **not** change the export. A scene that declares no guide is captured from the
 export only, exactly as before.
+
+`transformed-selection` is the scene that pins a **transformed selection**. A
+stroke may declare a `transform` - a uniform scale and a rotation about a
+stated centre - and the harness applies it with the **product's own** maps
+(`core/document/selectionTransform.ts`), so the golden is the picture the
+editor's scale and rotate actually draw, not a hand-written approximation.
+Those maps are geometry, not rasterization, which is why that one module is
+allowed past the renderer boundary; the harness still never imports a
+rasterization internal.
 
 ## The rules the suite enforces on itself
 

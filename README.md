@@ -47,7 +47,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   polygon's tips, and whose **inner radius** (5-100 %, default 50 %) sets how
   deep the valleys reach. Both take a **rotation** (0-360°, default 0°) about
   the centre of the dragged box - a rigid turn, so the shape keeps its size -
-  because the selection cannot rotate. `Shift` squares the
+  because a shape is drawn, not transformed. `Shift` squares the
   box, which is what makes either shape regular. The three options are **Sides**
   (labelled **Points** for the star), **Inner radius** (the star only) and
   **Rotation**; they describe the *next* shape, so changing one is not an edit
@@ -83,15 +83,32 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   empty paper to clear. The selection is shown as a dashed frame around the
   strokes plus a blue trace over each of them. Dragging from inside the frame
   moves every selected stroke as one gesture; releasing records **one** undo
-  step, and `Esc` cancels a drag mid-flight. The arrow keys nudge the selection
+  step, and `Esc` cancels a drag mid-flight. The frame also carries **four
+  corner handles** and a **rotation handle** above its top edge: drag a corner
+  handle to **scale** the selection uniformly about the centre of the frame (the
+  corner keeps its direction from the centre, so dragging away from the centre
+  grows the selection and towards it shrinks it, and the size is clamped so a
+  selection can never collapse or invert), and drag the rotation handle to
+  **rotate** it about the same centre. The rotation **snaps to 15 degrees**
+  while the pointer is held down; hold `Shift` to turn the snap **off** and
+  rotate freely. Both are measured **from where you pressed**, so grabbing a
+  handle slightly off its centre does not jump the content. The handles take
+  precedence over the move: a press on a corner is a scale, not a drag, and
+  they appear only for a real selection - never on a marquee's rubber band.
+  The arrow keys nudge the selection
   by 1 px (`Shift`: 10 px) and a continuous run of nudges is one step (reselecting
   starts a new one), `Ctrl+D` duplicates
   it in place and selects the copies, `Ctrl+Shift+H`/`Ctrl+Shift+V` flips it
   about its own centre, and `Delete`/`Backspace` removes it - each as one step,
   restorable with undo (deleted strokes come back in their original painting
-  order). A transform that would move nothing - flipping a single dab - records
-  nothing, and neither undo nor redo runs while a drag is in flight. The same
-  actions live in the **Selection** menu. Selecting is not an
+  order). A transform that would move nothing - flipping a single dab, or
+  scaling one - records
+  nothing, and neither undo nor redo runs while a drag is in flight. A scale or
+  a rotation moves the strokes' **samples** and nothing else: the brush, the
+  colour, the opacity and the pressure are untouched, so a scaled stroke is
+  still the same stroke and a saved file reopens exactly as it looks. The move,
+  duplicate, nudge, flip and delete actions also live in the **Selection**
+  menu; the scale and the rotation are handle gestures. Selecting is not an
   edit: it adds no history step and never marks the document dirty.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
@@ -296,10 +313,13 @@ paste-ready version of the same briefing is in
   (the stroke list stays authoritative and the pixels are rebuilt from it, so the
   drag can never drift from the committed result). That is fine at the sizes
   tested and is the first thing to cache if a heavy layer makes dragging lag.
-- **Transform means translation, duplication and reflection.** Scaling, rotating,
-  perspective, per-stroke nudging and copy/paste across layers are not
-  implemented, and a flip is applied to the stroke samples (there is no
-  non-destructive transform to edit later).
+  A scale and a rotation cost the same.
+- **A transform is baked on apply.** Scaling and rotating move the selected
+  strokes' samples and commit them, so there is no non-destructive transform to
+  edit later, and the **painted width is not scaled with the path**: a scaled
+  stroke is the same stroke drawn along a different path, not a stroke drawn
+  with a bigger brush. Perspective, shear, a non-uniform scale, per-stroke
+  nudging and copy/paste across layers are not implemented.
 - Shape tools draw the **outline** of a line, rectangle, ellipse, polygon or
   star as a stroke
   of the current brush, and the rectangle, ellipse, polygon and star can fill it
