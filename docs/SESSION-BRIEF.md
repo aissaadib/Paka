@@ -583,6 +583,15 @@ Product:
 
 Verification gaps:
 
+- The grid and the snapping were checked in the browser app on the **live
+  display canvas** (the lattice is painted with the spacing in document pixels
+  - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's
+  edge moves onto the line when the snap is on), through the real
+  `Canvas2DRenderer` (the unit suite plus a visual-regression scene with a
+  committed golden), and at the state level (the status bar reads `grid 50 px`
+  and `snap on`). The **packaged Tauri window is unverified**, and a native
+  save/reopen of a document with the grid on is unverified: the grid is view
+  state, so it is not in the file at all, and that is covered by Vitest.
 - Gradients were checked in the browser at state level and their pixels through
   the real `Canvas2DRenderer`; the live display canvas was not sampled because
   the harness suspends animation frames.
