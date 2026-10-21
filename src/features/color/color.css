@@ -131,10 +131,32 @@
   border-radius: 2px;
 }
 
-.color-wheel__hex {
-  color: var(--text-dim);
+/* The colour text field. It replaced the read-only hex readout, so it keeps
+   the mono treatment and takes the rest of the row; the message under it is
+   the only place a refusal is announced, in text, so nothing is carried by
+   the border colour alone. */
+.color-wheel__entry {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.color-wheel__input {
+  width: 100%;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+}
+
+.color-wheel__input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.color-wheel__message {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 /* The contrast and colour-difference readout: two rows of text under the

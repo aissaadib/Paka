@@ -399,3 +399,36 @@ describe("the metrics are total", () => {
     );
   });
 });
+
+describe("a colour that is not solid", () => {
+  it("is not measured, and the readout says it is not a solid colour", () => {
+    // The app stores and paints `#rrggbb`, so an alpha below 1 has no ink to
+    // measure. Guessing at the composite over the paper would put a number
+    // next to a mark the app cannot draw, so the report stays empty and the
+    // reason names the alpha rather than pretending the colour is unreadable.
+    const report = measureColor("#16181c80", "#ffffff", ["#16181c"]);
+
+    expect(report.ink).toBeNull();
+    expect(report.ratio).toBeNull();
+    expect(report.band).toBeNull();
+    expect(report.nearest).toBeNull();
+    expect(report.ratioReason).toBe("translucent");
+    expect(report.nearestReason).toBe("translucent");
+    expect(UNKNOWN_REASONS.translucent).toMatch(/not a solid colour/);
+  });
+
+  it("measures an opaque 8-digit hex, because it is solid", () => {
+    const report = measureColor("#16181cff", "#ffffff", ["#16181c"]);
+
+    expect(report.ink).toEqual({ r: 22, g: 24, b: 28 });
+    expect(report.ratio).not.toBeNull();
+    expect(report.ratioReason).toBeNull();
+  });
+
+  it("drops a translucent palette entry instead of measuring it", () => {
+    const report = measureColor("#16181c", "#ffffff", ["#16181c80"]);
+
+    expect(report.nearest).toBeNull();
+    expect(report.nearestReason).toBe("palette-unreadable");
+  });
+});

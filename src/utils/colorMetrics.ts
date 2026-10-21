@@ -29,12 +29,19 @@
  * result rather than a `NaN`. The metric functions fold a broken channel
  * into the sRGB cube, and the formatters render a value that is not a number
  * as *unknown*, so no `NaN` can reach the readout. It also knows nothing
- * about CSS colour strings: parsing is the caller's business (`hexToRgb` in
- * `./color` does it), and a colour that is not a hex colour never reaches
+ * about CSS colour strings: parsing is the caller's business (`parseHexColor`
+ * in `./color` does it), and a colour that is not a hex colour never reaches
  * the arithmetic.
+ *
+ * One thing the module does insist on is **solidity**. The readout measures
+ * ink that will be painted, and the app paints `#rrggbb`; a colour carrying
+ * an alpha below 1 is therefore not measured at all. It is reported as *not
+ * a solid colour*, which is a different fact from "not a colour" and is said
+ * as such: guessing at the composite over the paper would put a number next
+ * to a mark the app cannot actually draw.
  */
 
-import { hexToRgb } from "./color";
+import { parseHexColor } from "./color";
 import type { Rgb } from "./color";
 
 /**
@@ -483,6 +490,12 @@ export type MetricUnavailable =
   | "ink"
   /** The paper colour is not a hex colour. */
   | "paper"
+  /**
+   * The colour is a hex colour, but not an opaque one: it carries an alpha
+   * below 1. The app stores and paints `#rrggbb`, so there is no solid ink to
+   * measure and no honest composite to guess at.
+   */
+  | "translucent"
   /** The palette holds no entries at all. */
   | "palette-empty"
   /** The palette holds entries, but none of them is a readable colour. */
@@ -497,9 +510,9 @@ export type MetricUnavailable =
  * know, so the words it shows are true.
  */
 export interface ColorMetricReport {
-  /** The ink, parsed. `null` when the stored colour is not a hex colour. */
+  /** The ink, parsed. `null` when the stored colour is not a solid hex colour. */
   readonly ink: Rgb | null;
-  /** The paper, parsed. `null` when the stored colour is not a hex colour. */
+  /** The paper, parsed. `null` when the stored colour is not a solid hex colour. */
   readonly paper: Rgb | null;
   /** The WCAG contrast ratio of the two, or `null` when either is unreadable. */
   readonly ratio: number | null;
@@ -518,26 +531,32 @@ export interface ColorMetricReport {
  *
  * Both colours arrive as the strings the app stores, because that is the
  * only thing the app has: a project file may hold any non-empty string as a
- * colour, and a colour that is not a hex colour cannot be measured. Such a
- * colour produces `null` fields and an *unknown* readout, never a crash and
- * never a made-up number.
+ * colour, and a colour that is not a readable hex colour - or that is not
+ * opaque - cannot be measured. Such a colour produces `null` fields and an
+ * *unknown* readout, never a crash and never a made-up number.
  */
 export function measureColor(
   ink: string,
   paper: string,
   palette: readonly string[],
 ): ColorMetricReport {
-  const inkRgb = hexToRgb(ink);
-  const paperRgb = hexToRgb(paper);
+  // A colour is measured only when it is solid: the app paints the stored
+  // `#rrggbb`, so a colour with an alpha below 1 has no ink to measure. The
+  // parsed colour is kept so the readout can tell "not a colour" (null here)
+  // from "not a solid colour" (parsed, but translucent).
+  const inkColor = parseHexColor(ink);
+  const paperColor = parseHexColor(paper);
+  const inkRgb = inkColor !== null && inkColor.alpha >= 1 ? inkColor.rgb : null;
+  const paperRgb = paperColor !== null && paperColor.alpha >= 1 ? paperColor.rgb : null;
 
-  // A palette entry that is not a hex colour is dropped rather than
+  // A palette entry that is not a solid hex colour is dropped rather than
   // measured, but it is counted: a palette that holds entries and has no
   // readable one is a different fact from a palette that holds none.
   const entries: PaletteEntry[] = [];
   for (const hex of palette) {
-    const rgb = hexToRgb(hex);
-    if (rgb !== null) {
-      entries.push({ hex, rgb });
+    const parsed = parseHexColor(hex);
+    if (parsed !== null && parsed.alpha >= 1) {
+      entries.push({ hex, rgb: parsed.rgb });
     }
   }
 
@@ -546,12 +565,16 @@ export function measureColor(
 
   let ratioReason: MetricUnavailable | null = null;
   if (ratio === null) {
-    ratioReason = inkRgb === null ? "ink" : "paper";
+    if (inkRgb === null) {
+      ratioReason = inkColor === null ? "ink" : "translucent";
+    } else {
+      ratioReason = paperColor === null ? "paper" : "translucent";
+    }
   }
 
   let nearestReason: MetricUnavailable | null = null;
   if (inkRgb === null) {
-    nearestReason = "ink";
+    nearestReason = inkColor === null ? "ink" : "translucent";
   } else if (palette.length === 0) {
     nearestReason = "palette-empty";
   } else if (entries.length === 0) {
@@ -578,6 +601,7 @@ export function measureColor(
 export const UNKNOWN_REASONS: Readonly<Record<MetricUnavailable, string>> = {
   ink: "the colour is not a hex value",
   paper: "the paper colour is not a hex value",
+  translucent: "not a solid colour (alpha below 1)",
   "palette-empty": "the palette is empty",
   "palette-unreadable": "the palette holds no readable colour",
 };

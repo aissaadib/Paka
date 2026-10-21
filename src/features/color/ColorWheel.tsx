@@ -20,6 +20,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { hexToHsv, hsvToHex } from "../../utils/color";
 import type { Hsv } from "../../utils/color";
+import { ColorField } from "./ColorField";
 import { hsvToWheelPoint, resolveWheelHsv, wheelPointToHsv } from "./wheelGeometry";
 import { createWheelState, reduceWheelState } from "./wheelState";
 import type { WheelState } from "./wheelState";
@@ -194,7 +195,7 @@ export function ColorWheel() {
           style={{ background: brush.color }}
           aria-hidden="true"
         />
-        <span className="color-wheel__hex">{brush.color}</span>
+        <ColorField />
       </div>
     </div>
   );
