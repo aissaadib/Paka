@@ -10,6 +10,7 @@
 import { useCallback, useState } from "react";
 import { CanvasStage } from "../../features/canvas/CanvasStage";
 import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
+import { ColorPanel } from "../../features/color/ColorPanel";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
 import { LayersPanel } from "../../features/layers/LayersPanel";
 import {
@@ -117,7 +118,12 @@ export function Workspace() {
       <div className="workspace-body">
         <ToolRail />
         <CanvasStage />
-        <LayersPanel />
+        <div className="side-panels">
+          <ColorPanel />
+          <div className="side-panels__layers">
+            <LayersPanel />
+          </div>
+        </div>
       </div>
       <CanvasStatusBar
         fileMessage={fileMessage}
