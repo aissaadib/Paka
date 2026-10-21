@@ -92,6 +92,7 @@ source alpha and a transparent source.
 | `guides` | a document with **composition guides**: a vertical and a horizontal one |
 | `grid` | a document with the **grid overlay** on, at a 40 px spacing and a 2x zoom |
 | `transformed-selection` | a **scaled and rotated** stroke: the picture a transformed selection draws |
+| `contrast-readout` | the palette's inks on the white paper the contrast readout measures |
 
 `polygon` and `star` are the shape tools' pictures. A shape is an ordinary
 stroke whose samples trace the outline, so a scene states the outline as the
@@ -130,6 +131,13 @@ editor's scale and rotate actually draw, not a hand-written approximation.
 Those maps are geometry, not rasterization, which is why that one module is
 allowed past the renderer boundary; the harness still never imports a
 rasterization internal.
+
+`contrast-readout` is the scene behind the colour panel's contrast readout:
+the palette's inks drawn on the white paper the readout measures them
+against. The harness drives the **renderer**, not the UI, so the scene pins
+the colours the readout reports on - the swatches and the paper they are
+measured against - rather than the readout's own text. The readout itself is
+a React component and is verified by hand in the running app.
 
 ## The rules the suite enforces on itself
 
