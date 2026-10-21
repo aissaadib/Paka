@@ -206,7 +206,16 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Phase 6 - Aids and non-destructive editing
 
-- [ ] Guides, grids, snapping.
+- [x] **Guides**: a dedicated **Guides** tool places a vertical or horizontal
+      guide by dragging on empty canvas (the axis follows the dominant drag
+      direction, the position is the press coordinate) and moves an existing
+      guide by dragging it; a click selects it, `Delete` removes it, `Esc`
+      cancels a drag. A guide is document state but **display-only**, so the
+      project format change is additive and the file version stays 9.
+- [ ] Grids, rulers.
+- [ ] Snapping to guides. Snapping changes what a stroke *does* - it alters the
+      pointer's position - so it touches the shared input path and changes the
+      stored samples. It is a separate slice with its own version decision.
 - [ ] Adjustment layers / non-destructive effects.
 
 ## Phase 7 - Advanced

@@ -58,6 +58,10 @@ export interface EditorActions {
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
   deleteSelection(): void;
+  /** Removes the guide the guides tool has selected, as one undoable step. */
+  deleteSelectedGuide(): void;
+  /** Cancels the guide gesture in flight and clears the guide selection. */
+  cancelGuideGesture(): void;
   /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
   nudgeSelection(dx: number, dy: number): void;
   /** Copies the selected strokes above the originals and selects the copies. */
@@ -121,6 +125,13 @@ export function createEditor(options: EditorOptions = {}): Editor {
     clearSelection: () => engine.clearSelection(),
     deleteSelection: () => {
       engine.deleteSelection();
+    },
+    deleteSelectedGuide: () => {
+      engine.deleteSelectedGuide();
+    },
+    cancelGuideGesture: () => {
+      engine.cancelGuideGesture();
+      engine.selectGuide(null);
     },
     nudgeSelection: (dx, dy) => {
       engine.nudgeSelection(dx, dy);

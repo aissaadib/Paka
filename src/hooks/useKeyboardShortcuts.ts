@@ -5,17 +5,19 @@
  * an interface concern and live here. Shortcuts are ignored while typing in a
  * text field so renaming a layer or naming a document never triggers tools.
  *
- *   B / E / M / L / R / O / P / S / G / I / H
+ *   B / E / M / L / R / O / P / S / G / I / U / H
  *                                brush / eraser / select / line / rectangle /
  *                                ellipse / polygon / star / bucket fill /
- *                                colour picker / pan
+ *                                colour picker / guides / pan
  *   [ / ]          decrease / increase brush size
  *   Arrows         nudge the selection by 1 px (Shift: 10 px)
  *   Ctrl+D         duplicate the selection
  *   Ctrl+Shift+H   flip the selection horizontally
  *   Ctrl+Shift+V   flip the selection vertically
- *   Escape         clear the selection
- *   Delete         delete the selected strokes
+ *   Escape         clear the selection (with the guides tool: cancel the
+ *                  guide drag and clear the guide selection)
+ *   Delete         delete the selected strokes (with the guides tool: the
+ *                  selected guide)
  *   Ctrl+Z         undo
  *   Ctrl+Shift+Z   redo
  *   Ctrl+Y         redo
@@ -165,6 +167,12 @@ export function useKeyboardShortcuts(
 
       if (key === "escape") {
         event.preventDefault();
+        // The guides tool owns Escape while it is active: it cancels the drag
+        // in flight and clears the guide selection.
+        if (engine.getState().toolId === "guides") {
+          actions.cancelGuideGesture();
+          return;
+        }
         actions.clearSelection();
         return;
       }
@@ -172,6 +180,12 @@ export function useKeyboardShortcuts(
       if (key === "delete" || key === "backspace") {
         // Backspace is also the browser's "go back" gesture; the editor owns it.
         event.preventDefault();
+        // A selected guide is the guides tool's selection, so Delete removes
+        // that first; the stroke selection is untouched by it.
+        if (engine.getState().toolId === "guides" && engine.getState().selectedGuideId !== null) {
+          actions.deleteSelectedGuide();
+          return;
+        }
         actions.deleteSelection();
         return;
       }

@@ -128,6 +128,7 @@ describe("tool definitions", () => {
       "bucket",
       "gradient",
       "picker",
+      "guides",
       "pan",
     ]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
@@ -141,6 +142,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("bucket").shortcut).toBe("F");
     expect(getToolDefinition("gradient").shortcut).toBe("G");
     expect(getToolDefinition("picker").shortcut).toBe("I");
+    expect(getToolDefinition("guides").shortcut).toBe("U");
     expect(getToolDefinition("pan").shortcut).toBe("H");
   });
 

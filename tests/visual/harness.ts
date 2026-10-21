@@ -35,7 +35,7 @@ import type {
 import type { DrawingRenderer } from "/src/core/rendering/types";
 import type { BrushSettings } from "/src/types/brush";
 import { isSceneStroke } from "./scene";
-import type { Scene, SceneElement, SceneLayer, SceneVerdict } from "./scene";
+import type { Scene, SceneElement, SceneGuide, SceneLayer, SceneVerdict } from "./scene";
 
 let elementCounter = 0;
 
@@ -129,13 +129,23 @@ function toElements(
 function buildDocument(
   scene: Scene,
   layers: ReturnType<typeof createLayer>[],
+  guides: readonly SceneGuide[] = [],
 ): DrawingDocument {
   const base = createDocument({
     width: scene.width,
     height: scene.height,
     background: scene.background ?? "#ffffff",
   });
-  return { ...base, layers, activeLayerId: layers[0]?.id ?? base.activeLayerId };
+  return {
+    ...base,
+    layers,
+    activeLayerId: layers[0]?.id ?? base.activeLayerId,
+    guides: guides.map((guide, index) => ({
+      id: `guide-${index + 1}`,
+      axis: guide.axis,
+      position: guide.position,
+    })),
+  };
 }
 
 function readPixels(canvas: HTMLCanvasElement): Uint8ClampedArray {
@@ -188,8 +198,15 @@ function compare(
 /**
  * Renders one scene, reports whether its three renderings agree, and paints
  * the exported picture into `golden` so the test can screenshot it.
+ *
+ * The display picture is painted into `display` as well: the composition
+ * guides are display-only, so they can only be seen there.
  */
-export function runScene(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict {
+export function runScene(
+  scene: Scene,
+  golden?: HTMLCanvasElement,
+  displayCanvas?: HTMLCanvasElement,
+): SceneVerdict {
   elementCounter = 0;
 
   const layers = scene.layers.map((layer) => {
@@ -200,7 +217,10 @@ export function runScene(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict
     return created;
   });
   const layerIds = layers.map((layer) => layer.id);
-  const drawingDocument = buildDocument(scene, layers);
+  const drawingDocument = buildDocument(scene, layers, scene.guides ?? []);
+  // The same document without its guides: the guides are display-only, so
+  // this is the picture the export has to agree with.
+  const plainDocument = buildDocument(scene, layers);
 
   // The map the renderer's stroke source reads. It is mutated in place, so the
   // renderer always sees the content the step below asks it to draw.
@@ -271,9 +291,25 @@ export function runScene(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict
   setContent(allElements);
   const rebuiltPixels = readPixels(display);
 
-  // 4. Exported: the document composite, which is what a PNG export writes.
+  // 4. The same display without the guides. The guides are display-only, so
+  // this is the picture the export has to agree with, and the difference
+  // between the two displays is the guides' own contribution.
+  renderer.setDocument(plainDocument);
+  renderer.render();
+  const plainPixels = readPixels(display);
+  renderer.setDocument(drawingDocument);
+  renderer.render();
+
+  // 5. Exported: the document composite, which is what a PNG export writes.
   const exported = renderer.composeDocumentImage();
   const exportedPixels = readPixels(exported);
+
+  // The export of the same document without its guides: the two must be the
+  // same picture, because a guide never reaches an export.
+  renderer.setDocument(plainDocument);
+  const plainExport = renderer.composeDocumentImage();
+  const plainExportPixels = readPixels(plainExport);
+  renderer.setDocument(drawingDocument);
 
   if (golden) {
     golden.width = exported.width;
@@ -288,24 +324,45 @@ export function runScene(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict
     context.drawImage(exported, 0, 0);
   }
 
+  if (displayCanvas) {
+    displayCanvas.width = scene.width;
+    displayCanvas.height = scene.height;
+    displayCanvas.style.width = `${scene.width}px`;
+    displayCanvas.style.height = `${scene.height}px`;
+    const context = displayCanvas.getContext("2d");
+    if (!context) {
+      throw new Error("the harness needs a 2d context");
+    }
+    context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
+    // The display canvas still holds the last render: the document with its
+    // guides.
+    context.drawImage(display, 0, 0);
+  }
+
   const liveVsRebuilt = livePixels
     ? compare(livePixels, rebuiltPixels, scene.width, scene.height, false)
     : { differing: 0, first: null };
   // The display draws a one-pixel document border that the export does not
   // have, so the export is compared with the display's interior.
   const rebuiltVsExported = compare(
-    rebuiltPixels,
+    plainPixels,
     exportedPixels,
     scene.width,
     scene.height,
     true,
   );
+  const guidesVisible =
+    compare(rebuiltPixels, plainPixels, scene.width, scene.height, false).differing > 0;
+  const guidesNotExported =
+    compare(exportedPixels, plainExportPixels, scene.width, scene.height, false).differing === 0;
 
   return {
     sceneId: scene.id,
     liveEqualsRebuilt: liveVsRebuilt.differing === 0,
     rebuiltEqualsExported: rebuiltVsExported.differing === 0,
     liveChecked: liveCapable,
+    guidesVisible,
+    guidesNotExported,
     liveVsRebuiltDiffering: liveVsRebuilt.differing,
     rebuiltVsExportedDiffering: rebuiltVsExported.differing,
     firstDifference: liveVsRebuilt.first ?? rebuiltVsExported.first,
@@ -316,7 +373,11 @@ export function runScene(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict
 declare global {
   interface Window {
     __pakaVisual?: {
-      run(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict;
+      run(
+        scene: Scene,
+        golden?: HTMLCanvasElement,
+        displayCanvas?: HTMLCanvasElement,
+      ): SceneVerdict;
     };
   }
 }

@@ -98,6 +98,19 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   picks the colour actually on screen rather than the colour a stroke was
   authored with. It samples on click (no drag), stays selected afterwards, and
   is not an edit: it adds no history step and never marks the document dirty.
+- **Composition guides** (`U`): a dedicated **Guides** tool places a vertical or
+  horizontal guide by dragging on empty canvas, and moves an existing guide by
+  dragging it. The axis follows the dominant direction of the drag, and the
+  guide sits at the **press** point, so it marks where the drag started. The
+  drag has to travel **3 screen pixels** before its direction decides the
+  axis, so **a shorter drag creates no guide at all** (it is a click, and a
+  click on empty canvas just clears the selection). A click selects a guide,
+  `Delete` removes it and `Esc` cancels a drag in flight; the status bar
+  reports the selected guide and its position. Every change is one undo step.
+  A guide is part of the document, but it is **display-only**: it is drawn over
+  the artwork and never reaches a PNG export, so an exported picture is
+  exactly the artwork. There is no snapping to guides yet, and no grids or
+  rulers.
 - **HSV colour wheel**: a **Colour** panel beside the layers. The disc picks a
   hue (the angle) and a saturation (the distance from the centre), the value
   slider picks the brightness, and the three sliders name the same numbers and
@@ -252,9 +265,14 @@ paste-ready version of the same briefing is in
 ## Known limitations
 
 - Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
-  **ellipse**, **polygon**, **star**, **bucket**, **gradient** and **colour
-  picker** tools exist, plus
+  **ellipse**, **polygon**, **star**, **bucket**, **gradient**, **colour
+  picker** and **guides** tools exist, plus
   pan. There is no text tool.
+- **Guides are axis-only and are not a snapping aid.** A guide is vertical or
+  horizontal, a second guide on the same position is refused, the colour is
+  fixed, and there is no position label. Nothing snaps to a guide yet: the
+  guides mark positions, they do not change what a stroke does. There are no
+  grids and no rulers.
 - **Gradients are two-stop, linear or radial, and paint the whole layer.**
   There is no draggable stop editor, no angle snapping and no gradient with a
   transparent stop (opacity applies to the whole element). A gradient is

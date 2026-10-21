@@ -84,6 +84,7 @@ The corpus covers the current feature set, not only the brush:
 | `soft-erase-rim` | a painted stroke with a **soft eraser** across it |
 | `polygon` | a **filled** five-sided polygon, inscribed in the dragged box's ellipse |
 | `star` | a **filled** five-point star, with the inner radius at 50 % |
+| `guides` | a document with **composition guides**: a vertical and a horizontal one |
 
 `polygon` and `star` are the shape tools' pictures. A shape is an ordinary
 stroke whose samples trace the outline, so a scene states the outline as the
@@ -97,6 +98,14 @@ so it fills the star only because the outline is a simple loop.
 `soft-erase-rim` is the scene that catches the audited **region-rounding**
 defect: the composited region floored instead of ceiled clips the erase's
 padded edge, and the live erase and the rebuilt erase then disagree.
+
+`guides` is the scene that pins the **composition guides**. The guides are
+display-only, so the scene has **two** goldens: `guides-<platform>.png` is the
+export (which contains no guide at all) and `guides-display-<platform>.png` is
+the display (which contains the two guide lines). The harness also asserts the
+two properties the format depends on: the guides change the display and do
+**not** change the export. A scene that declares no guide is captured from the
+export only, exactly as before.
 
 ## The rules the suite enforces on itself
 

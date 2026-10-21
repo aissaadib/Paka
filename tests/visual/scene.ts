@@ -57,6 +57,18 @@ export interface SceneGradient {
 
 export type SceneElement = SceneStroke | SceneFill | SceneGradient;
 
+/**
+ * A composition guide: a marker on one axis, in document pixels.
+ *
+ * The guides are display-only, so a scene that declares them pins two
+ * pictures: the export, which does not contain them, and the display, which
+ * does.
+ */
+export interface SceneGuide {
+  readonly axis: "vertical" | "horizontal";
+  readonly position: number;
+}
+
 export interface SceneLayer {
   /** The layer's name; it is also the layer's identity in the document. */
   readonly id: string;
@@ -72,6 +84,8 @@ export interface Scene {
   readonly height: number;
   readonly background?: string;
   readonly layers: readonly SceneLayer[];
+  /** The composition guides; omitted means the document has none. */
+  readonly guides?: readonly SceneGuide[];
 }
 
 /** True when the element is a stroke, which is the only kind with a live path. */
@@ -95,6 +109,10 @@ export interface SceneVerdict {
   readonly rebuiltEqualsExported: boolean;
   /** Whether the scene has a live path at all (only strokes do). */
   readonly liveChecked: boolean;
+  /** The guides changed the display: they are painted over the artwork. */
+  readonly guidesVisible: boolean;
+  /** The guides did not change the export: they are display-only. */
+  readonly guidesNotExported: boolean;
   readonly liveVsRebuiltDiffering: number;
   readonly rebuiltVsExportedDiffering: number;
   readonly firstDifference: { x: number; y: number } | null;

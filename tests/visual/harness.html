@@ -15,13 +15,19 @@
         no border, no shadow, no margin and no surrounding chrome, and its
         CSS size must match its pixel size one to one.
       */
-      #golden {
+      #golden,
+      #display {
         display: block;
       }
     </style>
   </head>
   <body>
     <canvas id="golden"></canvas>
+    <!--
+      The display picture: the composition guides are display-only, so they
+      can only be seen here. A scene that declares no guide leaves it empty.
+    -->
+    <canvas id="display"></canvas>
     <script type="module">
       import { mount } from "/tests/visual/harness.ts";
       mount();

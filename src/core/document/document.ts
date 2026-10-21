@@ -199,6 +199,7 @@ export function createDocument(options: CreateDocumentOptions): DrawingDocument 
     background: options.background ?? DEFAULT_DOCUMENT_BACKGROUND,
     layers: [firstLayer],
     activeLayerId: firstLayer.id,
+    guides: [],
   };
 }
 

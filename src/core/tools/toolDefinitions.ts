@@ -96,6 +96,13 @@ export const PAN_TOOL: ToolDefinition = {
   description: "Move the canvas view",
 };
 
+export const GUIDES_TOOL: ToolDefinition = {
+  id: "guides",
+  label: "Guides",
+  shortcut: "U",
+  description: "Place and move composition guides",
+};
+
 /** Tools offered by the application, in tool rail order. */
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
@@ -109,6 +116,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BUCKET_TOOL,
   GRADIENT_TOOL,
   PICKER_TOOL,
+  GUIDES_TOOL,
   PAN_TOOL,
 ];
 

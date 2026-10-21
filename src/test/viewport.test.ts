@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { guideGrabRadius } from "../core/document/guides";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -90,5 +91,52 @@ describe("pan and fit", () => {
   it("survives a zero-sized document without producing NaN", () => {
     const fitted = fitToViewport({ width: 800, height: 600 }, { width: 0, height: 0 });
     expect(fitted).toEqual({ zoom: 1, offsetX: 400, offsetY: 300 });
+  });
+});
+
+/**
+ * A guide in the viewport.
+ *
+ * A guide's position is document space and its grab radius is screen space.
+ * These are the two halves of that rule, checked at the zoom extremes the
+ * viewport allows.
+ */
+describe("a guide in the viewport", () => {
+  it("keeps its document position while the view is panned and zoomed", () => {
+    const guide = { id: "guide-1", axis: "vertical" as const, position: 400 };
+
+    // Panning moves the guide on screen and leaves it where it is in the
+    // document.
+    const panned = panBy({ zoom: 1, offsetX: 0, offsetY: 0 }, 30, -12);
+    const screen = docToScreen(panned, guide.position, 0);
+    expect(screen.x).toBe(430);
+    expect(screen.y).toBe(-12);
+    // The document position did not move: it is still the same guide.
+    expect(screenToDoc(panned, screen.x, screen.y).x).toBeCloseTo(guide.position, 9);
+
+    // Zooming at a cursor point keeps the guide's document position and moves
+    // its screen position with the transform.
+    const zoomed = zoomAt({ zoom: 1, offsetX: 0, offsetY: 0 }, 300, 200, 4);
+    const zoomedScreen = docToScreen(zoomed, guide.position, 0);
+    expect(zoomedScreen.x).toBe(zoomed.offsetX + guide.position * zoomed.zoom);
+    expect(screenToDoc(zoomed, zoomedScreen.x, 0).x).toBeCloseTo(guide.position, 9);
+  });
+
+  it("maps to a device position of document x times zoom times dpr", () => {
+    for (const zoom of [MIN_ZOOM, 0.25, 1, 4, MAX_ZOOM]) {
+      for (const dpr of [1, 2]) {
+        const screen = docToScreen({ zoom, offsetX: 0, offsetY: 0 }, 400, 0);
+        // The canvas transform is scale = zoom * dpr, so the device x is the
+        // screen x times the device pixel ratio.
+        expect(screen.x * dpr).toBeCloseTo(400 * zoom * dpr, 6);
+      }
+    }
+  });
+
+  it("has a grab radius that shrinks with the zoom", () => {
+    // Eight screen pixels, in document units, at both ends of the zoom range.
+    expect(guideGrabRadius(MIN_ZOOM)).toBeCloseTo(400, 6);
+    expect(guideGrabRadius(1)).toBe(8);
+    expect(guideGrabRadius(MAX_ZOOM)).toBeCloseTo(0.125, 6);
   });
 });
