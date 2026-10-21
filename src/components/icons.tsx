@@ -111,6 +111,22 @@ export function IconEllipse(props: IconProps) {
   );
 }
 
+export function IconPolygon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.6 13.1 6.4 11.2 12.4H4.8L2.9 6.4z" />
+    </Icon>
+  );
+}
+
+export function IconStar(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.4 9.9 6.3 14.2 6.9 11.1 9.8 11.9 14.1 8 12 4.1 14.1 4.9 9.8 1.8 6.9 6.1 6.3z" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>

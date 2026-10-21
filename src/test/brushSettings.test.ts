@@ -123,6 +123,8 @@ describe("tool definitions", () => {
       "line",
       "rectangle",
       "ellipse",
+      "polygon",
+      "star",
       "bucket",
       "gradient",
       "picker",
@@ -134,6 +136,8 @@ describe("tool definitions", () => {
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
+    expect(getToolDefinition("polygon").shortcut).toBe("P");
+    expect(getToolDefinition("star").shortcut).toBe("S");
     expect(getToolDefinition("bucket").shortcut).toBe("F");
     expect(getToolDefinition("gradient").shortcut).toBe("G");
     expect(getToolDefinition("picker").shortcut).toBe("I");
@@ -147,6 +151,8 @@ describe("tool definitions", () => {
     expect(findToolByShortcut("l")?.id).toBe("line");
     expect(findToolByShortcut("r")?.id).toBe("rectangle");
     expect(findToolByShortcut("o")?.id).toBe("ellipse");
+    expect(findToolByShortcut("p")?.id).toBe("polygon");
+    expect(findToolByShortcut("s")?.id).toBe("star");
     expect(findToolByShortcut("f")?.id).toBe("bucket");
     expect(findToolByShortcut("g")?.id).toBe("gradient");
     expect(findToolByShortcut("i")?.id).toBe("picker");

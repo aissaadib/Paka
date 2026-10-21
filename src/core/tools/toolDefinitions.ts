@@ -52,6 +52,22 @@ export const ELLIPSE_TOOL: ToolDefinition = {
   fillable: true,
 };
 
+export const POLYGON_TOOL: ToolDefinition = {
+  id: "polygon",
+  label: "Polygon",
+  shortcut: "P",
+  description: "Draw a regular polygon inscribed in the dragged box",
+  fillable: true,
+};
+
+export const STAR_TOOL: ToolDefinition = {
+  id: "star",
+  label: "Star",
+  shortcut: "S",
+  description: "Draw a star inscribed in the dragged box",
+  fillable: true,
+};
+
 export const PICKER_TOOL: ToolDefinition = {
   id: "picker",
   label: "Colour picker",
@@ -88,6 +104,8 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   LINE_TOOL,
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,
+  POLYGON_TOOL,
+  STAR_TOOL,
   BUCKET_TOOL,
   GRADIENT_TOOL,
   PICKER_TOOL,

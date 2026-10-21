@@ -7,6 +7,8 @@ export type ToolId =
   | "line"
   | "rectangle"
   | "ellipse"
+  | "polygon"
+  | "star"
   | "bucket"
   | "gradient"
   | "picker"

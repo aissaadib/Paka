@@ -105,7 +105,14 @@ import {
   zoomToAt,
 } from "../rendering/viewport";
 import { createToolRegistry, type ToolRegistry } from "../tools/toolRegistry";
-import type { ShapePoint } from "../tools/shapeGeometry";
+import {
+  DEFAULT_SHAPE_INNER_RATIO,
+  DEFAULT_SHAPE_ROTATION,
+  DEFAULT_SHAPE_SIDES,
+  normalizeShapeOptions,
+  type ShapeOptions,
+  type ShapePoint,
+} from "../tools/shapeGeometry";
 import type { Tool, ToolContext } from "../tools/types";
 
 /** Low-frequency state React is allowed to render from. */
@@ -132,6 +139,23 @@ export interface EditorSnapshot {
    * toggling this never rewrites existing strokes.
    */
   readonly shapeFill: boolean;
+  /**
+   * How many sides the next polygon has, and how many points the next star has.
+   *
+   * Editor state, like `shapeFill`: it describes the next shape, not the ones
+   * already committed - a committed shape stores only its points.
+   */
+  readonly shapeSides: number;
+  /**
+   * The star's inner radius as a fraction of its outer radius (`0.05..1`).
+   * Editor state, like `shapeFill`.
+   */
+  readonly shapeInnerRatio: number;
+  /**
+   * The rotation of the next polygon or star about its box's centre, in
+   * degrees (`0..360`). Editor state, like `shapeFill`.
+   */
+  readonly shapeRotation: number;
   /**
    * Colour distance the bucket treats as "the same region", in 8-bit sRGB
    * channel units (`0..255`). Editor state: it describes the next fill, not the
@@ -357,6 +381,13 @@ export class DrawingEngine implements StrokeSource {
    * this is editor state and not part of the brush or the document.
    */
   private shapeFill = false;
+  /**
+   * The options the next polygon or star is drawn with. See
+   * `EditorSnapshot.shapeSides` for why they are editor state.
+   */
+  private shapeSides = DEFAULT_SHAPE_SIDES;
+  private shapeInnerRatio = DEFAULT_SHAPE_INNER_RATIO;
+  private shapeRotation = DEFAULT_SHAPE_ROTATION;
   /** Bucket-fill tolerance in 8-bit channel units. */
   private fillTolerance = 24;
   private activeFill: ActiveFill | null = null;
@@ -430,6 +461,7 @@ export class DrawingEngine implements StrokeSource {
       },
       getBrush: () => engine.brush,
       getActiveLayerId: () => engine.doc.activeLayerId,
+      getShapeOptions: () => engine.getShapeOptions(),
       setViewport: (viewport) => engine.setViewport(viewport),
       requestRender: () => engine.requestRender(),
       beginStroke: (sample) => engine.beginStroke(sample),
@@ -868,6 +900,75 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.shapeFill = filled;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * The options the next polygon or star is drawn with.
+   *
+   * Editor state, like `shapeFill`: the values are clamped to their
+   * documented ranges, and a shape reads them when its gesture starts, so it
+   * keeps the side count, the inner ratio and the rotation that were active
+   * when the user pressed.
+   */
+  getShapeOptions(): ShapeOptions {
+    return normalizeShapeOptions({
+      sides: this.shapeSides,
+      innerRatio: this.shapeInnerRatio,
+      rotation: this.shapeRotation,
+    });
+  }
+
+  /**
+   * Sets how many sides the next polygon has, and how many points the next
+   * star has (`3..24`).
+   */
+  setShapeSides(sides: number): void {
+    const next = normalizeShapeOptions({
+      sides,
+      innerRatio: this.shapeInnerRatio,
+      rotation: this.shapeRotation,
+    }).sides;
+    if (next === this.shapeSides) {
+      return;
+    }
+    this.shapeSides = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets the next star's inner radius as a fraction of its outer radius
+   * (`0.05..1`).
+   */
+  setShapeInnerRatio(ratio: number): void {
+    const next = normalizeShapeOptions({
+      sides: this.shapeSides,
+      innerRatio: ratio,
+      rotation: this.shapeRotation,
+    }).innerRatio;
+    if (next === this.shapeInnerRatio) {
+      return;
+    }
+    this.shapeInnerRatio = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Turns the next polygon or star about its box's centre (`0..360` degrees).
+   */
+  setShapeRotation(degrees: number): void {
+    const next = normalizeShapeOptions({
+      sides: this.shapeSides,
+      innerRatio: this.shapeInnerRatio,
+      rotation: degrees,
+    }).rotation;
+    if (next === this.shapeRotation) {
+      return;
+    }
+    this.shapeRotation = next;
     this.commands.breakMerge();
     this.publish();
   }
@@ -2238,6 +2339,9 @@ export class DrawingEngine implements StrokeSource {
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
       shapeFill: this.shapeFill,
+      shapeSides: this.shapeSides,
+      shapeInnerRatio: this.shapeInnerRatio,
+      shapeRotation: this.shapeRotation,
       fillTolerance: this.fillTolerance,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
@@ -2258,6 +2362,9 @@ export class DrawingEngine implements StrokeSource {
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
       previous.shapeFill === next.shapeFill &&
+      previous.shapeSides === next.shapeSides &&
+      previous.shapeInnerRatio === next.shapeInnerRatio &&
+      previous.shapeRotation === next.shapeRotation &&
       previous.fillTolerance === next.fillTolerance &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&

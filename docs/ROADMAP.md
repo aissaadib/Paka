@@ -115,6 +115,26 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       an empty outline - a different drawing. See
       [ARCHITECTURE.md](ARCHITECTURE.md#shape-tools) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#strokes).
+- [x] Polygon and star tools (`P`, `S`): a **polygon** is a regular *n*-gon
+      (3-24 sides, default 5) inscribed in the **ellipse** of the dragged box
+      with a vertex at the top, and a **star** is the classic *2p*-vertex
+      outline (3-24 points, default 5) - a tip and a valley alternating, not a
+      self-crossing pentagram, because the rasterizer fills with the non-zero
+      rule and would fill a pentagram's crossings as one blob. The star is
+      inscribed in the **same ellipse** as the polygon, so a star's tips are a
+      polygon's tips, and its **inner radius** (5-100 %, default 50 %) sets how
+      deep the valleys reach. Both take a **rotation** (0-360°, default 0°) about
+      the box's centre - a rigid turn, so the shape keeps its side lengths and
+      its size - because the selection can move, nudge, duplicate and flip but
+      cannot rotate. `Shift` squares the box, which is what makes either shape
+      regular; `Alt` draws from the centre, as for the other shapes. The three
+      options are **editor state**: they are clamped, they are not undoable, they
+      do not dirty the file, they are read when the gesture starts (so a shape
+      keeps the values that were active when the user pressed) and they are not
+      stored on the stroke - one number serves both tools, so the slider is
+      labelled **Sides** for the polygon and **Points** for the star. A polygon
+      and a star are ordinary strokes, so the file format did not move. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#the-polygon-and-the-star).
 - [x] Bucket (flood) fill (`F`): a press flood-fills the contiguous region under
       the pointer and writes it to the active layer as a bounded, pixel-exact
       patch. The scan samples the **merged visible composite** (paper plus every

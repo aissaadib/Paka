@@ -5,8 +5,10 @@
  * an interface concern and live here. Shortcuts are ignored while typing in a
  * text field so renaming a layer or naming a document never triggers tools.
  *
- *   B / E / M / L / R / O / G / I / H   brush / eraser / select / line / rectangle /
- *                                ellipse / bucket fill / colour picker / pan
+ *   B / E / M / L / R / O / P / S / G / I / H
+ *                                brush / eraser / select / line / rectangle /
+ *                                ellipse / polygon / star / bucket fill /
+ *                                colour picker / pan
  *   [ / ]          decrease / increase brush size
  *   Arrows         nudge the selection by 1 px (Shift: 10 px)
  *   Ctrl+D         duplicate the selection

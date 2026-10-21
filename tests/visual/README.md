@@ -82,6 +82,17 @@ The corpus covers the current feature set, not only the brush:
 | `gradient` | a linear gradient, with a stroke over it |
 | `multi-layer` | a three-layer stack, one of them hidden |
 | `soft-erase-rim` | a painted stroke with a **soft eraser** across it |
+| `polygon` | a **filled** five-sided polygon, inscribed in the dragged box's ellipse |
+| `star` | a **filled** five-point star, with the inner radius at 50 % |
+
+`polygon` and `star` are the shape tools' pictures. A shape is an ordinary
+stroke whose samples trace the outline, so a scene states the outline as the
+stroke's samples - the points here are the ones `shapeOutline` produces for the
+default options, and the golden pins the picture they draw. The `fill` flag on a
+scene stroke is the same flag the shape tools write: the closed outline is
+filled with the brush colour before the outline is traced on top. The star
+scene is the one that matters: the rasterizer fills with the **non-zero** rule,
+so it fills the star only because the outline is a simple loop.
 
 `soft-erase-rim` is the scene that catches the audited **region-rounding**
 defect: the composited region floored instead of ceiled clips the erase's

@@ -3,6 +3,8 @@
  *
  * Pure functions that turn a drag - an anchor and a current point, plus the
  * Shift/Alt modifiers - into the outline a shape tool previews and commits.
+ * The polygon and the star also take the options they are drawn with (the
+ * side count, the inner ratio and the rotation); the other kinds ignore them.
  * Nothing here knows about the engine, the renderer or the pointer: a shape is
  * just an ordered list of document-space points, and the stroke pipeline treats
  * it exactly like a brush path (see `ShapeTool`).
@@ -17,11 +19,76 @@
 
 import { clamp } from "../../utils/math";
 
-export type ShapeKind = "line" | "rectangle" | "ellipse";
+export type ShapeKind = "line" | "rectangle" | "ellipse" | "polygon" | "star";
 
 export interface ShapePoint {
   readonly x: number;
   readonly y: number;
+}
+
+/**
+ * The options a polygon or a star is drawn with.
+ *
+ * They describe the *next* shape, not the ones already committed: a committed
+ * shape stores only its points, so changing an option never rewrites existing
+ * work and never needs a file-format field. The engine owns them (they are
+ * editor state, like `shapeFill`) and the tool reads them once, when the
+ * gesture starts.
+ *
+ * - `sides` is the polygon's side count and the star's point count.
+ * - `innerRatio` is the star's inner radius as a fraction of its outer radius.
+ * - `rotation` turns the outline about the box's centre, in degrees.
+ */
+export interface ShapeOptions {
+  readonly sides: number;
+  readonly innerRatio: number;
+  readonly rotation: number;
+}
+
+/** A polygon needs three sides; 24 is visually a circle and still tiny. */
+export const MIN_SHAPE_SIDES = 3;
+export const MAX_SHAPE_SIDES = 24;
+/**
+ * The floor of the star's inner radius.
+ *
+ * It keeps the outline simple - a star whose valleys reach the centre would
+ * pinch - so the non-zero fill fills the star instead of a blob.
+ */
+export const MIN_SHAPE_INNER_RATIO = 0.05;
+export const MAX_SHAPE_INNER_RATIO = 1;
+
+/**
+ * The step the inner-radius control moves in.
+ *
+ * The value is snapped to it, so the slider's thumb and its number box can
+ * never show two different ratios.
+ */
+export const SHAPE_INNER_RATIO_STEP = 0.05;
+
+export const DEFAULT_SHAPE_SIDES = 5;
+export const DEFAULT_SHAPE_INNER_RATIO = 0.5;
+export const DEFAULT_SHAPE_ROTATION = 0;
+
+/** The options a polygon or a star gets before the user changes them. */
+export const DEFAULT_SHAPE_OPTIONS: ShapeOptions = {
+  sides: DEFAULT_SHAPE_SIDES,
+  innerRatio: DEFAULT_SHAPE_INNER_RATIO,
+  rotation: DEFAULT_SHAPE_ROTATION,
+};
+
+/**
+ * Clamps the options into their documented ranges.
+ *
+ * The geometry clamps too, so an out-of-range value can never produce a
+ * degenerate shape; this helper is what the engine's setters use, so the
+ * value the user sees is already the value the geometry will use.
+ */
+export function normalizeShapeOptions(options: ShapeOptions): ShapeOptions {
+  return {
+    sides: clamp(Math.round(options.sides), MIN_SHAPE_SIDES, MAX_SHAPE_SIDES),
+    innerRatio: clamp(options.innerRatio, MIN_SHAPE_INNER_RATIO, MAX_SHAPE_INNER_RATIO),
+    rotation: clamp(Math.round(options.rotation), 0, 360),
+  };
 }
 
 export interface ShapeDrag {
@@ -43,8 +110,18 @@ const MIN_ELLIPSE_SEGMENTS = 24;
 const MAX_ELLIPSE_SEGMENTS = 180;
 const ELLIPSE_SEGMENTS_PER_RADIUS = 1.5;
 
-/** The outline for a shape dragged from `anchor` to `current`. */
-export function shapeOutline(kind: ShapeKind, drag: ShapeDrag): ShapePoint[] {
+/**
+ * The outline for a shape dragged from `anchor` to `current`.
+ *
+ * `options` only matters for the polygon and the star; the other kinds ignore
+ * it, which is why the parameter has a default and the existing call sites
+ * stay as they are.
+ */
+export function shapeOutline(
+  kind: ShapeKind,
+  drag: ShapeDrag,
+  options: ShapeOptions = DEFAULT_SHAPE_OPTIONS,
+): ShapePoint[] {
   switch (kind) {
     case "line":
       return lineOutline(drag);
@@ -52,6 +129,10 @@ export function shapeOutline(kind: ShapeKind, drag: ShapeDrag): ShapePoint[] {
       return rectangleOutline(drag);
     case "ellipse":
       return ellipseOutline(drag);
+    case "polygon":
+      return polygonOutline(drag, options);
+    case "star":
+      return starOutline(drag, options);
   }
 }
 
@@ -179,4 +260,136 @@ function ellipseSegments(radiusX: number, radiusY: number): number {
 
 function roundUpToFour(value: number): number {
   return Math.ceil(value / 4) * 4;
+}
+
+/**
+ * The ellipse a polygon or a star is inscribed in.
+ *
+ * It is the drag's box: its centre and its half-extents. A polygon that
+ * follows the ellipse rule is the familiar one - the rule Photoshop,
+ * Procreate and Illustrator use - and the star follows the same ellipse, so
+ * the two tools agree on where a tip sits.
+ *
+ * The polygon's own bounding box is therefore *not* the drag's box: it equals
+ * it when the side count is a multiple of four (the vertices sit on all four
+ * extremes), it is narrower in one axis when the side count is two more than a
+ * multiple of four, and it is smaller in both axes when the side count is odd.
+ */
+function dragEllipse(drag: ShapeDrag): {
+  centerX: number;
+  centerY: number;
+  radiusX: number;
+  radiusY: number;
+} {
+  const { minX, minY, maxX, maxY } = dragBox(drag);
+  return {
+    centerX: (minX + maxX) / 2,
+    centerY: (minY + maxY) / 2,
+    radiusX: (maxX - minX) / 2,
+    radiusY: (maxY - minY) / 2,
+  };
+}
+
+/**
+ * Turns a placed outline about the box's centre.
+ *
+ * The rotation is a **rigid** turn: the vertices are placed first, and then
+ * they are turned about the centre, so the shape keeps its side lengths, its
+ * distances and its size. Folding the rotation into the ellipse's *parameter*
+ * instead would morph the shape on a non-square box - the side lengths would
+ * change with the angle - which is not a rotation.
+ *
+ * The angle is measured the way the placement measures it: from the +x axis
+ * towards +y, which is clockwise on a screen where y grows downwards.
+ */
+function rotateAboutCentre(
+  points: readonly ShapePoint[],
+  centerX: number,
+  centerY: number,
+  rotationDegrees: number,
+): ShapePoint[] {
+  const radians = (rotationDegrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return points.map((point) => {
+    const dx = point.x - centerX;
+    const dy = point.y - centerY;
+    return {
+      x: centerX + dx * cos - dy * sin,
+      y: centerY + dx * sin + dy * cos,
+    };
+  });
+}
+
+/**
+ * Turns the placed outline about the centre and closes it.
+ *
+ * The closing repeat is the *turned* first point, so the outline is a proper
+ * loop: the last point repeats the first exactly.
+ */
+function turnedOutline(
+  placed: readonly ShapePoint[],
+  centerX: number,
+  centerY: number,
+  rotationDegrees: number,
+): ShapePoint[] {
+  const turned = rotateAboutCentre(placed, centerX, centerY, rotationDegrees);
+  turned.push({ x: turned[0].x, y: turned[0].y });
+  return turned;
+}
+
+/**
+ * A regular polygon inscribed in the drag's ellipse.
+ *
+ * Vertex `k` sits at `-π/2 + 2πk/n`, so the first vertex is at the top and
+ * the sides are equal when the box is a square (which `Shift` guarantees). The
+ * rotation is applied afterwards, about the box's centre, so the shape turns
+ * rigidly and the first vertex ends up at `-π/2 + rotation`.
+ */
+function polygonOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
+  const { sides, rotation } = normalizeShapeOptions(options);
+  const { centerX, centerY, radiusX, radiusY } = dragEllipse(drag);
+  const placed: ShapePoint[] = [];
+  for (let index = 0; index < sides; index += 1) {
+    const angle = -Math.PI / 2 + (2 * Math.PI * index) / sides;
+    placed.push({
+      x: centerX + radiusX * Math.cos(angle),
+      y: centerY + radiusY * Math.sin(angle),
+    });
+  }
+  return turnedOutline(placed, centerX, centerY, rotation);
+}
+
+/**
+ * A star: the classic `2p`-vertex outline, an outer and an inner vertex
+ * alternating around the ellipse's centre.
+ *
+ * It is deliberately **not** a pentagram - the five vertices connected in a
+ * skipping order. A pentagram crosses itself, and the rasterizer fills a
+ * shape with the non-zero rule, so a self-crossing outline would fill its
+ * crossings as one blob instead of as a star.
+ *
+ * The outer vertices are the polygon's vertices, and the inner ones are the
+ * same ellipse scaled by `innerRatio` about the centre, so a ratio of `1`
+ * gives a regular `2p`-gon and the star's valleys always point between two
+ * tips. The rotation is applied afterwards, about the box's centre, so the
+ * star turns rigidly and keeps the ratio between its tips and its valleys.
+ */
+function starOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
+  const { sides, innerRatio, rotation } = normalizeShapeOptions(options);
+  const { centerX, centerY, radiusX, radiusY } = dragEllipse(drag);
+  const placed: ShapePoint[] = [];
+  for (let index = 0; index < sides; index += 1) {
+    const outer = -Math.PI / 2 + (2 * Math.PI * index) / sides;
+    placed.push({
+      x: centerX + radiusX * Math.cos(outer),
+      y: centerY + radiusY * Math.sin(outer),
+    });
+    const inner = -Math.PI / 2 + (2 * Math.PI * (index + 0.5)) / sides;
+    placed.push({
+      x: centerX + radiusX * innerRatio * Math.cos(inner),
+      y: centerY + radiusY * innerRatio * Math.sin(inner),
+    });
+  }
+  return turnedOutline(placed, centerX, centerY, rotation);
 }

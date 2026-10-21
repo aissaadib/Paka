@@ -58,6 +58,7 @@ function toStroke(
     layerId,
     brush: toBrush(element.brush),
     ...(element.erase ? { erase: true } : {}),
+    ...(element.fill ? { fill: true } : {}),
     xs: [...element.xs],
     ys: [...element.ys],
     pressures: [...pressures],
