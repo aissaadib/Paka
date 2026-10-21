@@ -6,8 +6,9 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-20**, at the live-preview compositing, layer-safety and
-raster-budget slices on `main` — clean and in sync with `origin/main`.
+Last verified: **2026-10-21**, at `87593bc` - the **polygon and star** slice
+(T-14), on top of the HSV colour wheel, the stamp (dab) engine and the
+visual-regression harness.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,18 +31,30 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
 
 ## 2. Current state (verified today)
 
-- Branch `main`, working tree clean after the live-preview compositing,
-  layer-safety and raster-budget slices.
-- `pnpm test` → **461 tests in 29 files, all pass** (re-run for this slice).
-- `pnpm typecheck` clean; `pnpm build` succeeds (verified for this slice).
-- Project file format **version 8** (`PROJECT_VERSION = 8`); `stabilizer` was
-  additive within v6 (missing = 0), `texture` is required from v7, and
-  `blendMode` may be `multiply` or `screen` from v8.
+- Branch `feat/t06-settings-persistence` (from `feat/stamp-brush-engine` at
+  `a1c9c1d`), after the live-preview compositing, layer-safety, raster-budget,
+  bounded-rasterization, **stamp (dab) brush engine**, **HSV colour wheel**,
+  **composition guides**, **polygon and star** and **scale/rotate** slices.
+  The settings slice is committed on its own branch, ready for review; it is
+  not merged into the development branch yet.
+- `pnpm test` → **742 tests in 36 files, all pass** (the settings slice: 711
+  before it).
+- `pnpm typecheck` clean; `pnpm build` succeeds (the settings slice).
+- Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
+  additive within v6 (missing = 0), `texture` is required from v7,
+  `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
+  `stampSpacing` and `stampHardness` are required from v9. `document.guides`
+  is **additive within v9** (missing = no guides), because the guides are
+  display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
-  built before the fill, gradient, hardness, spacing/stabilizer, texture and
-  blend mode slices); packaged-app verification is still outstanding.
+  built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
+  mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
+  packaged-app verification is still outstanding, **except** for the settings
+  commands, which were verified in a release build driven through UI
+  Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
-  stabilizer and grain texture shipped; the stamp engine remains. Phase 4 has
+  stabilizer, grain texture and the stamp (dab) engine shipped; directional or
+  per-dab stamp textures remain. Phase 4 has
   `normal` / `multiply` / `screen` layer blend modes; masks and groups remain.
   Phase 0 gained three more correctness items: live-preview compositing inside
   its own layer, layer/history safety during a gesture, and a bounded document
@@ -51,6 +64,14 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t06-settings-persistence` | **Settings persistence** - the nine editor preferences (brush, tool, shape fill, shape sides, star inner ratio, shape rotation, fill tolerance, gradient type, gradient end colour) live in a per-user settings file in the OS configuration folder and are restored at startup. The file holds preferences only - never a drawing - and changing one is not an edit, so it adds no history step and never marks the document unsaved. A missing, corrupt or future-versioned file starts the app with the defaults and no error. The **autosave** machinery and its policy seam exist and are covered by tests, but the decisions that govern autosaving are the owner's, so nothing is enabled and no recovery file is ever written. |
+| `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
+| `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
+| `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
+| `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
+| `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
+| `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. The reverted commit stays in the history. |
+| `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |
 | `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active (on end, on cancel, on a document or raster-scale change, and before an eraser takes its snapshot), so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
 | `21cd7c7` | **Finished-gesture notice reset** — a refused layer change explains once per gesture, and a finished gesture ends that state. |
 | `fae138c` | **Honest peak raster model** — the budget models the peak surface set (three 2× surfaces plus a transient scan buffer, 58 bytes per document pixel) instead of four full surfaces; the 16,777,216-px cap is unchanged. |
@@ -82,10 +103,26 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
   mode, and releasing the stroke never changes the stacking.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
-- **Shapes** (`L` line, `R` rectangle, `O` ellipse): live preview, one stroke =
-  one undo step; `Shift` constrains (45°, squares, circles), `Alt` draws from
-  the centre. Rectangle/ellipse can be filled via the **Fill shape** switch;
-  a line cannot. Shapes ignore pen pressure (constant width).
+- **Shapes** (`L` line, `R` rectangle, `O` ellipse, `P` polygon, `S` star): live
+  preview, one stroke = one undo step; `Shift` constrains (45°, squares, circles,
+  a regular polygon or star), `Alt` draws from the centre. Rectangle/ellipse/
+  polygon/star can be filled via the **Fill shape** switch; a line cannot.
+  Shapes ignore pen pressure (constant width).
+- **Polygon and star** (`P`, `S`): a regular *n*-gon (3-24 sides, default 5)
+  inscribed in the **ellipse** of the dragged box with a vertex at the top, and
+  the classic **2p-vertex** star (3-24 points, default 5) inscribed in the
+  **same ellipse** (so a star's tips are a polygon's tips) with an **inner
+  radius** (5-100 %, default 50 %). Both take a **rotation** (0-360°, default
+  0°) about the box's centre - a rigid turn, so the shape keeps its size -
+  because the selection cannot rotate. The three
+  options are editor state (not undoable, not dirtying, read at press time) and
+  are shared: the slider is labelled **Sides** for the polygon and **Points**
+  for the star. The shape's own box is not the drag's box: the polygon's own
+  box **equals** the drag's box when the side count is a multiple of four, is
+  **narrower in one axis** when the side count is two more than a multiple of
+  four, and is **smaller in both axes** when the side count is odd; and a
+  rotated shape swings off the ellipse, so its box can be **larger** than the
+  drag's box in one axis - and smaller in the other.
 - **Bucket fill** (`F`): flood-fills the region under the pointer from the
   merged visible composite, writes a bounded pixel-exact patch to the active
   layer. **Tolerance** 0–255 per-channel; transparent pixels match each other.
@@ -96,19 +133,67 @@ raster-budget slices on `main` — clean and in sync with `origin/main`.
   preview element, one undo step, cancel removes it. Two stops only; paints the
   whole layer in element order; no stop editor, no angle snapping.
 - **Selection/transform** (`M`): marquee or click selects whole strokes of the
-  active layer; drag moves them; arrow keys nudge (1 px, `Shift` 10 px,
-  coalesced); `Ctrl+D` duplicates; `Ctrl+Shift+H`/`V` flips; `Delete` removes;
-  `Esc` cancels; all one undo step each and mirrored in the **Selection** menu.
+  active layer; drag moves them; the four **corner handles** scale the
+  selection and the **rotation handle** above the frame turns it; arrow keys
+  nudge (1 px, `Shift` 10 px, coalesced); `Ctrl+D` duplicates;
+  `Ctrl+Shift+H`/`V` flips; `Delete` removes; `Esc` cancels; all one undo step
+  each and mirrored in the **Selection** menu.
   Selection is an overlay only, never serialized or exported, and painting is
   not clipped to it.
+  A **scale** is uniform and about the centre of the selection's frame: the
+  corner keeps its direction from the centre, so dragging away from the centre
+  grows the selection and dragging towards it shrinks it, and the factor is
+  clamped so a selection can never collapse or invert (5 % is the floor). A
+  **rotation** is about the same centre; the angle is the pointer's compass
+  angle clockwise from "up", it **snaps to 15 degrees** while the pointer is
+  held down, and **`Shift` turns the snap off** for a free turn. Both are
+  measured **from where the press landed**, so a press that misses the handle
+  by a little does not jump the content. Both are
+  **baked on apply**: the transform moves the strokes' samples and nothing else,
+  so the brush, the colour, the opacity and the pressure are untouched, a
+  scaled stroke is still the same stroke, and there is **no project-format
+  change**. The handles belong to the **committed selection**: they appear on
+  its frame and never on a marquee's rubber band.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
+- **Preferences survive a restart**: the brush, the tool, the shape options, the
+  fill tolerance and the gradient settings are stored in a per-user settings file
+  in the operating system's configuration folder (`%APPDATA%\com.paka.drawing\
+  settings.json` on Windows) and restored at startup. The file holds
+  preferences only - never a drawing - and changing one is not an edit, so it
+  adds no history step and never marks the document unsaved. A missing, corrupt
+  or future-versioned file starts the app with the defaults and no error.
+- **Composition guides** (`U`): a dedicated **Guides** tool. Drag on empty canvas
+  to place a guide - the axis follows the dominant direction of the drag and the
+  position is the **press** coordinate, so the guide marks where the drag
+  started. The drag has to travel **3 screen pixels** before its direction
+  decides the axis, so **a shorter drag creates no guide at all** (it is a
+  click). Drag an existing guide to move it along its own axis; a click selects
+  it, `Delete` removes it, `Esc` cancels a drag in flight. A guide is document
+  state but **display-only**: it is painted over the artwork and never reaches a
+  layer surface or a PNG export, so the format change is additive and the file
+  version stays 9. No snapping to guides yet, and no grids or rulers.
+- **HSV colour wheel** (the **Colour** panel): a disc where the angle is the
+  hue and the distance from the centre is the saturation, a value slider, and
+  three sliders naming the same numbers. It writes the brush colour through
+  `setBrush`, so it follows a colour picked off the canvas and the toolbar's
+  colour input; the sliders are keyboard-operable; choosing a colour is not an
+  edit.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
-  eraser and shapes), spacing (2–200 % of diameter, sample density), stabilizer
-  (0–100 %, brush and eraser only), texture (0–100 %, deterministic grain over
-  the finished coverage, applied to brush/eraser/shapes), colour + 8-swatch
-  palette, pressure size and pressure opacity toggles. All settings are captured
-  per stroke.
+  eraser and shapes), sampling (2–200 % of diameter, sample density),
+  stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
+  grain over the finished coverage, applied to brush/eraser/shapes), a **stamp**
+  switch with **stamp spacing** (2–100 % of the brush size, the distance
+  between dabs) and **stamp hardness** (the falloff of one dab) — all three
+  brush and eraser only — colour + 8-swatch palette, pressure size and pressure
+  opacity toggles. All settings are captured per stroke.
+- **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
+  placed along its path instead of round-capped segments. The dabs' coverage is
+  unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
+  never darken, and the stroke's opacity is still applied once. Each dab has a
+  true hardness curve: a falloff inside the dab rather than a blur of the
+  finished silhouette. The dabs are a pure function of the samples and the
+  brush, so live drawing, undo/redo, reopen and export agree.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
@@ -144,16 +229,20 @@ src/
   hooks/        React bindings, keyboard shortcuts, native environment
   state/        editorStore (snapshot + intents) and context
   core/
-    document/   document/layer metadata, ordered element store, selection
+    document/   document/layer metadata, ordered element store, selection,
+                guides (the guide model, geometry and document operations),
+                selectionTransform (the scale/rotate geometry) and
+                selectionHandles (the transform handles)
     brushes/    defaults/normalization, strokeBuilder (sample capture)
     fill/       pure flood scan, fill-patch record
     gradient/   gradient geometry/stops/cloning
     tools/      registry, per-tool behaviour, shape geometry
     commands/   command stack, stroke/fill/gradient/document commands
     input/      pointer normalization, DOM binder
-    rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke
+    rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke,
+                stampCoverage (dab placement + coverage union)
     engine/     DrawingEngine: integration, gestures, history, snapshot
-    project/    format v8, gateway port, file orchestration
+    project/    format v9, gateway port, file orchestration
     export/     PNG export
   types/        shared value types
   utils/        math, colour, ids, paths, store
@@ -161,24 +250,23 @@ src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
 
-Key files for the next slice (stamp engine):
+Key files for the next slice (directional / per-dab stamp textures):
 
-- `src/core/rendering/canvas2dStroke.ts` — current segment rasterizer and grain
-  tile; `rasterizeStroke` is the function a stamp path must sit behind or beside
-  without changing default output.
-- `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStrokeToBuffer`,
-  `compositeStrokeBuffer`, `paintStrokeCoverage`, `featherStroke`,
-  `applyStrokeTexture`; the stroke buffer, single-alpha composite and
-  post-dab grain are the invariants a stamp engine must keep.
+- `src/core/rendering/stampCoverage.ts` — the dab plan (`stampDabs`, the cursor)
+  and the coverage union (`StampCoverage.paintDab`); a per-dab texture has to
+  multiply a dab's profile inside `paintDab`, and the tile upload has to
+  stay bounded.
+- `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStampStroke`,
+  `extendStampStroke`, `writeStampCoverage`; the coverage buffer, the
+  single-alpha composite and the post-dab grain are the invariants a per-dab
+  texture must keep.
 - `src/types/brush.ts` / `src/core/brushes/defaults.ts` — brush fields
-  (stamp spacing/hardness/texture) and defaults/clamping/equality.
-- `src/features/brushes/BrushControls.tsx` — controls for real stamp settings.
+  (a texture strength, a texture kind) and defaults/clamping/equality.
+- `src/features/brushes/BrushControls.tsx` — controls for real texture settings.
 - `src/core/document/types.ts` — `StrokeRecord`/`brush`, the authoritative record.
-- `src/core/engine/DrawingEngine.ts` — per-stroke brush capture and renderer
-  begin/extend/finish lifecycle.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
-  serializer; appearance-changing stamp fields need v9.
-- Tests: `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`,
+  serializer; an appearance-changing texture field needs v10.
+- Tests: `stampCoverage.test.ts`, `canvas2dRenderer.test.ts`,
   `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
 
@@ -296,17 +384,62 @@ Key files for the next slice (stamp engine):
   before anything is allocated; the file format version is unchanged.
 - **A shape is an ordinary stroke** whose samples trace the outline;
   `fill: true` fills the polygon before tracing the outline. No geometry type.
+- **The stamp engine is a rasterization strategy, not a new kind of content.**
+  With `stamp` off the stroke is the legacy round-capped segment path, byte for
+  byte; with it on it is a chain of round dabs placed along the stored polyline
+  at a fixed arc-length interval (`stampSpacing * size` document pixels). The
+  dabs' coverage is combined with a **per-pixel maximum** (a union), because
+  Canvas 2D has no max-alpha composite; the stroke's opacity is still applied
+  once, so overlapping dabs and a self-crossing stroke never darken. Each dab
+  carries its own hardness curve (`stampHardness`), a falloff inside the dab
+  rather than a blur of the finished silhouette; the stroke-level hardness
+  feather and the grain post-pass still run over the finished coverage. The
+  dab plan is a pure function of the samples and the brush - no randomness, no
+  clock, no zoom, no `rasterScale` - so live drawing, commit, rebuild,
+  undo/redo, reopen and export agree. The plan does not depend on the sample
+  density, so `spacing` stays non-appearance-changing. The stamp applies to the
+  brush and the eraser; shapes keep the segment path and record the stamp
+  fields as unused. The coverage map is bounded by the stroke's own footprint
+  (like the feather scratch), so the raster budget does not move: the cache
+  uses up to 8 of the 10 bytes per document pixel of transient allowance, and
+  the upload to the stroke buffer is one 16 KB tile at a time.
 - **A fill is a pixel patch**, not a traced contour: colour, tight bbox, binary
   mask. Redo/reopen replay the mask, never re-run the flood.
 - **A gradient is geometry + stops**, not pixels; radial = fixed centre, radius
   by distance, inner radius 0. Endpoints clamp to the document.
 - **Editor options describe the next gesture and are not serialized**:
-  `shapeFill`, `fillTolerance` (default 24), `gradientType`,
-  `gradientEndColor`. Each is read at press time so the committed record keeps
-  the setting it was drawn with. Changing an option is not an edit. The brush is
-  the same: the current brush is session state, while every stroke stores the
-  full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`
-  and `texture`.
+  `shapeFill`, `shapeSides` (3-24, default 5), `shapeInnerRatio` (0.05-1,
+  default 0.5), `shapeRotation` (0-360°, default 0), `fillTolerance` (default
+  24), `gradientType`, `gradientEndColor`. Each is read at press time so the
+  committed record keeps the setting it was drawn with. Changing an option is
+  not an edit. The brush is the
+  same: the current brush is session state, while every stroke stores the
+  full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
+  `texture`, `stamp`, `stampSpacing` and `stampHardness`.
+- **Preferences are session state that happens to survive a restart.** The
+  settings file holds the nine editor preferences and nothing else: no
+  drawing, no document, no history. Restoring them goes through the engine's
+  editor-state setters, so a restored preference costs no history entry, no
+  revision bump and no dirty flag - the same contract the brush settings have
+  always had. The file lives in the OS configuration directory, its path is
+  owned by Rust (the WebView never learns it), and it is written with the
+  same atomic replace the project file uses. Every field is validated on the
+  way in: a missing field takes its default, an out-of-range value is clamped,
+  a malformed value takes its default, and a file from a newer version is
+  ignored wholesale. A corrupt settings file cannot stop the editor from
+  starting.
+- **The colour wheel is a view of the brush colour, not a second source of
+  truth.** The brush still stores an `#rrggbb` string, and the wheel writes
+  through the same `setBrush` path as the toolbar's colour input, the swatches
+  and the canvas picker, so colour has one place and a colour picked off the
+  canvas moves the wheel. `rgbToHsv` and `hsvToRgb` are exact inverses over
+  the whole 8-bit sRGB cube, and a grey reports hue `0` with saturation `0`.
+  The wheel keeps the hue and saturation the *user* asked for while the brush
+  holds the colour the wheel wrote, because the 8-bit grid is coarse on a dark
+  colour - the default `#16181c` stores a hue of 205° as a colour whose own
+  hue is 220° - and any colour changed elsewhere replaces it with the stored
+  colour. Choosing a colour is session state for the next gesture, not an
+  edit.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
@@ -315,8 +448,9 @@ Key files for the next slice (stamp engine):
   smoothed path is already stored in the samples; v7 requires `texture` because
   an older reader would draw a textured stroke plain; v8 allows `multiply` and
   `screen` blend modes because a v7 reader rejects them rather than drawing them
-  as `normal`; unknown/newer versions are rejected outright, as are v4 files
-  containing a gradient.
+  as `normal`; v9 requires `stamp`, `stampSpacing` and `stampHardness` because
+  an older reader would draw a stamped stroke as the segment path; unknown/newer
+  versions are rejected outright, as are v4 files containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
   restores painting order. Undo/redo are refused during a selection gesture.
@@ -329,32 +463,61 @@ Key files for the next slice (stamp engine):
 
 Product:
 
-- No text tool; only brush, eraser, select, line, rectangle, ellipse, bucket,
-  gradient, picker, pan.
-- Layer rasterization is a full rebuild: for each element on a layer the
-  renderer clears the whole stroke buffer and blends one full-surface draw, so
-  an undo on a busy layer costs `O(elements x surface pixels)` regardless of the
-  stroke geometry. Measured numbers, their environmental limits, and the
-  recommended first fix (dirty bounds for the stroke buffer) are in
+- No text tool; only brush, eraser, select, line, rectangle, ellipse, polygon,
+  star, bucket, gradient, picker, guides, pan.
+- Shapes: a committed shape stores its **points**, not its kind, so a polygon or
+  a star cannot be re-edited as one - it is an ordinary stroke afterwards. There
+  is no rotation *gesture* (the option covers the need), no irregular polygon,
+  no per-vertex handles, and the polygon's and the star's options are session
+  state: they are not persisted, and they are shared between the two tools.
+- A layer is still re-rasterized from scratch when it changes, but the rebuild is
+  bounded by each element's own footprint: it clears and blends only the rectangle
+  the element inks, so the cost follows the stroke geometry instead of the
+  document size (measured 47x-187x less touched area for strokes that ink a small
+  part of the document, about 1.1x for strokes that cover it). What is left is a
+  per-draw cost charged for the document-sized layer surface, which needs a
+  profile in the packaged app before the surfaces can be restructured; measured
+  numbers, their environmental limits and that recipe are in
   [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
 - Gradients: two stops, whole-layer, no stop editor, no angle snapping, no
   transparent stop, not selectable (cannot move/duplicate/flip).
 - Fills: binary mask, no feather/gap-closing, no pre-commit preview, not
   selectable.
 - Hardness: a single Gaussian feather of the finished silhouette, so the edge
-  extends slightly beyond the nominal diameter; no stamp profile.
-- Spacing: sample density only, not stamp spacing; lower values cost memory but
-  do not add grain. Stabilizer: exponential follow with visible lag, no
-  look-ahead or rope catch-up; shapes ignore it.
-- Texture: one grain post-pass, not a stamp/per-dab, directional or image-based
-  texture. No stamp engine yet.
+  extends slightly beyond the nominal diameter. The stamp engine's own
+  `stampHardness` is the true per-dab profile and does not extend past the dab.
+- Sampling: sample density only, not the stamp's dab spacing; lower values cost
+  memory but do not add grain. Stabilizer: exponential follow with visible lag,
+  no look-ahead or rope catch-up; shapes ignore it.
+- Texture: one grain post-pass, not a per-dab, directional or image-based
+  texture. The stamp engine has no texture layer yet.
+- The stamp engine: round dabs only - no directional, elongated, offset or
+  bristle shapes, no scatter, rotation or jitter, and no per-dab opacity (a
+  stroke still gets one alpha). A stamped stroke's cost grows with the square of
+  the brush radius, so a very large brush with a fine dab spacing is expensive
+  to re-rasterize; the planner stops after a fixed work budget, so an extreme
+  stroke is cut short rather than stalling the app.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
-  switch/tool switch, not a painting mask, no scale/rotate/perspective, no
-  copy/paste across layers.
+  switch/tool switch, not a painting mask, no perspective and no non-uniform
+  scale, no copy/paste across layers. A transform is **baked on apply**, so
+  there is no persistent transform to edit afterwards, and the painted width is
+  not scaled with the path.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
-  inheritance. No layer masks/groups; no adjustment layers; no guides/grids; no
-  autosave/crash recovery; `Ctrl+N` unbound.
+  inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+- **There is no autosave and no crash recovery.** The recovery machinery and
+  its policy seam exist (`src/core/autosave/`) and are covered by tests, but
+  the decisions that govern autosaving - when it runs, how a never-saved
+  document is protected, whether recovery is automatic, prompted or manual,
+  when a recovery copy is deleted and how a conflict is presented - are the
+  owner's and are unanswered, so **nothing is enabled and no recovery file is
+  ever written**. The settings file is written 300 ms after the last
+  preference change, so a preference changed in the last moments before the
+  window closes can be lost.
+- Guides: axis-only (no diagonals), one guide per axis position (a duplicate is
+  refused), a fixed accent colour, no position label, and **no snapping to
+  guides** - snapping changes what a stroke does, so it is its own slice. No
+  grids and no rulers yet either.
 - A layer with a non-default opacity or blend mode spends one extra
   document-sized scratch canvas while it is being previewed.
 - The document pixel budget covers a one-layer document plus the working
@@ -392,6 +555,16 @@ Verification gaps:
   `normal` unchanged), the export composite matched, and undo/redo restored the
   layer. The mode mapping, dirty flag, single-step history, duplication and v8
   format round-trip are covered by Vitest. No packaged Tauri or high-DPI check.
+- The stamp engine was checked in the browser app with real pixels: the `Stamp`
+  switch and its two sliders appeared and toggled, a stamped drag drew a chain
+  of separated dabs on the live display canvas, the same drag without the stamp
+  drew the continuous legacy line, `Ctrl+Z` restored the stamped dabs and a
+  second `Ctrl+Z` cleared the stroke back to paper (`history 0`). The dab
+  geometry, the union, the live/commit/rebuild/export parity, the eraser, the
+  cancel path, the resolution agreement and the v9 format are covered by
+  Vitest, and the renderer was driven with real Chromium pixels through Vite
+  (the dabs' spacing and the soft dab's radial falloff were read off the
+  canvas). No packaged Tauri or high-DPI check.
 - The live-preview compositing was proven with real pixels through the real
   `Canvas2DRenderer` using a software pixel canvas (a brush and a shape preview
   under an opaque and a translucent upper layer, active-layer opacity applied
@@ -428,9 +601,9 @@ Verification gaps:
   - State checks that always work: status bar (`history N`, `N selected`,
     `● unsaved`), toolbar controls, document title.
 - Shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `f` bucket, `g` gradient, `i` picker, `p`/middle-drag pan;
-  `Esc` clears/cancels; arrows nudge (`Shift` 10 px); `Ctrl+D` duplicate;
-  `Ctrl+Shift+H`/`V` flip.
+  `o` ellipse, `p` polygon, `s` star, `f` bucket, `g` gradient, `i` picker,
+  `h` pan (middle-drag also pans); `Esc` clears/cancels; arrows nudge
+  (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip.
 - Windows toolchain (details in HANDOFF §7): cargo is at
   `%USERPROFILE%\.cargo\bin` and must be prepended to `PATH`; WinLibs
   `mingw64\bin` must also be on `PATH` (rustc calls `dlltool.exe` by name);
@@ -438,72 +611,80 @@ Verification gaps:
   `-C link-arg=-Wl,--exclude-all-symbols` (do not override `RUSTFLAGS`). A cold
   release build takes ~5 minutes.
 
-## 9. Next slice — stamp-based brush engine (Phase 3)
+## 9. Next slice — directional / per-dab stamp textures (Phase 3)
 
-`docs/ROADMAP.md` "Next slice" is the authority. Hardness, spacing, stabilizer
-and grain texture shipped; the stamp/dab engine is the remaining Phase 3 item.
+`docs/ROADMAP.md` "Next slice" is the authority. Hardness, sampling, stabilizer,
+grain texture and the stamp (dab) engine have shipped; the texture layer of the
+stamp engine is the remaining Phase 3 item.
 
-The goal: add a stamp rasterizer behind the existing stroke interface for
-**per-dab spacing, true hardness curves and directional/image textures**, without
-changing what current hard, soft and grain files look like.
+The goal: let a dab carry its own texture - one that varies **per dab** and can
+follow the path's direction, the way a bristle or a dry brush varies - instead
+of the single document-anchored grain post-pass over the finished coverage,
+without changing what current hard, soft, grain and stamped files look like.
 
 ### Constraints to keep
 
-1. `DrawingRenderer` and `StrokeRecord` stay the boundary. Stamps are a
+1. `DrawingRenderer` and `StrokeRecord` stay the boundary. A texture is a
    rasterization strategy; the vector samples remain authoritative for undo,
    reopen and export.
-2. Keep the existing segment path and grain post-pass as the default. Default
-   hard/soft/grain strokes must stay pixel-identical, including the single-alpha
-   composite and the no-self-darkening invariant.
-3. Accumulate per-dab coverage into one stroke buffer (max/union, not repeated
-   source-over), then composite once at the stroke opacity. Grain stays a
-   post-dab pass unless the format records per-dab texture.
-4. Any grain/stamp randomness must be deterministic from document coordinates so
-   live, rebuild, undo/redo, reopen and PNG export agree at every zoom and
-   `rasterScale`.
-5. Capture stamp settings per stroke. Appearance-changing fields that a v8
-   reader cannot ignore require **format version 9**; prove it with tests.
-6. Keep `spacing` (sample density) distinct from stamp spacing, or document an
-   explicit migration if they are merged.
+2. Keep the existing segment path, the existing grain pass and the existing
+   stamp engine as the defaults. Default hard/soft/grain/stamped strokes must
+   stay pixel-identical, including the single-alpha composite and the
+   no-self-darkening invariant.
+3. A per-dab texture multiplies a dab's coverage **before** the union, so the
+   union is still a maximum and a stroke still cannot darken. The stroke's
+   opacity is still applied once.
+4. Any texture variation must be deterministic from document coordinates (and,
+   if it follows the path, from the dab's own direction), so live, rebuild,
+   undo/redo, reopen and PNG export agree at every zoom and `rasterScale`. No
+   `Math.random()` in a repaint path.
+5. Capture the texture settings per stroke. Appearance-changing fields that a v9
+   reader cannot ignore require **format version 10**; prove it with tests.
+6. Keep `spacing` (sample density) distinct from the stamp's dab spacing.
+7. The coverage map stays footprint-bounded and the upload stays one tile at a
+   time: the raster budget's 58 bytes per document pixel must not move.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts` / `defaults.ts`: stamp fields, defaults, clamp and
-      equality.
-- [ ] `src/core/rendering/canvas2dStroke.ts` / `Canvas2DRenderer.ts`: stamp
-      rasterizer behind the existing buffer/composite path; default unchanged.
-- [ ] `src/features/brushes/BrushControls.tsx`: real stamp controls, no
+- [ ] `src/types/brush.ts` / `defaults.ts`: the texture fields, defaults, clamp
+      and equality.
+- [ ] `src/core/rendering/stampCoverage.ts`: the texture inside the dab's
+      profile, deterministic from the document and the dab's direction.
+- [ ] `src/core/rendering/Canvas2DRenderer.ts`: wire the texture through the
+      stamp path; the segment path and the grain post-pass stay untouched.
+- [ ] `src/features/brushes/BrushControls.tsx`: real texture controls, no
       placeholders.
-- [ ] `src/core/engine/DrawingEngine.ts`: per-stroke capture and brush setters
-      stay editor state (no history, no dirty).
-- [ ] `src/core/project/projectFormat.ts`: format v9 if appearance changes,
-      validate the new fields, read v1-v8 unchanged.
-- [ ] Tests: segment/grain parity at default, stamped live/commit equality,
-      self-overlap/no-darkening, deterministic pattern at different zoom/scale,
-      format round-trip and old-file defaults.
+- [ ] `src/core/project/projectFormat.ts`: format v10 if the appearance changes,
+      validate the new fields, read v1-v9 unchanged.
+- [ ] Tests: default parity, deterministic texture at different zoom/scale, the
+      union still holds, live/commit/rebuild/export parity, format round-trip
+      and old-file defaults.
 - [ ] Docs in the same commit: README, ARCHITECTURE, PROJECT_FORMAT, ROADMAP,
       HANDOFF + this brief.
-- [ ] Browser check: default hard/soft/grain strokes unchanged, stamp effect
-      visible, one undo step, save/reopen and export agree; report
-      automated/browser evidence separately.
+- [ ] Browser check: the default strokes unchanged, the texture visible, one
+      undo step, save/reopen and export agree; report automated/browser
+      evidence separately.
 - [ ] `pnpm test`, `pnpm typecheck`, `pnpm build`; commit (`git commit -F`) and
       push.
 
 ### Acceptance criteria
 
-- Default hard, soft and grain output is unchanged pixel for pixel.
-- A stamped stroke is one undo step; it never rewrites existing strokes.
-- Live drawing, undo/redo, reopen and export produce the same stamped pixels.
-- Overlapping dabs and a self-crossing stamped stroke do not darken.
-- Old projects open unchanged; a v9 file requires the new fields and an older
+- Default hard, soft, grain and stamped output is unchanged pixel for pixel.
+- A textured dab stroke is one undo step; it never rewrites existing strokes.
+- Live drawing, undo/redo, reopen and export produce the same textured pixels.
+- The union still holds: overlapping dabs and a self-crossing stroke do not
+  darken.
+- The texture is anchored to the document, not to the frame: the same stroke
+  renders the same at every zoom and `rasterScale`.
+- Old projects open unchanged; a v10 file requires the new fields and an older
   reader refuses it rather than drawing the wrong look.
 
 ## 10. First ten minutes of a new session
 
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
-   raster-budget commit (or the commit this file names).
+   commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 461 tests in 29 files).
+   anything (expect 653 tests in 32 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

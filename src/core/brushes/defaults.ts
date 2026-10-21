@@ -7,6 +7,14 @@ export const MIN_BRUSH_SIZE = 1;
 export const MAX_BRUSH_SIZE = 512;
 export const MIN_SPACING = 0.02;
 export const MAX_SPACING = 2;
+/**
+ * Dab distance, as a fraction of the brush size: 2 % to 100 %.
+ *
+ * The maximum is the brush's own diameter: beyond it the dabs no longer
+ * touch, and the stroke reads as a dotted line rather than a stroke.
+ */
+export const MIN_STAMP_SPACING = 0.02;
+export const MAX_STAMP_SPACING = 1;
 
 /**
  * Defaults are tuned for mouse and pen input on a white document:
@@ -23,6 +31,9 @@ export const DEFAULT_BRUSH: BrushSettings = {
   spacing: 0.12,
   stabilizer: 0,
   texture: 0,
+  stamp: false,
+  stampSpacing: 0.1,
+  stampHardness: 1,
 };
 
 /** Clamps and validates a brush configuration. */
@@ -38,6 +49,9 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     spacing: clamp(brush.spacing, MIN_SPACING, MAX_SPACING),
     stabilizer: clamp(brush.stabilizer, 0, 1),
     texture: clamp(brush.texture, 0, 1),
+    stamp: brush.stamp === true,
+    stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
+    stampHardness: clamp(brush.stampHardness, 0, 1),
   };
 }
 
@@ -60,7 +74,10 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.minSizeRatio === b.minSizeRatio &&
     a.spacing === b.spacing &&
     a.stabilizer === b.stabilizer &&
-    a.texture === b.texture
+    a.texture === b.texture &&
+    a.stamp === b.stamp &&
+    a.stampSpacing === b.stampSpacing &&
+    a.stampHardness === b.stampHardness
   );
 }
 

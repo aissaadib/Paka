@@ -31,6 +31,38 @@ export interface Layer {
 /** Mutable fields of a layer that user actions may change. */
 export type LayerPatch = Partial<Pick<Layer, "name" | "visible" | "opacity" | "blendMode">>;
 
+/**
+ * The axis a composition guide runs along.
+ *
+ * A `vertical` guide stands at an x and spans the whole viewport; a
+ * `horizontal` one stands at a y.
+ */
+export type GuideAxis = "vertical" | "horizontal";
+
+/**
+ * A composition guide: a marker on one axis, in document pixels.
+ *
+ * A guide is metadata - it has no pixels - so it lives on the document rather
+ * than on a layer. It is **display-only**: the renderer paints it over the
+ * artwork, and it never reaches a layer surface or a PNG export, exactly like
+ * the selection overlay. An older reader therefore ignores the field and draws
+ * the same picture, which is why the project format needs no version bump.
+ *
+ * One number, not a point: a vertical guide's y is meaningless (it spans the
+ * page), so the axis plus a single position is the whole geometry.
+ */
+export interface Guide {
+  readonly id: string;
+  readonly axis: GuideAxis;
+  /**
+   * Position along the guide's axis, in document pixels.
+   *
+   * Always a whole document pixel: a guide is a registration mark, and a
+   * fractional position would draw a soft edge at some zooms.
+   */
+  readonly position: number;
+}
+
 export interface DrawingDocument {
   readonly id: string;
   readonly name: string;
@@ -43,6 +75,14 @@ export interface DrawingDocument {
   /** Bottom-first layer order: index 0 is the bottom-most layer. */
   readonly layers: readonly Layer[];
   readonly activeLayerId: LayerId | null;
+  /**
+   * The composition guides, in document space.
+   *
+   * Document-level metadata, next to the background: a guide is not layer
+   * content, it is not painted into a layer surface, and it survives a layer
+   * delete. Empty by default.
+   */
+  readonly guides: readonly Guide[];
 }
 
 /**

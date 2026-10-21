@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 8,
+  "version": 9,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -95,7 +95,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -117,7 +120,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -139,7 +145,10 @@ added without changing the model.
             "minSizeRatio": 0.12,
             "spacing": 0.12,
             "stabilizer": 0,
-            "texture": 0
+            "texture": 0,
+            "stamp": false,
+            "stampSpacing": 0.1,
+            "stampHardness": 1
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -200,6 +209,30 @@ version described under [Versioning](#versioning).
 | `width`, `height` | number | Document size in document pixels; must be 8-8192 per side and at most 16,777,216 px in total. |
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
+| `guides` | array | The composition guides. **Additive**: a file without the field opens with no guides. |
+
+#### `guides[]`
+
+A guide is a marker on one axis, in document pixels.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Guide id; must be unique within the file. |
+| `axis` | string | `"vertical"` (the guide stands at an x) or `"horizontal"` (at a y). |
+| `position` | number | The position along the guide's axis, in document pixels. Rounded to a whole pixel when read. |
+
+The guides are **display-only**: they are painted over the artwork on the
+display canvas and never reach a layer surface or a PNG export. A reader that
+does not know the field therefore draws the very same picture, which is why the
+field is additive and the file version did not move.
+
+Reading is forgiving, like the rest of the format: a file with no `guides`
+field opens with no guides, a `guides` field that is not a list is ignored with
+a warning, and a guide with an unknown axis, a non-finite position, a missing
+id or a duplicate id is dropped with a warning rather than making the file
+unopenable - a decorative overlay must never cost the user their drawing. A
+file with more than 10,000 guides is **refused**, like the sample and
+fill-pixel ceilings.
 
 ### `layers[]`
 
@@ -258,16 +291,19 @@ An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
 re-renderable if the brush model changes.
 
-A shape drawn with the line, rectangle or ellipse tool is an **ordinary stroke**:
+A shape drawn with the line, rectangle, ellipse, polygon or star tool is an
+**ordinary stroke**:
 its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
-four corners plus the repeated first point for a rectangle, and a closed run of
-short segments for an ellipse - with `pressures` all `1`, so a shape has the
+four corners plus the repeated first point for a rectangle, a closed run of
+short segments for an ellipse, and the outline's own vertices for a polygon or
+a star - with `pressures` all `1`, so a shape has the
 brush's constant full width. There is no geometry field, which is why
 adding shape tools needed no new element kind: a reader that already knows
 strokes reproduces shapes, and undo, reopen and export treat them exactly like
 any other stroke.
 
-A rectangle or ellipse committed with the fill setting on adds one boolean,
+A rectangle, ellipse, polygon or star committed with the fill setting on adds
+one boolean,
 `fill: true`, to that same stroke: the samples still trace the outline, and a
 reader fills the polygon they bound before tracing it. It is a stroke-level flag
 rather than a document- or layer-level one, so a single layer can mix filled
@@ -338,7 +374,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | --- | --- | --- |
 | `size` | 1-512 | Diameter in document pixels at full pressure. |
 | `opacity` | 0-1 | Alpha for the whole stroke, applied once when it composites. |
-| `color` | non-empty string | CSS colour. |
+| `color` | non-empty string | CSS colour. The colour wheel, the toolbar's colour input, the swatches and the canvas picker all write this same field, so picking a colour never changes the format. |
 | `hardness` | 0-1 | Edge falloff: `1` is the hard edge, lower values feather the finished silhouette. Required in version 6; version-1 to -5 files have no field and read as `1`. |
 | `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
 | `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
@@ -346,6 +382,9 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
 | `texture` | 0-1 | Strength of the deterministic, document-anchored grain applied once to the finished stroke coverage. `0` is the plain coverage. Required in version 7; version-1 to -6 files have no field and read as `0`. |
+| `stamp` | boolean | Whether the stroke is rasterized as a chain of round dabs instead of round-capped segments. `false` is the legacy segment path. Required in version 9; version-1 to -8 files have no field and read as `false`. |
+| `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
+| `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 
 ## Validation policy
 
@@ -370,8 +409,9 @@ looks like:
   values;
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
-  a `stabilizer` present but outside `0..1`, and a version-7 `texture` that is
-  missing or outside `0..1`;
+  a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
+  missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
+  `stampSpacing`/`stampHardness` that is missing or outside its range;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -383,7 +423,8 @@ looks like:
 - a gradient with an unknown `type`, fewer than two or more than
   `MAX_PROJECT_GRADIENT_STOPS` (64) stops, a non-hex stop colour, offsets outside
   `0..1` or not strictly ascending, endpoints outside the document, or opacity
-  outside `0..1`.
+  outside `0..1`;
+- more than `MAX_PROJECT_GUIDES` (10,000) composition guides.
 
 **Lenient - repaired with a warning** when only cosmetics are affected:
 
@@ -400,16 +441,29 @@ looks like:
   stored samples already describe the smoothed path, so old version-6 files and
   all earlier versions render exactly as they did;
 - a missing `texture` in a version-1 to -6 file → `0`. Version 7 requires it
-  because a version-6 reader would ignore a textured stroke and draw it plain.
+  because a version-6 reader would ignore a textured stroke and draw it plain;
+- a missing `stamp` in a version-1 to -8 file → `false`, and missing
+  `stampSpacing`/`stampHardness` → their defaults. The stamp did not exist
+  before version 9, and the stamp off is exactly the segment path those files
+  were written by;
+- a missing `guides` field → no guides. This is an additive field within
+  version 9: the guides are display-only, so a file without them opens exactly
+  as it always did;
+- a `guides` field that is not a list → ignored;
+- a guide with an unknown `axis`, a non-finite `position`, a missing id or a
+  duplicate id → that guide is dropped. A decorative overlay must never make a
+  drawing unopenable;
+- a guide `position` that is not a whole pixel → rounded to the nearest one.
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
 
 Two further guarantees:
 
-- **Ids are reserved.** Layer, document, stroke, fill and gradient ids read from
-  a file advance the id counters, so layers or elements created after opening a
-  project cannot collide with ids that came from the file.
+- **Ids are reserved.** Layer, document, stroke, fill, gradient and guide ids
+  read from a file advance the id counters, so layers, elements or guides
+  created after opening a project cannot collide with ids that came from the
+  file.
 - **A rejected file changes nothing.** Open parses and validates *before* the
   engine is touched, so a corrupt or unsupported file leaves the current drawing
   exactly as it was, unsaved marker included.
@@ -427,7 +481,8 @@ Two further guarantees:
 | 5 | Adds `kind: "gradient"` to elements; reads version-1 to -4 files unchanged. | - |
 | 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | Writes the additive `stabilizer` field too. |
 | 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | Writes the required `texture` field. |
-| 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | The current version; what this build always writes. |
+| 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | - |
+| 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -441,10 +496,21 @@ Two further guarantees:
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
   as `0`; when present it must still be a number in `0..1`.
+- **`document.guides` is additive within version 9.** The composition guides are
+  display-only: they are painted over the artwork and never reach a layer
+  surface or a PNG export. A version-9 reader that skips the field draws the
+  identical picture, so the field needed no version bump - the same situation as
+  `stabilizer` within version 6. A file without the field opens with no guides;
+  a file with them round-trips exactly.
 - **`texture` required version 7.** It changes how stored samples are
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field
   could be added additively.
+- **`stamp` required version 9.** It changes how the stored samples are
+  rasterized - a chain of dabs instead of round-capped segments - so a
+  version-8 reader that ignored it would draw a stamped stroke as a plain one,
+  which is a different picture. Version-1 to -8 files read with the stamp off,
+  which is exactly the path they were written by.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

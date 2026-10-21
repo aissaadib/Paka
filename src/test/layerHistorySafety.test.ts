@@ -291,7 +291,7 @@ describe("layer edits during an active gesture", () => {
     expect(layer(engine, topLayerId).opacity).toBe(1);
     expect(layer(engine, topLayerId).blendMode).toBe("normal");
     expect(during.history.depth).toBe(afterAdd);
-    expect(during.notice).toContain("Finish the current stroke or selection");
+    expect(during.notice).toContain("Finish the current stroke, selection or guide drag");
 
     engine.finishStroke();
     expect(engine.listStrokes(topLayerId)).toHaveLength(1);
@@ -385,7 +385,7 @@ describe("layer edits during an active gesture", () => {
     // The first refusal explains itself, which publishes a new snapshot.
     engine.setLayerOpacity(topLayerId, 0.5);
     const afterFirstRefusal = engine.getState();
-    expect(afterFirstRefusal.notice).toContain("Finish the current stroke or selection");
+    expect(afterFirstRefusal.notice).toContain("Finish the current stroke, selection or guide drag");
     expect(afterFirstRefusal).not.toBe(beforeRefusal);
 
     // Further refusals in the same gesture keep the explanation and do not
@@ -414,7 +414,7 @@ describe("layer edits during an active gesture", () => {
     engine.cancelStroke();
     engine.beginStroke(createSample({ docX: 60, docY: 60 }));
     engine.setLayerOpacity(topLayerId, 0.75);
-    expect(engine.getState().notice).toContain("Finish the current stroke or selection");
+    expect(engine.getState().notice).toContain("Finish the current stroke, selection or guide drag");
     engine.cancelStroke();
 
     // So does a finished gesture: committing the stroke ends the once-state too.
@@ -425,7 +425,7 @@ describe("layer edits during an active gesture", () => {
     engine.beginStroke(createSample({ docX: 100, docY: 100 }));
     engine.dismissNotice();
     engine.setLayerOpacity(topLayerId, 0.6);
-    expect(engine.getState().notice).toContain("Finish the current stroke or selection");
+    expect(engine.getState().notice).toContain("Finish the current stroke, selection or guide drag");
     engine.cancelStroke();
   });
 });

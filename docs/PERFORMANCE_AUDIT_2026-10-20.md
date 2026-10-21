@@ -4,7 +4,7 @@
 was changed by this audit. The only repository file this audit added is this
 report.
 
-**State at the end of the session:** `main` at `2fa34cc`, which contains
+**State at the end of the session:** `main` at `9b2aceb`, which contains
 
 * `4ac040b` — **R1 (dirty bounds) shipped**: the rebuild is bounded by each
   element's inked rectangle (47x-187x less touched area), byte-identical
@@ -12,16 +12,48 @@ report.
 * `520aa77` — the grouped-preview scratch is released when no preview is
   active, which is what keeps the raster budget's peak model true.
 * `2fa34cc` — **the element-scratch variant (F7) was reverted**: it bought
-  nothing demonstrable (the timing claim did not reproduce, see F7e), it
-  differed by 1/255 of alpha on a few dozen pixels at rasterScale 2 (F7d),
-  and it would have moved the documented raster budget from 58 to 59 bytes per
-  document pixel.
+  nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at
+  rasterScale 2 (F7d), and it would have moved the documented raster budget
+  from 58 to 59 bytes per document pixel.
+* `9b2aceb` — the stamp (dab) brush engine, with the tiled coverage map and
+  the per-stroke work budget.
 
-So the durable results of this audit are the *area* reduction (F1c), the
-*mechanism* of the remaining cost (F7b, F7f), the memory budget (F5) and the
-pixel verdicts (F7d) — and one open lead: the per-draw cost charged for the
-document-sized layer surface (F7f), which needs a profile **in the packaged
-app** before anyone restructures the surfaces around it.
+> ## ERRATA (2026-10-20, end of session) — read this before using any number
+>
+> **Every millisecond in this report is retracted.** The benchmarks used a 1x1
+> `getImageData` to flush the canvas before timing — necessary, because
+> unflushed Canvas 2D timings are meaningless — but **the flush itself is
+> charged the canvas's area**. Agent 1 measured this directly (Chromium over
+> CDP, 200 calls per size, warm-up, detached and attached canvases, headless
+> and headed, agreeing): `putImageData` 0.0075-0.0145 ms per call, **flat**
+> across 0.26-16.78 Mpx destinations; `drawImage` 0.0005-0.0015 ms, flat;
+> `getImageData` on an *idle* canvas flat; but a `getImageData` on a canvas
+> with **pending work** is charged that canvas's area (0.30 ms per draw at
+> 16.78 Mpx).
+>
+> So the "knee" in F7, the 10x swings, the "85x" and the "destination is the
+> cost" of F7f were **my sync, not the renderer**. What survives is what does
+> not depend on a clock: the structural call counts (F1, F3, F4), the *area*
+> results (F1b, F1c), the *pixel* verdicts (F7d) and the *memory* findings
+> (F5). The sections below are kept as the record of what was measured, with
+> the affected claims marked; the authoritative list is:
+>
+> | Claim | Status |
+> | --- | --- |
+> | One full-document clear + one full-surface blend **per element** (F1) | **Stands** — call counts, not timings. |
+> | R1 cuts the touched area 47x-187x (F1c) | **Stands** — geometry, not timing. |
+> | F1b is byte-identical to the pre-F1b rendering in 8 configurations (F7d) | **Stands** — byte comparison. |
+> | F7 vs F1b: byte-identical at rasterScale 1, <=1/255 at rasterScale 2 (F7d) | **Stands** — byte comparison. |
+> | Live surfaces: 2 / 3 / 4, i.e. 48 / 58 / 74 bytes per document pixel (F5) | **Stands** — counted canvases and arithmetic. |
+> | Rebuild cost per element in ms (F2, F7, F7e) | **Retracted** — measured a flush. |
+> | "The blur cost is linear in the scratch area" (F3) | **Retracted** — the flush of the scratch is charged the scratch's area, so the reading was circular. The *structural* claim (every frame re-blurs the whole bbox) stands. |
+> | "A draw from a just-written canvas is a whole-canvas operation" (F7b) | **Retracted** — it was the flush of the canvas with pending work. |
+> | "The destination is the cost" (F7f) and the tile/batching lead | **Closed** — a read-back cost, not a rendering-path cost. It survives only for the rare read-back paths (PNG export, bucket scan, picker probe). |
+>
+> The method lesson is the one this report's Appendix C already gave, and
+> which this audit then failed to apply to its own harness: **sample frame
+> deltas with `requestAnimationFrame` and never force a sync with
+> `getImageData` inside a measurement.**
 
 **Baseline audited:** `main` at `e1071d9` ("fix: composite the live preview
 inside its own layer"), project format v8. The renderer file
@@ -43,11 +75,11 @@ was empty), so the numbers describe the renderer as committed.
 
 | Question | Verdict |
 | --- | --- |
-| Rebuild/undo scales with element count | **Confirmed.** Cost is `O(elements x surface pixels)`, and it is the *document-sized* surface, not the stroke geometry, that dominates. **Fixed since:** R1 shipped as `4ac040b` — the rebuild is now bounded by each element's inked rectangle (see F1c). |
+| Rebuild/undo scales with element count | **Confirmed (structurally).** Per element, one full-document `clearRect` + one full-surface `drawImage`, independent of stroke geometry. **Fixed:** R1 shipped as `4ac040b` — the rebuild is bounded by each element's inked rectangle (F1c). The *milliseconds* are retracted (errata). |
 | Rebuild clears/draws document-sized buffers | **Confirmed, deterministically.** One full-buffer `clearRect` + one full-surface `drawImage` **per element**. **Fixed since:** `4ac040b` (same measurement, before/after in F1c). |
-| Soft/textured strokes re-feather full surfaces at 2x | **Confirmed.** Every frame re-blurs the whole stroke bounding box; the cost grows with the stroke and with `rasterScale^2`. Still open (R2). |
-| Composite cost rises sharply with layer count at 2x | **Not confirmed at the tested scale.** Cost is linear in the number of *visible* layers with a small constant (~0.15 ms/layer at 1280x800 CSS, DPR 2). The 2x penalty comes from destination pixels (4x), not from the layer count. |
-| Huge layer surfaces | **Confirmed by arithmetic; now bounded by the 16,777,216 px document cap** already merged by Agent 4 (`isValidDocumentSize`), and the peak is now stated honestly (58 bytes per document pixel) and the over-budget case is closed by the scratch release (`520aa77`). |
+| Soft/textured strokes re-feather full surfaces at 2x | **Confirmed (structurally).** Every frame re-blurs the whole stroke bounding box. Still open (R2) — but its *cost* is not quantified here (errata). |
+| Composite cost rises sharply with layer count at 2x | **Not confirmed.** One `drawImage` per visible layer; the cost of a draw is flat in the destination (Agent 1's measurement), so the layer count is not the risk. The 2x penalty is a destination-pixel multiplier, not a layer-count effect. |
+| Huge layer surfaces | **Confirmed by arithmetic and by counting live canvases; now bounded by the 16,777,216 px document cap** (`isValidDocumentSize`), the peak is stated honestly (58 bytes per document pixel), and the over-budget case is closed by the scratch release (`520aa77`). |
 
 ---
 
@@ -97,24 +129,24 @@ contaminated figure and is used for cross-environment reasoning.
 
 ### 1.3 Threats to validity (read this before quoting any number)
 
+* **Every millisecond here is retracted (see the errata at the top).** The
+  timing method used a 1x1 `getImageData` to flush the canvas before each
+  measurement, and that flush is charged the canvas's area — so the timings
+  measure the flush, not the work. Agent 1's direct measurement (Chromium over
+  CDP, 200 calls per size, warm-up, detached and attached canvases, headless
+  and headed, agreeing) is the reference: `putImageData` and `drawImage` are
+  **flat** in the destination size, while a read-back of a canvas with pending
+  work is charged that canvas's area. Read the timing tables as evidence of
+  *what was called*, not of *how long it took*.
 * **The harness is not the product.** The packaged app renders through the
   Windows WebView2 (Chromium) on a real GPU. This harness rasterises large
-  canvases in software or on a virtualised GPU; absolute milliseconds will
-  differ, in both directions. **Only the scaling laws and the structural
-  counts should be carried forward as findings.**
+  canvases in software or on a virtualised GPU.
 * **Timings in this harness were unstable.** The same configuration measured
-  64 ms in one run and 684 ms in another (a 10x swing with no code change),
-  consistent with Chromium demoting a canvas to a CPU-backed surface under
-  memory pressure. The interleaved rebuild grid below is the trustworthy
-  measurement; earlier single-shot runs are cited only as ranges.
-* **`getImageData` readback dominates anything that touches the display
-  canvas** (a 1x1 readback of a 2560x1600 canvas costs ~20-40 ms here). Any
-  figure that includes a display-canvas readback is therefore a *floor*, not a
-  frame cost. This is why the composite numbers below are reported as
-  "per frame, excluding the readback".
+  64 ms in one run and 684 ms in another (a 10x swing with no code change) —
+  which the errata now explains: the cost of the sync depends on the canvas's
+  state and on the read-back pressure the harness itself created.
 * **Concurrency.** Three other agents were editing the same repository and
-  running builds during the session. Where a number moved between runs, the
-  interleaved measurement was repeated.
+  running builds during the session, which added to the drift.
 
 ---
 
@@ -122,17 +154,23 @@ contaminated figure and is used for cross-environment reasoning.
 
 ### F1 — A layer rebuild touches the whole document-sized surface once per element (structural, confirmed)
 
-`rasterizeLayer()` (Canvas2DRenderer.ts:718) loops over the layer's elements.
-For each element it calls `rasterizeStrokeToBuffer()` (line 824), which
-**clears the entire document-sized stroke buffer** (`clearStrokeBuffer()`,
-line 1128) and then `compositeStrokeBuffer()` -> `paintStrokeCoverage()`
-(line 865), whose hard-brush path is:
+> **Line numbers in this section are from the renderer as it was when the
+> measurements were taken** (`e1071d9`, before R1 and the stamp engine). The
+> file has grown since; read the *symbols*, not the anchors: `rasterizeLayer`,
+> `rasterizeStrokeToBuffer`, `clearStrokeBufferRegion`, `compositeStrokeBuffer`,
+> `paintStrokeCoverage` in `src/core/rendering/Canvas2DRenderer.ts`.
+
+`rasterizeLayer()` loops over the layer's elements. For each element it calls
+`rasterizeStrokeToBuffer()`, which **clears the document-sized stroke buffer
+over that element's region** (after R1; the whole buffer before it) and then
+`compositeStrokeBuffer()` -> `paintStrokeCoverage()`, whose hard-brush path is:
 
 ```
-ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);   // line 873
+ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
 ```
 
-i.e. the whole buffer is blended over the whole surface, at document size.
+i.e. the whole buffer is blended over the whole surface, at document size
+(before R1; after it, the same rectangle as the region that was cleared).
 
 Measured call counts (wrapper over the 2D context, 2048x2048 document):
 
@@ -225,26 +263,21 @@ Wall clock in the same session (medians, ms):
 | 2048x2048 | 2 | 100 short | 2532.7 | 18.6 |
 | 2048x2048 | 2 | 25 dense (document-wide) | 1061.3 | 1306.8 |
 
-Three things this says, including the parts that are not flattering:
+Three things this says — but **the two timing columns are retracted** (see the
+errata: the sync was charged the canvas's area, so these milliseconds measure
+the flush, not the rebuild). What survives is the *area* column and the
+*shape* of the comparison:
 
-1. **The win is real and large** where strokes ink a small part of the
-   document: the 100-element undo at 2048^2 / 2x goes from 3.37 Gpx to 18 Mpx,
-   and from 2.53 s to 19 ms in this harness. (The *area* is durable; the
-   *timing* is not — see F7e: on an idle machine the same comparison is much
-   closer, because the cost that F1b removes only appears when the
-   document-sized read-back is expensive.)
-2. **A layer of strokes that together cover the document got ~23 % slower**
-   (1061 -> 1307 ms). There the inked rectangle is nearly the whole document,
-   so the area barely shrinks (1.11x) while the new path adds a per-element
-   region computation and a 1:1 blit in place of one large blend.
-3. **At small surfaces the rebuild is now bounded by a per-element overhead**,
-   not by area: 100 elements cost ~2.4 ms each on a 1024^2 surface but
-   ~0.19 ms each on a 4096^2 surface, although the area is now negligible in
-   both. The measured difference is ~12x; the explanation (small canvases
-   falling back to a CPU-backed surface in this Chromium) is a **hypothesis**,
-   not a proven cause. If it holds, the next lever for small documents is the
-   *number* of elements — a per-layer cache of the last rasterization — not
-   the area.
+1. **The area win is real and large** where strokes ink a small part of the
+   document: the 100-element undo at 2048^2 / 2x goes from 3.37 Gpx to 18 Mpx.
+   The millisecond column next to it (2.53 s -> 19 ms) is **not** a result.
+2. **A layer of strokes that together cover the document barely improves**
+   (area 1.11x), because the inked rectangle is nearly the whole document
+   there. The "~23 % slower" figure is likewise a flush artefact and is
+   retracted.
+3. The remaining per-element term is **not** the area any more (the area is
+   negligible in both rows) — but this report cannot say what it *is*: the
+   measurements that would have answered that were flush-dominated.
 
 Pixel invariants were re-checked in the browser at five sample points for a
 hard, a soft, a grained and a soft+grained brush: live == post-commit display,
@@ -272,18 +305,20 @@ Reading of the table:
 
 * **Cost follows surface pixels, not document pixels.** 1024x1024 at 2x and
   2048x2048 at 1x have the same 2048x2048 surface and near-identical costs
-  (43.7 vs 42.8 ms for 25 tiny strokes).
+  (43.7 vs 42.8 ms for 25 tiny strokes). *(Retracted: this is the flush of the
+  surface, which is the same canvas in both cases.)*
 * **Cost follows area roughly linearly** (16.8 Mpx -> 67.1 Mpx: 157 ms ->
   ~400 ms for the same 25-100 dense elements) — until the surface gets large
-  enough that the rasteriser changes behaviour, see F5.
+  enough that the rasteriser changes behaviour, see F5. *(Retracted: the same
+  flush effect, which is charged the surface's area.)*
 * **Tiny strokes are cheap per element, dense strokes are not.** Going from 25
-  to 100 *tiny* strokes costs only ~20% more (43.7 -> 53.0 ms): the browser
-  skips empty tiles of the mostly-transparent source. Going from 25 to 100
-  *dense* strokes (each a serpentine covering the whole document) roughly
-  doubles the cost. The bad case is a layer full of strokes that together
-  cover the document — an illustration, a painted area, a scribbled layer.
+  to 100 *tiny* strokes costs only ~20% more (43.7 -> 53.0 ms). *(Retracted as
+  a cost claim; what survives is the area column of F1b: the same rebuild
+  touches 47x-187x less area for tiny strokes than for document-wide ones.)*
+  The bad case is a layer full of strokes that together cover the document —
+  an illustration, a painted area, a scribbled layer.
 
-### F3 — Live preview of a soft or textured stroke re-feathers the whole stroke every frame (confirmed)
+### F3 — Live preview of a soft or textured stroke re-feathers the whole stroke every frame (confirmed structurally)
 
 Per-frame call counts for one preview frame (2048x2048 document, 2x,
 structural):
@@ -294,10 +329,10 @@ structural):
 | soft | 2 | 3 | 1 | + clear + blurred copy of the stroke bbox, then draw the blurred copy |
 | soft + grain | 2 | 3 | 2 | + grain pattern fill over the scratch |
 
-`featherStroke()` (line 968) blurs the stroke's **whole** bounding box into a
-scratch canvas, and `render()` calls it again on every frame (line 384 ->
+`featherStroke()` blurs the stroke's **whole** bounding box into a scratch
+canvas, and `render()` calls it again on every frame (`render` ->
 `paintStrokeCoverage` -> `featherStroke`). The bounding box grows with the
-stroke, so the cost of every frame grows with the stroke, and the scratch is
+stroke, so the work of every frame grows with the stroke, and the scratch is
 sized in *raster* pixels, so it grows with `rasterScale^2` as well.
 
 Measured component costs (2048x2048 document; medians):
@@ -314,26 +349,25 @@ Measured component costs (2048x2048 document; medians):
 | soft | 100% | 2 | 4066x4081 (16.6 Mpx) | **555.9 ms** | - | 590.2 ms |
 | soft + grain | 100% | 2 | 4066x4081 (16.6 Mpx) | 539.9 ms | **239.8 ms** | 766.1 ms |
 
-Interpretation:
+Interpretation — **and the retraction that applies to it**:
 
 * The blur is **linear in the scratch area** (4.15 Mpx -> 107.7 ms,
   16.6 Mpx -> 555.9 ms, i.e. 4x area -> 5.2x time) and scales with
-  `rasterScale^2` because the scratch is in raster pixels.
-* A soft stroke that covers a large area, drawn at 2x, therefore re-blurs
-  ~16.6 Mpx **on every frame**; adding grain adds a second full-scratch pass
-  (a pattern fill with `destination-in`).
-* Caveat on the hard-path column: it does **not** scale with `rasterScale^2`
-  as the structure predicts (32.2 ms at 2x vs 41.7 ms at 1x for the same 25%
-  bbox). That is harness noise of the same order as the effect being measured,
-  which is exactly why the *structural* counts and the *ratios* (soft path,
-  4x area -> 5.2x time) are the findings to carry forward, not the absolute
-  milliseconds.
-* Note the inversion: the *hard* path is not free either — it draws the whole
-  document-sized stroke buffer to the layer surface on every commit
-  (`paintStrokeCoverage` line 873), which is why its "composite of coverage"
-  column is the same order as the soft path's.
+  `rasterScale^2` because the scratch is in raster pixels. **Retracted as a
+  cost claim:** the sync that followed each blur is itself charged the
+  scratch's area, so this reading is circular. The *structural* claim stands
+  and is the durable one: the scratch is sized to the stroke's bounding box in
+  raster pixels, so a bigger stroke or a bigger `rasterScale` means more
+  pixels to blur and to copy every frame.
+* A soft stroke that covers a large area therefore re-blurs its whole bbox
+  **on every frame**; adding grain adds a second full-scratch pass (a pattern
+  fill with `destination-in`).
+* The *hard* path is not free either — it draws the whole document-sized
+  stroke buffer to the layer surface on every commit (`paintStrokeCoverage`),
+  which is why its "composite of coverage" column is the same order as the soft
+  path's.
 
-### F4 — Composite cost versus layer count (hypothesis NOT confirmed at the tested scale)
+### F4 — Composite cost versus layer count (hypothesis NOT confirmed)
 
 Structural: a composite frame issues exactly **one `drawImage` per visible
 layer** (8 layers -> 8 `drawImage` calls, plus 1 clear and 1 paper fill).
@@ -425,7 +459,47 @@ The remaining, *unaddressed* part of the budget is that **every additional
 layer adds another full-resolution surface** (16 B/px at 2x), which the
 document cap does not bound.
 
-### F7 — After R1: the remaining per-element cost is the canvas-to-canvas blit, and it has a knee (measured 2026-10-20, after `4ac040b`)
+**The stamp engine does not move the peak (2026-10-20).** The stamp (dab)
+brush engine keeps its coverage in a JavaScript map of 1 byte per **device**
+pixel over the **stroke's own footprint** - at most 4 bytes per document pixel
+at the budgeted scale of 2 - and it is a transient, so it fits inside the same
+10 bytes-per-document-pixel allowance as the bucket scan: the in-flight map and
+the resident scratch together use at most 8 of those 10 bytes, leaving **2
+bytes per document pixel of transient headroom** for the next feature that needs
+scratch space (masks, groups, tile-based layer surfaces). Two details keep it
+there:
+
+* the coverage map is **tiled and allocated on demand**, so it follows the
+  inked area rather than the document size;
+* the upload from the coverage map into the stroke buffer is **one `ImageData`
+  per tile** (64 x 64 x 4 = 16 KB), never one for the whole dirty rectangle -
+  which would be document-sized (256 MiB at the cap) in the rebuild path.
+
+The coverage map is JavaScript heap rather than a canvas backing store, so it
+sits outside the budget model's stated scope ("calculable backing-store
+pixels"). It is stated here next to the budget rather than folded into the
+constants in `document.ts`, so the model keeps describing exactly what it says
+it describes. The envelope therefore stays **58 bytes per document pixel**
+(worst observed scenario 56 B/px, 896 MiB at the cap, inside the 1 GiB budget).
+
+The stamp engine's own cost is quadratic in the brush radius, because each dab
+touches its whole bounding box: a 512 px brush at `rasterScale` 2 is a thousand
+device pixels across, so a million pixels per dab. The planner therefore
+enforces a **per-stroke work budget** (`MAX_STAMP_COVERAGE_WORK`), cut at a
+lattice index so the live path and the rebuild path truncate identically; an
+extreme stroke is cut short rather than stalling the app. The live path pays
+only for the new dabs of each pointer event.
+
+### F7 — After R1: the remaining per-element cost (SUPERSEDED — the "knee" and the split below are flush artefacts)
+
+> **This whole section is superseded by the errata at the top of the report.**
+> The split below (99 % of the time in the blit) and the "knee" are what the
+> harness's read-back sync produced, not what the renderer does: a read-back
+> of a canvas with pending work is charged that canvas's area, and the
+> measurements here flush after every rebuild. The *structural* facts survive
+> (F1, F1b) and the *pixel* facts survive (F7d); the timing story does not.
+> The section is kept as the record of what was measured, and F7b and F7f
+> carry the corrections.
 
 R1 removed the area term, so the rebuild was profiled again by wrapping the
 renderer's per-element internals (50 tiny strokes, one layer, medians of 3
@@ -469,7 +543,17 @@ hypothesis and a proposal.
 > idle machine — see F7e. The mechanism itself (F7b) is a reproducible
 > measurement; the rebuild timings around it are not.
 
-#### F7b — the mechanism, tested directly (measured)
+#### F7b — the mechanism, tested directly (SUPERSEDED: it measured the sync, not the draw)
+
+> **Correction (errata):** the table below is reproducible, but the reading
+> drawn from it was wrong. The 7.85 ms at 2048^2 was the **flush of the canvas
+> with pending work** — the harness's `getImageData` sync, which is charged
+> that canvas's area — not a "read-back of the source" inside the draw. Agent
+> 1's direct measurement settles the axis: `drawImage` and `putImageData` are
+> **flat** in the destination (0.0005-0.0145 ms per call from 0.26 to 16.78
+> Mpx), while a read-back of a canvas with pending work is charged its area.
+> The size cliff in the table below is therefore the *size of the canvas the
+> harness flushed*, not a property of the renderer.
 
 The mechanism above was then tested in isolation from the renderer: draw a
 64x64 sub-rect from a canvas source in three variants — (a) the source is
@@ -534,12 +618,17 @@ Cost (50 tiny strokes, per element, medians):
 | 2048x2048 | 2 | 0.23 ms | 0.25 ms | neutral |
 | 3072x3072 | 1 | 0.15 ms | 0.12 ms | neutral |
 
-> **Correction (2026-10-20):** these timings were measured on a heavily
-> loaded machine and **do not reproduce on an idle one** (F7e). The *cost
-> model* they support is still right — a draw from a just-written canvas is a
-> whole-canvas operation (F7b) — but the size of the effect is not a stable
-> number. Read this table as "what the mechanism can be worth when the
-> document-sized read-back is expensive", not as a promise.
+> **Correction (errata):** **both columns of this table are retracted.** They
+> were measured on a loaded machine, with a `getImageData` sync after each
+> rebuild, and that sync is charged the canvas's area (F7b, F7f, and Agent 1's
+> write-cost measurement) — so the table measures the flush, not the rebuild.
+> The "cost model" line that followed it is withdrawn with it: there is no
+> measured "whole-canvas operation" in a draw, because a draw is flat in the
+> destination size.
+>
+> What survives from this section is the *pixel* part (below) and the
+> structural fact that the prototype and the shipped path differ only in where
+> the coverage is rasterized.
 
 So the cost model is confirmed: reading back the document-sized buffer *is*
 the remaining per-element cost, and an element-sized scratch removes it. Where
@@ -642,7 +731,29 @@ So, stated plainly:
 A smaller, honest claim is worth more here than a large one that does not
 reproduce.
 
-#### F7f — the remaining cost is the DESTINATION, not the source (measured)
+#### F7f — the remaining cost is the DESTINATION, not the source (SUPERSEDED: it measured the sync)
+
+> **Correction (errata):** this section's conclusion — that the per-element
+> cost of a rebuild is the *destination* canvas, and that the tile/batching
+> lead follows — is **withdrawn**. The table below is reproducible, and it
+> measures one thing: 100 blits into a destination, followed by a
+> `getImageData` sync. The cost tracks the destination's area because the
+> **sync** is charged the destination's area (Agent 1's measurement), not
+> because the blits are expensive — `drawImage` is flat in the destination
+> (0.0005-0.0015 ms per call), and a single 800x800 blit of the same 0.64 Mpx
+> into a 4096^2 destination cost 178.8 ms *with the sync* and nothing like that
+> without it.
+>
+> So: the destination-area term is a **read-back** cost, not a rendering-path
+> cost. The app's per-frame path draws and writes; it reads back only for the
+> colour picker, the PNG export and the bucket scan, which are rare one-shot
+> operations. **The tile/batching lead is closed on this basis**, and the
+> stamp engine's per-tile `putImageData` (flat, ~0.01 ms per tile) is fine as
+> it stands.
+>
+> What remains genuinely open is the one thing no measurement here settled:
+> **how long a rebuild actually takes in the packaged app.** That needs rAF
+> frame deltas in a visible window (Appendix C), not a harness read-back.
 
 On an idle machine the last term was isolated with a micro-benchmark: 100
 blits of 80x80 px (0.64 Mpx written in total) from a small static source into
@@ -700,64 +811,41 @@ frame-rate number could be obtained in this environment.
 
 | # | Option | What it changes | Expected effect (from the evidence) | Risk | Effort |
 | --- | --- | --- | --- | --- | --- |
-| **R1** | **Dirty bounds for the stroke buffer** — track the inked rect of the stroke buffer and draw only that sub-rect in `paintStrokeCoverage`; clear only that rect instead of the whole buffer in `rasterizeStrokeToBuffer` | Per-element blend goes from `document area` to `stroke bbox` | F1/F2: 25 tiny strokes at 2048^2/1x drop from ~43 ms to ~1-2 ms; the 100-element undo at 4096^2/2x drops from ~3.4 Gpx to ~a few Mpx. Biggest single win, smallest blast radius | Medium: the buffer accumulates a whole live stroke, so the dirty rect must cover all of it; the eraser path (`destination-out`) is safe because drawing empty pixels is a no-op, but the *live* buffer and the *rebuild* buffer have different lifetimes | Small-medium: one rect field on the buffer, two call sites |
-| **R2** | **Incremental / viewport-limited feathering** — keep the blurred result and re-blur only the newly inked band (plus the 3-radius pad), or blur only the visible region during a live stroke | Per-frame blur cost stops growing with the stroke length | F3: a full-document soft stroke at 2x currently re-blurs 16.6 Mpx every frame (0.55 s here) plus 0.24 s for grain | High: the "live preview == committed pixels" invariant must survive exactly. A Gaussian blur is not separable across a band boundary, so the incremental result must be proven pixel-identical, not approximately equal | Medium-large, needs pixel-equality tests |
-| **R3** | **Composite cache / invalidation** — keep paper+layers in a cached canvas, invalidate on layer content/opacity/blend/visibility change, and during a stroke only draw the preview on top | Per-frame cost during a stroke stops re-blending every layer | F4: 8 layers cost ~0.15 ms/layer here (or ~0.5 ms with real content and a blend mode) — small at 1280x800, 4x that on a 4K display | Medium: Agent 1's fix (preview composited inside its own layer, honouring opacity/blend) must be preserved by the cache; the cache must be invalidated on every path that changes a layer's appearance | Medium |
+| **R1** | **Dirty bounds for the stroke buffer** — track the inked rect of the stroke buffer and draw only that sub-rect in `paintStrokeCoverage`; clear only that rect instead of the whole buffer in `rasterizeStrokeToBuffer` | Per-element blend goes from `document area` to `stroke bbox` | **SHIPPED** as `4ac040b`: the touched area per rebuild drops 47x-187x for typical strokes (F1b, F1c), byte-identical pixels (F7d). The millisecond effect was never measured (errata) | Medium: the buffer accumulates a whole live stroke, so the dirty rect must cover all of it; the eraser path (`destination-out`) is safe because drawing empty pixels is a no-op, but the *live* buffer and the *rebuild* buffer have different lifetimes | Done |
+| **R2** | **Incremental / viewport-limited feathering** — keep the blurred result and re-blur only the newly inked band (plus the 3-radius pad), or blur only the visible region during a live stroke | Per-frame blur work stops growing with the stroke length | F3 (structural): every frame re-blurs the stroke's whole bounding box, in raster pixels, so a long stroke at 2x blurs and copies its entire footprint each frame. The *cost* of that is not quantified here (errata) | High: the "live preview == committed pixels" invariant must survive exactly. A Gaussian blur is not separable across a band boundary, so the incremental result must be proven pixel-identical, not approximately equal | Medium-large, needs pixel-equality tests |
+| **R3** | **Composite cache / invalidation** — keep paper+layers in a cached canvas, invalidate on layer content/opacity/blend/visibility change, and during a stroke only draw the preview on top | Per-frame work during a stroke stops re-blending every layer | F4: one `drawImage` per visible layer, and a draw is flat in the destination size (Agent 1), so the payoff is the *number* of layers, not their area. Not quantified in milliseconds (errata) | Medium: Agent 1's fix (preview composited inside its own layer, honouring opacity/blend) must be preserved by the cache; the cache must be invalidated on every path that changes a layer's appearance | Medium |
 | **R4** | **Raster-scale and surface budget policy** — keep the 16.7 Mpx document cap; additionally make `rasterScale` doc-size aware (e.g. 2x only up to 2048^2) and/or budget surfaces per layer | Memory and fill rate for big documents | F5: a 1x document at 4096^2 is 64 MiB per surface; at 2x it is 256 MiB. Lowering the scale for large documents is a visible quality trade-off | Medium-high: HiDPI crispness is a product decision; the current rule is `clamp(dpr, 1, 2)` | Small (policy) but touches product behaviour |
-| **R5** | **Tile-based / partial surfaces** — keep a layer's coverage in tiles or partial surfaces and composite per tile on demand, instead of drawing every element into one document-sized surface | Removes the *destination-area* term: fewer draws into a big canvas | F7f: the remaining per-element cost is the destination — every element is blitted into the document-sized layer surface and each blit is charged ~0.1 ms per destination megapixel (harness constant). Neither F1b nor F7 can touch it. So the earlier "defer" no longer holds for large documents; **spatial batching** (accumulate elements into one small scratch, blit once) is the cheaper first step and does not change the surface model | Very high: it changes the surface model, the export path, the erase snapshot and the format's mental model. Needs a packaged-app profile first, because the constant is harness-specific | Very large — **revisit, batch first** |
+| **R5** | **Tile-based / partial surfaces** — keep a layer's coverage in tiles and composite per tile on demand | Would remove a destination-area term | **CLOSED as a lead.** F7f, which motivated it, was retracted: the destination-area term is the *read-back* cost of a canvas with pending work, not a rendering-path cost, and `drawImage`/`putImageData` are flat in the destination. The stamp engine already uses a tiled coverage map, and its per-tile upload is cheap (~0.01 ms per tile) | Very high: it changes the surface model, the export path, the erase snapshot and the format's mental model | Very large — **do not start on this evidence** |
 
 ---
 
 ## 4. Recommended order
 
 0. **DONE — R1 shipped.** `4ac040b` bounds the layer rebuild by each element's
-   inked rectangle. Measured before/after (F1c): the 100-element rebuild at
-   2048^2 / 2x went from 3.37 Gpx to 18 Mpx, and from 2.53 s to 19 ms in the
-   harness; the pixel invariants (live == commit == rebuild == export) hold for
-   hard, soft, grained and soft+grained brushes. The one case that did not
-   improve is a layer whose strokes together cover the whole document (~23 %
-   slower) — see F1c.
-1. **The per-element cost is the DESTINATION (F7f) — the next lever is fewer
-   draws into the document-sized layer surface, not smaller draws.** Every
-   element of a rebuild is blitted into the layer surface, and each blit is
-   charged the destination's area (~0.1 ms per destination megapixel in this
-   harness; the constant is harness-specific, the shape is not). F1b shrank the
-   blit and F7 shrank the source; neither touches this. Two ways forward:
-   * **Batching** (cheap, no model change): accumulate several elements into
-     one small scratch and blit that once, so a layer of N elements costs a
-     few destination draws instead of N. A per-layer cache of the last
-     rasterization (so an undo re-rasterizes only the changed element) is the
-     same idea applied to the element count.
-   * **Tiles / partial surfaces** (R5, expensive): keep a layer's coverage in
-     tiles and composite per tile on demand.
-
-   Both need a **packaged-app profile** first — on a real GPU the constant is
-   likely far smaller, and that changes the priority of this lever relative
-   to the others.
-2. **R2 — incremental feathering**, but only if the soft brush is still
-   visibly slow in the packaged app. The safest first version is
-   *viewport-limited* feathering (blur only what is visible while a stroke is
-   in flight, blur the full bbox at commit) — but that breaks the
-   "live == commit" invariant for strokes whose edge is off-screen, so it
-   needs the banded/incremental variant or an explicit product decision.
-3. **R3 — composite cache.** Cheap to prototype, and the measurement says the
-   payoff is modest at 1280x800 but grows with display size and layer count.
-   Do it after R2, when the remaining per-frame cost is dominated by the
-   composite rather than by rebuilds.
+   inked rectangle: the touched area per rebuild drops 47x-187x for typical
+   strokes (F1b, F1c), and the pixels are unchanged (F7d — byte-identical to
+   the pre-F1b rendering in all eight measured configurations).
+1. **Measure what a rebuild actually costs, in the packaged app, with rAF
+   frame deltas and no read-back inside the measurement** (Appendix C). Every
+   millisecond in this report is retracted (errata), so the one thing this
+   audit cannot offer is a time budget for a layer rebuild. If the packaged
+   app shows the rebuild is slow, the durable levers are, in order: the
+   *number* of elements (a per-layer cache of the last rasterization, so an
+   undo re-rasterizes only the changed element) and the *blur* work of a
+   soft stroke (R2).
+2. **R2 — incremental feathering**, if the packaged-app profile says the
+   feather is the cost. It touches the "live preview == committed pixels"
+   invariant and needs a pixel proof, not just a timing.
+3. **R3 — composite cache**, if the profile says the per-frame composite is
+   the cost (it scales with the number of visible layers, and each layer is one
+   `drawImage`).
 4. **R4 — keep the shipped document budget** (Agent 4, `fae138c`: the peak is
    58 bytes per document pixel, 928 MiB at the cap) and treat the per-layer
    surface growth as a separate, explicit policy item: either a
    layer-count/surface budget, or lazy surface allocation for layers that are
    hidden or never drawn.
-5. **R5 — the destination lead, and it needs a packaged-app profile first.**
-   F7f shows the remaining per-element cost is the *destination*: every
-   element is blitted into the document-sized layer surface and each blit is
-   charged the destination's area (~0.1 ms per destination megapixel in this
-   harness). Batching (accumulate elements into one small scratch, blit once)
-   is the cheap first step and does not change the surface model; tiles are
-   the structural answer. Neither is a small slice: both change the surface
-   model and the raster budget, so the audit's earlier "defer" still stands
-   **until a profile in the packaged app** shows the term is worth it there.
+5. **R5 — closed** as a lead (see the options table): its motivation was
+   retracted, and the stamp engine already tiles its coverage.
 
 **Non-goals for this audit and for the follow-up slices:** no renderer
 replacement (WebGL/WebGPU stays out of scope until a profile shows Canvas 2D
@@ -769,20 +857,25 @@ and no change to the stamp-engine slice that is the current roadmap item.
 
 ## 5. Threats to validity, restated
 
-* Every millisecond in this document comes from an Electron/Chromium harness
-  with a hidden tab, software or virtualised rasterisation and other agents
-  running on the same machine. **The numbers must be re-measured in the
-  packaged Tauri app before they are used to prioritise work.** The structural
-  counts and the derived pixel volumes are the durable part of this audit.
-* The rebuild grid (F2) was measured with interleaved rounds and is
-  internally consistent (identical surface sizes give identical costs). The
-  preview component grid (F3) was measured in one pass per configuration and
-  is less controlled; treat the ratios, not the absolutes, as the finding.
+* **Every millisecond in this document is retracted** (errata at the top):
+  the timing method's `getImageData` sync is charged the canvas's area, so
+  the timings measure the flush. The durable part of this audit is the
+  structural counts, the area results, the pixel verdicts and the memory
+  findings — **not** the milliseconds. The one measurement that supersedes
+  them all is Agent 1's write-cost benchmark (Chromium over CDP, script at
+  `%TEMP%\opencode\canvas-write-cost.mjs`): `putImageData` and `drawImage` are
+  flat in the destination size, and only a read-back of a canvas with pending
+  work is charged that canvas's area.
+* The rebuild grid (F2) and the preview grid (F3) were measured with
+  interleaved rounds and a flush after each operation; the flush is the
+  dominant term in both.
 * The 8192^2 surface measurement (F5) is a single configuration with 3
-  samples; it demonstrates a cliff, not a curve.
+  samples; it demonstrates a cliff, not a curve — and the cliff it shows is
+  the *area* of the surface, which is arithmetic, not a timing.
 * Nothing here was measured in the packaged Tauri window, on a pen device, or
   with a real GPU. No claim about packaged-app or hardware performance is
-  made.
+  made, and the one open question — how long a rebuild takes in the product —
+  is exactly what Appendix C is for.
 
 ---
 
@@ -804,7 +897,7 @@ console.log(counts);           // F1/F3/F4 numbers
 proto.drawImage = orig.draw; proto.clearRect = orig.clear; proto.fillRect = orig.fill;
 ```
 
-## Appendix B — how to reproduce the timings
+## Appendix B — how to reproduce the timings (and how this audit got them wrong)
 
 ```js
 // Force the canvas pipeline to finish; without this, Canvas 2D timings are meaningless.
@@ -817,19 +910,36 @@ sync(surfaceCtx);                       // flush
 const ms = performance.now() - t0;
 ```
 
-Use interleaved rounds (round-robin over the configurations, several rounds,
-report median and min) so that machine drift does not favour one
-configuration. Measure the *layer surface* (not the display canvas) when the
-question is about rebuilds: the display readback costs 20-40 ms on its own
-here and would mask the effect being measured.
+**Do not use the snippet above to time anything** — it is what invalidated
+this audit's own measurements. The `getImageData` sync is not free: it is
+**charged the canvas's area**, so the "flush" dominates the measurement and
+scales with the canvas, which is exactly the "knee" and the 10x swings this
+report originally reported. The correct way to time a frame is to let the
+frame clock do it:
 
-For frame-rate numbers in the packaged app, sample `requestAnimationFrame`
-deltas in a visible window; the agent browser harness suspends rAF when the
-tab is hidden, so no frame-rate claim can be made from it.
+```js
+// in a VISIBLE window (the agent browser harness suspends rAF when hidden)
+const samples = [];
+let last = performance.now();
+const tick = () => {
+  const now = performance.now();
+  samples.push(now - last);
+  last = now;
+  if (samples.length < 120) requestAnimationFrame(tick);
+};
+requestAnimationFrame(tick);
+```
 
-## Appendix C — profiling the packaged app (the recipe for the open lead)
+For the *write* costs themselves (which are flat in the destination size),
+Agent 1's script drives Chromium over the DevTools protocol from Node and
+needs no browser tooling: `%TEMP%\opencode\canvas-write-cost.mjs`. It measures
+`putImageData`, `drawImage` and `getImageData` against destinations of
+0.26-16.78 Mpx, detached and attached, headless and headed.
 
-The open lead (F7f) needs the packaged Tauri window, because the harness
+## Appendix C — profiling the packaged app (the recipe for the open question)
+
+The one question this audit could not answer — **how long a rebuild actually
+takes in the product** — needs the packaged Tauri window, because the harness
 suspends `requestAnimationFrame` when its tab is hidden and rasterises large
 canvases in software. A practical recipe that needs no new dependency:
 
@@ -858,11 +968,13 @@ canvases in software. A practical recipe that needs no new dependency:
 
 3. Draw (a) a stroke that is small on screen and (b) a stroke that fills the
    view, and compare the frame cost. Then repeat with a 2048x2048 document and
-   a 4096x4096 one. If the per-frame cost grows with the *document* size while
-   the on-screen content is the same, the destination-area term is real in the
-   packaged app too, and batching (or tiles) is worth scheduling. If it does
-   not, the term is a harness artefact and the audit's F7f should be filed as
-   such.
+   a 4096x4096 one. The question is simply **how long a rebuild of a layer
+   with a hundred strokes takes in the product**, and how that changes with
+   the document size, the brush softness and the number of layers — the
+   numbers this audit could not produce. If the per-frame cost grows with the
+   *document* size while the on-screen content is the same, the layer surface
+   is the lever (batching, or a smaller raster scale); if it does not, the
+   per-element work is the lever (a per-layer cache of the last rasterization).
 4. Do **not** read frame timings from a hidden window, and do not trust a
    single sample: take the median of at least five, and repeat the whole
    measurement after an unrelated build to check for drift.

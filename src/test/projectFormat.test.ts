@@ -19,6 +19,7 @@ import type {
   StrokeSource,
 } from "../core/document/types";
 import {
+  MAX_PROJECT_GUIDES,
   PROJECT_FORMAT_ID,
   PROJECT_VERSION,
   parseProject,
@@ -138,6 +139,7 @@ describe("serializeProject", () => {
     expect(Object.keys(document).sort()).toEqual([
       "activeLayerId",
       "background",
+      "guides",
       "height",
       "id",
       "name",
@@ -501,6 +503,115 @@ describe("parseProject round trip", () => {
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
     expect(payload.version).toBe(PROJECT_VERSION);
+  });
+
+  it("round-trips the stamp engine's settings at version 9", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        stamp: true,
+        stampSpacing: 0.25,
+        stampHardness: 0.4,
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.stamp).toBe(true);
+    expect(parsed.project.strokes[0].brush.stampSpacing).toBe(0.25);
+    expect(parsed.project.strokes[0].brush.stampHardness).toBe(0.4);
+
+    // The value is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stamp).toBe(true);
+    expect(payload.layers[0].elements[0].brush.stampSpacing).toBe(0.25);
+    expect(payload.layers[0].elements[0].brush.stampHardness).toBe(0.4);
+  });
+
+  it("opens version 8 files with the stamp off, which is the path they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId);
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 8;
+    delete payload.layers[0].elements[0].brush.stamp;
+    delete payload.layers[0].elements[0].brush.stampSpacing;
+    delete payload.layers[0].elements[0].brush.stampHardness;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.stamp).toBe(false);
+    expect(legacy.project.strokes[0].brush.stampSpacing).toBe(DEFAULT_BRUSH.stampSpacing);
+    expect(legacy.project.strokes[0].brush.stampHardness).toBe(DEFAULT_BRUSH.stampHardness);
+  });
+
+  it("refuses a version-9 stroke brush without the stamp settings", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stamp;
+        }),
+      ),
+    ).toContain("brush stamp");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampSpacing;
+        }),
+      ),
+    ).toContain("brush stamp spacing");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampHardness;
+        }),
+      ),
+    ).toContain("brush stamp hardness");
+  });
+
+  it("refuses a version-9 stroke brush with an invalid stamp setting", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stamp: "yes" };
+        }),
+      ),
+    ).toContain("brush stamp");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampSpacing: 5 };
+        }),
+      ),
+    ).toContain("brush stamp spacing");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampHardness: -1 };
+        }),
+      ),
+    ).toContain("brush stamp hardness");
   });
 
   it("round-trips multiply and screen layer blend modes at version 8", () => {
@@ -1173,5 +1284,134 @@ describe("parseProject repairs", () => {
     }
     expect(parsed.project.document.activeLayerId).toBe(parsed.project.document.layers[0].id);
     expect(parsed.project.warnings.join(" ")).toContain("active layer");
+  });
+});
+
+/**
+ * The composition guides in the project file.
+ *
+ * The guides are **additive**: they are display-only, so a file without the
+ * field opens exactly as before, a file with it opens in every build, and the
+ * file version does not move.
+ */
+describe("the composition guides in the project file", () => {
+  function withGuides(guides: unknown): string {
+    return mutate((project) => {
+      (project.document as { guides?: unknown }).guides = guides;
+    });
+  }
+
+  it("round-trips a guide with its id, axis and position", () => {
+    const document = {
+      ...createDocument({ name: "Study", width: 640, height: 480 }),
+      guides: [
+        { id: "guide-1", axis: "vertical" as const, position: 400 },
+        { id: "guide-2", axis: "horizontal" as const, position: 120 },
+      ],
+    };
+    const text = serializeProject(document, storeOf([]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides).toEqual([
+      { id: "guide-1", axis: "vertical", position: 400 },
+      { id: "guide-2", axis: "horizontal", position: 120 },
+    ]);
+  });
+
+  it("opens a file without the guides field with no guides at all", () => {
+    // Every file written before the guides existed looks like this.
+    const text = mutate((project) => {
+      delete (project.document as { guides?: unknown }).guides;
+    });
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides).toEqual([]);
+  });
+
+  it("keeps the file version where it was, because the guides are display-only", () => {
+    expect(PROJECT_VERSION).toBe(9);
+    const document = {
+      ...createDocument({ width: 100, height: 80 }),
+      guides: [{ id: "guide-1", axis: "vertical" as const, position: 10 }],
+    };
+    const payload = JSON.parse(serializeProject(document, storeOf([]))) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
+  });
+
+  it("repairs a broken guide instead of refusing the file", () => {
+    const text = withGuides([
+      { id: "guide-ok", axis: "vertical", position: 10 },
+      { id: "guide-nan", axis: "vertical", position: Number.NaN },
+      { id: "guide-axis", axis: "diagonal", position: 20 },
+      { id: "guide-ok", axis: "horizontal", position: 30 },
+      { axis: "horizontal", position: 40 },
+    ]);
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    // Only the sound guide survives.
+    expect(parsed.project.document.guides).toEqual([
+      { id: "guide-ok", axis: "vertical", position: 10 },
+    ]);
+    expect(parsed.project.warnings).toHaveLength(4);
+    const warnings = parsed.project.warnings.join(" ");
+    expect(warnings).toContain("position");
+    expect(warnings).toContain("axis");
+    expect(warnings).toContain("id");
+  });
+
+  it("rounds a guide's position to a whole document pixel", () => {
+    const parsed = parseProject(withGuides([{ id: "guide-1", axis: "vertical", position: 120.4 }]));
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides[0].position).toBe(120);
+  });
+
+  it("ignores a guides field that is not a list", () => {
+    const parsed = parseProject(withGuides("nonsense"));
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides).toEqual([]);
+    expect(parsed.project.warnings.join(" ")).toContain("guides");
+  });
+
+  it("refuses a file with more guides than the ceiling", () => {
+    const many = Array.from({ length: MAX_PROJECT_GUIDES + 1 }, (_value, index) => ({
+      id: `guide-${index}`,
+      axis: "vertical",
+      position: index,
+    }));
+
+    expect(rejectionOf(withGuides(many))).toContain(String(MAX_PROJECT_GUIDES));
+  });
+
+  it("keeps generated guide ids clear of the ids that came from the file", () => {
+    resetIdCounters();
+    const parsed = parseProject(withGuides([{ id: "guide-9", axis: "vertical", position: 10 }]));
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides[0].id).toBe("guide-9");
+    // The next generated guide id walks past the one the file carried.
+    expect(createId("guide")).not.toBe("guide-9");
   });
 });

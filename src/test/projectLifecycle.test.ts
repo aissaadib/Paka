@@ -223,6 +223,34 @@ describe("serialize and loadProject", () => {
     expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.texture).toBe(0.55);
   });
 
+  it("round-trips the stamp settings through save and reopen", () => {
+    const engine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 40, stamp: true, stampSpacing: 0.3, stampHardness: 0.45 },
+    });
+    paintStroke(engine, 0);
+    const text = engine.serialize();
+
+    const reopened = new DrawingEngine();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    reopened.loadProject(parsed.project, null);
+
+    const strokes = reopened.listStrokes(activeLayerId(reopened));
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].brush.stamp).toBe(true);
+    expect(strokes[0].brush.stampSpacing).toBe(0.3);
+    expect(strokes[0].brush.stampHardness).toBe(0.45);
+    // The loaded stamped stroke stays one undoable step and keeps its dab
+    // settings through undo and redo, because they live on the stroke record.
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.stamp).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.stampSpacing).toBe(0.3);
+  });
+
   it("rebuilds one undoable step per loaded stroke", () => {
     const engine = new DrawingEngine();
     paintStroke(engine, 0);
@@ -434,5 +462,32 @@ describe("serialize and loadProject", () => {
 
     expect(reopened.getState().file.dirty).toBe(false);
     expect(reopened.getState().history.depth).toBe(0);
+  });
+
+  it("round-trips the composition guides through save and reopen", () => {
+    const engine = new DrawingEngine();
+    engine.setTool("guides");
+    // A drag that is wider than it is tall: a vertical guide at the press x.
+    engine.handlePointerSample({ ...sample(120, 40), phase: "down" });
+    engine.handlePointerSample({ ...sample(220, 50), phase: "move" });
+    engine.handlePointerSample({ ...sample(220, 50), phase: "up" });
+    const original = engine.getState().document.guides;
+    expect(original).toHaveLength(1);
+
+    const text = engine.serialize();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    const reopened = new DrawingEngine();
+    reopened.loadProject(parsed.project, "C:\\art\\guided.paka");
+
+    // The guide comes back with its id, axis and position, and the reopened
+    // document draws the same guide.
+    expect(reopened.getState().document.guides).toEqual(original);
+    expect(reopened.getState().document.guides[0].position).toBe(120);
+    expect(reopened.getState().document.guides[0].axis).toBe("vertical");
   });
 });

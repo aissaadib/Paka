@@ -9,13 +9,21 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_BRUSH, MAX_BRUSH_SIZE, MIN_BRUSH_SIZE } from "../core/brushes/defaults";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+  MIN_STAMP_SPACING,
+} from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
+import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
 import { isFillPatch, isGradient } from "../core/document/types";
-import type { PointerSample } from "../types/pointer";
+import type { Guide } from "../core/document/types";
+import type { CursorReport, PointerSample } from "../types/pointer";
+import type { Bounds, Point } from "../types/geometry";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {  return {
     phase: "move",
@@ -59,6 +67,7 @@ function createSpyRenderer(
   const replaced: Array<{ xs: number[]; ys: number[] }> = [];
   const ended: StrokeRecord[] = [];
   const selections: Array<RendererSelection | null> = [];
+  const selectedGuides: Array<string | null> = [];
   let cancelled = 0;
   let documents = 0;
   let renders = 0;
@@ -95,6 +104,9 @@ function createSpyRenderer(
     setSelection: (selection) => {
       selections.push(selection);
     },
+    setSelectedGuide: (guideId) => {
+      selectedGuides.push(guideId);
+    },
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
@@ -122,6 +134,7 @@ function createSpyRenderer(
     replaced,
     ended,
     selections,
+    selectedGuides,
     getCancelled: () => cancelled,
     getDocuments: () => documents,
     getRenders: () => renders,
@@ -292,6 +305,70 @@ describe("DrawingEngine stroke capture", () => {
     expect(engine.listStrokes(layerId)[0].brush.spacing).toBe(0.3);
     expect(engine.listStrokes(layerId)[0].brush.stabilizer).toBe(0.8);
     expect(engine.listStrokes(layerId)[0].brush.texture).toBe(0.6);
+  });
+
+  it("treats the stamp settings as editor state: no history step, no dirty flag", () => {
+    const engine = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setBrush({ stamp: true, stampSpacing: 0.3, stampHardness: 0.5 });
+    expect(engine.getState().brush.stamp).toBe(true);
+    expect(engine.getState().brush.stampSpacing).toBe(0.3);
+    expect(engine.getState().brush.stampHardness).toBe(0.5);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // Out-of-range values are clamped, and a no-op change publishes nothing.
+    engine.setBrush({ stampSpacing: 0.001, stampHardness: 4 });
+    expect(engine.getState().brush.stampSpacing).toBe(MIN_STAMP_SPACING);
+    expect(engine.getState().brush.stampHardness).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("captures the stamp settings per stroke, so a later change rewrites nothing", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ stamp: true, stampSpacing: 0.25, stampHardness: 0.4 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 40, timeStamp: 16 }));
+    engine.finishStroke();
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.stamp).toBe(true);
+    expect(stroke.brush.stampSpacing).toBe(0.25);
+    expect(stroke.brush.stampHardness).toBe(0.4);
+
+    // Changing the setting describes the next stroke; it never rewrites an
+    // existing record's brush.
+    engine.setBrush({ stamp: false, stampSpacing: 0.9, stampHardness: 1 });
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.stampSpacing).toBe(0.25);
+    expect(engine.listStrokes(layerId)[0].brush.stampHardness).toBe(0.4);
+
+    // A stamped stroke is one undo step, like any other.
+    expect(engine.getState().history).toMatchObject({ depth: 1, canUndo: true });
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+  });
+
+  it("draws shapes with the plain segment path, even when the brush is stamped", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setBrush({ stamp: true });
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 60, docY: 40, timeStamp: 16 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 40, timeStamp: 32 }));
+
+    // A shape is an outline, not a chain of dabs, so its record says so.
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {
@@ -1083,6 +1160,254 @@ describe("DrawingEngine shape tools", () => {
 });
 
 /**
+ * The polygon and the star.
+ *
+ * A polygon and a star are ordinary strokes whose samples trace the outline,
+ * so these tests are about the geometry the engine hands over and about the
+ * options that shape it - not about a new kind of content.
+ */
+describe("DrawingEngine polygon and star tools", () => {
+  function createShapeEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Drags a shape from one point to another and releases it. */
+  function dragShape(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+    modifiers: Partial<PointerSample["modifiers"]> = {},
+  ): void {
+    const held = { shift: false, alt: false, ctrl: false, meta: false, ...modifiers };
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from[0], docY: from[1], modifiers: held }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to[0], docY: to[1], modifiers: held }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to[0], docY: to[1], modifiers: held }),
+    );
+  }
+
+  it("commits a polygon as one ordinary stroke", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // Five sides plus the repeated first point.
+    expect(strokes[0].xs).toHaveLength(6);
+    expect(strokes[0].ys).toHaveLength(6);
+    expect(strokes[0].xs[0]).toBeCloseTo(strokes[0].xs[5], 9);
+    expect(strokes[0].ys[0]).toBeCloseTo(strokes[0].ys[5], 9);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("commits a star with a point per tip", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("star");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // Five points: five tips and five valleys, plus the repeated first point.
+    expect(strokes[0].xs).toHaveLength(11);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("fills a polygon and a star through the existing fill switch", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeFill(true);
+    engine.setTool("polygon");
+    dragShape(engine, [50, 50], [150, 150]);
+    engine.setTool("star");
+    dragShape(engine, [200, 50], [300, 150]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(2);
+    expect(strokes[0].fill).toBe(true);
+    expect(strokes[1].fill).toBe(true);
+  });
+
+  it("treats the options as editor state: no history step, no dirty flag", () => {
+    const { engine } = createShapeEngine();
+
+    engine.setShapeSides(9);
+    engine.setShapeInnerRatio(0.25);
+    engine.setShapeRotation(45);
+
+    expect(engine.getState().shapeSides).toBe(9);
+    expect(engine.getState().shapeInnerRatio).toBe(0.25);
+    expect(engine.getState().shapeRotation).toBe(45);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("clamps the options to their documented ranges", () => {
+    const { engine } = createShapeEngine();
+
+    engine.setShapeSides(1);
+    expect(engine.getState().shapeSides).toBe(3);
+    engine.setShapeSides(99);
+    expect(engine.getState().shapeSides).toBe(24);
+    engine.setShapeSides(7.6);
+    expect(engine.getState().shapeSides).toBe(8);
+    engine.setShapeInnerRatio(0);
+    expect(engine.getState().shapeInnerRatio).toBe(0.05);
+    engine.setShapeInnerRatio(4);
+    expect(engine.getState().shapeInnerRatio).toBe(1);
+    engine.setShapeRotation(-30);
+    expect(engine.getState().shapeRotation).toBe(0);
+    engine.setShapeRotation(400);
+    expect(engine.getState().shapeRotation).toBe(360);
+  });
+
+  it("reads the options when the gesture starts, not when it ends", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeSides(6);
+    engine.setTool("polygon");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    // The option changes mid-drag: the shape keeps the sides it started with.
+    engine.setShapeSides(3);
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes[0].xs).toHaveLength(7);
+  });
+
+  it("keeps the inner ratio and the rotation it started with", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeInnerRatio(0.25);
+    engine.setShapeRotation(90);
+    engine.setTool("star");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    // Both options change mid-drag; the star keeps the ones it started with.
+    engine.setShapeInnerRatio(0.9);
+    engine.setShapeRotation(0);
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
+
+    const star = engine.listStrokes(layerId)[0];
+    // The box is 100..200 by 100..200, so the centre is (150, 150) and the
+    // circle's radius is 50.
+    const centre = { x: 150, y: 150 };
+    const radius = (index: number): number =>
+      Math.hypot(star.xs[index] - centre.x, star.ys[index] - centre.y);
+    // A tip is on the circle, a valley at a quarter of it: the inner ratio of
+    // 0.25 the star started with.
+    expect(radius(0)).toBeCloseTo(50, 6);
+    expect(radius(1)).toBeCloseTo(12.5, 6);
+    // The rotation of 90 degrees the star started with: the first tip, which
+    // starts at the top, is now at the right.
+    expect(star.xs[0]).toBeCloseTo(200, 6);
+    expect(star.ys[0]).toBeCloseTo(150, 6);
+  });
+
+  it("never rewrites a committed shape when an option changes", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+    const committed = engine.listStrokes(layerId)[0];
+    const before = { xs: [...committed.xs], ys: [...committed.ys] };
+
+    engine.setShapeSides(3);
+    engine.setShapeInnerRatio(0.9);
+    engine.setShapeRotation(45);
+
+    const after = engine.listStrokes(layerId)[0];
+    expect(after.xs).toEqual(before.xs);
+    expect(after.ys).toEqual(before.ys);
+    // And the option changes are not edits of their own.
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("draws a polygon from its centre under Alt and squares it under Shift", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [150, 150], [250, 200], { alt: true });
+    const centred = engine.listStrokes(layerId)[0];
+    // The mean of the vertices is the shape's centre; the closing repeat is
+    // not a vertex, so it is left out.
+    const vertices = centred.xs.length - 1;
+    const centreX =
+      centred.xs.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+    const centreY =
+      centred.ys.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+    expect(centreX).toBeCloseTo(150, 6);
+    expect(centreY).toBeCloseTo(150, 6);
+
+    dragShape(engine, [100, 100], [200, 140], { shift: true });
+    const squared = engine.listStrokes(layerId)[1];
+    // Shift squares the drag's box (100 by 100), so the polygon is regular:
+    // every vertex is the same distance from the box's centre.
+    for (let index = 0; index < squared.xs.length; index += 1) {
+      const radius = Math.hypot(squared.xs[index] - 150, squared.ys[index] - 150);
+      expect(radius).toBeCloseTo(50, 6);
+    }
+  });
+
+  it("discards a click that never moved", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [100, 100]);
+
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("draws a shape with the plain segment path, even when the brush is stamped", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setBrush({ stamp: true });
+    engine.setTool("star");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+  });
+
+  it("selects a polygon and moves it in one undo step", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+    const before = [...engine.listStrokes(layerId)[0].xs];
+
+    engine.setTool("select");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 280, docY: 280 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 280, docY: 280 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    const depth = engine.getState().history.depth;
+    engine.handlePointerSample(createSample({ phase: "down", docX: 150, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 170, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 170, docY: 150 }));
+
+    const moved = engine.listStrokes(layerId)[0];
+    expect(moved.xs[0]).toBeCloseTo(before[0] + 20, 6);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+  });
+});
+
+/**
  * Selection and transform.
  *
  * Driven through the same pointer entry point the DOM binder uses, so each test
@@ -1526,6 +1851,414 @@ describe("DrawingEngine selection", () => {
     // The centre line is y = 125, so y becomes 250 - y and x is untouched.
     expectClose(engine.listStrokes(layerId)[0].xs, originalXs);
     expect(engine.listStrokes(layerId)[0].ys).toEqual(originalYs.map((y) => 250 - y));
+  });
+
+  /** The painted frame of a stroke: its samples' bounds plus half the brush. */
+  function paintedFrame(xs: readonly number[], ys: readonly number[]): Bounds {
+    const padding = DEFAULT_BRUSH.size / 2;
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    return {
+      x: minX - padding,
+      y: minY - padding,
+      width: maxX - minX + padding * 2,
+      height: maxY - minY + padding * 2,
+    };
+  }
+
+  /** Presses a handle, drags it to `to` and releases it. */
+  function dragHandle(
+    engine: DrawingEngine,
+    from: Point,
+    to: Point,
+    modifiers: PointerSample["modifiers"] = { shift: false, alt: false, ctrl: false, meta: false },
+  ): void {
+    engine.handlePointerSample(createSample({ phase: "down", docX: from.x, docY: from.y }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to.x, docY: to.y, modifiers }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to.x, docY: to.y, modifiers }),
+    );
+  }
+
+  /** A selected horizontal stroke, ready to be transformed. */
+  function selectStroke(): {
+    engine: DrawingEngine;
+    spy: ReturnType<typeof createSpyRenderer>;
+    layerId: string;
+    frame: Bounds;
+    centre: Point;
+    xs: number[];
+    ys: number[];
+    /** The brush and the pressures, copied before the gesture. */
+    brush: StrokeRecord["brush"];
+    pressures: number[];
+    /** The stroke's identity, copied before the gesture. */
+    id: string;
+    startTime: number;
+    depth: number;
+  } {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 150],
+    ], "up");
+    const stroke = engine.listStrokes(layerId)[0];
+    const xs = [...stroke.xs];
+    const ys = [...stroke.ys];
+    const frame = paintedFrame(xs, ys);
+    return {
+      engine,
+      spy,
+      layerId,
+      frame,
+      centre: { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 },
+      xs,
+      ys,
+      brush: { ...stroke.brush },
+      pressures: [...stroke.pressures],
+      id: stroke.id,
+      startTime: stroke.startTime,
+      depth: engine.getState().history.depth,
+    };
+  }
+
+  it("scales the selection about its frame's centre and records one undo step", () => {
+    const { engine, layerId, frame, centre, xs, ys, brush, pressures, id, startTime, depth } =
+      selectStroke();
+    // The south-east corner handle.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+
+    const scaled = engine.listStrokes(layerId)[0];
+    scaled.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(centre.x + (xs[index] - centre.x) * 2, 6);
+    });
+    scaled.ys.forEach((y, index) => {
+      expect(y).toBeCloseTo(centre.y + (ys[index] - centre.y) * 2, 6);
+    });
+    // One step for the whole drag.
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    // The transform moves the samples and nothing else: the brush, the
+    // pressures and the sample count are the ones the stroke was drawn with.
+    // The comparison is against the copies taken *before* the gesture, not
+    // against the stroke itself, which would be true by construction.
+    expect(scaled.brush).toEqual(brush);
+    expect(scaled.pressures).toEqual(pressures);
+    expect(scaled.times).toHaveLength(xs.length);
+    expect(scaled.id).toBe(id);
+    expect(scaled.startTime).toBe(startTime);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+
+    engine.redo();
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(
+      centre.x + (xs[0] - centre.x) * 2,
+      6,
+    );
+  });
+
+  it("does not jump the content when the press misses the handle", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    // A press four pixels short of the corner, still inside the grab radius.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    const press = { x: corner.x - 4, y: corner.y - 4 };
+    // One pixel further along the corner's own ray.
+    const moved = { x: press.x + 1, y: press.y + 1 };
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: press.x, docY: press.y }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: moved.x, docY: moved.y }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: moved.x, docY: moved.y }));
+
+    // The content has barely moved: the drag is measured from the press, not
+    // read from the pointer.
+    const after = engine.listStrokes(layerId)[0];
+    after.xs.forEach((x, index) => {
+      expect(Math.abs(x - xs[index])).toBeLessThan(2);
+    });
+    after.ys.forEach((y, index) => {
+      expect(Math.abs(y - ys[index])).toBeLessThan(2);
+    });
+    // And the centre is still the centre: a scale about it moves both ends
+    // the same way.
+    expect(centre.x).toBeCloseTo((xs[0] + xs[xs.length - 1]) / 2, 6);
+  });
+
+  it("does not jump the content when the press misses the rotation handle", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    // The rotation handle rests above the frame's top edge; the press lands
+    // six pixels to its left, still inside the grab radius.
+    const rotate = { x: centre.x, y: frame.y - 24 };
+    const press = { x: rotate.x - 6, y: rotate.y };
+    const moved = { x: press.x + 1, y: press.y };
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: press.x, docY: press.y }));
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: moved.x,
+        docY: moved.y,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+    engine.handlePointerSample(
+      createSample({
+        phase: "up",
+        docX: moved.x,
+        docY: moved.y,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+
+    // A pixel of movement is a fraction of a degree, not the four degrees an
+    // absolute reading would have asked for.
+    const after = engine.listStrokes(layerId)[0];
+    after.xs.forEach((x, index) => {
+      expect(Math.abs(x - xs[index])).toBeLessThan(2);
+    });
+    after.ys.forEach((y, index) => {
+      expect(Math.abs(y - ys[index])).toBeLessThan(2);
+    });
+  });
+
+  it("rotates the selection about its frame's centre", () => {
+    const { engine, layerId, frame, centre, xs, ys, depth } = selectStroke();
+    // The rotation handle rests above the frame's top edge.
+    const rotate = { x: centre.x, y: frame.y - 24 };
+
+    // A pointer to the right of the centre asks for a quarter turn.
+    dragHandle(engine, rotate, { x: centre.x + 40, y: centre.y });
+
+    const turned = engine.listStrokes(layerId)[0];
+    turned.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(centre.x - (ys[index] - centre.y), 6);
+    });
+    turned.ys.forEach((y, index) => {
+      expect(y).toBeCloseTo(centre.y + (xs[index] - centre.x), 6);
+    });
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+  });
+
+  it("snaps the rotation to 15 degrees, and Shift turns the snap off", () => {
+    const { engine, layerId, frame, centre, xs, ys } = selectStroke();
+    const rotate = { x: centre.x, y: frame.y - 24 };
+    // A pointer that asks for about 104 degrees.
+    const to = { x: centre.x + 40, y: centre.y + 10 };
+
+    dragHandle(engine, rotate, to);
+    const snapped = engine.listStrokes(layerId)[0];
+    const snappedXs = [...snapped.xs];
+    const snappedAngle = Math.round(Math.atan2(40, -10) / (Math.PI / 12)) * (Math.PI / 12);
+    snappedXs.forEach((x, index) => {
+      const dx = xs[index] - centre.x;
+      const dy = ys[index] - centre.y;
+      expect(x).toBeCloseTo(
+        centre.x + dx * Math.cos(snappedAngle) - dy * Math.sin(snappedAngle),
+        6,
+      );
+    });
+
+    // With Shift held the snap is off, so the free angle is kept.
+    engine.undo();
+    dragHandle(engine, rotate, to, {
+      shift: true,
+      alt: false,
+      ctrl: false,
+      meta: false,
+    });
+    const free = engine.listStrokes(layerId)[0];
+    const freeAngle = Math.atan2(40, -10);
+    free.xs.forEach((x, index) => {
+      const dx = xs[index] - centre.x;
+      const dy = ys[index] - centre.y;
+      expect(x).toBeCloseTo(
+        centre.x + dx * Math.cos(freeAngle) - dy * Math.sin(freeAngle),
+        6,
+      );
+    });
+    // The free angle is not a multiple of 15 degrees, so the two differ.
+    expect(free.xs[0]).not.toBeCloseTo(snappedXs[0], 3);
+  });
+
+  it("shows the new frame and the handles after a transform", () => {
+    const { engine, spy, frame, centre } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+
+    const overlay = spy.selections[spy.selections.length - 1];
+    // The frame follows the strokes: the samples doubled, the padding did not.
+    expect(overlay?.bounds?.width).toBeCloseTo(frame.width * 2 - DEFAULT_BRUSH.size, 6);
+    expect(overlay?.bounds?.height).toBeCloseTo(frame.height, 6);
+    // The handles are on the frame's new corners.
+    expect(overlay?.handles?.corners).toHaveLength(4);
+    expect(overlay?.handles?.corners[2].x).toBeCloseTo(
+      overlay?.bounds?.x as number + (overlay?.bounds?.width as number),
+      6,
+    );
+  });
+
+  it("puts the handles on the selected frame and never on the rubber band", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [100, 100],
+      [200, 100],
+    ]);
+    engine.setTool("select");
+
+    // A marquee drag with nothing selected shows the band and nothing else:
+    // the handles belong to a selection, and there is none.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 60, docY: 50 }));
+    const band = spy.selections[spy.selections.length - 1];
+    expect(band?.bounds).toEqual({ x: 20, y: 20, width: 40, height: 30 });
+    expect(band?.handles).toBeNull();
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 50 }));
+
+    // A marquee that meets the stroke selects it: the handles sit on its
+    // frame, and the frame is the one derived from the strokes.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 250, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 250, docY: 150 }));
+    const selected = spy.selections[spy.selections.length - 1];
+    const bounds = selected?.bounds;
+    expect(selected?.handles?.corners).toHaveLength(4);
+    expect(selected?.handles?.corners[0]).toEqual({ x: bounds?.x, y: bounds?.y });
+    expect(selected?.handles?.corners[2]).toEqual({
+      x: (bounds?.x ?? 0) + (bounds?.width ?? 0),
+      y: (bounds?.y ?? 0) + (bounds?.height ?? 0),
+    });
+
+    // A new marquee replaces the frame with the band, and the handles go with
+    // it: they are never drawn on the rubber band.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 30, docY: 30 }));
+    const second = spy.selections[spy.selections.length - 1];
+    expect(second?.bounds).toEqual({ x: 20, y: 20, width: 10, height: 10 });
+    expect(second?.handles).toBeNull();
+  });
+
+  it("recomputes the cursor when the viewport changes", () => {
+    const { engine, frame } = selectStroke();
+    const reports: CursorReport[] = [];
+    engine.subscribeCursor((report) => reports.push(report));
+
+    // Put the pointer on the south-east corner handle. The screen position is
+    // the same point, so the pointer is where the report says it is.
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: corner.x,
+        docY: corner.y,
+        screenX: corner.x,
+        screenY: corner.y,
+      }),
+    );
+    expect(reports[reports.length - 1].cursor).toBe("nwse-resize");
+
+    // Zoom without moving the pointer: the document point under it is a
+    // different one, so the answer must be recomputed rather than kept.
+    engine.setViewport({ zoom: 4, offsetX: 0, offsetY: 0 });
+    expect(reports[reports.length - 1].cursor).toBe("default");
+  });
+
+  it("records no step for a transform that changes nothing", () => {
+    const { engine, layerId } = createSelectingEngine();
+    // A single dab: the frame's centre is the dab itself, so a scale and a
+    // rotation both map it onto itself.
+    handle(engine, [[100, 100]], "up");
+    engine.setTool("select");
+    handle(engine, [
+      [90, 90],
+      [110, 110],
+    ], "up");
+    const depth = engine.getState().history.depth;
+    const frame = paintedFrame([100], [100]);
+    const centre = { x: frame.x + frame.width / 2, y: frame.y + frame.height / 2 };
+
+    dragHandle(engine, { x: frame.x + frame.width, y: frame.y + frame.height }, {
+      x: centre.x + 40,
+      y: centre.y + 40,
+    });
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.listStrokes(layerId)[0].xs.every((x) => x === 100)).toBe(true);
+    expect(engine.listStrokes(layerId)[0].ys.every((y) => y === 100)).toBe(true);
+  });
+
+  it("cancels a transform in flight and records nothing", () => {
+    const { engine, layerId, frame, centre, xs, ys, depth } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    engine.handlePointerSample(createSample({ phase: "down", docX: corner.x, docY: corner.y }));
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: centre.x + (corner.x - centre.x) * 3,
+        docY: centre.y + (corner.y - centre.y) * 3,
+      }),
+    );
+    // The preview moved.
+    expect(engine.listStrokes(layerId)[0].xs[0]).not.toBeCloseTo(xs[0], 3);
+
+    engine.handlePointerSample(createSample({ phase: "cancel", docX: 0, docY: 0 }));
+    // The originals are back and nothing was recorded.
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("survives a save and reopen", () => {
+    const { engine, layerId, frame, centre } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    dragHandle(
+      engine,
+      corner,
+      {
+        x: centre.x + (corner.x - centre.x) * 2,
+        y: centre.y + (corner.y - centre.y) * 2,
+      },
+    );
+    const transformedXs = [...engine.listStrokes(layerId)[0].xs];
+    const transformedYs = [...engine.listStrokes(layerId)[0].ys];
+
+    // The transform is a change of the samples, so the project file carries it
+    // like any other stroke: reopening it gives the same stroke back.
+    const parsed = parseProject(engine.serialize());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const reopened = parsed.project.strokes[0];
+    expect(reopened.xs).toEqual(transformedXs);
+    expect(reopened.ys).toEqual(transformedYs);
+    expect(reopened.brush).toEqual(engine.listStrokes(layerId)[0].brush);
   });
 
   it("refuses undo and redo while a selection drag is in flight", () => {
@@ -2206,5 +2939,425 @@ describe("DrawingEngine bucket fill", () => {
 
     engine.dismissNotice();
     expect(engine.getState().notice).toBeNull();
+  });
+});
+
+
+/**
+ * The composition guides.
+ *
+ * A guide is document state with no pixels: it is placed with a drag, moved
+ * with a drag, selected with a click, and every change is one undoable step.
+ * These tests drive the engine the way the app does - through normalized
+ * pointer samples - so the whole gesture path is covered.
+ */
+describe("DrawingEngine composition guides", () => {
+  function createGuideEngine(guides: readonly Guide[] = []) {
+    const spy = createSpyRenderer();
+    const base = createDocument({ name: "Test", width: 400, height: 300 });
+    const engine = new DrawingEngine({
+      document: { ...base, guides },
+      renderer: spy.renderer,
+    });
+    engine.setTool("guides");
+    return { engine, spy };
+  }
+
+  /** Drags with the pointer and releases it. */
+  function drag(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+    overrides: Partial<PointerSample> = {},
+  ): void {
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from[0], docY: from[1], ...overrides }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to[0], docY: to[1], ...overrides }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to[0], docY: to[1], ...overrides }),
+    );
+  }
+
+  function guidesOf(engine: DrawingEngine): readonly Guide[] {
+    return engine.getState().document.guides;
+  }
+
+  it("creates one guide at the press point, on the axis the drag chose", () => {
+    const { engine } = createGuideEngine();
+
+    // A drag that is wider than it is tall makes a vertical guide, and the
+    // guide sits where the pointer went down, not where it came up.
+    drag(engine, [100, 50], [220, 60]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("makes a horizontal guide from a drag that is taller than it is wide", () => {
+    const { engine } = createGuideEngine();
+
+    drag(engine, [100, 50], [110, 200]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].axis).toBe("horizontal");
+    expect(guides[0].position).toBe(50);
+  });
+
+  it("snaps the position to a whole document pixel", () => {
+    const { engine } = createGuideEngine();
+
+    drag(engine, [120.4, 50], [220, 60]);
+
+    expect(guidesOf(engine)[0].position).toBe(120);
+  });
+
+  it("moves an existing guide along its own axis", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    // Press on the guide - the y is irrelevant for a vertical guide - and drag.
+    drag(engine, [100, 200], [250, 210]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].id).toBe(id);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(250);
+    // The drag is one undo step, not one per pointer move.
+    expect(engine.getState().history.depth).toBe(2);
+  });
+
+  it("never changes the axis of a guide that is being moved", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // A drag that is much taller than it is wide still only moves the guide in
+    // x, because the guide is vertical.
+    drag(engine, [100, 200], [110, 300]);
+
+    const guides = guidesOf(engine);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(110);
+  });
+
+  it("records nothing for a drag that ends where it started", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    // One drag that goes out and comes back: the guide ends where it began,
+    // so the gesture changed nothing and history must not grow.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 250, docY: 210 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("selects a guide that is pressed without moving", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(engine.getState().selectedGuideId).toBe(id);
+  });
+
+  it("clears the selection when empty canvas is pressed", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    expect(engine.getState().selectedGuideId).not.toBeNull();
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 250 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 300, docY: 250 }));
+
+    expect(engine.getState().selectedGuideId).toBeNull();
+  });
+
+  it("removes the selected guide as one undoable step", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    const depth = engine.getState().history.depth;
+
+    expect(engine.deleteSelectedGuide()).toBe(true);
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().selectedGuideId).toBeNull();
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(100);
+  });
+
+  it("undoes and redoes a guide change exactly", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const before = guidesOf(engine).map((guide) => ({ ...guide }));
+
+    drag(engine, [100, 200], [250, 210]);
+    expect(guidesOf(engine)[0].position).toBe(250);
+
+    engine.undo();
+    expect(guidesOf(engine).map((guide) => ({ ...guide }))).toEqual(before);
+
+    engine.redo();
+    expect(guidesOf(engine)[0].position).toBe(250);
+    expect(guidesOf(engine)[0].id).toBe(before[0].id);
+  });
+
+  it("cancels a drag: the guide goes back where it was and history is untouched", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+    const dirty = engine.getState().file.dirty;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 300, docY: 210 }));
+    // The live preview is on screen...
+    expect(guidesOf(engine)[0].position).toBe(300);
+
+    engine.cancelGuideGesture();
+
+    // ...and the cancel puts it back.
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(dirty);
+  });
+
+  it("cancels a drag that was creating a guide: the guide disappears", () => {
+    const { engine } = createGuideEngine();
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(1);
+
+    engine.cancelGuideGesture();
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("refuses undo while a guide drag is in flight", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 300, docY: 210 }));
+
+    expect(engine.undo()).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+
+    engine.handlePointerSample(createSample({ phase: "up", docX: 300, docY: 210 }));
+    expect(engine.undo()).toBe(true);
+  });
+
+  it("pans with the middle button while the guides tool is active", () => {
+    const { engine } = createGuideEngine();
+    const before = engine.getState().viewport;
+
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 100, docY: 50, screenX: 100, screenY: 50, button: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 130, docY: 50, screenX: 130, screenY: 50, button: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 130, docY: 50, screenX: 130, screenY: 50, button: 1 }),
+    );
+
+    expect(engine.getState().viewport.offsetX).toBe(before.offsetX + 30);
+    // Panning is not an edit.
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("places the same guide for a pen, a mouse and a touch", () => {
+    for (const kind of ["pen", "mouse", "touch"] as const) {
+      const { engine } = createGuideEngine();
+      drag(engine, [100, 50], [220, 60], { kind });
+      const guides = guidesOf(engine);
+      expect(guides).toHaveLength(1);
+      expect(guides[0].axis).toBe("vertical");
+      expect(guides[0].position).toBe(100);
+    }
+  });
+
+  it("grabs a guide within eight screen pixels at any zoom", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // 20 document pixels away is 20 screen pixels at 1x: out of reach.
+    expect(engine.findGuideAt(120, 50)).toBeNull();
+
+    // At a quarter zoom the same 20 screen pixels are 80 document pixels, and
+    // the radius is 32 document pixels: still out of reach.
+    engine.setViewport({ zoom: 0.25, offsetX: 0, offsetY: 0 });
+    expect(engine.findGuideAt(180, 50)).toBeNull();
+    // 28 document pixels is 7 screen pixels at that zoom: in reach.
+    expect(engine.findGuideAt(128, 50)?.position).toBe(100);
+  });
+
+  it("refuses a guide that would land on another one", () => {
+    // Two guides at the same spot, as a hand-edited file could carry.
+    const { engine } = createGuideEngine([
+      { id: "guide-a", axis: "vertical", position: 100 },
+      { id: "guide-b", axis: "vertical", position: 300 },
+    ]);
+
+    // Dragging the second one onto the first is refused: the guide stays put.
+    drag(engine, [300, 200], [100, 210]);
+    expect(guidesOf(engine).map((guide) => guide.position).sort()).toEqual([100, 300]);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("refuses a create that would land on an existing guide", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    // At 64x the grab radius is an eighth of a document pixel, so a press a
+    // fifth of a document pixel away misses the guide - and the new guide
+    // would round onto the very same position.
+    engine.setViewport({ zoom: 64, offsetX: 0, offsetY: 0 });
+    drag(engine, [100.2, 50], [220, 60]);
+
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("creates nothing when the drag is shorter than the axis threshold", () => {
+    const { engine } = createGuideEngine();
+
+    // Two document pixels at 1x: under the three CSS pixels the tool needs
+    // before it decides which axis the guide takes, so nothing is created.
+    drag(engine, [100, 50], [102, 50]);
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("keeps the redo stack intact when a drag is cancelled", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // Undo leaves a redo entry, and a cancelled drag must not destroy it.
+    engine.undo();
+    expect(engine.getState().history.canRedo).toBe(true);
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 420, docY: 60 }));
+    engine.cancelGuideGesture();
+
+    expect(engine.getState().history.canRedo).toBe(true);
+    expect(engine.redo()).toBe(true);
+    expect(guidesOf(engine)).toHaveLength(1);
+  });
+
+  it("lets the tool start a new gesture after the engine cancelled the last one", () => {
+    const { engine } = createGuideEngine();
+
+    // The Escape key cancels the gesture without a pointer release, so the
+    // tool has to be told: it must not go on believing a drag is in flight.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    engine.cancelGuideGesture();
+
+    // The next press has to work.
+    drag(engine, [300, 50], [420, 60]);
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(300);
+  });
+
+  it("does not call the file clean when it is saved during a guide drag", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // A save while a drag is in flight writes the *preview*, not the document
+    // the user is going to keep, so the file cannot be called clean.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 420, docY: 60 }));
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(true);
+
+    // Cancelling the drag leaves the file and the document different, so the
+    // file has to stay dirty until it is written again.
+    engine.cancelGuideGesture();
+    expect(engine.getState().file.dirty).toBe(true);
+
+    // The next save writes the document and clears the marker.
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("drops the guide selection when the guides tool is left", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    expect(engine.getState().selectedGuideId).not.toBeNull();
+
+    engine.setTool("brush");
+
+    expect(engine.getState().selectedGuideId).toBeNull();
+  });
+
+  it("drops the guide gesture when the document is replaced", () => {
+    const { engine } = createGuideEngine();
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(1);
+
+    engine.newDocument({ name: "Fresh", width: 400, height: 300 });
+
+    // The preview went with the document, and the gesture with it: a release
+    // that arrives afterwards must not bring the old guide back.
+    engine.handlePointerSample(createSample({ phase: "up", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("changes no pixels: a guide never invalidates a layer", () => {
+    const { engine, spy } = createGuideEngine();
+
+    drag(engine, [100, 50], [220, 60]);
+    drag(engine, [100, 200], [250, 210]);
+
+    // A guide is metadata: no layer surface is invalidated and no stroke is
+    // re-rasterized, so the document's pixels are exactly what they were.
+    expect(spy.invalidated).toEqual([]);
+    expect(engine.listStrokes(engine.getState().document.activeLayerId as string)).toEqual([]);
+  });
+
+  it("tells the renderer which guide is selected", () => {
+    const { engine, spy } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(spy.selectedGuides).toContain(id);
   });
 });

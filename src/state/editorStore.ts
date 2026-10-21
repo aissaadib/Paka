@@ -26,6 +26,12 @@ export interface EditorActions {
   setBrush(patch: Partial<BrushSettings>): void;
   /** Whether the shape tools fill their outline instead of tracing it. */
   setShapeFill(filled: boolean): void;
+  /** Sides of the next polygon, and points of the next star (3-24). */
+  setShapeSides(sides: number): void;
+  /** Inner radius of the next star, as a fraction of its outer radius. */
+  setShapeInnerRatio(ratio: number): void;
+  /** Rotation of the next polygon or star, in degrees (0-360). */
+  setShapeRotation(degrees: number): void;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   setFillTolerance(tolerance: number): void;
   /** Chooses linear or radial for the next gradient drag. */
@@ -52,6 +58,10 @@ export interface EditorActions {
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
   deleteSelection(): void;
+  /** Removes the guide the guides tool has selected, as one undoable step. */
+  deleteSelectedGuide(): void;
+  /** Cancels the guide gesture in flight and clears the guide selection. */
+  cancelGuideGesture(): void;
   /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
   nudgeSelection(dx: number, dy: number): void;
   /** Copies the selected strokes above the originals and selects the copies. */
@@ -85,6 +95,9 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
     setShapeFill: (filled) => engine.setShapeFill(filled),
+    setShapeSides: (sides) => engine.setShapeSides(sides),
+    setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),
+    setShapeRotation: (degrees) => engine.setShapeRotation(degrees),
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
@@ -112,6 +125,13 @@ export function createEditor(options: EditorOptions = {}): Editor {
     clearSelection: () => engine.clearSelection(),
     deleteSelection: () => {
       engine.deleteSelection();
+    },
+    deleteSelectedGuide: () => {
+      engine.deleteSelectedGuide();
+    },
+    cancelGuideGesture: () => {
+      engine.cancelGuideGesture();
+      engine.selectGuide(null);
     },
     nudgeSelection: (dx, dy) => {
       engine.nudgeSelection(dx, dy);

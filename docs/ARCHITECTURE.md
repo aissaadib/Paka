@@ -62,8 +62,9 @@ layer list and the **ordered element data** - strokes and serialized fill
 patches - never a flattened image, so a reopened drawing is still editable
 element by element. A fill stores its committed pixels (colour, box and coverage
 mask), not its seed and tolerance, so reopening cannot re-derive a different
-region. The format, its validation rules and its versioning policy are
-documented in [`PROJECT_FORMAT.md`](./PROJECT_FORMAT.md).
+region. The document envelope also carries the **composition guides**, which
+are display-only metadata. The format, its validation rules and its versioning
+policy are documented in [`PROJECT_FORMAT.md`](./PROJECT_FORMAT.md).
 
 The pieces:
 
@@ -119,11 +120,11 @@ memory; it never changes document size or stroke coordinates.
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
-| `src/core/document` | Document and layer metadata, ordered element store | types, utils |
+| `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -198,11 +199,24 @@ scans: the fill's boundary is the picture the user sees, not one layer's
 internal pixels.
 
 Rasterizing a layer is a rebuild, not an incremental edit: for every element on
-that layer the renderer clears the whole stroke buffer and blends one
-full-surface draw, so the cost is `O(elements x surface pixels)` and does not
-depend on the stroke's geometry. A measured breakdown - including the
-environmental limits of those measurements - and the recommended first fix
-(dirty bounds for the stroke buffer) are in
+that layer the renderer rasterizes it into the shared stroke buffer and blends it
+onto the layer surface, one element at a time, in painting order. Since `4ac040b`
+that work is bounded by the element's own footprint instead of by the document:
+the buffer is cleared and blended only over the rectangle the element can ink -
+the padded bounding box of its samples, which is the brush radius, the blur
+spread of a soft edge and one pixel of margin - while the layer's own single full
+clear is unchanged, because a rebuild still starts from an empty surface. The
+surface and the stroke buffer share the same device pixel grid, so that rectangle
+is blitted one to one under the identity transform and nothing is resampled, and
+the pixels are the same ones the old full-surface blend produced. The cost of a
+rebuild therefore follows the strokes' geometry instead of the document size: a
+measured 47x-187x less touched area per rebuild for strokes that ink a small part
+of the document, and about 1.1x for strokes that cover the whole document. The
+display and the eraser still draw the whole buffer, because the viewport clips
+that for us and the eraser subtracts from the layer it mutates. The measured
+breakdown - including the environmental limits of those measurements, the
+remaining per-draw cost charged for the document-sized surface, and the recipe
+for profiling it in the packaged app - is in
 [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
 
 ### Layer blend modes
@@ -380,6 +394,67 @@ through the shared coverage path; a filled shape's interior grains along with
 its outline. It is a visible surface texture, not per-dab spacing or a true
 texture brush, and it still composites at the stroke opacity once.
 
+### Stamp engine (dabs)
+
+`BrushSettings.stamp` switches the rasterization strategy for a stroke: with it
+off, the stroke is the legacy round-capped segment path, byte for byte; with it
+on, the stroke is a **union of round dabs** placed along the stored polyline.
+
+The dabs are placed by **arc length**, not per sample: the first dab sits on the
+first sample and the rest every `stampSpacing * size` document pixels along the
+path, with the remainder of a segment carried into the next one. Two consequences
+matter:
+
+- The plan does not depend on the **sample density**, so the existing `spacing`
+  field stays non-appearance-changing: the same path captured at two densities
+  produces the same dabs (there is a test for it).
+- The plan is a **pure function of the samples and the brush** - no randomness,
+  no clock, no zoom, no `rasterScale` - so live drawing, the commit, a layer
+  rebuild, undo/redo, a reopened file and a PNG export all produce the same
+  dabs. `src/core/rendering/stampCoverage.ts` is the only place that decides
+  where a dab goes, so the live path and the rebuild path cannot disagree.
+
+The dabs' coverage is combined with a **per-pixel maximum**, never a sum.
+Canvas 2D has no max-alpha composite operation - its `lighten` blend mode
+compares colours, not alpha - so the union is computed in plain numbers in a
+coverage map and uploaded to the stroke buffer as pixels:
+
+```
+coverage map   = 1 byte per device pixel, in 64x64 tiles, allocated on demand
+dab profile    = 1 inside the dab's core, a smooth falloff to 0 at its radius
+union          = max(existing coverage, the dab's coverage)
+upload         = one ImageData per tile (16 KB), putImageData into the stroke buffer
+```
+
+A self-crossing or overlapping stamped stroke therefore cannot darken, and the
+stroke's opacity is still applied **once**, when the buffer composites - the same
+invariant the segment path keeps. The stroke-level hardness feather and the grain
+post-pass still run over the finished coverage, so a soft or grainy brush stays
+soft or grainy when the stamp is on.
+
+The coverage map is bounded by the **stroke's own footprint**, like the feather
+scratch, so the stamp engine adds no document-sized surface and the raster
+budget's 58 bytes per document pixel still holds (see *Document size and surface
+memory*). The upload is per tile, so the buffer it needs is 16 KB whatever the
+stroke's size.
+
+Two guards keep the cost and the memory bounded, and both are deterministic, so
+the live path and the rebuild path cut at the same place:
+
+- a **spacing floor** of 0.5 document pixels, so a 1 px brush cannot ask for
+  thousands of dabs per pixel;
+- a **per-stroke work budget** (`MAX_STAMP_COVERAGE_WORK`): the planner stops
+  placing dabs once the dabs' bounding boxes add up to the budget. The cut is a
+  lattice index, so the same first K dabs are produced whether the path holds
+  ten samples or ten thousand. A project file's path length is not bounded by the
+  parser, so this is what stops a hostile file from exhausting memory; an
+  extreme stroke is cut short, which is a rendering limit rather than a hang.
+
+The stamp applies to **brush and eraser** strokes. Shape tools keep the segment
+path - a shape is an outline, and a filled shape is a flat polygon - and a
+shape's stroke record stores the stamp fields as they were not used, so the file
+says what was actually drawn.
+
 ### Eraser strokes
 
 An eraser is a brush whose strokes **subtract** coverage instead of adding it.
@@ -467,30 +542,144 @@ The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
 and there is nothing to finish or cancel - and it stays selected afterwards,
 consistent with the eraser. `B` returns to the brush.
 
+### The colour wheel
+
+The **Colour** panel holds an HSV wheel: a disc where the angle of the pointer
+is the hue and its distance from the centre is the saturation, a value
+(brightness) slider, and three sliders that name the same three numbers. It is
+a *view* of the brush colour, not a second source of truth:
+
+- The brush still stores an `#rrggbb` string, and the wheel writes through the
+  same `setBrush` path the toolbar's colour input, the swatches and the canvas
+  picker use. So a colour picked off the canvas moves the wheel, and a colour
+  chosen on the wheel is the colour the next stroke is painted with.
+- The conversion is exact. `rgbToHsv` and `hsvToRgb` are inverses over the
+  whole 8-bit sRGB cube, so a colour that came from the app comes back as the
+  same three bytes (verified over all 16,777,216 of them, by the sweep in
+  `src/test/color.test.ts`), and the hue a grey has - none - is reported as hue
+  `0` with saturation `0`.
+- The disc's geometry is fixed in `src/features/color/wheelGeometry.ts` and
+  shared with the CSS: hue `0` is at 3 o'clock, the hue grows clockwise (the
+  CSS `conic-gradient` is rotated `from 90deg` to match), the centre is
+  saturation `0` and the rim is saturation `1`. A drag that leaves the disc
+  keeps tracking the pointer's angle and clamps the saturation at the rim.
+  The CSS keeps the same contract: the white overlay is a `closest-side`
+  radial gradient, so it reaches zero exactly at the disc's radius - the
+  radius at which the saturation is `1` - and the colour the disc draws at a
+  point is the colour a click at that point produces. (The outermost
+  one-pixel ring of the disc is the decorative inset, not the hue.)
+
+One subtlety is worth stating, because it is the difference between a control
+that feels right and one that fights the user: the stored colour is 8-bit
+sRGB, and on a dark or desaturated colour that grid is coarse. The default
+brush colour `#16181c` has six levels of red, so a hue of 205° is stored as a
+colour whose own hue is 220°. The wheel therefore keeps the hue and
+saturation the user *asked for* while the brush holds the colour the wheel
+wrote, and falls back to the stored colour as soon as the colour is changed
+from anywhere else. Without that, dragging the hue slider on a dark colour
+would snap the slider back to a nearby hue on every step.
+
+"Changed from anywhere else" is decided by `src/features/color/wheelState.ts`,
+not by comparing colours. A colour changed elsewhere and then changed back to
+the wheel's last colour is indistinguishable from the wheel's own write, so
+the wheel's state remembers the colour it was last reconciled against, and
+any change of the brush colour that the wheel did not write drops the request
+- once and for good, so a stale hue cannot come back.
+
+### Preferences that survive a restart
+
+The editor's preferences - the brush, the tool, the shape options, the fill
+tolerance and the gradient settings - are **session state that happens to
+survive a restart**. They live in a per-user settings file in the operating
+system's configuration directory, and they are restored at startup.
+
+The file is **not a project file**. It holds preferences only: no drawing, no
+document, no history. That is what keeps the two apart:
+
+- restoring a preference goes through the engine's **editor-state** setters,
+  so it costs no history entry, no revision bump and no dirty flag - the same
+  contract the brush settings have always had;
+- a project file is the user's work and is written only when the user asks;
+  the settings file is the app's own and is written when a preference
+  changes.
+
+**The path belongs to Rust.** Two native commands, `read_app_settings` and
+`write_app_settings`, own the configuration directory and the file name; the
+WebView asks for the settings and hands them back, and never learns where
+they live. The alternative - passing a frontend-chosen path to the generic
+project writer - would have widened the WebView's write scope from one file
+to any `.json` the user can name. The write reuses the project's own atomic
+replace, so a crash or a full disk cannot leave a half-written settings file.
+
+**Every field is validated on the way in**, because the file is on disk and a
+user can put anything in it: a missing field takes its default, an
+out-of-range value is clamped rather than rejected, a malformed value takes
+its default, and a file written by a newer version is ignored wholesale -
+its meaning is unknown rather than wrong. A corrupt settings file therefore
+cannot stop the editor from starting.
+
+The store (`src/core/settings/`) is framework-free: it reads the file, applies
+it, watches the editor's snapshot for changes, and writes the file back
+debounced, so a brush-slider drag is one write rather than sixty. A file that
+cannot be read or written is recorded and forgotten - it is a minor
+inconvenience, not something the user has to act on.
+
+### The autosave seam (not enabled)
+
+`src/core/autosave/` holds the machinery for writing a recovery copy of the
+drawing, and **nothing starts it**. The decisions that govern autosaving -
+whether it runs, at what interval, how a never-saved document is protected,
+whether recovery is automatic, prompted or manual, when a copy is deleted and
+how a conflict is presented - are the owner's, so the policy is *injected*
+rather than chosen: `enabled`, `intervalMs` and `recoveryPathFor`.
+
+What the code guarantees, and what its tests pin:
+
+- **an autosave never marks the document saved.** The service calls no engine
+  mutator, so the dirty flag, the close guard and the title dot keep saying
+  "unsaved" whatever it does;
+- **an autosave never writes the user's path.** The copy goes to the path the
+  policy derives, and the service refuses to write at all when that path is
+  the project's own;
+- **one write at a time**, and a copy written while the user saved is
+  reported as *superseded* rather than passed off as current.
+
+A recovery copy is a **project file** - the same format, the same parser - so
+it needs no new format, and it is written with the same `engine.serialize()`
+a save uses. It is named `<stem>.autosave.paka` beside the project: the
+marker cannot go at the end, because the native writer only accepts `.paka`
+and `.json` and the extension is the last part of the name.
+
+Like the rest of the brush, the wheel is session state for the next gesture:
+choosing a colour is not an edit, adds no history step and never marks the
+document dirty. The three sliders are native range inputs, so the wheel is
+fully operable from the keyboard, and the disc is a pointer affordance on top
+of them.
+
 ### Shape tools
 
-A line, rectangle or ellipse is a **stroke whose samples trace the shape's
-outline** rather than a path the pointer traced. That is the whole trick: a
-committed shape is an ordinary `StrokeRecord` (`ShapeTool` → `shapeOutline` →
-stroke buffer → `StrokeCommand`), so it inherits one-undo-step semantics, the
-project file, re-rasterization after undo or reopen, and layer compositing -
-without a line of shape-specific rendering. The cost is honest and visible:
-shapes are brush strokes, so they are **outlines drawn with round joins** (a
-rectangle's corners are slightly rounded, an ellipse is a polygon of many short
-segments). Their samples carry pressure `1`, so a shape has
+A line, rectangle, ellipse, polygon or star is a **stroke whose samples trace
+the shape's outline** rather than a path the pointer traced. That is the whole
+trick: a committed shape is an ordinary `StrokeRecord` (`ShapeTool` →
+`shapeOutline` → stroke buffer → `StrokeCommand`), so it inherits one-undo-step
+semantics, the project file, re-rasterization after undo or reopen, and layer
+compositing - without a line of shape-specific rendering. The cost is honest and
+visible: shapes are brush strokes, so they are **outlines drawn with round
+joins** (a rectangle's corners are slightly rounded, an ellipse is a polygon of
+many short segments). Their samples carry pressure `1`, so a shape has
 the brush's full, constant width.
 
-A rectangle or an ellipse can also be **filled**, and that is still not a second
-kind of content: the same stroke carries `fill: true`, and the rasterizer fills
-the polygon its samples trace before tracing the outline on top. So a filled
-shape is one solid silhouette, its edge lands exactly where an unfilled shape's
-edge landed, and it re-rasterizes from the element list like everything else (see
-[Rasterization](#rasterization)). A line is never filled - its outline bounds no
-interior - which `ToolDefinition.fillable` states: the *tool* says whether
-filling is meaningful, the engine says whether the user asked for it. The
-setting (`shapeFill`) is editor state, offered in the toolbar only for a
-fillable tool and read when a gesture starts, so a shape keeps the setting it was
-drawn with and toggling it rewrites nothing.
+A rectangle, an ellipse, a polygon or a star can also be **filled**, and that is
+still not a second kind of content: the same stroke carries `fill: true`, and the
+rasterizer fills the polygon its samples trace before tracing the outline on top.
+So a filled shape is one solid silhouette, its edge lands exactly where an
+unfilled shape's edge landed, and it re-rasterizes from the element list like
+everything else (see [Rasterization](#rasterization)). A line is never filled -
+its outline bounds no interior - which `ToolDefinition.fillable` states: the
+*tool* says whether filling is meaningful, the engine says whether the user asked
+for it. The setting (`shapeFill`) is editor state, offered in the toolbar only
+for a fillable tool and read when a gesture starts, so a shape keeps the setting
+it was drawn with and toggling it rewrites nothing.
 
 The gesture is a drag from an anchor to the current point.
 `core/tools/shapeGeometry.ts` is pure - it turns
@@ -500,6 +689,58 @@ ellipse sampled on a multiple of four segments so it touches its bounding box
 exactly. `ShapeTool` owns only the anchor and recomputes the *whole* outline on
 every move, which is what lets `Shift` and `Alt` change the shape mid-drag
 (45-degree lines, squares and circles; drawing from the centre).
+
+#### The polygon and the star
+
+The polygon and the star are the same trick with a different outline, and they
+need no new content, no new command and **no format change**: a saved polygon
+reopens as the same pixels, and - like every other shape - it is no longer "a
+polygon" once it is committed, because the file stores points, not a kind.
+
+Both are inscribed in the **ellipse of the drag's box**, so the two tools agree
+on where a tip sits. The polygon's rule is the familiar one - the rule
+Photoshop, Procreate and Illustrator use - and the star follows it. A polygon is
+a regular *n*-gon: vertex *k* sits at `-π/2 + 2πk/n` on that ellipse, so the
+first vertex is at the **top**, and the outline closes by repeating the first
+point. Because the polygon is inscribed in the ellipse, its own bounding box is
+**not** the drag's box: the two are equal when the side count is a multiple of
+four (the vertices sit on all four extremes), the polygon's is narrower in one
+axis when the side count is two more than a multiple of four, and it is smaller
+in both axes when the side count is odd. A star with *p* points is the classic
+**2*p*-vertex outline - an outer and an inner vertex alternating - and
+deliberately **not** a pentagram: a pentagram crosses itself, and the rasterizer
+fills with the **non-zero** rule, so a self-crossing outline would fill its
+crossings as one blob instead of as a star. The star's tips are the polygon's
+vertices and its inner vertices are the same ellipse scaled by `innerRatio`
+about the centre, so a ratio of `1` is a regular `2p`-gon and the valleys
+always point between two tips. The inner ratio has a floor of `0.05`, which is
+what keeps the outline simple.
+
+`Shift` squares the drag's box, which is what makes a polygon or a star
+**regular**; `Alt` draws from the centre, exactly as for the rectangle and the
+ellipse. The **rotation** exists as an option because the selection can move,
+nudge, duplicate and flip but cannot rotate - without it, a rotated polygon
+would be unreachable in the product. It is a **rigid** turn: the vertices are
+placed on the ellipse first and are then turned about the box's centre, so the
+shape keeps its side lengths, its distances and its size, and the first vertex
+ends up at `-π/2 + rotation`. (Folding the rotation into the ellipse's
+*parameter* instead would **morph** the shape on a non-square box: its side
+lengths would change with the angle, which is not a rotation.) The turn takes
+the shape off the ellipse it was inscribed in, so a rotated shape's own
+bounding box can be **larger** than the drag's box in one axis - and smaller in
+the other - and it can reach outside the paper. It never leaves the circle of
+radius `max(rx, ry)` around the box's centre.
+
+The three options - the side/point count (`3..24`, default `5`), the inner
+radius (`0.05..1`, default `0.5`) and the rotation (`0..360°`, default `0`) -
+are **editor state** in the engine, published in the `EditorSnapshot` and read
+through `ToolContext.getShapeOptions()`. They are not undoable, they do not
+dirty the file, and they are not stored on the stroke: a committed shape keeps
+only its points, which is why changing an option never rewrites existing work
+and why the format does not move. Like `shapeFill`, they are read **when the
+gesture starts**, so a shape keeps the values that were active when the user
+pressed. One number serves both tools, so the toolbar's slider is labelled
+**Sides** for the polygon and **Points** for the star.
 
 Because the outline is **replaced** rather than appended, the renderer contract
 gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
@@ -650,12 +891,18 @@ that could drift. Selection is editor state, not document state: it is not
 serialized, it adds no history step, and it never marks the document dirty.
 
 The overlay is **display-only**. The engine hands the renderer
-`{ bounds, strokes }` through `setSelection(...)`; the renderer traces the
-centrelines in blue and draws the frame as a dashed rectangle, after the layers
-and the in-progress stroke and before the document border. It never reaches a
+`{ bounds, strokes, handles }` through `setSelection(...)`; the renderer traces
+the centrelines in blue and draws the frame as a dashed rectangle, after the
+layers and the in-progress stroke and before the document border. It never reaches a
 layer surface and `composeDocumentImage` (and therefore PNG export) never sees it.
 
-Two gestures, chosen on press by `isInsideSelection`:
+The **handles belong to the committed selection**, never to the marquee's rubber
+band: while a band is being dragged the overlay shows the band and no handles,
+and the handles appear only for a real selection, on the frame derived from the
+strokes. A handle drawn on the band would be a lie anyway - the hit test uses
+the committed selection, so it could not be grabbed.
+
+Four gestures, chosen on press:
 
 - **Marquee** - drag anywhere outside the frame. The rubber band is live in the
   overlay; the committed selection is decided on release and re-derived from the
@@ -671,6 +918,67 @@ Two gestures, chosen on press by `isInsideSelection`:
   accumulation drift. Cancelling (a lost capture, a tool switch, `Esc`) writes
   the originals back and records nothing, and a press inside the frame that never
   moved records nothing either.
+- **Scale** - drag one of the four **corner handles**. The scale is **uniform**
+  and is about the **centre of the selection's frame**, taken when the gesture
+  starts. The corner keeps its direction from the centre: the factor is the
+  pointer's distance *along that direction* relative to the corner's own
+  distance, so dragging away from the centre grows the selection, dragging
+  towards it shrinks it, and dragging across the diagonal changes nothing. That
+  is the rule a proportional corner handle follows in a vector editor, and it is
+  what keeps the scale uniform. The factor is clamped to `MIN_SCALE_FACTOR`
+  (5 %): a drag through the centre must not collapse the selection or mirror it.
+- **Rotate** - drag the **rotation handle**, the circle above the frame's top
+  edge. The rotation is about the same centre, and the angle is the pointer's
+  compass angle measured clockwise from "up". The angle **snaps to 15 degrees**
+  while the pointer is held down, and **Shift turns the snap off** so the turn
+  can be free.
+
+Both transforms are measured **from where the press landed**, not from the
+pointer alone. The grab radius is 10 screen pixels, so a press may land up to
+that far from the handle it grabs; reading the pointer's angle or factor
+directly would jump the content at the press, before the user has moved
+anything. The scale is therefore `1 + (the pointer's factor − the press's
+factor)` and the rotation is the *change* of the compass angle since the press
+(wrapped to the shortest way round). The rates are unchanged: dragging the
+pointer one corner-distance further out still doubles the selection.
+
+The handles win over the move: they sit on the frame's corners, which are
+inside the frame, so a press on a corner would otherwise start a translation.
+Grabbing a handle is an explicit "transform this", and it is checked first.
+
+A scale and a rotation are **baked on apply**, exactly like a move: the
+transform is a coordinate map over the selected strokes' *samples*, and the
+strokes are committed as they are. There is no persistent transform, no new
+element kind and no project-format change, because a stroke stays
+self-describing: the same brush, the same colour, the same opacity, the same
+pressure and the same number of samples, just at new positions. A transform
+never changes a stroke's brush, so the painted width is *not* scaled with it -
+the frame of a scaled selection is the scaled frame of its samples plus the
+same padding, not the scaled frame.
+
+The transform geometry is **pure and DOM-free**
+(`core/document/selectionTransform.ts`): the scale and rotation maps, the
+factor and the angle a pointer asks for, the two rules that measure a drag
+**from the press** (`scaleFactorFrom`, `rotationAngleFrom`), the clamps, the
+angle snap, and the rule that says where the selection's frame is.
+`core/document/selectionHandles.ts` owns the handles' layout and their hit
+test. The engine holds no transform state of its own: the frame it draws is
+**derived from the strokes**, so after a transform the overlay shows the new
+frame and the handles sit on its new corners.
+
+The snap's tie - exactly 7.5 degrees between two steps - breaks **away from
+zero**, so +7.5 degrees snaps to +15 and -7.5 to -15: a clockwise turn and its
+counter-clockwise twin must not land on different angles. A factor that is not
+a number at all is refused differently from a small one: the selection
+**stays where it is** (the identity) rather than being shrunk to 5 %, because a
+selection that suddenly shrank is a surprise and one that did not move is not.
+
+A transform is one undo step, through the same command as the move and the
+flip: `createTransformStrokesCommand` runs the map over the copies taken
+before the gesture, so `apply` is the committed result and `revert` writes the
+originals back. A transform that moves nothing is **refused** rather than
+recorded - a scale or a turn of a single dab maps every sample onto itself, and
+an undo step whose undo does nothing reads as a broken undo button.
 
 Three menu/keyboard transforms reuse the same "copy the originals, edit stroke
 data, push one command" machinery:
@@ -727,7 +1035,105 @@ does not exist.
 The cost of the live move is honest: one full layer re-rasterization per pointer
 move. That is the price of never showing a preview that could differ from the
 committed result; caching the moved strokes' pixels is the obvious optimisation
-if a heavy layer makes dragging lag.
+if a heavy layer makes dragging lag. A scale and a rotation cost the same: the
+transform is written over the samples and the layer is re-rasterized, so the
+pixels on screen are always what a re-rasterization would produce.
+
+Two limits are worth stating plainly, because they follow from baking the
+transform on apply:
+
+- **A transform is about the frame's centre at the moment the gesture starts.**
+  A rotation can move that centre - the axis-aligned envelope of a turned
+  selection is not centred on the point it turned around - so a *second*
+  rotation is about the new frame's centre, not the first one's. The same is
+  true of the flip, which has always had this property.
+- **A scaled stroke is not literally the stroke redrawn at the new size.** A
+  redraw samples the path at the brush's spacing, so it would have more
+  samples. What *is* guaranteed is that the scaled stroke is an ordinary
+  stroke whose samples are the transformed ones, so it re-rasterizes, reopens,
+  undoes, redoes and exports exactly like any other.
+
+### Composition guides
+
+A guide is a marker on an axis: a vertical guide stands at an x, a horizontal one
+at a y. It is **document state** - `DrawingDocument.guides` - because it is
+stored with the drawing and must mean the same thing at every zoom and on every
+machine. It is **display-only**: the renderer paints it over the artwork and it
+never reaches a layer surface or a PNG export, exactly like the selection
+overlay.
+
+The model is deliberately small (`core/document/types.ts`):
+
+```ts
+interface Guide { readonly id: string; readonly axis: "vertical" | "horizontal"; readonly position: number }
+```
+
+One number, not a point: a vertical guide's y is meaningless (it spans the
+page), so the axis plus a single position is the whole geometry and there is no
+second source of truth. The position is always a **whole document pixel**: a
+guide is a registration mark, and a fractional position would draw a soft edge
+at some zooms. `core/document/guides.ts` is the pure module that holds the
+rules - the axis heuristic, the rounding, the hit-test, the duplicate rule and
+the document operations - and it is unit tested without a canvas.
+
+**Two spaces, on purpose.** The guide's *position* is document space, so zoom
+and pan need no special handling: the canvas transform already maps document to
+device. Its *grab radius* is screen space (8 CSS px, `8 / zoom` document px),
+because a press is made with a finger or a mouse: a fixed document radius would
+make a guide ungrabbable when zoomed out and impossible to miss when zoomed in.
+
+The **Guides tool** (`core/tools/guidesTool.ts`) is one tool with two gestures,
+chosen by where the press lands - the same shape as the select tool:
+
+- **Press on empty canvas** - drag out a new guide. The axis comes from the
+  dominant direction of the drag (`|dx| > |dy|` is vertical, otherwise
+  horizontal), and the position is the **press** coordinate along that axis, so
+  the guide marks where the user started rather than where they let go. The
+  axis is decided once and never changes afterwards.
+- **The axis-decision threshold: 3 CSS pixels.** The drag has to travel
+  **3 CSS px** (the same distance on screen at every zoom, so `3 / zoom`
+  document px) before its direction decides the axis - otherwise the first
+  pixel of jitter would fix the axis for the whole drag. **A drag shorter than
+  3 CSS px creates no guide at all**: until the threshold is reached no guide
+  exists, so a press-and-release inside it is a click and a drag inside it
+  leaves the document untouched.
+- **Press on an existing guide** (within the grab radius) - drag it along its
+  own axis. A vertical guide follows x and ignores y.
+- **A press that never moves** is a click: on a guide it selects it, on empty
+  canvas it clears the selection. `Delete` removes the selected guide, `Esc`
+  cancels the drag in flight and clears the selection.
+
+The **duplicate rule**: two guides on the same axis at the same position are
+pointless, so a create or a move that would land on another guide is refused
+and the drag does nothing. A guide may sit **outside the paper** - a guide
+marks a position, and clamping would lose the intent; it is drawn across the
+whole viewport either way.
+
+**History.** A guide gesture never enters history while it is in flight. The
+guide lives in the document during the gesture - that is how the renderer shows
+it - and the release commits **one** document command; a cancel puts the
+document back exactly as it was and records nothing. A gesture that changed
+nothing (a click on empty canvas, or a drag that ended where it started) commits
+nothing either, so history never holds a step that appears to do nothing. The
+command is an ordinary `DocumentCommand`, so undo and redo restore the guide set
+exactly; the guide selection is *editor* state and is dropped when the guides
+tool is left or when the selected guide disappears.
+
+**Display.** The guides are painted in the display pass, after the layers and
+before the selection overlay and the document border, as full-viewport lines one
+device pixel wide (`1 / scale`, the same hairline idiom as the border). The
+selected guide is drawn in the selection accent so the two overlays can be told
+apart. `composeDocumentImage` never sees them, so a PNG export of a document
+with guides is byte-identical to one without - which is exactly why the project
+format needs no version bump for them.
+
+**Saving during a drag.** The live preview is part of the document while the
+gesture runs, so a save taken mid-drag writes the *preview*, not the document
+the user is going to keep. The file is therefore **not** marked clean by such a
+save: the engine remembers that the file holds a preview, and the dirty flag
+stays on until the file is written again. The same rule as everywhere else in
+the editor applies - an operation must never mark the document clean when the
+document is not what was written.
 
 ### Dirty surfaces
 
@@ -763,7 +1169,8 @@ densely the input path is sampled
 (see [Sampling, spacing and the stabilizer](#sampling-spacing-and-the-stabilizer));
 it is not stamp spacing and does not alter the rasterizer.
 
-A stroke flagged `fill` (a filled rectangle or ellipse) additionally fills the
+A stroke flagged `fill` (a filled rectangle, ellipse, polygon or star)
+additionally fills the
 closed polygon its samples trace, once, before the outline is traced - and only
 on a full re-rasterization (`fromIndex === 0`), which is the only way a shape is
 ever drawn. Both passes are drawn at full coverage and the stroke's alpha is
@@ -810,6 +1217,21 @@ This bounds *calculable backing-store pixels*, not the browser's total memory:
 the display canvas, the compositor and the GPU driver add their own overhead,
 and every additional layer adds another full-resolution surface. The budget
 covers a one-layer document plus the working buffers.
+
+The stamp engine's coverage map does not move the peak. It is **1 byte per
+device pixel over the stroke's own footprint** - at most 4 bytes per document
+pixel at the budgeted scale of 2 - and it is a transient like the scan buffer,
+so it fits inside the same 10 bytes per document pixel allowance: the in-flight
+map and the resident scratch together use at most 8 of those 10 bytes, leaving
+**2 bytes per document pixel of transient headroom** for the next feature that
+needs scratch space (masks, groups, tiles). Two details keep it there: the
+coverage map is tiled and allocated on demand, so it follows the inked area
+rather than the document, and the upload to the stroke buffer is **one
+`ImageData` per tile** (16 KB), never one for the whole dirty rectangle, which
+would be document-sized in the rebuild path. The coverage map is JavaScript
+heap rather than a canvas backing store, so it sits outside the budget model's
+stated scope; it is stated here next to the budget rather than folded into the
+constants, so the model keeps describing what it says it describes.
 
 ## Undo / redo
 
@@ -967,7 +1389,12 @@ keep it from churning. Two things deliberately bypass React:
 
 - **Cursor position and pressure** are written imperatively through
   `engine.subscribeCursor`, because they change on every pointer move.
-- **The canvas cursor style** is applied in an effect keyed on the tool id.
+- **The canvas cursor style** is applied from the same cursor stream, because a
+  tool can ask for a more specific cursor than its own: the select tool's
+  transform handles want a diagonal resize cursor and the rotation handle a grab
+  cursor. The engine recomputes that answer on every pointer move **and on
+  every viewport change** - a zoom moves the handles, so a cursor that still
+  claimed a resize cursor would be lying.
 
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
@@ -1053,7 +1480,19 @@ DOM-free by design.
   ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
-  exactly-closed outline, and the degenerate extent. Shape *behaviour* is
+  exactly-closed outline, and the degenerate extent. The polygon and the star
+  are covered there too: the vertex count, the first vertex at the top, the
+  inscribed-ellipse rule, the clamped side count, the star's alternating tips
+  and valleys, its inner-radius ratio, the rotation about the centre, the
+  degenerate drag, and the proof that the star's outline is a **simple** loop
+  even at the smallest inner ratio (which is what makes the non-zero fill fill
+  a star rather than a blob). The rotation is tested on a **non-square** box
+  as well as a square one, and the assertion is that the turned outline is the
+  rigid turn of the unrotated one - the same side lengths, the same distances -
+  because a square box cannot tell a rigid turn from a morph. The star's
+  **absolute** placement is pinned too: its tips sit on the box's ellipse and
+  its valleys on the same ellipse scaled by the inner ratio, so a star drawn
+  at the wrong size cannot pass. Shape *behaviour* is
   covered through the recording renderer on the engine: a drag previews with a
   full-buffer redraw and commits nothing, the release commits exactly one stroke
   carrying the outline's samples, and cancellation, a mid-drag tool switch, an
@@ -1061,7 +1500,10 @@ DOM-free by design.
   the history untouched. The fill setting is covered the same way: a shape is
   flagged only while the setting is on, each shape keeps the setting it was
   drawn with, a line is never filled even with the setting on, and the setting
-  survives a tool switch without becoming an edit. `replaceStroke` is asserted on
+  survives a tool switch without becoming an edit. The polygon's and the star's
+  options are editor state too: they are clamped, they never enter history or
+  dirty the file, and they are read when the gesture starts, so a shape keeps
+  the values that were active when the user pressed. `replaceStroke` is asserted on
   the draw-call stream: it
   clears the buffer and redraws the whole outline, and the preview composites at
   the stroke's own alpha.
@@ -1097,9 +1539,24 @@ DOM-free by design.
   refused instead of recorded, undo and redo refusing to run mid-drag, and every
   transform refusing to run with
   nothing selected. The
+  transform geometry has its own pure suite: the scale about a centre, the
+  rotation about a centre, the clamps (a selection can neither collapse nor
+  invert), the 15-degree angle snap and the free angle `Shift` asks for, the
+  factor a pointer asks for, and the selection's frame **after** a transform -
+  which is the frame of the transformed samples plus the same padding, because a
+  transform never changes a stroke's brush. The handle suite pins the corner
+  positions, the rotation handle on the centre's ray, the grab radius and the
+  nearest-handle-wins rule. The engine suite drives the scale and the rotation
+  through the same pointer entry point: one undo step, exact undo and redo, the
+  brush and the pressures untouched, the frame and the handles following the
+  transformed strokes, a cancel restoring the originals and recording nothing, a
+  transform that would change nothing being refused, and the transformed stroke
+  surviving a save and reopen.
+  The
   renderer suite asserts the overlay stream: the trace and the dashed frame come
   after the layers and before the solid border, `setSelection(null)` leaves only
-  the border, and the exported composite contains neither.
+  the border, the handles are painted on the display canvas only, and the
+  exported composite contains neither the frame nor the handles.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
@@ -1135,7 +1592,19 @@ dragging from inside the frame moves the ink to the new position and leaves the
 old position as paper while the history depth rises by exactly one, `Esc` clears
 the frame and the trace without moving anything, `Delete` removes the selected
 strokes and undo restores them, and undo/redo of the move returns the ink to the
-exact original and moved positions. Stroke compositing is verified that way
+exact original and moved positions. The transform handles are verified the same
+way: the four corner squares and the rotation circle appear on the selected
+frame, the cursor becomes a diagonal resize cursor over a corner and a grab
+cursor over the rotation handle, dragging a corner out doubles the ink's extent
+about the frame's centre and the history depth rises by exactly one, dragging
+the rotation handle a quarter turn turns the ink by a quarter turn, the
+snapped turn lands on 15 degrees while a `Shift` turn keeps the free angle,
+and a press that misses a handle does not jump the content. The PNG export
+**cannot run in a browser** - it asks the Tauri save dialog, which is absent
+outside the desktop shell - so "the handles never reach an export" is covered
+by the renderer unit suite and by `composeDocumentImage()` calling
+`paintDocument()` only, not by a browser measurement.
+Stroke compositing is verified that way
 against the real rasterizer and the platform PNG encoder: a 50%-opacity stroke
 that retraces itself is pixel-identical in its retraced and single-covered
 parts, two separate strokes that overlap do build up, and the live composite
@@ -1180,24 +1649,30 @@ version-1, -2 or -3 file opens with its shapes traced rather than filled.
 These are real gaps, not footnotes:
 
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
-  `bucket`, `gradient` and `picker`, plus `pan`. There is no text tool. A bucket
+  `polygon`, `star`, `bucket`, `gradient` and `picker`, plus `pan`. There is no
+  text tool. A bucket
   fill writes a region; a gradient is a two-stop linear/radial colour function,
   not an editable gradient with draggable stops.
-- **Selection is stroke-level, layer-scoped and limited to translation,
-  duplication and reflection.** A marquee
+- **Selection is stroke-level, layer-scoped and limited to translation, scaling,
+  rotation, duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
   layer or the tool changes. **Fill patches and gradients are not selectable** -
   the stroke-only view deliberately filters them out - so they can only be
   undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
   feathering,
-  no clipping, and no scale, rotate or perspective; duplicate stays on the layer
-  (there is no cross-layer copy/paste). The frame is the selected strokes'
+  no clipping, no perspective and no non-uniform scale; duplicate stays on the
+  layer (there is no cross-layer copy/paste). The frame is the selected strokes'
   bounding box, not the region that was dragged.
+- **A transform is baked on apply.** A scaled or turned selection is committed
+  as new sample positions, so there is no persistent transform to edit later,
+  and the painted width is not scaled with the path - a transform changes where
+  a stroke was drawn, not how wide it is.
 - **A live selection move re-rasterizes the whole layer per pointer move.** The
   element list stays authoritative and the pixels are rebuilt from it, which is
   why the drag can never drift from the committed result; caching the moved
   strokes is the optimisation to reach for if a heavy layer makes dragging lag.
+  A scale and a rotation cost the same.
 - **Shapes are stroke outlines, not vectors.** A committed shape is stored as
   ordinary stroke samples and cannot be recognised or edited as a rectangle
   afterwards; a filled shape is the same samples plus a `fill` flag, so there is
@@ -1212,7 +1687,9 @@ These are real gaps, not footnotes:
   visible layers; there is no per-layer sampling, no `Alt`-click temporary
   picker from the brush, no magnifier preview and no colour history or swatches
   from picks. Precision is the surfaces' - 8-bit sRGB - so sampling a
-  semi-transparent area yields the blended screen colour by design.
+  semi-transparent area yields the blended screen colour by design. The colour
+  wheel picks colours *by* hue rather than by sampling, and has no swatch
+  library, no colour history and no eyedropper of its own.
 - **A bucket fill is a committed raster patch, not an editable region.** Its
   boundary is the binary set of pixels the scan selected, so there is no
   feathering, no "fill within selection", no gap-closing and no way to change

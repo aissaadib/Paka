@@ -11,13 +11,23 @@ import type { BrushSettings } from "../../types/brush";
 import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
-import type { LayerId } from "../document/types";
-import type { ShapePoint } from "./shapeGeometry";
+import type { Guide, GuideAxis, LayerId } from "../document/types";
+import type { SelectionHandleId } from "../document/selectionHandles";
+import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
   readonly viewport: Viewport;
   getBrush(): BrushSettings;
   getActiveLayerId(): LayerId | null;
+  /**
+   * The options the next polygon or star is drawn with.
+   *
+   * Editor state, like `shapeFill`: the engine owns it and publishes it, and
+   * a tool reads it once when its gesture starts, so a shape keeps the values
+   * that were active when the user pressed. The line, the rectangle and the
+   * ellipse ignore it.
+   */
+  getShapeOptions(): ShapeOptions;
   setViewport(viewport: Viewport): void;
   requestRender(): void;
   /** Starts a stroke on the active layer with the current brush. */
@@ -56,10 +66,27 @@ export interface ToolContext {
    * `false`, so "no selection" needs no separate query.
    */
   isInsideSelection(docX: number, docY: number): boolean;
+  /**
+   * The transform handle a press grabs, or `null` when it grabs none.
+   *
+   * The select tool asks this **first**: a press on a corner handle starts a
+   * scale and a press on the rotation handle starts a rotation, so the handles
+   * take precedence over the move gesture that a press inside the frame would
+   * otherwise start.
+   */
+  findSelectionHandleAt(docX: number, docY: number): SelectionHandleId | null;
   /** Starts a marquee gesture; the selection itself is decided on release. */
   beginSelection(sample: PointerSample): void;
   /** Starts translating the current selection, dragging from inside it. */
   beginSelectionMove(sample: PointerSample): void;
+  /**
+   * Starts a scale or a rotation, from the handle the press grabbed.
+   *
+   * The transform is about the centre of the selection's frame at this moment,
+   * and it moves the selected strokes' samples only - the brush, the colour and
+   * the pressure are untouched.
+   */
+  beginSelectionTransform(sample: PointerSample, handle: SelectionHandleId): void;
   /**
    * Applies the active selection gesture to a sample: a marquee rubber-band
    * while selecting, or a live translation while moving.
@@ -116,6 +143,43 @@ export interface ToolContext {
   cancelGradient(): void;
   /** True while a gradient is previewed but not yet recorded in history. */
   isGradientActive(): boolean;
+  /**
+   * The composition guide a press grabs, or `null` when it grabs none.
+   *
+   * The grab radius is screen-space, so the engine converts it with the live
+   * zoom; a guide is therefore equally easy to grab at 2 % and at 6400 %.
+   */
+  findGuideAt(docX: number, docY: number): Guide | null;
+  /**
+   * Starts creating a guide at the press point.
+   *
+   * The axis is not decided yet: it comes from the direction the pointer
+   * travels, which only the drag knows. The guide's position is the *press*
+   * coordinate along that axis, so it does not follow the pointer.
+   */
+  beginGuideCreate(sample: PointerSample): void;
+  /**
+   * Puts the new guide on the canvas, on the axis the drag chose.
+   *
+   * A preview only: the guide reaches the document when `finishGuideGesture`
+   * commits the gesture.
+   */
+  setGuideAxis(axis: GuideAxis): void;
+  /** Starts moving an existing guide along its own axis. */
+  beginGuideMove(guide: Guide): void;
+  /** Moves the guide of a move gesture to follow the pointer. */
+  moveGuideTo(sample: PointerSample): void;
+  /**
+   * Commits the guide gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click on empty canvas, or a drag that
+   * ended where it started - commits nothing at all.
+   */
+  finishGuideGesture(): void;
+  /** Aborts the guide gesture, restoring the document. */
+  cancelGuideGesture(): void;
+  /** Selects a guide, or clears the selection with `null`. */
+  selectGuide(guideId: string | null): void;
 }
 
 export interface Tool {

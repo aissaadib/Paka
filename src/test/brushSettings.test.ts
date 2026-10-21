@@ -3,6 +3,7 @@ import {
   brushSettingsEqual,
   DEFAULT_BRUSH,
   MAX_BRUSH_SIZE,
+  MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   normalizeBrush,
   stepBrushSize,
@@ -50,6 +51,9 @@ describe("brush configuration", () => {
       spacing: 100,
       stabilizer: -4,
       texture: 9,
+      stamp: true,
+      stampSpacing: 9,
+      stampHardness: -2,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -61,6 +65,8 @@ describe("brush configuration", () => {
     expect(normalized.spacing).toBe(2);
     expect(normalized.stabilizer).toBe(0);
     expect(normalized.texture).toBe(1);
+    expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
+    expect(normalized.stampHardness).toBe(0);
   });
 
   it("applies a patch without mutating the current settings", () => {
@@ -117,9 +123,12 @@ describe("tool definitions", () => {
       "line",
       "rectangle",
       "ellipse",
+      "polygon",
+      "star",
       "bucket",
       "gradient",
       "picker",
+      "guides",
       "pan",
     ]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
@@ -128,9 +137,12 @@ describe("tool definitions", () => {
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
+    expect(getToolDefinition("polygon").shortcut).toBe("P");
+    expect(getToolDefinition("star").shortcut).toBe("S");
     expect(getToolDefinition("bucket").shortcut).toBe("F");
     expect(getToolDefinition("gradient").shortcut).toBe("G");
     expect(getToolDefinition("picker").shortcut).toBe("I");
+    expect(getToolDefinition("guides").shortcut).toBe("U");
     expect(getToolDefinition("pan").shortcut).toBe("H");
   });
 
@@ -141,6 +153,8 @@ describe("tool definitions", () => {
     expect(findToolByShortcut("l")?.id).toBe("line");
     expect(findToolByShortcut("r")?.id).toBe("rectangle");
     expect(findToolByShortcut("o")?.id).toBe("ellipse");
+    expect(findToolByShortcut("p")?.id).toBe("polygon");
+    expect(findToolByShortcut("s")?.id).toBe("star");
     expect(findToolByShortcut("f")?.id).toBe("bucket");
     expect(findToolByShortcut("g")?.id).toBe("gradient");
     expect(findToolByShortcut("i")?.id).toBe("picker");

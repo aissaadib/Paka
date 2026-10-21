@@ -1,0 +1,51 @@
+{
+    "id":  "layer-opacity",
+    "width":  160,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#3b82f6",
+                                                          "size":  20
+                                                      },
+                                            "xs":  [
+                                                       20,
+                                                       140
+                                                   ],
+                                            "ys":  [
+                                                       35,
+                                                       35
+                                                   ]
+                                        }
+                                    ]
+                   },
+                   {
+                       "id":  "Tint",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#e5484d",
+                                                          "size":  20
+                                                      },
+                                            "xs":  [
+                                                       40,
+                                                       120
+                                                   ],
+                                            "ys":  [
+                                                       85,
+                                                       85
+                                                   ]
+                                        }
+                                    ],
+                       "opacity":  0.5
+                   }
+               ]
+}

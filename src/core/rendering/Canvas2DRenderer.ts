@@ -23,6 +23,8 @@ import type {
   StrokeRecord,
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
+import type { SelectionHandles } from "../document/selectionHandles";
+import type { Bounds } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
@@ -35,6 +37,14 @@ import {
   TEXTURE_TILE_SIZE,
   textureCoverage,
 } from "./canvas2dStroke";
+import {
+  COVERAGE_TILE_SIZE,
+  StampCoverage,
+  StampDabCursor,
+  stampDabs,
+  unionStampRect,
+  type StampRect,
+} from "./stampCoverage";
 import type {
   DrawingRenderer,
   RendererKind,
@@ -59,6 +69,18 @@ const SELECTION_TRACE_ALPHA = 0.85;
 /** Device pixels; divided by the display scale so it is constant at any zoom. */
 const SELECTION_TRACE_WIDTH = 1.5;
 const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
+/** Screen pixels; divided by the display scale so the handles never change size. */
+const HANDLE_SIZE_PX = 8;
+const ROTATION_HANDLE_RADIUS_PX = 5;
+/** The handle's own fill, so a handle reads on top of dark ink as well. */
+const HANDLE_FILL_COLOR = "#ffffff";
+/**
+ * Accent used for the composition guides.
+ *
+ * A different hue from the selection accent, so the two overlays can be told
+ * apart at a glance; the *selected* guide is drawn in the selection colour.
+ */
+const GUIDE_COLOR = "#e0567f";
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -167,8 +189,32 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * only ever read, never written, and the canvas is reused across frames.
    */
   private previewSurface: HTMLCanvasElement | null = null;
+  /**
+   * Coverage of the in-flight stamped stroke, in device pixels.
+   *
+   * The stamp engine unions its dabs with a maximum, and Canvas 2D cannot
+   * express a maximum of alpha (its `lighten` blend mode compares colours,
+   * not alpha), so the coverage is accumulated here in plain numbers and
+   * uploaded to the stroke buffer as pixels. The map is bounded by the
+   * stroke's own footprint - like the feather scratch - so it never adds a
+   * document-sized surface to the raster budget.
+   */
+  private stampCoverage: StampCoverage | null = null;
+  /** Places the dabs of the in-flight stroke as its path grows. */
+  private stampCursor: StampDabCursor | null = null;
+  /** The reused upload buffer: one coverage tile, never larger. */
+  private stampUpload: ImageData | null = null;
+  /** Scratch coverage map used when a committed stroke is re-rasterized. */
+  private readonly stampScratch = new StampCoverage();
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
+  /**
+   * The guide the user has selected, or `null`.
+   *
+   * The guide *positions* are document state and arrive with the document; only
+   * the selection is an overlay concern, so it has its own channel.
+   */
+  private selectedGuideId: string | null = null;
   private rasterScale: number;
   private destroyed = false;
 
@@ -278,6 +324,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
   beginStroke(stroke: StrokeRecord): void {
     this.activeStroke = stroke;
+    const stamped = this.isStamped(stroke);
+    this.stampCoverage = stamped ? new StampCoverage() : null;
+    this.stampCursor = stamped ? new StampDabCursor(stroke.brush) : null;
     this.clearStrokeBuffer();
     if (stroke.erase === true) {
       // The erase snapshot and the grouped-preview scratch are mutually
@@ -296,12 +345,22 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (this.activeStroke !== stroke) {
       // Defensive path: a stroke arrived without a matching `beginStroke`.
       this.activeStroke = stroke;
+      this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
+      this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
       if (stroke.erase === true) {
         this.beginErase(stroke.layerId);
       }
       this.clearStrokeBuffer();
       this.prepareStrokeBuffer();
-      rasterizeStroke(this.strokeCtx, stroke, 0);
+      if (this.stampCoverage !== null) {
+        this.extendStampStroke(stroke);
+      } else {
+        rasterizeStroke(this.strokeCtx, stroke, 0);
+      }
+    } else if (this.stampCoverage !== null) {
+      // The stamp engine appends its new dabs: the coverage map is the
+      // authority, so only the rectangle the new dabs touched is uploaded.
+      this.extendStampStroke(stroke);
     } else if (fromIndex <= 1) {
       // The stroke had a single sample until now, so the buffer holds the dab
       // that `rasterizeStroke` stamps for a press without movement. Once the
@@ -338,9 +397,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
     this.activeStroke = stroke;
+    // A shape replaces its geometry on every move, so its buffer is redrawn
+    // from scratch. A stamped shape is not a thing (the engine draws shapes
+    // with the plain segment path), but the branch keeps the two paths apart.
+    this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
+    this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
     this.clearStrokeBuffer();
     this.prepareStrokeBuffer();
-    rasterizeStroke(this.strokeCtx, stroke, 0);
+    if (this.stampCoverage !== null) {
+      this.extendStampStroke(stroke);
+    } else {
+      rasterizeStroke(this.strokeCtx, stroke, 0);
+    }
     this.requestFrame();
   }
 
@@ -365,6 +433,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.dropEraseBase();
       this.clearStrokeBuffer();
       this.activeStroke = null;
+      this.dropStampCoverage();
       this.dropPreviewSurface();
       this.requestFrame();
       return;
@@ -374,6 +443,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.compositeStrokeBuffer(surface, stroke);
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    this.dropStampCoverage();
     // The preview is over: the group scratch is released so it cannot sit
     // next to a later erase snapshot (see the raster budget).
     this.dropPreviewSurface();
@@ -390,6 +460,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.dropEraseBase();
     this.clearStrokeBuffer();
     this.activeStroke = null;
+    this.dropStampCoverage();
     this.dropPreviewSurface();
     this.requestFrame();
   }
@@ -399,6 +470,20 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
     this.selection = selection;
+    this.requestFrame();
+  }
+
+  /**
+   * Marks a guide as the selected one, or clears the selection.
+   *
+   * Overlay only: the selected guide is drawn in the selection accent on the
+   * display canvas, and never reaches a layer surface or an export.
+   */
+  setSelectedGuide(guideId: string | null): void {
+    if (this.destroyed || guideId === this.selectedGuideId) {
+      return;
+    }
+    this.selectedGuideId = guideId;
     this.requestFrame();
   }
 
@@ -434,6 +519,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
 
+    this.paintGuides(ctx, scale);
+
     this.paintSelection(ctx, scale);
 
     // Hairline document boundary: exactly one device pixel at any zoom.
@@ -443,8 +530,57 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
+   * Draws the composition guides over the artwork.
+   *
+   * A guide is a full-viewport line, not a mark on the paper: it stays visible
+   * while the paper is panned away, and a guide may sit outside the paper
+   * altogether. Its *position* is document space - the canvas transform already
+   * maps document to device - while its *appearance* is screen space: the line
+   * is one device pixel wide at any zoom, the same hairline idiom as the
+   * document border.
+   *
+   * The guides are not part of the document's pixels: they are drawn on the
+   * display canvas only, so an export of a document with guides is
+   * byte-identical to one without. The selected guide is drawn in the
+   * selection accent, so it is told apart from the others at a glance.
+   */
+  private paintGuides(ctx: CanvasRenderingContext2D, scale: number): void {
+    const doc = this.doc;
+    if (!doc || doc.guides.length === 0) {
+      return;
+    }
+
+    const { zoom, offsetX, offsetY } = this.viewport;
+    const viewWidth = this.canvas.width / this.devicePixelRatio;
+    const viewHeight = this.canvas.height / this.devicePixelRatio;
+    // The viewport in document space: what the user can see right now. The
+    // subtraction is written as `0 - x` so an edge at the origin is `+0`
+    // rather than the `-0` a plain negation would produce.
+    const left = 0 - offsetX / zoom;
+    const top = 0 - offsetY / zoom;
+    const right = left + viewWidth / zoom;
+    const bottom = top + viewHeight / zoom;
+
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1 / scale;
+    for (const guide of doc.guides) {
+      ctx.strokeStyle = guide.id === this.selectedGuideId ? SELECTION_COLOR : GUIDE_COLOR;
+      ctx.beginPath();
+      if (guide.axis === "vertical") {
+        ctx.moveTo(guide.position, top);
+        ctx.lineTo(guide.position, bottom);
+      } else {
+        ctx.moveTo(left, guide.position);
+        ctx.lineTo(right, guide.position);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
    * Draws the selection overlay: the selected strokes traced in the accent
-   * colour, then the rubber-band rectangle.
+   * colour, then the rubber-band rectangle and the transform handles.
    *
    * Strokes are traced along their centrelines rather than re-rasterized with
    * their brush, because the overlay answers one question - "what will a
@@ -495,7 +631,55 @@ export class Canvas2DRenderer implements DrawingRenderer {
       ctx.setLineDash([]);
     }
 
+    if (selection.handles) {
+      this.paintSelectionHandles(ctx, scale, selection.handles, bounds);
+    }
+
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Draws the transform handles: a square on each corner of the frame and a
+   * circle above it that turns the selection.
+   *
+   * Overlay only, like the frame and the trace: the handles are painted on the
+   * display canvas and never reach a layer surface, the document or a PNG
+   * export. Their **positions** are in document space, so they sit on the
+   * selection's corners exactly; their **size** is in screen pixels, so they
+   * stay the same size on screen at any zoom.
+   */
+  private paintSelectionHandles(
+    ctx: CanvasRenderingContext2D,
+    scale: number,
+    handles: SelectionHandles,
+    bounds: Bounds | null,
+  ): void {
+    const size = HANDLE_SIZE_PX / scale;
+    const half = size / 2;
+    const radius = ROTATION_HANDLE_RADIUS_PX / scale;
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = SELECTION_COLOR;
+    ctx.fillStyle = HANDLE_FILL_COLOR;
+    ctx.lineWidth = 1 / scale;
+
+    for (const corner of handles.corners) {
+      ctx.fillRect(corner.x - half, corner.y - half, size, size);
+      ctx.strokeRect(corner.x - half, corner.y - half, size, size);
+    }
+
+    // The rotation handle: a circle above the frame's top edge, tied to it by
+    // a short stem so it reads as part of the frame.
+    if (bounds) {
+      ctx.beginPath();
+      ctx.moveTo(handles.rotate.x, handles.rotate.y + radius);
+      ctx.lineTo(handles.rotate.x, bounds.y);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(handles.rotate.x, handles.rotate.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   /**
@@ -609,9 +793,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.surfaces.dispose();
     this.activeStroke = null;
     this.dropEraseBase();
+    this.dropStampCoverage();
     this.probeCanvas = null;
     this.featherBuffer = null;
     this.previewSurface = null;
+    this.stampUpload = null;
   }
 
   /**
@@ -884,7 +1070,142 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     this.clearStrokeBufferRegion(region);
     this.prepareStrokeBuffer();
+    if (this.isStamped(stroke)) {
+      this.rasterizeStampStroke(stroke);
+      return;
+    }
     rasterizeStroke(this.strokeCtx, stroke, 0);
+  }
+
+  /**
+   * True when a stroke is drawn as a chain of dabs instead of segments.
+   *
+   * A filled shape keeps its flat polygon interior, so it is never drawn as
+   * dabs: the engine gives shapes the plain segment path in the first place.
+   */
+  private isStamped(stroke: StrokeRecord): boolean {
+    return stroke.brush.stamp === true && stroke.fill !== true;
+  }
+
+  /**
+   * Paints the dabs the stroke has gained since the last update.
+   *
+   * The cursor places the new dabs from the path the pointer has just added,
+   * and the coverage map keeps their union, so only the new dabs are
+   * rasterized. The cursor walks the same path as a full re-rasterization
+   * does, so the live preview stays identical to what undo, reopen and export
+   * produce for the same samples - the property every other path in the
+   * renderer relies on.
+   */
+  private extendStampStroke(stroke: StrokeRecord): void {
+    const coverage = this.stampCoverage;
+    const cursor = this.stampCursor;
+    if (!coverage || !cursor) {
+      return;
+    }
+    const dabs = cursor.advance(stroke);
+    const scale = this.rasterScale;
+    let dirty: StampRect | null = null;
+    for (const dab of dabs) {
+      const rect = coverage.paintDab(
+        dab.x * scale,
+        dab.y * scale,
+        dab.radius * scale,
+        stroke.brush.stampHardness,
+      );
+      if (rect) {
+        dirty = unionStampRect(dirty, rect);
+      }
+    }
+    if (dirty) {
+      this.writeStampCoverage(coverage, dirty, stroke.brush.color);
+    }
+  }
+
+  /**
+   * Rasterizes a whole stamped stroke into the stroke buffer.
+   *
+   * The rebuild path has no live coverage map to reuse, so the dabs are
+   * painted into a scratch map and uploaded in one go. The result is the same
+   * coverage the live path produced: the dabs and their union are a pure
+   * function of the stroke's samples.
+   */
+  private rasterizeStampStroke(stroke: StrokeRecord): void {
+    const coverage = this.stampScratch;
+    coverage.clear();
+    const dabs = stampDabs(stroke, stroke.brush);
+    const scale = this.rasterScale;
+    let dirty: StampRect | null = null;
+    for (const dab of dabs) {
+      const rect = coverage.paintDab(
+        dab.x * scale,
+        dab.y * scale,
+        dab.radius * scale,
+        stroke.brush.stampHardness,
+      );
+      if (rect) {
+        dirty = unionStampRect(dirty, rect);
+      }
+    }
+    if (dirty) {
+      this.writeStampCoverage(coverage, dirty, stroke.brush.color);
+    }
+  }
+
+  /**
+   * Uploads a rectangle of a coverage map to the stroke buffer.
+   *
+   * The upload is **per coverage tile**, so the buffer it needs is one tile
+   * (64 x 64 x 4 = 16 KB) whatever the stroke's size: a document-sized dirty
+   * rectangle would be a 256 MiB upload at the raster budget's cap. The map is
+   * the authority, so writing a whole tile is always safe - the pixels
+   * outside the changed area carry the coverage they already had.
+   *
+   * `putImageData` writes device pixels and ignores the context transform, so
+   * the tiles are placed in the buffer's own pixels.
+   */
+  private writeStampCoverage(
+    coverage: StampCoverage,
+    rect: StampRect,
+    color: string,
+  ): void {
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+    const image = this.ensureStampUpload();
+    const data = image.data;
+    const firstTileX = Math.floor(rect.left / COVERAGE_TILE_SIZE);
+    const lastTileX = Math.floor((rect.left + rect.width - 1) / COVERAGE_TILE_SIZE);
+    const firstTileY = Math.floor(rect.top / COVERAGE_TILE_SIZE);
+    const lastTileY = Math.floor((rect.top + rect.height - 1) / COVERAGE_TILE_SIZE);
+
+    for (let tileY = firstTileY; tileY <= lastTileY; tileY += 1) {
+      for (let tileX = firstTileX; tileX <= lastTileX; tileX += 1) {
+        const tile = {
+          left: tileX * COVERAGE_TILE_SIZE,
+          top: tileY * COVERAGE_TILE_SIZE,
+          width: COVERAGE_TILE_SIZE,
+          height: COVERAGE_TILE_SIZE,
+        };
+        coverage.writeRect(data, COVERAGE_TILE_SIZE, tile, rgb);
+        this.strokeCtx.putImageData(image, tile.left, tile.top);
+      }
+    }
+  }
+
+  /** The reused upload buffer: one coverage tile, never larger. */
+  private ensureStampUpload(): ImageData {
+    const existing = this.stampUpload;
+    if (existing) {
+      return existing;
+    }
+    const created = this.strokeCtx.createImageData(COVERAGE_TILE_SIZE, COVERAGE_TILE_SIZE);
+    this.stampUpload = created;
+    return created;
+  }
+
+  /** Releases the in-flight stroke's coverage map. */
+  private dropStampCoverage(): void {
+    this.stampCoverage = null;
+    this.stampCursor = null;
   }
 
   /** Clears the part of the stroke buffer a stroke is about to ink. */
@@ -1260,6 +1581,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private abandonStroke(): void {
     this.activeStroke = null;
     this.dropEraseBase();
+    this.dropStampCoverage();
     this.dropPreviewSurface();
     this.clearStrokeBuffer();
   }

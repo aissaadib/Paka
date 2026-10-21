@@ -7,9 +7,12 @@ export type ToolId =
   | "line"
   | "rectangle"
   | "ellipse"
+  | "polygon"
+  | "star"
   | "bucket"
   | "gradient"
   | "picker"
+  | "guides"
   | "pan";
 
 export interface ToolDefinition {

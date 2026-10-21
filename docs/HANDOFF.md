@@ -65,23 +65,35 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 | `pnpm tauri build --no-bundle` | Release executable only → `src-tauri/target/release/paka.exe`. |
 | `pnpm tauri build` | The above plus MSI/NSIS installers (needs WiX/NSIS downloads). |
 
-## 4. Current state (verified 2026-10-20)
+## 4. Current state (verified 2026-10-21)
 
-- Branch `main`, pushed after the live-preview compositing, layer-safety and
-  raster-budget slices.
-- **`pnpm test` → 461 tests in 29 files, all pass.** `pnpm typecheck` clean;
-  `pnpm build` succeeds.
-- **Project file format version 8** (`PROJECT_VERSION = 8`).
+- Branch `integration/t10-hsv-color-wheel` at `bc062c7`, after the
+  live-preview compositing, layer-safety, raster-budget, bounded-rasterization,
+  **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
+  slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
+  merged; nothing is waiting in the working tree.
+- **`pnpm test` → 711 tests in 34 files, all pass** (the scale/rotate slice: 653
+  before it).
+  `pnpm typecheck` clean; `pnpm build` succeeds.
+- **Project file format version 9** (`PROJECT_VERSION = 9`). `document.guides` is
+  additive within version 9.
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
   non-default manifests` warning (see §8). The executable predates the fill,
-  gradient, hardness, spacing/stabilizer, texture and blend mode slices.
+  gradient, hardness, spacing/stabilizer, texture, blend mode, raster-budget,
+  bounded-rasterization and stamp slices.
 
 ### Shipped slices (this arc, newest first)
 
 | Commit | Slice |
 | --- | --- |
+| `feat/ff26-transform` | **Scale and rotate a selection** — the select tool's overlay grows four **corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame; the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off**. The transform is **baked on apply** (it moves the strokes' samples and nothing else), so there is **no format change**. One undo step per transform, through the same command as a move. The geometry is pure (`core/document/selectionTransform.ts`, `core/document/selectionHandles.ts`) and unit tested; the handles are display-only. |
+| `feat/t11-guides` | **Composition guides** — a **Guides** tool (`U`) places a vertical or horizontal guide by dragging on empty canvas and moves an existing guide by dragging it; a click selects it, `Delete` removes it, `Esc` cancels a drag. The guide model, the axis heuristic, the rounding, the screen-space grab radius, the hit-test and the duplicate rule live in a pure module (`core/document/guides.ts`). The guides are document state but **display-only**, so the format change is additive and the version stays 9. |
+| `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
+| `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
+| `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. |
+| `4ac040b` | **Bounded layer rasterization** — a rebuild clears and blends only the rectangle each element inks, so the cost follows the stroke geometry instead of the document size (47x-187x less touched area); the pixels are unchanged. Measured in [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md). |
 | `520aa77` | **Preview scratch lifetime** — the grouped live-preview scratch is released whenever no preview is active, so the erase snapshot and the scratch are never alive together and the raster budget's peak holds. |
 | `21cd7c7` | **Finished-gesture notice reset** — a refused layer change explains once per gesture, and a finished gesture ends that state. |
 | `fae138c` | **Honest peak raster model** — the budget models the peak surface set (three 2x surfaces plus a transient scan buffer, 58 bytes per document pixel) instead of four full surfaces; the cap is unchanged. |
@@ -283,10 +295,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 6. Key files
 
-- `src/core/engine/DrawingEngine.ts` — snapshot/publish, tools, selection state,
-  gesture guards, `shapeFill`, `fillTolerance`, `gradientType`,
-  `gradientEndColor`, and the begin/finish/cancel lifecycles for fills and
-  gradients.
+- `src/core/engine/DrawingEngine.ts` — snapshot/publish, tools, selection state
+  (including the scale and rotation gestures), gesture guards, `shapeFill`,
+  `fillTolerance`, `gradientType`, `gradientEndColor`, and the begin/finish/cancel
+  lifecycles for fills and gradients.
 - `src/core/fill/floodFill.ts` — pure 4-connected scan, tolerance rule,
   transparency rule and `MAX_FILL_SCAN_PIXELS`.
 - `src/core/fill/fillPatch.ts` — `FillPatchRecord` creation and deep cloning.
@@ -302,29 +314,57 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/rendering/canvas2dStroke.ts` — `rasterizeStroke` (including the fill
   branch for filled shapes), `strokeFeatherRadius` / `SOFT_EDGE_RADIUS_RATIO`,
   `TEXTURE_TILE_SIZE` / `textureCoverage`.
+- `src/core/rendering/stampCoverage.ts` — the stamp engine: `stampDabs` and
+  `StampDabCursor` (the arc-length dab plan), `stampDabCoverage` (the per-dab
+  profile), `StampCoverage` (the per-pixel maximum over 64x64 tiles),
+  `MAX_STAMP_COVERAGE_WORK` (the per-stroke budget) and
+  `MIN_STAMP_SPACING_PX` (the spacing floor).
 - `src/core/rendering/Canvas2DRenderer.ts` — `paintStrokeCoverage`,
   `featherStroke` (bounded scratch + scaled blur), `applyStrokeTexture` /
   `textureTile`, `rasterizeFillPatch`, `rasterizeGradient`,
-  `readCompositeImage`, element-ordered layer rebuilds.
+  `readCompositeImage`, element-ordered layer rebuilds, and the stamp path
+  (`extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage`).
 - `src/core/document/types.ts` — `StrokeRecord` (incl. `fill?: boolean`),
-  `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
+  `FillPatchRecord`, `GradientRecord`, `Guide`/`GuideAxis`, `LayerElement`, type
+  guards, `Layer`.
+- `src/core/document/guides.ts` — the pure guide rules: the axis heuristic, the
+  integer rounding, the screen-space grab radius, the hit-test, the duplicate
+  rule and the document operations.
+- `src/core/document/selectionTransform.ts` — the pure transform geometry: the
+  scale and rotation maps, the factor a pointer asks for, `MIN_SCALE_FACTOR`,
+  the 15-degree angle snap and the selection's frame rule.
+- `src/core/document/selectionHandles.ts` — the pure handle layout: the four
+  corner handles, the rotation handle above the frame, the screen-space grab
+  radius, the hit-test and the cursors.
+- `src/core/tools/guidesTool.ts` — the guides tool: the two gestures (create by
+  drag, move by drag) and the click that selects.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
   version-history comment, fill/gradient validation, version-aware `readBrush`
-  (required `hardness` in v6+, `texture` in v7+, defaults for older files).
+  (required `hardness` in v6+, `texture` in v7+, `stamp`/`stampSpacing`/
+  `stampHardness` in v9+, defaults for older files).
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
+- `src/core/tools/shapeGeometry.ts` — the pure outline generators: the line, the
+  rectangle, the ellipse, the polygon (a regular *n*-gon inscribed in the drag
+  box's ellipse) and the star (the `2p`-vertex outline), plus `ShapeOptions`
+  and their clamps.
 - `src/features/brushes/BrushControls.tsx` — size, opacity, **Hardness**,
-  **Spacing**, **Stabilizer** and **Texture** sliders.
-- `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
+  **Sampling**, **Stabilizer**, **Texture** sliders and the **Stamp** switch with
+  its **Stamp spacing** and **Stamp hardness** sliders.
+- `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch, and the
+  **Sides**/**Points**, **Inner radius** and **Rotation** sliders shown for the
+  polygon and the star only.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
+  `setShapeSides`, `setShapeInnerRatio`, `setShapeRotation`,
   `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
 - Tests: `src/test/brushSettings.test.ts`, `src/test/canvas2dStroke.test.ts`,
-  `src/test/floodFill.test.ts`, `src/test/fillCommand.test.ts`,
+  `src/test/stampCoverage.test.ts`, `src/test/floodFill.test.ts`,
+  `src/test/fillCommand.test.ts`,
   `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
   `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
-  `src/test/projectLifecycle.test.ts`, shared fakes in
+  `src/test/projectLifecycle.test.ts`, `src/test/guides.test.ts`, shared fakes in
   `src/test/support/recordingCanvas.ts` (gradient methods and `filter` state are
   injected alongside the recorded methods).
 
@@ -380,9 +420,25 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   820×731, CSS 656×584, DPR 1.25, paper rect at (40, 64) → backing paper origin
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `f` bucket fill, `g` gradient, `i` picker, `p`/middle-drag pan;
+  `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
+  `u` guides, `h` pan (middle-drag also pans);
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
-  duplicate; `Ctrl+Shift+H`/`V` flip.
+  duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
+  the guide drag and clears the guide selection, and `Delete` removes the
+  selected guide.
+- **Guides check (verified 2026-10-21).** Press `u`: the rail shows a **Guides**
+  button and the status bar counts the guides. A drag on empty canvas creates one
+  guide and raises `history` by one; the guide sits at the **press** coordinate
+  and the axis follows the dominant drag direction - but only once the drag has
+  travelled **3 CSS pixels**, so a shorter drag creates **nothing** (check it: a
+  two-pixel drag leaves the guide count and `history` untouched). Clicking the
+  guide selects it (the status bar reads `vertical guide at 88 px` and the line
+  is drawn in the selection accent); `Delete` removes it and `Esc` clears the
+  selection. `Esc` during a drag leaves no guide and no history step, and the
+  next press still works. `Ctrl+Z` brings a deleted guide back. Zooming with
+  `Ctrl+Wheel` over the guide keeps it under the pointer and at the same
+  document position. The guide is painted on the display canvas only: a PNG
+  export of the document contains no guide.
 - **Bucket fill check (verified 2026-10-19).** Override `rAF` first (§8), press
   `f`, click inside the paper with synthetic pointer events, wait one frame, then
   read the display canvas: the sampled pixel should be the brush colour and the
@@ -444,26 +500,45 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   179 px tall, and `document.scrollWidth` equalled the viewport (no horizontal
   overflow). A 900 px screenshot confirmed Size/Opacity/Hardness/Spacing/
   Stabilizer/Texture and both pressure toggles.
+- **Polygon/star check (verified 2026-10-21, Chromium via Playwright).** Press
+  `p`: the rail's **Polygon** button is active and the toolbar shows a
+  **Sides** slider (default `5`), a **Rotation** slider (default `0°`) and the
+  **Fill shape** switch. Press `s`: the first slider is relabelled **Points**
+  and an **Inner radius** slider (default `50 %`) appears between it and
+  **Rotation**. A drag on the paper raises `history` to `1` and shows
+  `● unsaved`; `Ctrl+Z` returns it to `history 0` and the painted pixels go.
+  The options are shared: the value set for the star is the polygon's side
+  count. The geometry, the clamps, the press-time capture, the **rigid**
+  rotation (a non-square box turns without changing the shape's side lengths)
+  and the simple star outline are covered by Vitest, and the two pictures are
+  pinned by the visual-regression scenes `polygon` and `star`.
 
 ## 9. Next move
 
-**Stamp-based brush engine behind the existing stroke interface** (the remaining
-Phase 3 work). Texture now ships as a grain post-pass; stamps are about per-dab
-spacing, true hardness curves and directional/image textures. The "Next slice"
-section of [ROADMAP.md](ROADMAP.md) is kept current and is the authority.
+**Directional, image-based or per-dab stamp textures** (the rest of the Phase 3
+work). The stamp engine itself has shipped: a stroke can be drawn as a chain of
+round dabs placed along its path, unioned so it never darkens where it crosses
+itself, with a true per-dab hardness curve (format version 9). The grain is
+still one document-anchored post-pass over the finished coverage. The "Next
+slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the authority.
 
 The constraints that matter:
 
 - keep `DrawingRenderer`/`StrokeRecord` as the boundary; samples stay the
   authoritative record for undo, reopen and export;
-- keep the segment path as the default and preserve hard/soft/grain output;
-  accumulate per-dab coverage into one buffer so overlapping dabs cannot darken;
-- keep grain deterministic from document coordinates so live, rebuild, undo/redo,
-  reopen and PNG export agree at every zoom and `rasterScale`;
-- a non-default stamp/dab appearance cannot be ignored by a v8 reader without
-  changing the picture, so expect **format version 9** if fields change output;
-- keep `spacing` (sample density) distinct from stamp spacing, or document an
-  explicit migration if they are merged.
+- keep the segment path, the grain pass and the stamp engine as the defaults and
+  preserve hard/soft/grain/stamped output;
+- a per-dab texture multiplies a dab's coverage **before** the union, so the
+  union stays a maximum and a stroke still cannot darken;
+- keep the texture deterministic from document coordinates (and from the dab's
+  own direction, if it follows the path) so live, rebuild, undo/redo, reopen and
+  PNG export agree at every zoom and `rasterScale`;
+- a non-default texture appearance cannot be ignored by a v9 reader without
+  changing the picture, so expect **format version 10** if fields change
+  output;
+- keep `spacing` (sample density) distinct from the stamp's dab spacing;
+- the coverage map stays footprint-bounded and the upload stays one tile at a
+  time: the raster budget's 58 bytes per document pixel must not move.
 
 Optional polish, deliberately not done yet:
 
@@ -508,6 +583,30 @@ Optional polish, deliberately not done yet:
   about merged resource manifests; the app launches, its window responds and its
   title updates from the frontend, but DPI scaling of the packaged build was not
   visually checked.
+- **The composition guides were verified in the browser app** (§8: the tool, the
+  drag, the selection, `Delete`, `Esc`, the undo and the zoom) **and through the
+  real `Canvas2DRenderer`** (the unit suite plus a visual-regression scene with
+  a committed golden), but **not in the packaged Tauri window**. A native
+  save/reopen of a document with guides is unverified; save/reopen is covered by
+  Vitest at the format and lifecycle level. Snapping to guides, grids and rulers
+  are not implemented at all.
+- **The scale and rotate of a selection were verified in the browser app**: the
+  four corner handles and the rotation handle appear on the selected frame, the
+  cursor becomes a diagonal resize cursor over a corner and a grab cursor over
+  the rotation handle, dragging a corner out doubles the ink's extent about the
+  frame's centre, dragging the rotation handle a quarter turn turns the ink by a
+  quarter turn, the snapped turn lands on 15 degrees while a `Shift` turn keeps
+  the free angle, a press that misses a handle does not jump the content, and
+  the history depth rises by exactly one per transform. The **packaged Tauri
+  window is unverified**. The PNG export **cannot run in a browser at all** -
+  `File -> Export PNG...` asks the Tauri save dialog, which is absent outside
+  the desktop shell, so the status bar reports *"The export dialog could not be
+  shown"* and no PNG is written. The "the handles never reach an export"
+  property is therefore covered by the **Vitest renderer suite** (the composed
+  image records no handle call) and by the code's structure
+  (`composeDocumentImage()` calls `paintDocument()` only), not by a browser
+  measurement. A native save/reopen of a transformed selection is covered by
+  Vitest at the format level, not by a native round trip.
 - **`cargo test --lib` cannot run** on this toolchain (§7).
 - Product limitations documented in ROADMAP and not planned yet: undo history is
   not stored in the project file (reopening rebuilds one step per element); no

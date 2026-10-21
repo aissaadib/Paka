@@ -111,12 +111,38 @@ export function IconEllipse(props: IconProps) {
   );
 }
 
+export function IconPolygon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.6 13.1 6.4 11.2 12.4H4.8L2.9 6.4z" />
+    </Icon>
+  );
+}
+
+export function IconStar(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.4 9.9 6.3 14.2 6.9 11.1 9.8 11.9 14.1 8 12 4.1 14.1 4.9 9.8 1.8 6.9 6.1 6.3z" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="M5.5 8V4.2a1 1 0 0 1 2 0V7" />
       <path d="M7.5 6.6V3.4a1 1 0 0 1 2 0v3.2" />
       <path d="M9.5 6.9V4.6a1 1 0 0 1 2 0v5.1a4 4 0 0 1-4 4H7a3.5 3.5 0 0 1-3.5-3.5V8.4a1 1 0 0 1 2 0v.9" />
+    </Icon>
+  );
+}
+
+/** A dashed cross: the composition guides. */
+export function IconGuides(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.2v11.6" strokeDasharray="2 2" />
+      <path d="M2.2 8h11.6" strokeDasharray="2 2" />
     </Icon>
   );
 }

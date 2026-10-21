@@ -52,6 +52,22 @@ export const ELLIPSE_TOOL: ToolDefinition = {
   fillable: true,
 };
 
+export const POLYGON_TOOL: ToolDefinition = {
+  id: "polygon",
+  label: "Polygon",
+  shortcut: "P",
+  description: "Draw a regular polygon inscribed in the dragged box",
+  fillable: true,
+};
+
+export const STAR_TOOL: ToolDefinition = {
+  id: "star",
+  label: "Star",
+  shortcut: "S",
+  description: "Draw a star inscribed in the dragged box",
+  fillable: true,
+};
+
 export const PICKER_TOOL: ToolDefinition = {
   id: "picker",
   label: "Colour picker",
@@ -80,6 +96,13 @@ export const PAN_TOOL: ToolDefinition = {
   description: "Move the canvas view",
 };
 
+export const GUIDES_TOOL: ToolDefinition = {
+  id: "guides",
+  label: "Guides",
+  shortcut: "U",
+  description: "Place and move composition guides",
+};
+
 /** Tools offered by the application, in tool rail order. */
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
@@ -88,9 +111,12 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   LINE_TOOL,
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,
+  POLYGON_TOOL,
+  STAR_TOOL,
   BUCKET_TOOL,
   GRADIENT_TOOL,
   PICKER_TOOL,
+  GUIDES_TOOL,
   PAN_TOOL,
 ];
 
