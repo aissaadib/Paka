@@ -7,7 +7,20 @@
 | Paka source inspected | `C:\Users\aissa\Desktop\Paka` at `9b0a885` ("Merge branch 'feat/visual-regression-harness' into feat/stamp-brush-engine") — i.e. post-G1 (the stamp engine) and post-T-01 (the visual harness) |
 | Isolated worktree | `C:\Users\aissa\AppData\Local\Temp\opencode\paka-t14-discovery` (detached at `9b0a885`, **read-only**) |
 | Artifact root | `C:\Users\aissa\Desktop\Paka-feature-factory\wave1\T-14-polygon-star-discovery.md` |
+| Committed as | `docs/T-14-polygon-star-discovery.md` on branch `docs/t14-polygon-star-discovery` (base `9b0a885`, like the sibling `docs/t11-guides-discovery` and `docs/t13-contrast-dee-plan` branches) |
 | Paka checkout | Untouched by this task: no file in `C:\Users\aissa\Desktop\Paka` was created, edited or deleted. |
+
+> **Status note (added after the implementation landed).** The slice this
+> document specifies has since been implemented as `958bb96` ("feat: add polygon
+> and star shape tools"), on the development branch, **derived from this
+> document**: the shipped `ShapeOptions` (`sides`, `innerRatio`, `rotation`),
+> the 3–24 side range, the 0.05 inner-ratio floor, the inscribed-ellipse
+> polygon with its first vertex at the top, the 2p-vertex star that is
+> deliberately not a pentagram, the rigid rotation about the box's centre, and
+> the "editor state, not a file-format field" decision all match §3 below
+> point for point. The line numbers in §2 and §3 refer to the **pre-
+> implementation** tree (`9b0a885`), which is what the discovery read; `grep`
+> is authoritative for the current tree.
 
 ---
 
