@@ -1,0 +1,29 @@
+{
+  "id": "transformed-selection",
+  "width": 200,
+  "height": 150,
+  "background": "#ffffff",
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        {
+          "kind": "stroke",
+          "brush": {
+            "hardness": 1,
+            "color": "#16181c",
+            "size": 10
+          },
+          "xs": [50, 50, 120],
+          "ys": [40, 110, 110],
+          "transform": {
+            "scale": 1.4,
+            "rotateDegrees": 30,
+            "centerX": 80,
+            "centerY": 75
+          }
+        }
+      ]
+    }
+  ]
+}

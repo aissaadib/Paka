@@ -32,14 +32,18 @@ const FORBIDDEN_IMPORTS = ["stampCoverage", "canvas2dStroke", "strokeBuilder"];
  * The only app modules the harness may import.
  *
  * The renderer and the scheduler are the boundary; the document model and the
- * brush defaults are configuration. Anything else would reach past the
- * boundary into how the pixels are made.
+ * brush defaults are configuration. The transform maps are here because a
+ * scene may declare a scale and a rotation, and the picture the golden pins
+ * has to be the picture the *product* draws - not a hand-written
+ * approximation of it. They are geometry, not rasterization: they decide
+ * where a sample lands, never how a pixel is made.
  */
 const ALLOWED_APP_IMPORTS = [
   "/src/core/rendering/Canvas2DRenderer",
   "/src/core/rendering/frameScheduler",
   "/src/core/rendering/types",
   "/src/core/document/document",
+  "/src/core/document/selectionTransform",
   "/src/core/document/types",
   "/src/core/brushes/defaults",
   "/src/types/brush",

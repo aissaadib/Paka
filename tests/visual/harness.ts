@@ -23,6 +23,10 @@ import { Canvas2DRenderer } from "/src/core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "/src/core/rendering/frameScheduler";
 import { createDocument, createLayer } from "/src/core/document/document";
 import { DEFAULT_BRUSH } from "/src/core/brushes/defaults";
+import {
+  createRotateTransform,
+  createScaleTransform,
+} from "/src/core/document/selectionTransform";
 import { isStroke } from "/src/core/document/types";
 import type {
   DrawingDocument,
@@ -35,7 +39,14 @@ import type {
 import type { DrawingRenderer } from "/src/core/rendering/types";
 import type { BrushSettings } from "/src/types/brush";
 import { isSceneStroke } from "./scene";
-import type { Scene, SceneElement, SceneGuide, SceneLayer, SceneVerdict } from "./scene";
+import type {
+  Scene,
+  SceneElement,
+  SceneGuide,
+  SceneLayer,
+  SceneTransform,
+  SceneVerdict,
+} from "./scene";
 
 let elementCounter = 0;
 
@@ -48,19 +59,58 @@ function toBrush(patch: Readonly<Record<string, unknown>> | undefined): BrushSet
   return { ...DEFAULT_BRUSH, ...(patch ?? {}) } as BrushSettings;
 }
 
+/**
+ * Applies a scene's transform to a stroke's samples.
+ *
+ * The maps are the **product's own**, so the picture the golden pins is the
+ * picture a transformed selection really draws. A scale and a rotation about
+ * the same centre commute, so the order they are applied in does not matter.
+ */
+function applyTransform(
+  xs: readonly number[],
+  ys: readonly number[],
+  transform: SceneTransform | undefined,
+): { xs: number[]; ys: number[] } {
+  if (!transform) {
+    return { xs: [...xs], ys: [...ys] };
+  }
+  const centre = { x: transform.centerX, y: transform.centerY };
+  let currentX = [...xs];
+  let currentY = [...ys];
+
+  if (transform.scale !== undefined) {
+    const map = createScaleTransform(centre, transform.scale);
+    const baseX = currentX;
+    const baseY = currentY;
+    currentX = baseX.map((x, index) => map.mapX(x, baseY[index]));
+    currentY = baseY.map((y, index) => map.mapY(baseX[index], y));
+  }
+
+  if (transform.rotateDegrees !== undefined) {
+    const map = createRotateTransform(centre, (transform.rotateDegrees * Math.PI) / 180);
+    const baseX = currentX;
+    const baseY = currentY;
+    currentX = baseX.map((x, index) => map.mapX(x, baseY[index]));
+    currentY = baseY.map((y, index) => map.mapY(baseX[index], y));
+  }
+
+  return { xs: currentX, ys: currentY };
+}
+
 function toStroke(
   element: Extract<SceneElement, { kind: "stroke" }>,
   layerId: LayerId,
 ): StrokeRecord {
   const pressures = element.pressures ?? element.xs.map(() => 1);
+  const samples = applyTransform(element.xs, element.ys, element.transform);
   return {
     id: nextId("stroke"),
     layerId,
     brush: toBrush(element.brush),
     ...(element.erase ? { erase: true } : {}),
     ...(element.fill ? { fill: true } : {}),
-    xs: [...element.xs],
-    ys: [...element.ys],
+    xs: samples.xs,
+    ys: samples.ys,
     pressures: [...pressures],
     times: element.xs.map((_value, index) => index * 16),
     startTime: 0,

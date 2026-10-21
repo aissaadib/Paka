@@ -12,6 +12,27 @@
 
 export type SceneBlendMode = "normal" | "multiply" | "screen";
 
+/**
+ * A transform applied to a stroke's samples before it is drawn.
+ *
+ * The transform is the **product's own**: the harness runs the same scale and
+ * rotation maps the editor runs on a selection, so the golden pins what a
+ * transformed selection really looks like rather than a picture of a
+ * hand-written approximation.
+ *
+ * The centre is stated in document pixels, because a transform is always about
+ * a centre - the centre of the selection's frame, in the editor.
+ */
+export interface SceneTransform {
+  /** Uniform scale factor about the centre. */
+  readonly scale?: number;
+  /** Clockwise rotation in degrees about the centre. */
+  readonly rotateDegrees?: number;
+  /** The centre of the transform, in document pixels. */
+  readonly centerX: number;
+  readonly centerY: number;
+}
+
 /** A painted or erasing stroke. */
 export interface SceneStroke {
   readonly kind: "stroke";
@@ -29,6 +50,8 @@ export interface SceneStroke {
    * interior takes the brush colour and whose outline is still traced on top.
    */
   readonly fill?: boolean;
+  /** A transform to apply to the samples before the stroke is drawn. */
+  readonly transform?: SceneTransform;
 }
 
 /** A bucket-fill patch, as the flood fill records it. */

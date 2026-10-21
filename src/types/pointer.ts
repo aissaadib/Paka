@@ -63,4 +63,12 @@ export interface CursorReport {
   readonly kind: PointerKind;
   readonly pressure: number;
   readonly hasPressure: boolean;
+  /**
+   * The CSS cursor to show at this position.
+   *
+   * It is the active tool's cursor, except where the tool has something more
+   * specific to say - the select tool's transform handles, for instance, ask
+   * for a resize cursor while the pointer is over one of them.
+   */
+  readonly cursor: string;
 }

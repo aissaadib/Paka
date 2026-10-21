@@ -40,7 +40,7 @@ architecture by browsing.
 | `public/` | Static icons only |
 | `src-tauri/gen/` | Generated Tauri schemas, if present |
 | `licenses/*.txt` | Verbatim third-party licence texts; regenerate the notice file, do not read them |
-| All 32 test files | Use the test map in §8 |
+| All 34 test files | Use the test map in §8 |
 | `README.md` end to end | Feature prose duplicates SESSION-BRIEF; open only for user-facing wording |
 | `docs/HANDOFF.md` and `docs/SESSION-BRIEF.md` both, end to end | Read SESSION-BRIEF first; HANDOFF only §7/§8 when you need toolchain or verification detail |
 | `docs/ARCHITECTURE.md` end to end (1549 lines) | Read the named section in §6 |
@@ -62,6 +62,8 @@ architecture by browsing.
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
 `floodFill`, `document/types.ts`, `document/guides.ts`,
+`document/selectionTransform.ts` (the scale/rotate geometry),
+`document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`, `stampCoverage`,
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
@@ -101,7 +103,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
-| Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
+| Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
@@ -137,6 +139,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | `GuideAxis`, `Guide`, `DrawingDocument.guides` | `core/document/types.ts` | 40, 54, 85 |
 | `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
+| `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
+| `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
@@ -213,6 +217,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Bucket fill | `floodFill.test.ts`, `fillCommand.test.ts` |
 | Gradients | `gradient.test.ts` |
 | Selection math | `strokeSelection.test.ts` |
+| Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |

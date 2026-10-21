@@ -1,11 +1,17 @@
 /**
  * Select tool.
  *
- * One tool, two gestures, chosen by where the press lands:
+ * One tool, four gestures, chosen by where the press lands:
+ *  - **on a handle** - scale the selection by a corner handle, or rotate it by
+ *    the handle above the frame;
  *  - **inside** the current selection - translate the selected strokes;
  *  - **anywhere else** - drag a marquee, which on release becomes the new
  *    selection (a press that never moved is a zero-size marquee, i.e. a click,
  *    which selects the strokes under the pointer or clears the selection).
+ *
+ * The handles come first: they sit on the frame's corners, which are inside
+ * the frame, so a press on a corner would otherwise start a move. Grabbing a
+ * handle is an explicit "transform this", and it wins.
  *
  * The tool owns only the gesture bookkeeping (`active`, so a stray move or
  * cancel without a press is ignored). Everything else - what stays selected,
@@ -34,6 +40,12 @@ export class SelectTool {
       return;
     }
     this.active = true;
+    // The handles win over the move: they are the transform's affordance.
+    const handle = context.findSelectionHandleAt(sample.docX, sample.docY);
+    if (handle !== null) {
+      context.beginSelectionTransform(sample, handle);
+      return;
+    }
     if (context.isInsideSelection(sample.docX, sample.docY)) {
       context.beginSelectionMove(sample);
     } else {
