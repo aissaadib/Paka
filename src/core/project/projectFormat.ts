@@ -42,12 +42,12 @@ import type {
   Guide,
   GuideAxis,
   Layer,
-  LayerBlendMode,
   LayerElement,
   LayerId,
   StrokeRecord,
   StrokeSource,
 } from "../document/types";
+import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import type { BrushSettings } from "../../types/brush";
@@ -103,6 +103,11 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -9 files still open unchanged, with the
  * texture off, which is exactly the coverage they were written by.
  *
+ * Version 11: a layer's `blendMode` may also be `overlay`, `soft-light`,
+ * `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` or
+ * `exclusion`. A version-10 reader rejects those values, so the version was
+ * bumped; version-1 to -10 files still open unchanged.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -111,14 +116,8 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 10;
+export const PROJECT_VERSION = 11;
 export const PROJECT_FILE_EXTENSION = "paka";
-
-const LAYER_BLEND_MODES: readonly LayerBlendMode[] = ["normal", "multiply", "screen"];
-
-function isLayerBlendMode(value: string): value is LayerBlendMode {
-  return (LAYER_BLEND_MODES as readonly string[]).includes(value);
-}
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
 /** Upper bound on the total fill-mask pixels a file may contain. */

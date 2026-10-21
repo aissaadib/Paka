@@ -180,8 +180,10 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder,
-  visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`) and
-  selection. Layer pixels composite bottom-first over the paper colour; a blend
+  visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`, `Overlay`,
+  `Soft light`, `Hard light`, `Color dodge`, `Darken`, `Lighten`, `Difference`,
+  `Exclusion`) and selection. Layer pixels composite bottom-first over the paper
+  colour; a blend
   mode combines the whole layer with everything below it, including the paper.
   A layer cannot be changed while a stroke, fill, gradient or selection drag is
   in flight, so a release can never commit into a layer that was removed
@@ -354,10 +356,12 @@ paste-ready version of the same briefing is in
   star - it is an ordinary stroke afterwards.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
-- Only the **`normal`**, **`multiply`** and **`screen`** blend modes are
-  implemented. They are canvas compositing operations over the finished layer,
-  so they combine with the paper and every lower layer; there are no group,
-  clipping or alpha-inheritance semantics yet.
+- The **separable** blend modes are implemented: `normal`, `multiply`, `screen`,
+  `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`,
+  `difference` and `exclusion`. They are canvas compositing operations over the
+  finished layer, so they combine with the paper and every lower layer; the
+  non-separable hue/saturation/color/luminosity modes, group and clipping
+  contexts, and alpha inheritance are not implemented.
 - Opacity is applied **per stroke, not per dab**: a stroke gets one alpha, from
   the brush opacity and the stroke's mean pressure. Pressure tapers width within
   a stroke but not opacity - per-dab opacity without build-up needs per-pixel

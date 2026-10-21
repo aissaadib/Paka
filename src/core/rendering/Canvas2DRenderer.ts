@@ -92,6 +92,22 @@ function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
       return "multiply";
     case "screen":
       return "screen";
+    case "overlay":
+      return "overlay";
+    case "soft-light":
+      return "soft-light";
+    case "hard-light":
+      return "hard-light";
+    case "color-dodge":
+      return "color-dodge";
+    case "darken":
+      return "darken";
+    case "lighten":
+      return "lighten";
+    case "difference":
+      return "difference";
+    case "exclusion":
+      return "exclusion";
   }
 }
 

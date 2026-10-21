@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
+import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
 import type {
@@ -703,26 +704,34 @@ describe("parseProject round trip", () => {
     ).toContain("brush stamp texture");
   });
 
-  it("round-trips multiply and screen layer blend modes at version 8", () => {
+  it("round-trips every layer blend mode at version 11", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const elements = storeOf([[layerId, [strokeFor(layerId)]]]);
+
+    for (const mode of LAYER_BLEND_MODES) {
+      const blended = updateLayer(document, layerId, { blendMode: mode });
+      const parsed = parseProject(serializeProject(blended, elements));
+      expect(parsed.ok, mode).toBe(true);
+      if (parsed.ok) {
+        expect(parsed.project.document.layers[0].blendMode, mode).toBe(mode);
+      }
+    }
+  });
+
+  it("opens version 10 files with the blend modes that version knew", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const multiplied = updateLayer(document, layerId, { blendMode: "multiply" });
-    const screened = updateLayer(document, layerId, { blendMode: "screen" });
-
-    const parsedMultiply = parseProject(
+    const payload = JSON.parse(
       serializeProject(multiplied, storeOf([[layerId, [strokeFor(layerId)]]])),
-    );
-    expect(parsedMultiply.ok).toBe(true);
-    if (parsedMultiply.ok) {
-      expect(parsedMultiply.project.document.layers[0].blendMode).toBe("multiply");
-    }
+    ) as { version: number };
+    payload.version = 10;
 
-    const parsedScreen = parseProject(
-      serializeProject(screened, storeOf([[layerId, [strokeFor(layerId)]]])),
-    );
-    expect(parsedScreen.ok).toBe(true);
-    if (parsedScreen.ok) {
-      expect(parsedScreen.project.document.layers[0].blendMode).toBe("screen");
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.project.document.layers[0].blendMode).toBe("multiply");
     }
   });
 
@@ -1043,7 +1052,7 @@ describe("parseProject rejections", () => {
     expect(rejectionOf(mutate((project) => (project.layers[0].visible = "yes" as unknown as boolean)))).toContain(
       "visibility",
     );
-    expect(rejectionOf(mutate((project) => (project.layers[0].blendMode = "color-dodge")))).toContain(
+    expect(rejectionOf(mutate((project) => (project.layers[0].blendMode = "color-burn")))).toContain(
       "unsupported blend mode",
     );
   });
@@ -1428,9 +1437,10 @@ describe("the composition guides in the project file", () => {
   it("keeps the guides additive, so they never force a version bump of their own", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
-    // same picture. Version 10 was spent on the per-dab texture, not on the
-    // guides, and a version-9 file that carries them still opens.
-    expect(PROJECT_VERSION).toBe(10);
+    // same picture. Version 10 was spent on the per-dab texture, version 11 on
+    // the extra blend modes, and neither bump was for the guides; a version-9
+    // file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(11);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),
