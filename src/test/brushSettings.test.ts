@@ -170,4 +170,3 @@ describe("tool definitions", () => {
     expect(() => getToolDefinition("smudge" as "brush")).toThrow(/Unknown tool id/);
   });
 });
-

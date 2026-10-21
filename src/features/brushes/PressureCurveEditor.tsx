@@ -270,5 +270,3 @@ export function PressureCurveEditor() {
     </div>
   );
 }
-
-

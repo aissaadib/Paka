@@ -328,5 +328,3 @@ describe("platform and layout regressions", () => {
     expect(press("z", { alt: true })).toBeNull();
   });
 });
-
-

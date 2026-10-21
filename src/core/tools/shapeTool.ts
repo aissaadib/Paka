@@ -118,4 +118,3 @@ export class ShapeTool implements Tool {
     return shapeOutline(this.kind, drag, this.options);
   }
 }
-

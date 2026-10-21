@@ -50,4 +50,3 @@ export class GradientTool implements Tool {
     }
   }
 }
-

@@ -57,4 +57,3 @@ export class BrushTool implements Tool {
     }
   }
 }
-

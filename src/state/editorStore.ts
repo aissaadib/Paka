@@ -206,4 +206,3 @@ export function createEditor(options: EditorOptions = {}): Editor {
     subscribe: (listener) => engine.subscribe(listener),
   };
 }
-

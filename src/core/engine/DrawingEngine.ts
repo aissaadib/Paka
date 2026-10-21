@@ -3537,4 +3537,3 @@ export class DrawingEngine implements StrokeSource {
     this.store.setState(next);
   }
 }
-

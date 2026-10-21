@@ -3684,4 +3684,3 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
     expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
   });
 });
-
