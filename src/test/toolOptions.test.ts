@@ -117,7 +117,8 @@ describe("tool option reads and writes", () => {
     }
     inner.write(actions, 0.333);
     const [, value] = calls[0];
-    expect(value).toBeCloseTo(0.33, 10);
+    // The step is 0.05: 0.333 snaps to 0.35, the nearest reachable ratio.
+    expect(value).toBeCloseTo(0.35, 10);
   });
 });
 
