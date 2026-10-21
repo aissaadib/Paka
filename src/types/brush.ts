@@ -22,7 +22,8 @@ export interface PressureCurvePoint {
 
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
-  readonly size: number;  /** Opacity of the whole stroke in `[0, 1]`. */
+  readonly size: number;
+  /** Opacity of the whole stroke in `[0, 1]`. */
   readonly opacity: number;
   /** CSS color of the stroke. */
   readonly color: string;
