@@ -6,17 +6,7 @@
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-
-const PALETTE: readonly string[] = [
-  "#16181c",
-  "#ffffff",
-  "#e5484d",
-  "#e8a33d",
-  "#3fb950",
-  "#3b82f6",
-  "#8b5cf6",
-  "#d946a0",
-];
+import { PALETTE } from "./palette";
 
 /** `input[type=color]` only accepts `#rrggbb`. */
 function toColorInputValue(color: string): string {

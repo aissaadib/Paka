@@ -139,6 +139,15 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   toolbar's colour input and the swatches write, so the wheel follows a colour
   picked off the canvas - and choosing a colour is not an edit: it adds no
   history step and never marks the document dirty.
+- **Contrast and colour-difference readout**: under the wheel, the **WCAG 2.2
+  contrast ratio** between the brush colour and the document's paper (with a
+  plain-language band, from "excellent" to "low"), and the palette swatch
+  **perceptually closest** to the ink, with its CIEDE2000 distance. The ratio
+  is a lightness comparison and the distance a perceptual one, so the readout
+  shows both and promises neither for the other. It is a reading, not a
+  control: no history step, no dirty flag, and it follows a colour chosen
+  anywhere - the wheel, the toolbar's colour input, a swatch or the canvas
+  picker.
 - **Preferences survive a restart**: the brush, the active tool, the shape
   options, the fill tolerance and the gradient settings are stored in a
   per-user settings file in the operating system's configuration folder and
