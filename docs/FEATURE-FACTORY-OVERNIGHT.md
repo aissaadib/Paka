@@ -200,3 +200,41 @@ artefact was renamed.
   tree. Every browser result in this log is a **browser** result, and is
   labelled as one.
 - **No React-layer test framework** exists, by the project's own rule.
+
+### 2.9 Scale and rotate a selection - implemented, reviewed twice
+
+Paka could select strokes and move, nudge, duplicate, flip and delete them, but
+there was **no way to scale or rotate** them: the biggest gap in a drawing
+app's selection tools.
+
+The first review returned **CHANGES REQUIRED**. The geometry was right, but
+three things were not:
+
+- the handles were painted on the **marquee's rubber band** and appeared with
+  nothing selected;
+- the transform was **absolute** rather than relative to the grab point, so a
+  press 6 px off the rotation handle moved the ink by **27 document pixels**;
+- the 15 degree snap **tie-broke asymmetrically** (+7.5 to 15, -7.5 to 0).
+
+All fixed, with twelve new tests, and the **re-review returned PASS**.
+
+- `1622517` on `feat/ff26-transform`, merged as `a42e67f`, **pushed**.
+- The transform is **baked on apply**, exactly like a move: only the samples
+  change, so the brush, the pressures and the **project format** are untouched
+  and the format stays at version 9. The handles are **display-only**.
+
+### 2.10 A concurrent writer was merged in, not overwritten
+
+Another writer pushed `8001346` (a docs anchor cleanup) onto the development
+branch while this shift was running, and our histories diverged. Their commit
+was **merged in** - no rebase, no force-push, no history rewrite - and the
+work log sits on top of it.
+
+### 2.11 A browser export claim was withdrawn, not restated
+
+The scale/rotate report claimed a browser measurement of the export. The
+reviewer could not reproduce it: **the PNG export cannot run in a browser at
+all**, because `File -> Export PNG...` asks the Tauri save dialog, which is
+absent outside the desktop shell. The claim was **withdrawn** rather than
+replaced with another number, and the documents now rest on the renderer unit
+suite and the visual scene's exported golden.
