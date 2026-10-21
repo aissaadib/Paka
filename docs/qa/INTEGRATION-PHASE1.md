@@ -126,10 +126,15 @@ settings and window coverage.
 
 ## 4. Packaged application
 
-Built from this branch (`pnpm tauri build --no-bundle`, release, 6m48s) and run
-on this machine: 1920x1080 physical, **125 %** scaling (DPI 120), work area
+Built from this branch's final commit (`f1a5f13`, release, `--no-bundle`) and
+run on this machine: 1920x1080 physical, **125 %** scaling (DPI 120), work area
 1920x1020. Geometry read under per-monitor-v2 awareness; screenshots captured
-with `PrintWindow(PW_RENDERFULLCONTENT)` at physical resolution.
+with `PrintWindow(PW_RENDERFULLCONTENT)` at physical resolution. The layers,
+settings, menu, undo and close-guard checks below were made on the binary built
+at `748f9eb`; the commits after it are documentation, the vendored skills and
+the agent roster, which change no Rust or frontend source. The final binary was
+rebuilt from `f1a5f13` and re-launched, and measures the same window rectangle
+(1818x1020 at (96,0), bottom overhang 0).
 
 | Check | Result |
 | --- | --- |
@@ -179,9 +184,17 @@ with `PrintWindow(PW_RENDERFULLCONTENT)` at physical resolution.
 ## 6. Preserved
 
 * `main` = `ad2ef11` = `origin/main`. Not merged into, not pushed.
-* The shared checkout at `C:\Users\aissa\Desktop\Paka` was not modified: it is
-  still at `fac6441` with its pre-existing working-tree entries untouched.
+* The shared checkout at `C:\Users\aissa\Desktop\Paka` was not modified by this
+  session. It has since moved on its own: another workstream committed four
+  documentation / vendored-skills commits to `feat/stamp-brush-engine`
+  (`4d9fcff`, `72347bf`, `37a7c8c`, `bc39597`) while this branch was being
+  built, and that branch is now at `bc39597`. Those commits are merged here
+  (`875768c`) rather than ignored, so this branch is a superset of the
+  development branch. The checkout's only remaining working-tree entry is the
+  pre-existing untracked `qa/` directory, which this session did not touch.
 * The four feature branches still exist at their original tips (except
   `qa/packaged-desktop`, which gained the erratum commit `7730989` on top of
   `d11073c`; the original report commit is intact in its history).
-* No dependency, lockfile, licence inventory or notice file was changed.
+* No dependency, lockfile, licence inventory or notice file was changed. The
+  lockfile that appears in this branch's history (`skills-lock.json`) came from
+  the dev merge, not from this work.
