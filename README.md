@@ -24,12 +24,14 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   use the brush controls, it is one undo step ("Erase"), and a saved file
   reopens with the erasure intact. A cancelled eraser stroke leaves the layer
   exactly as it was.
-- **Shape tools** (`L` line, `R` rectangle, `O` ellipse): drag from one point
+- **Shape tools** (`L` line, `R` rectangle, `O` ellipse, `P` polygon, `S` star):
+  drag from one point
   to another and the shape follows the pointer, previewed in the stroke buffer
   without touching the layer. Releasing commits it as **one** stroke, so it is
   one undo step and re-rasterizes identically on undo, reopen and export.
   `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws from
-  the centre. Rectangle and ellipse offer a **Fill shape** switch in the
+  the centre. Rectangle, ellipse, polygon and star offer a **Fill shape** switch
+  in the
   toolbar: with it on the interior takes the brush colour and the outline is
   still traced on top, so the edge lands exactly where an unfilled shape's edge
   would. The switch describes the *next* shape - each shape keeps the setting it
@@ -37,6 +39,25 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   Shapes draw with the current brush, so size, colour and opacity
   come from the brush controls; a press outside the paper records nothing, and a
   click that never moved leaves nothing behind.
+- **Polygon and star** (`P`, `S`): a **polygon** is a regular *n*-gon (3-24
+  sides, default 5) inscribed in the **ellipse** of the dragged box, with a
+  vertex at the top; a **star** is the classic *2p*-vertex outline (3-24
+  points, default 5) - a tip and a valley alternating, not a self-crossing
+  pentagram - inscribed in the **same ellipse**, so a star's tips are a
+  polygon's tips, and whose **inner radius** (5-100 %, default 50 %) sets how
+  deep the valleys reach. Both take a **rotation** (0-360°, default 0°) about
+  the centre of the dragged box - a rigid turn, so the shape keeps its size -
+  because the selection cannot rotate. `Shift` squares the
+  box, which is what makes either shape regular. The three options are **Sides**
+  (labelled **Points** for the star), **Inner radius** (the star only) and
+  **Rotation**; they describe the *next* shape, so changing one is not an edit
+  and a shape keeps the values that were active when it was drawn. The shape's
+  own box is not the dragged box: the polygon's own box **equals** the dragged
+  box when the side count is a multiple of four, is **narrower in one axis**
+  when the side count is two more than a multiple of four, and is **smaller in
+  both axes** when the side count is odd; and a rotated shape swings off the
+  ellipse, so its box can be **larger** than the dragged box in one axis - and
+  smaller in the other.
 - **Bucket fill** (`F`): click a region to flood-fill it with the current colour.
   The scan reads the **merged visible composite** - paper plus all visible layers
   - so line art on another layer bounds the fill, while the committed pixels go
@@ -231,7 +252,8 @@ paste-ready version of the same briefing is in
 ## Known limitations
 
 - Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
-  **ellipse**, **bucket**, **gradient** and **colour picker** tools exist, plus
+  **ellipse**, **polygon**, **star**, **bucket**, **gradient** and **colour
+  picker** tools exist, plus
   pan. There is no text tool.
 - **Gradients are two-stop, linear or radial, and paint the whole layer.**
   There is no draggable stop editor, no angle snapping and no gradient with a
@@ -260,14 +282,18 @@ paste-ready version of the same briefing is in
   perspective, per-stroke nudging and copy/paste across layers are not
   implemented, and a flip is applied to the stroke samples (there is no
   non-destructive transform to edit later).
-- Shape tools draw the **outline** of a line, rectangle or ellipse as a stroke
-  of the current brush, and the rectangle and ellipse can fill it (see the shape
+- Shape tools draw the **outline** of a line, rectangle, ellipse, polygon or
+  star as a stroke
+  of the current brush, and the rectangle, ellipse, polygon and star can fill it
+  (see the shape
   tools above). Because the stroke rasterizer
   uses round joins a rectangle's corners are very slightly rounded. A shape is
   stored as ordinary stroke samples, so it has no separate geometry to edit
   afterwards and it ignores pen pressure (constant width). A filled ellipse is
   filled from the same polyline its outline is traced with, so its interior is
-  faceted to the same sub-pixel degree as its outline.
+  faceted to the same sub-pixel degree as its outline. A polygon and a star are
+  stored the same way, so a committed one cannot be re-edited as a polygon or a
+  star - it is an ordinary stroke afterwards.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - Only the **`normal`**, **`multiply`** and **`screen`** blend modes are

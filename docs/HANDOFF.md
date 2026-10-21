@@ -72,7 +72,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
   slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
   merged; nothing is waiting in the working tree.
-- **`pnpm test` → 554 tests in 31 files, all pass** (the colour wheel slice).
+- **`pnpm test` → 588 tests in 31 files, all pass** (the polygon and star
+  slice: 582 before it, and 554 before the colour wheel slice).
   `pnpm typecheck` clean; `pnpm build` succeeds.
 - **Project file format version 9** (`PROJECT_VERSION = 9`).
 - A release executable has been built and launched successfully:
@@ -328,13 +329,20 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `stampHardness` in v9+, defaults for older files).
 - `src/core/tools/toolDefinitions.ts`, `src/types/tool.ts` — tool definitions and
   the `fillable` field.
+- `src/core/tools/shapeGeometry.ts` — the pure outline generators: the line, the
+  rectangle, the ellipse, the polygon (a regular *n*-gon inscribed in the drag
+  box's ellipse) and the star (the `2p`-vertex outline), plus `ShapeOptions`
+  and their clamps.
 - `src/features/brushes/BrushControls.tsx` — size, opacity, **Hardness**,
   **Sampling**, **Stabilizer**, **Texture** sliders and the **Stamp** switch with
   its **Stamp spacing** and **Stamp hardness** sliders.
-- `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
+- `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch, and the
+  **Sides**/**Points**, **Inner radius** and **Rotation** sliders shown for the
+  polygon and the star only.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
+  `setShapeSides`, `setShapeInnerRatio`, `setShapeRotation`,
   `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
 - Tests: `src/test/brushSettings.test.ts`, `src/test/canvas2dStroke.test.ts`,
   `src/test/stampCoverage.test.ts`, `src/test/floodFill.test.ts`,
@@ -397,7 +405,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   820×731, CSS 656×584, DPR 1.25, paper rect at (40, 64) → backing paper origin
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `f` bucket fill, `g` gradient, `i` picker, `p`/middle-drag pan;
+  `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
+  `h` pan (middle-drag also pans);
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
   duplicate; `Ctrl+Shift+H`/`V` flip.
 - **Bucket fill check (verified 2026-10-19).** Override `rAF` first (§8), press
@@ -461,6 +470,18 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   179 px tall, and `document.scrollWidth` equalled the viewport (no horizontal
   overflow). A 900 px screenshot confirmed Size/Opacity/Hardness/Spacing/
   Stabilizer/Texture and both pressure toggles.
+- **Polygon/star check (verified 2026-10-21, Chromium via Playwright).** Press
+  `p`: the rail's **Polygon** button is active and the toolbar shows a
+  **Sides** slider (default `5`), a **Rotation** slider (default `0°`) and the
+  **Fill shape** switch. Press `s`: the first slider is relabelled **Points**
+  and an **Inner radius** slider (default `50 %`) appears between it and
+  **Rotation**. A drag on the paper raises `history` to `1` and shows
+  `● unsaved`; `Ctrl+Z` returns it to `history 0` and the painted pixels go.
+  The options are shared: the value set for the star is the polygon's side
+  count. The geometry, the clamps, the press-time capture, the **rigid**
+  rotation (a non-square box turns without changing the shape's side lengths)
+  and the simple star outline are covered by Vitest, and the two pictures are
+  pinned by the visual-regression scenes `polygon` and `star`.
 
 ## 9. Next move
 

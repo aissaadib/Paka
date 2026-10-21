@@ -593,28 +593,28 @@ of them.
 
 ### Shape tools
 
-A line, rectangle or ellipse is a **stroke whose samples trace the shape's
-outline** rather than a path the pointer traced. That is the whole trick: a
-committed shape is an ordinary `StrokeRecord` (`ShapeTool` → `shapeOutline` →
-stroke buffer → `StrokeCommand`), so it inherits one-undo-step semantics, the
-project file, re-rasterization after undo or reopen, and layer compositing -
-without a line of shape-specific rendering. The cost is honest and visible:
-shapes are brush strokes, so they are **outlines drawn with round joins** (a
-rectangle's corners are slightly rounded, an ellipse is a polygon of many short
-segments). Their samples carry pressure `1`, so a shape has
+A line, rectangle, ellipse, polygon or star is a **stroke whose samples trace
+the shape's outline** rather than a path the pointer traced. That is the whole
+trick: a committed shape is an ordinary `StrokeRecord` (`ShapeTool` →
+`shapeOutline` → stroke buffer → `StrokeCommand`), so it inherits one-undo-step
+semantics, the project file, re-rasterization after undo or reopen, and layer
+compositing - without a line of shape-specific rendering. The cost is honest and
+visible: shapes are brush strokes, so they are **outlines drawn with round
+joins** (a rectangle's corners are slightly rounded, an ellipse is a polygon of
+many short segments). Their samples carry pressure `1`, so a shape has
 the brush's full, constant width.
 
-A rectangle or an ellipse can also be **filled**, and that is still not a second
-kind of content: the same stroke carries `fill: true`, and the rasterizer fills
-the polygon its samples trace before tracing the outline on top. So a filled
-shape is one solid silhouette, its edge lands exactly where an unfilled shape's
-edge landed, and it re-rasterizes from the element list like everything else (see
-[Rasterization](#rasterization)). A line is never filled - its outline bounds no
-interior - which `ToolDefinition.fillable` states: the *tool* says whether
-filling is meaningful, the engine says whether the user asked for it. The
-setting (`shapeFill`) is editor state, offered in the toolbar only for a
-fillable tool and read when a gesture starts, so a shape keeps the setting it was
-drawn with and toggling it rewrites nothing.
+A rectangle, an ellipse, a polygon or a star can also be **filled**, and that is
+still not a second kind of content: the same stroke carries `fill: true`, and the
+rasterizer fills the polygon its samples trace before tracing the outline on top.
+So a filled shape is one solid silhouette, its edge lands exactly where an
+unfilled shape's edge landed, and it re-rasterizes from the element list like
+everything else (see [Rasterization](#rasterization)). A line is never filled -
+its outline bounds no interior - which `ToolDefinition.fillable` states: the
+*tool* says whether filling is meaningful, the engine says whether the user asked
+for it. The setting (`shapeFill`) is editor state, offered in the toolbar only
+for a fillable tool and read when a gesture starts, so a shape keeps the setting
+it was drawn with and toggling it rewrites nothing.
 
 The gesture is a drag from an anchor to the current point.
 `core/tools/shapeGeometry.ts` is pure - it turns
@@ -624,6 +624,58 @@ ellipse sampled on a multiple of four segments so it touches its bounding box
 exactly. `ShapeTool` owns only the anchor and recomputes the *whole* outline on
 every move, which is what lets `Shift` and `Alt` change the shape mid-drag
 (45-degree lines, squares and circles; drawing from the centre).
+
+#### The polygon and the star
+
+The polygon and the star are the same trick with a different outline, and they
+need no new content, no new command and **no format change**: a saved polygon
+reopens as the same pixels, and - like every other shape - it is no longer "a
+polygon" once it is committed, because the file stores points, not a kind.
+
+Both are inscribed in the **ellipse of the drag's box**, so the two tools agree
+on where a tip sits. The polygon's rule is the familiar one - the rule
+Photoshop, Procreate and Illustrator use - and the star follows it. A polygon is
+a regular *n*-gon: vertex *k* sits at `-π/2 + 2πk/n` on that ellipse, so the
+first vertex is at the **top**, and the outline closes by repeating the first
+point. Because the polygon is inscribed in the ellipse, its own bounding box is
+**not** the drag's box: the two are equal when the side count is a multiple of
+four (the vertices sit on all four extremes), the polygon's is narrower in one
+axis when the side count is two more than a multiple of four, and it is smaller
+in both axes when the side count is odd. A star with *p* points is the classic
+**2*p*-vertex outline - an outer and an inner vertex alternating - and
+deliberately **not** a pentagram: a pentagram crosses itself, and the rasterizer
+fills with the **non-zero** rule, so a self-crossing outline would fill its
+crossings as one blob instead of as a star. The star's tips are the polygon's
+vertices and its inner vertices are the same ellipse scaled by `innerRatio`
+about the centre, so a ratio of `1` is a regular `2p`-gon and the valleys
+always point between two tips. The inner ratio has a floor of `0.05`, which is
+what keeps the outline simple.
+
+`Shift` squares the drag's box, which is what makes a polygon or a star
+**regular**; `Alt` draws from the centre, exactly as for the rectangle and the
+ellipse. The **rotation** exists as an option because the selection can move,
+nudge, duplicate and flip but cannot rotate - without it, a rotated polygon
+would be unreachable in the product. It is a **rigid** turn: the vertices are
+placed on the ellipse first and are then turned about the box's centre, so the
+shape keeps its side lengths, its distances and its size, and the first vertex
+ends up at `-π/2 + rotation`. (Folding the rotation into the ellipse's
+*parameter* instead would **morph** the shape on a non-square box: its side
+lengths would change with the angle, which is not a rotation.) The turn takes
+the shape off the ellipse it was inscribed in, so a rotated shape's own
+bounding box can be **larger** than the drag's box in one axis - and smaller in
+the other - and it can reach outside the paper. It never leaves the circle of
+radius `max(rx, ry)` around the box's centre.
+
+The three options - the side/point count (`3..24`, default `5`), the inner
+radius (`0.05..1`, default `0.5`) and the rotation (`0..360°`, default `0`) -
+are **editor state** in the engine, published in the `EditorSnapshot` and read
+through `ToolContext.getShapeOptions()`. They are not undoable, they do not
+dirty the file, and they are not stored on the stroke: a committed shape keeps
+only its points, which is why changing an option never rewrites existing work
+and why the format does not move. Like `shapeFill`, they are read **when the
+gesture starts**, so a shape keeps the values that were active when the user
+pressed. One number serves both tools, so the toolbar's slider is labelled
+**Sides** for the polygon and **Points** for the star.
 
 Because the outline is **replaced** rather than appended, the renderer contract
 gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
@@ -887,7 +939,8 @@ densely the input path is sampled
 (see [Sampling, spacing and the stabilizer](#sampling-spacing-and-the-stabilizer));
 it is not stamp spacing and does not alter the rasterizer.
 
-A stroke flagged `fill` (a filled rectangle or ellipse) additionally fills the
+A stroke flagged `fill` (a filled rectangle, ellipse, polygon or star)
+additionally fills the
 closed polygon its samples trace, once, before the outline is traced - and only
 on a full re-rasterization (`fromIndex === 0`), which is the only way a shape is
 ever drawn. Both passes are drawn at full coverage and the stroke's alpha is
@@ -1192,7 +1245,19 @@ DOM-free by design.
   ceiling.
 - Tool geometry is tested directly: `shapeGeometry` covers 45-degree snapping,
   squares and circles, drawing from the centre, the ellipse's bounded and
-  exactly-closed outline, and the degenerate extent. Shape *behaviour* is
+  exactly-closed outline, and the degenerate extent. The polygon and the star
+  are covered there too: the vertex count, the first vertex at the top, the
+  inscribed-ellipse rule, the clamped side count, the star's alternating tips
+  and valleys, its inner-radius ratio, the rotation about the centre, the
+  degenerate drag, and the proof that the star's outline is a **simple** loop
+  even at the smallest inner ratio (which is what makes the non-zero fill fill
+  a star rather than a blob). The rotation is tested on a **non-square** box
+  as well as a square one, and the assertion is that the turned outline is the
+  rigid turn of the unrotated one - the same side lengths, the same distances -
+  because a square box cannot tell a rigid turn from a morph. The star's
+  **absolute** placement is pinned too: its tips sit on the box's ellipse and
+  its valleys on the same ellipse scaled by the inner ratio, so a star drawn
+  at the wrong size cannot pass. Shape *behaviour* is
   covered through the recording renderer on the engine: a drag previews with a
   full-buffer redraw and commits nothing, the release commits exactly one stroke
   carrying the outline's samples, and cancellation, a mid-drag tool switch, an
@@ -1200,7 +1265,10 @@ DOM-free by design.
   the history untouched. The fill setting is covered the same way: a shape is
   flagged only while the setting is on, each shape keeps the setting it was
   drawn with, a line is never filled even with the setting on, and the setting
-  survives a tool switch without becoming an edit. `replaceStroke` is asserted on
+  survives a tool switch without becoming an edit. The polygon's and the star's
+  options are editor state too: they are clamped, they never enter history or
+  dirty the file, and they are read when the gesture starts, so a shape keeps
+  the values that were active when the user pressed. `replaceStroke` is asserted on
   the draw-call stream: it
   clears the buffer and redraws the whole outline, and the preview composites at
   the stroke's own alpha.
@@ -1319,7 +1387,8 @@ version-1, -2 or -3 file opens with its shapes traced rather than filled.
 These are real gaps, not footnotes:
 
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
-  `bucket`, `gradient` and `picker`, plus `pan`. There is no text tool. A bucket
+  `polygon`, `star`, `bucket`, `gradient` and `picker`, plus `pan`. There is no
+  text tool. A bucket
   fill writes a region; a gradient is a two-stop linear/radial colour function,
   not an editable gradient with draggable stops.
 - **Selection is stroke-level, layer-scoped and limited to translation,

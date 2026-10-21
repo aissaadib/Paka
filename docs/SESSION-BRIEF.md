@@ -6,8 +6,9 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-21**, at `dbcb446` - the **HSV colour wheel**
-slice, merged into the development branch.
+Last verified: **2026-10-21**, at `87593bc` - the **polygon and star** slice
+(T-14), on top of the HSV colour wheel, the stamp (dab) engine and the
+visual-regression harness.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -35,7 +36,8 @@ slice, merged into the development branch.
   live-preview compositing, layer-safety, raster-budget, bounded-
   rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
   The colour wheel slice is integrated, not a branch waiting for review.
-- `pnpm test` → **554 tests in 31 files, all pass** (the colour wheel slice).
+- `pnpm test` → **588 tests in 31 files, all pass** (the polygon and star
+  slice: 582 before it, and 554 before the colour wheel slice).
 - `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
@@ -57,6 +59,7 @@ slice, merged into the development branch.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. The reverted commit stays in the history. |
@@ -92,10 +95,26 @@ slice, merged into the development branch.
   mode, and releasing the stroke never changes the stacking.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
-- **Shapes** (`L` line, `R` rectangle, `O` ellipse): live preview, one stroke =
-  one undo step; `Shift` constrains (45°, squares, circles), `Alt` draws from
-  the centre. Rectangle/ellipse can be filled via the **Fill shape** switch;
-  a line cannot. Shapes ignore pen pressure (constant width).
+- **Shapes** (`L` line, `R` rectangle, `O` ellipse, `P` polygon, `S` star): live
+  preview, one stroke = one undo step; `Shift` constrains (45°, squares, circles,
+  a regular polygon or star), `Alt` draws from the centre. Rectangle/ellipse/
+  polygon/star can be filled via the **Fill shape** switch; a line cannot.
+  Shapes ignore pen pressure (constant width).
+- **Polygon and star** (`P`, `S`): a regular *n*-gon (3-24 sides, default 5)
+  inscribed in the **ellipse** of the dragged box with a vertex at the top, and
+  the classic **2p-vertex** star (3-24 points, default 5) inscribed in the
+  **same ellipse** (so a star's tips are a polygon's tips) with an **inner
+  radius** (5-100 %, default 50 %). Both take a **rotation** (0-360°, default
+  0°) about the box's centre - a rigid turn, so the shape keeps its size -
+  because the selection cannot rotate. The three
+  options are editor state (not undoable, not dirtying, read at press time) and
+  are shared: the slider is labelled **Sides** for the polygon and **Points**
+  for the star. The shape's own box is not the drag's box: the polygon's own
+  box **equals** the drag's box when the side count is a multiple of four, is
+  **narrower in one axis** when the side count is two more than a multiple of
+  four, and is **smaller in both axes** when the side count is odd; and a
+  rotated shape swings off the ellipse, so its box can be **larger** than the
+  drag's box in one axis - and smaller in the other.
 - **Bucket fill** (`F`): flood-fills the region under the pointer from the
   merged visible composite, writes a bounded pixel-exact patch to the active
   layer. **Tolerance** 0–255 per-channel; transparent pixels match each other.
@@ -345,10 +364,12 @@ Key files for the next slice (directional / per-dab stamp textures):
 - **A gradient is geometry + stops**, not pixels; radial = fixed centre, radius
   by distance, inner radius 0. Endpoints clamp to the document.
 - **Editor options describe the next gesture and are not serialized**:
-  `shapeFill`, `fillTolerance` (default 24), `gradientType`,
-  `gradientEndColor`. Each is read at press time so the committed record keeps
-  the setting it was drawn with. Changing an option is not an edit. The brush is
-  the same: the current brush is session state, while every stroke stores the
+  `shapeFill`, `shapeSides` (3-24, default 5), `shapeInnerRatio` (0.05-1,
+  default 0.5), `shapeRotation` (0-360°, default 0), `fillTolerance` (default
+  24), `gradientType`, `gradientEndColor`. Each is read at press time so the
+  committed record keeps the setting it was drawn with. Changing an option is
+  not an edit. The brush is the
+  same: the current brush is session state, while every stroke stores the
   full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
   `texture`, `stamp`, `stampSpacing` and `stampHardness`.
 - **The colour wheel is a view of the brush colour, not a second source of
@@ -386,8 +407,13 @@ Key files for the next slice (directional / per-dab stamp textures):
 
 Product:
 
-- No text tool; only brush, eraser, select, line, rectangle, ellipse, bucket,
-  gradient, picker, pan.
+- No text tool; only brush, eraser, select, line, rectangle, ellipse, polygon,
+  star, bucket, gradient, picker, pan.
+- Shapes: a committed shape stores its **points**, not its kind, so a polygon or
+  a star cannot be re-edited as one - it is an ordinary stroke afterwards. There
+  is no rotation *gesture* (the option covers the need), no irregular polygon,
+  no per-vertex handles, and the polygon's and the star's options are session
+  state: they are not persisted, and they are shared between the two tools.
 - A layer is still re-rasterized from scratch when it changes, but the rebuild is
   bounded by each element's own footprint: it clears and blends only the rectangle
   the element inks, so the cost follows the stroke geometry instead of the
@@ -505,9 +531,9 @@ Verification gaps:
   - State checks that always work: status bar (`history N`, `N selected`,
     `● unsaved`), toolbar controls, document title.
 - Shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `f` bucket, `g` gradient, `i` picker, `p`/middle-drag pan;
-  `Esc` clears/cancels; arrows nudge (`Shift` 10 px); `Ctrl+D` duplicate;
-  `Ctrl+Shift+H`/`V` flip.
+  `o` ellipse, `p` polygon, `s` star, `f` bucket, `g` gradient, `i` picker,
+  `h` pan (middle-drag also pans); `Esc` clears/cancels; arrows nudge
+  (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip.
 - Windows toolchain (details in HANDOFF §7): cargo is at
   `%USERPROFILE%\.cargo\bin` and must be prepended to `PATH`; WinLibs
   `mingw64\bin` must also be on `PATH` (rustc calls `dlltool.exe` by name);
@@ -588,7 +614,7 @@ without changing what current hard, soft, grain and stamped files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 554 tests in 31 files).
+   anything (expect 588 tests in 31 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

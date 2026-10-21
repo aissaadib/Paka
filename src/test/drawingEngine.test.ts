@@ -1152,6 +1152,254 @@ describe("DrawingEngine shape tools", () => {
 });
 
 /**
+ * The polygon and the star.
+ *
+ * A polygon and a star are ordinary strokes whose samples trace the outline,
+ * so these tests are about the geometry the engine hands over and about the
+ * options that shape it - not about a new kind of content.
+ */
+describe("DrawingEngine polygon and star tools", () => {
+  function createShapeEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Drags a shape from one point to another and releases it. */
+  function dragShape(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+    modifiers: Partial<PointerSample["modifiers"]> = {},
+  ): void {
+    const held = { shift: false, alt: false, ctrl: false, meta: false, ...modifiers };
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from[0], docY: from[1], modifiers: held }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to[0], docY: to[1], modifiers: held }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to[0], docY: to[1], modifiers: held }),
+    );
+  }
+
+  it("commits a polygon as one ordinary stroke", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // Five sides plus the repeated first point.
+    expect(strokes[0].xs).toHaveLength(6);
+    expect(strokes[0].ys).toHaveLength(6);
+    expect(strokes[0].xs[0]).toBeCloseTo(strokes[0].xs[5], 9);
+    expect(strokes[0].ys[0]).toBeCloseTo(strokes[0].ys[5], 9);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("commits a star with a point per tip", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("star");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(1);
+    // Five points: five tips and five valleys, plus the repeated first point.
+    expect(strokes[0].xs).toHaveLength(11);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("fills a polygon and a star through the existing fill switch", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeFill(true);
+    engine.setTool("polygon");
+    dragShape(engine, [50, 50], [150, 150]);
+    engine.setTool("star");
+    dragShape(engine, [200, 50], [300, 150]);
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes).toHaveLength(2);
+    expect(strokes[0].fill).toBe(true);
+    expect(strokes[1].fill).toBe(true);
+  });
+
+  it("treats the options as editor state: no history step, no dirty flag", () => {
+    const { engine } = createShapeEngine();
+
+    engine.setShapeSides(9);
+    engine.setShapeInnerRatio(0.25);
+    engine.setShapeRotation(45);
+
+    expect(engine.getState().shapeSides).toBe(9);
+    expect(engine.getState().shapeInnerRatio).toBe(0.25);
+    expect(engine.getState().shapeRotation).toBe(45);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("clamps the options to their documented ranges", () => {
+    const { engine } = createShapeEngine();
+
+    engine.setShapeSides(1);
+    expect(engine.getState().shapeSides).toBe(3);
+    engine.setShapeSides(99);
+    expect(engine.getState().shapeSides).toBe(24);
+    engine.setShapeSides(7.6);
+    expect(engine.getState().shapeSides).toBe(8);
+    engine.setShapeInnerRatio(0);
+    expect(engine.getState().shapeInnerRatio).toBe(0.05);
+    engine.setShapeInnerRatio(4);
+    expect(engine.getState().shapeInnerRatio).toBe(1);
+    engine.setShapeRotation(-30);
+    expect(engine.getState().shapeRotation).toBe(0);
+    engine.setShapeRotation(400);
+    expect(engine.getState().shapeRotation).toBe(360);
+  });
+
+  it("reads the options when the gesture starts, not when it ends", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeSides(6);
+    engine.setTool("polygon");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    // The option changes mid-drag: the shape keeps the sides it started with.
+    engine.setShapeSides(3);
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
+
+    const strokes = engine.listStrokes(layerId);
+    expect(strokes[0].xs).toHaveLength(7);
+  });
+
+  it("keeps the inner ratio and the rotation it started with", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setShapeInnerRatio(0.25);
+    engine.setShapeRotation(90);
+    engine.setTool("star");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    // Both options change mid-drag; the star keeps the ones it started with.
+    engine.setShapeInnerRatio(0.9);
+    engine.setShapeRotation(0);
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
+
+    const star = engine.listStrokes(layerId)[0];
+    // The box is 100..200 by 100..200, so the centre is (150, 150) and the
+    // circle's radius is 50.
+    const centre = { x: 150, y: 150 };
+    const radius = (index: number): number =>
+      Math.hypot(star.xs[index] - centre.x, star.ys[index] - centre.y);
+    // A tip is on the circle, a valley at a quarter of it: the inner ratio of
+    // 0.25 the star started with.
+    expect(radius(0)).toBeCloseTo(50, 6);
+    expect(radius(1)).toBeCloseTo(12.5, 6);
+    // The rotation of 90 degrees the star started with: the first tip, which
+    // starts at the top, is now at the right.
+    expect(star.xs[0]).toBeCloseTo(200, 6);
+    expect(star.ys[0]).toBeCloseTo(150, 6);
+  });
+
+  it("never rewrites a committed shape when an option changes", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+    const committed = engine.listStrokes(layerId)[0];
+    const before = { xs: [...committed.xs], ys: [...committed.ys] };
+
+    engine.setShapeSides(3);
+    engine.setShapeInnerRatio(0.9);
+    engine.setShapeRotation(45);
+
+    const after = engine.listStrokes(layerId)[0];
+    expect(after.xs).toEqual(before.xs);
+    expect(after.ys).toEqual(before.ys);
+    // And the option changes are not edits of their own.
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("draws a polygon from its centre under Alt and squares it under Shift", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [150, 150], [250, 200], { alt: true });
+    const centred = engine.listStrokes(layerId)[0];
+    // The mean of the vertices is the shape's centre; the closing repeat is
+    // not a vertex, so it is left out.
+    const vertices = centred.xs.length - 1;
+    const centreX =
+      centred.xs.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+    const centreY =
+      centred.ys.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+    expect(centreX).toBeCloseTo(150, 6);
+    expect(centreY).toBeCloseTo(150, 6);
+
+    dragShape(engine, [100, 100], [200, 140], { shift: true });
+    const squared = engine.listStrokes(layerId)[1];
+    // Shift squares the drag's box (100 by 100), so the polygon is regular:
+    // every vertex is the same distance from the box's centre.
+    for (let index = 0; index < squared.xs.length; index += 1) {
+      const radius = Math.hypot(squared.xs[index] - 150, squared.ys[index] - 150);
+      expect(radius).toBeCloseTo(50, 6);
+    }
+  });
+
+  it("discards a click that never moved", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [100, 100]);
+
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("draws a shape with the plain segment path, even when the brush is stamped", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setBrush({ stamp: true });
+    engine.setTool("star");
+    dragShape(engine, [100, 100], [200, 200]);
+
+    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+  });
+
+  it("selects a polygon and moves it in one undo step", () => {
+    const { engine, layerId } = createShapeEngine();
+
+    engine.setTool("polygon");
+    dragShape(engine, [100, 100], [200, 200]);
+    const before = [...engine.listStrokes(layerId)[0].xs];
+
+    engine.setTool("select");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 280, docY: 280 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 280, docY: 280 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    const depth = engine.getState().history.depth;
+    engine.handlePointerSample(createSample({ phase: "down", docX: 150, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 170, docY: 150 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 170, docY: 150 }));
+
+    const moved = engine.listStrokes(layerId)[0];
+    expect(moved.xs[0]).toBeCloseTo(before[0] + 20, 6);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+  });
+});
+
+/**
  * Selection and transform.
  *
  * Driven through the same pointer entry point the DOM binder uses, so each test

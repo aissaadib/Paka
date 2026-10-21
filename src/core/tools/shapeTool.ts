@@ -1,5 +1,6 @@
 /**
- * Shape tool: draws a line, rectangle or ellipse outline with the brush.
+ * Shape tool: draws a line, rectangle, ellipse, polygon or star outline with
+ * the brush.
  *
  * The gesture is a drag from an anchor to the current point. The tool keeps the
  * anchor, recomputes the whole outline on every move (so Shift/Alt can change
@@ -8,6 +9,10 @@
  * the outline is committed as a single stroke, which means one undo step, a
  * normal entry in the project file, and pixels that re-rasterize identically
  * after undo, reopen or resize.
+ *
+ * The polygon and the star read their options (the side count, the inner ratio
+ * and the rotation) once, when the gesture starts, so the shape keeps the
+ * values that were active when the user pressed.
  *
  * A release that cancels, a tool switch or a lost capture *discards* the
  * preview rather than committing it: unlike a brush stroke, nothing has been
@@ -18,7 +23,15 @@
 
 import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition } from "../../types/tool";
-import { outlineExtent, shapeOutline, type ShapeDrag, type ShapeKind, type ShapePoint } from "./shapeGeometry";
+import {
+  DEFAULT_SHAPE_OPTIONS,
+  outlineExtent,
+  shapeOutline,
+  type ShapeDrag,
+  type ShapeKind,
+  type ShapeOptions,
+  type ShapePoint,
+} from "./shapeGeometry";
 import type { Tool, ToolContext } from "./types";
 
 /** Below this document-space size a shape is treated as a click, not a shape. */
@@ -30,6 +43,14 @@ export class ShapeTool implements Tool {
 
   private readonly kind: ShapeKind;
   private anchor: ShapePoint | null = null;
+  /**
+   * The options this gesture started with.
+   *
+   * Read once, on press, and held for the whole drag: a polygon or a star
+   * keeps the side count, the inner ratio and the rotation that were active
+   * when the user pressed, even if the toolbar changes them mid-drag.
+   */
+  private options: ShapeOptions = DEFAULT_SHAPE_OPTIONS;
 
   constructor(kind: ShapeKind, definition: ToolDefinition) {
     this.kind = kind;
@@ -41,6 +62,7 @@ export class ShapeTool implements Tool {
       return;
     }
     this.anchor = { x: sample.docX, y: sample.docY };
+    this.options = context.getShapeOptions();
     // No outline yet: an unmoved drag should show nothing, not a dot.
     context.beginShape(sample);
   }
@@ -93,6 +115,6 @@ export class ShapeTool implements Tool {
       shift: sample.modifiers.shift,
       alt: sample.modifiers.alt,
     };
-    return shapeOutline(this.kind, drag);
+    return shapeOutline(this.kind, drag, this.options);
   }
 }

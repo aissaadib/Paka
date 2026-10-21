@@ -13,8 +13,10 @@ import {
   IconHand,
   IconLine,
   IconPicker,
+  IconPolygon,
   IconRectangle,
   IconSelect,
+  IconStar,
 } from "../icons";
 import { IconButton } from "./IconButton";
 
@@ -25,6 +27,8 @@ const TOOL_ICONS: Record<ToolId, ReactNode> = {
   line: <IconLine />,
   rectangle: <IconRectangle />,
   ellipse: <IconEllipse />,
+  polygon: <IconPolygon />,
+  star: <IconStar />,
   bucket: <IconBucket />,
   gradient: <IconGradient />,
   picker: <IconPicker />,

@@ -22,6 +22,13 @@ export interface SceneStroke {
   readonly pressures?: readonly number[];
   /** When true the stroke subtracts coverage instead of painting it. */
   readonly erase?: boolean;
+  /**
+   * When true the stroke's closed outline is filled before it is traced.
+   *
+   * The same flag the shape tools write: a filled shape is one stroke whose
+   * interior takes the brush colour and whose outline is still traced on top.
+   */
+  readonly fill?: boolean;
 }
 
 /** A bucket-fill patch, as the flood fill records it. */

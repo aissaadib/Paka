@@ -12,12 +12,21 @@ import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
 import type { LayerId } from "../document/types";
-import type { ShapePoint } from "./shapeGeometry";
+import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
   readonly viewport: Viewport;
   getBrush(): BrushSettings;
   getActiveLayerId(): LayerId | null;
+  /**
+   * The options the next polygon or star is drawn with.
+   *
+   * Editor state, like `shapeFill`: the engine owns it and publishes it, and
+   * a tool reads it once when its gesture starts, so a shape keeps the values
+   * that were active when the user pressed. The line, the rectangle and the
+   * ellipse ignore it.
+   */
+  getShapeOptions(): ShapeOptions;
   setViewport(viewport: Viewport): void;
   requestRender(): void;
   /** Starts a stroke on the active layer with the current brush. */

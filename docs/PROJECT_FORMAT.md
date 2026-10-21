@@ -267,16 +267,19 @@ An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
 re-renderable if the brush model changes.
 
-A shape drawn with the line, rectangle or ellipse tool is an **ordinary stroke**:
+A shape drawn with the line, rectangle, ellipse, polygon or star tool is an
+**ordinary stroke**:
 its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
-four corners plus the repeated first point for a rectangle, and a closed run of
-short segments for an ellipse - with `pressures` all `1`, so a shape has the
+four corners plus the repeated first point for a rectangle, a closed run of
+short segments for an ellipse, and the outline's own vertices for a polygon or
+a star - with `pressures` all `1`, so a shape has the
 brush's constant full width. There is no geometry field, which is why
 adding shape tools needed no new element kind: a reader that already knows
 strokes reproduces shapes, and undo, reopen and export treat them exactly like
 any other stroke.
 
-A rectangle or ellipse committed with the fill setting on adds one boolean,
+A rectangle, ellipse, polygon or star committed with the fill setting on adds
+one boolean,
 `fill: true`, to that same stroke: the samples still trace the outline, and a
 reader fills the polygon they bound before tracing it. It is a stroke-level flag
 rather than a document- or layer-level one, so a single layer can mix filled
