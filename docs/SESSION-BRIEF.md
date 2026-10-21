@@ -31,21 +31,19 @@ visual-regression harness.
 
 ## 2. Current state (verified today)
 
-- Branch `feat/t06-settings-persistence` (from `feat/stamp-brush-engine` at
-  `a1c9c1d`), after the live-preview compositing, layer-safety, raster-budget,
-  bounded-rasterization, **stamp (dab) brush engine**, **HSV colour wheel**,
-  **composition guides**, **polygon and star** and **scale/rotate** slices.
-  The settings slice is committed on its own branch, ready for review; it is
-  not merged into the development branch yet.
-- `pnpm test` → **742 tests in 36 files, all pass** (the settings slice: 711
-  before it).
-- `pnpm typecheck` clean; `pnpm build` succeeds (the settings slice).
-- Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
+- Branch `integration/phase1-settings-texture-transforms`, cut from
+  `feat/stamp-brush-engine` at `fac6441`: the **fixed-step scale/rotate
+  transforms**, **T-06 settings persistence** and the **FF-01 per-dab
+  directional texture**, on top of the live-preview compositing, layer-safety,
+  raster-budget, bounded-rasterization, **stamp (dab) brush engine**, **HSV
+  colour wheel**, **composition guides**, **polygon and star** and
+  **scale/rotate** slices. The feature branches remain; nothing was rewritten.
+- Project file format **version 10** (`PROJECT_VERSION = 10`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
-  `stampSpacing` and `stampHardness` are required from v9. `document.guides`
-  is **additive within v9** (missing = no guides), because the guides are
-  display-only.
+  `stampSpacing` and `stampHardness` are required from v9. `stampTexture` is
+  required from v10. `document.guides` is **additive within v9 and later**
+  (missing = no guides), because the guides are display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
   built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
   mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
@@ -53,8 +51,8 @@ visual-regression harness.
   commands, which were verified in a release build driven through UI
   Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
-  stabilizer, grain texture and the stamp (dab) engine shipped; directional or
-  per-dab stamp textures remain. Phase 4 has
+  stabilizer, grain texture, the stamp (dab) engine and the per-dab directional
+  texture shipped; brush-tip and image-based stamp textures remain. Phase 4 has
   `normal` / `multiply` / `screen` layer blend modes; masks and groups remain.
   Phase 0 gained three more correctness items: live-preview compositing inside
   its own layer, layer/history safety during a gesture, and a bounded document
@@ -65,6 +63,7 @@ visual-regression harness.
 | Commit | Slice |
 | --- | --- |
 | `feat/t06-settings-persistence` | **Settings persistence** - the nine editor preferences (brush, tool, shape fill, shape sides, star inner ratio, shape rotation, fill tolerance, gradient type, gradient end colour) live in a per-user settings file in the OS configuration folder and are restored at startup. The file holds preferences only - never a drawing - and changing one is not an edit, so it adds no history step and never marks the document unsaved. A missing, corrupt or future-versioned file starts the app with the defaults and no error. The **autosave** machinery and its policy seam exist and are covered by tests, but the decisions that govern autosaving are the owner's, so nothing is enabled and no recovery file is ever written. |
+| `feat/ff01-directional-texture` | **Per-dab directional texture** — a stamped stroke can carry **bristle lanes that run along the path**: each dab's coverage is multiplied by a lane pattern laid out in the dab's own frame, so the streaks rotate with the stroke. The lanes are measured against the brush's **centre line** (so every dab on a path sees the same offset at the same pixel, the union preserves the lanes instead of filling them in, and drawing a stroke backwards gives the same picture) and against the brush's **nominal size** (so the pattern is the same in document pixels at every `rasterScale`). The texture is multiplied in **before** the per-pixel maximum union, so it can only remove ink and a stroke still cannot darken. `stampTexture` is `0` by default, so every existing stroke is byte for byte unchanged. Format v10. |
 | `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
 | `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
@@ -184,8 +183,9 @@ visual-regression harness.
   stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
   grain over the finished coverage, applied to brush/eraser/shapes), a **stamp**
   switch with **stamp spacing** (2–100 % of the brush size, the distance
-  between dabs) and **stamp hardness** (the falloff of one dab) — all three
-  brush and eraser only — colour + 8-swatch palette, pressure size and pressure
+  between dabs), **stamp hardness** (the falloff of one dab) and **stamp
+  texture** (the strength of the bristle lanes) — all four brush and eraser
+  only — colour + 8-swatch palette, pressure size and pressure
   opacity toggles. All settings are captured per stroke.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
@@ -194,6 +194,14 @@ visual-regression harness.
   true hardness curve: a falloff inside the dab rather than a blur of the
   finished silhouette. The dabs are a pure function of the samples and the
   brush, so live drawing, undo/redo, reopen and export agree.
+- **Per-dab directional texture**: with the stamp texture on, each dab's
+  coverage is multiplied by bristle lanes that run **along** the path, so a
+  stroke reads as a bundle of streaks rather than a line of dots, and the lanes
+  rotate with the stroke. The texture is multiplied in **before** the union, so
+  it can only remove ink and the union is still a maximum. The lanes are laid
+  out against the brush's centre line, so the picture does not change when a
+  stroke is drawn backwards, and they are measured against the brush's nominal
+  size, so the pattern is the same in document pixels at every `rasterScale`.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
@@ -252,20 +260,21 @@ docs/           architecture, format, roadmap, handoff, this brief
 
 Key files for the next slice (directional / per-dab stamp textures):
 
-- `src/core/rendering/stampCoverage.ts` — the dab plan (`stampDabs`, the cursor)
-  and the coverage union (`StampCoverage.paintDab`); a per-dab texture has to
-  multiply a dab's profile inside `paintDab`, and the tile upload has to
+- `src/core/rendering/stampCoverage.ts` — the dab plan (`stampDabs`, the cursor),
+  the coverage union (`StampCoverage.paintDab`) and the per-dab texture
+  (`STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`); a brush **tip** would
+  replace the radial profile inside `paintDab`, and the tile upload has to
   stay bounded.
 - `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStampStroke`,
   `extendStampStroke`, `writeStampCoverage`; the coverage buffer, the
-  single-alpha composite and the post-dab grain are the invariants a per-dab
-  texture must keep.
+  single-alpha composite and the post-dab grain are the invariants a brush tip
+  must keep.
 - `src/types/brush.ts` / `src/core/brushes/defaults.ts` — brush fields
-  (a texture strength, a texture kind) and defaults/clamping/equality.
-- `src/features/brushes/BrushControls.tsx` — controls for real texture settings.
+  (a tip descriptor) and defaults/clamping/equality.
+- `src/features/brushes/BrushControls.tsx` — controls for real tip settings.
 - `src/core/document/types.ts` — `StrokeRecord`/`brush`, the authoritative record.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
-  serializer; an appearance-changing texture field needs v10.
+  serializer; a tip descriptor that changes the pixels needs v11.
 - Tests: `stampCoverage.test.ts`, `canvas2dRenderer.test.ts`,
   `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
@@ -403,6 +412,24 @@ Key files for the next slice (directional / per-dab stamp textures):
   (like the feather scratch), so the raster budget does not move: the cache
   uses up to 8 of the 10 bytes per document pixel of transient allowance, and
   the upload to the stroke buffer is one 16 KB tile at a time.
+- **The per-dab directional texture rides inside the dab's profile.**
+  `stampTexture` multiplies a dab's coverage **before** the union, so it can
+  only ever remove ink and the union is still a maximum. The lanes run along
+  the path, in the dab's own frame, and are laid out against the brush's
+  **centre line** rather than against the side of it - which is what makes
+  every dab on a straight path see the same offset at the same pixel, so the
+  lanes survive the union instead of being filled in, and why the picture does
+  not change when a stroke is drawn backwards. The lanes are measured against
+  the brush's **nominal size**, so the pattern is anchored to the document and
+  is the same in document pixels at every `rasterScale`. The lane's own width
+  and offset come from a fixed 32-bit hash of the lane index - the same idiom
+  the grain uses - so nothing depends on a clock, a random seed or the order
+  the dabs are painted in. `0` is the plain round dab, byte for byte.
+- **The first dab has no direction.** It carries the angle `0`, because the
+  path has not continued yet and a dab's direction must not depend on samples
+  that arrive later; the live path could not unpaint it if it did. Its lanes
+  are therefore laid out along the document's x axis rather than along the
+  stroke, and the neighbouring dabs overlap it.
 - **A fill is a pixel patch**, not a traced contour: colour, tight bbox, binary
   mask. Redo/reopen replay the mask, never re-run the flood.
 - **A gradient is geometry + stops**, not pixels; radial = fixed centre, radius
@@ -415,7 +442,7 @@ Key files for the next slice (directional / per-dab stamp textures):
   not an edit. The brush is the
   same: the current brush is session state, while every stroke stores the
   full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
-  `texture`, `stamp`, `stampSpacing` and `stampHardness`.
+  `texture`, `stamp`, `stampSpacing`, `stampHardness` and `stampTexture`.
 - **Preferences are session state that happens to survive a restart.** The
   settings file holds the nine editor preferences and nothing else: no
   drawing, no document, no history. Restoring them goes through the engine's
@@ -449,7 +476,9 @@ Key files for the next slice (directional / per-dab stamp textures):
   an older reader would draw a textured stroke plain; v8 allows `multiply` and
   `screen` blend modes because a v7 reader rejects them rather than drawing them
   as `normal`; v9 requires `stamp`, `stampSpacing` and `stampHardness` because
-  an older reader would draw a stamped stroke as the segment path; unknown/newer
+  an older reader would draw a stamped stroke as the segment path; v10 requires
+  `stampTexture` for the same reason - an older reader would draw the same
+  stamped stroke as plain dabs; unknown/newer
   versions are rejected outright, as are v4 files containing a gradient.
 - **Selection stores `{ layerId, strokeIds }` only**; the overlay is
   display-only. Transforms are `original + delta` from pre-drag copies, so undo
@@ -489,14 +518,18 @@ Product:
 - Sampling: sample density only, not the stamp's dab spacing; lower values cost
   memory but do not add grain. Stabilizer: exponential follow with visible lag,
   no look-ahead or rope catch-up; shapes ignore it.
-- Texture: one grain post-pass, not a per-dab, directional or image-based
-  texture. The stamp engine has no texture layer yet.
-- The stamp engine: round dabs only - no directional, elongated, offset or
-  bristle shapes, no scatter, rotation or jitter, and no per-dab opacity (a
+- Texture: one grain post-pass over the finished coverage, not an image-based
+  texture. The stamp engine's own `stampTexture` is a per-dab texture, but it
+  is a *procedural* bristle pattern, not a picture.
+- The stamp engine: round dabs only - no elongated, offset or tip shapes, no
+  scatter, rotation or jitter, and no per-dab opacity (a
   stroke still gets one alpha). A stamped stroke's cost grows with the square of
   the brush radius, so a very large brush with a fine dab spacing is expensive
   to re-rasterize; the planner stops after a fixed work budget, so an extreme
-  stroke is cut short rather than stalling the app.
+  stroke is cut short rather than stalling the app. The per-dab texture adds
+  arithmetic to the same loop - no extra allocation and no extra tile - but it
+  is not free: the dab painting costs about 1.5x a plain dab on the machine
+  it was measured on.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no perspective and no non-uniform
   scale, no copy/paste across layers. A transform is **baked on apply**, so
@@ -565,6 +598,19 @@ Verification gaps:
   Vitest, and the renderer was driven with real Chromium pixels through Vite
   (the dabs' spacing and the soft dab's radial falloff were read off the
   canvas). No packaged Tauri or high-DPI check.
+- The per-dab directional texture was verified **by the automated suite and by
+  the visual-regression harness**, not by hand in the running app: the lane
+  layout, the rotation with the dab's direction, the reversal invariance, the
+  "only removes ink" property, the union still holding, the live/commit/rebuild
+  parity and the v10 format are covered by Vitest, and the new
+  `directional-texture` scene was rendered in Chromium and pinned as a golden.
+  The scene was checked by **mutation**: an implementation that ignores the
+  dab's direction changes 4.3 % of the golden's pixels, which is above the
+  harness's 2 % tolerance, so the scene really does guard the orientation.
+  The texture's cost was measured structurally (no extra allocation, no extra
+  tile, the same dabs) and by a sampled end-to-end timing on one machine.
+  **No packaged Tauri check, no high-DPI check, and no hand-drawn stroke in the
+  running app.**
 - The live-preview compositing was proven with real pixels through the real
   `Canvas2DRenderer` using a software pixel canvas (a brush and a shape preview
   under an opaque and a translucent upper layer, active-layer opacity applied
@@ -611,57 +657,60 @@ Verification gaps:
   `-C link-arg=-Wl,--exclude-all-symbols` (do not override `RUSTFLAGS`). A cold
   release build takes ~5 minutes.
 
-## 9. Next slice — directional / per-dab stamp textures (Phase 3)
+## 9. Next slice — brush-tip and image-based stamp textures (Phase 3)
 
 `docs/ROADMAP.md` "Next slice" is the authority. Hardness, sampling, stabilizer,
-grain texture and the stamp (dab) engine have shipped; the texture layer of the
-stamp engine is the remaining Phase 3 item.
+grain texture, the stamp (dab) engine and the per-dab **directional texture**
+have shipped; the **shape** of a dab is the remaining Phase 3 item.
 
-The goal: let a dab carry its own texture - one that varies **per dab** and can
-follow the path's direction, the way a bristle or a dry brush varies - instead
-of the single document-anchored grain post-pass over the finished coverage,
-without changing what current hard, soft, grain and stamped files look like.
+The goal: let a stroke be stamped with a **tip** that is not a round disc - a
+felt tip, a dry ink blot, a bristle bundle - so the dab's coverage is the tip's
+mask rather than a radial falloff.
 
 ### Constraints to keep
 
-1. `DrawingRenderer` and `StrokeRecord` stay the boundary. A texture is a
+1. `DrawingRenderer` and `StrokeRecord` stay the boundary. A tip is a
    rasterization strategy; the vector samples remain authoritative for undo,
    reopen and export.
-2. Keep the existing segment path, the existing grain pass and the existing
-   stamp engine as the defaults. Default hard/soft/grain/stamped strokes must
-   stay pixel-identical, including the single-alpha composite and the
-   no-self-darkening invariant.
-3. A per-dab texture multiplies a dab's coverage **before** the union, so the
-   union is still a maximum and a stroke still cannot darken. The stroke's
-   opacity is still applied once.
-4. Any texture variation must be deterministic from document coordinates (and,
-   if it follows the path, from the dab's own direction), so live, rebuild,
+2. Keep the existing segment path, the existing grain pass, the existing stamp
+   engine and the existing per-dab texture as the defaults. Default hard, soft,
+   grain and stamped strokes must stay pixel-identical, including the
+   single-alpha composite and the no-self-darkening invariant.
+3. A tip multiplies a dab's coverage **before** the union, so the union is still
+   a maximum and a stroke still cannot darken. The stroke's opacity is still
+   applied once.
+4. Any tip variation must be deterministic from document coordinates (and, if it
+   follows the path, from the dab's own direction), so live, rebuild,
    undo/redo, reopen and PNG export agree at every zoom and `rasterScale`. No
    `Math.random()` in a repaint path.
-5. Capture the texture settings per stroke. Appearance-changing fields that a v9
-   reader cannot ignore require **format version 10**; prove it with tests.
+5. Capture the tip per stroke. Appearance-changing fields that a v10 reader
+   cannot ignore require **format version 11**; prove it with tests.
 6. Keep `spacing` (sample density) distinct from the stamp's dab spacing.
 7. The coverage map stays footprint-bounded and the upload stays one tile at a
    time: the raster budget's 58 bytes per document pixel must not move.
+8. A tip in the project file inflates the JSON, so the tip must be a **mask**
+   and not a colour, and it must not be an arbitrary blob of pixels: a bounded,
+   documented shape the parser can validate.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts` / `defaults.ts`: the texture fields, defaults, clamp
+- [ ] `src/types/brush.ts` / `defaults.ts`: the tip fields, defaults, clamp
       and equality.
-- [ ] `src/core/rendering/stampCoverage.ts`: the texture inside the dab's
-      profile, deterministic from the document and the dab's direction.
-- [ ] `src/core/rendering/Canvas2DRenderer.ts`: wire the texture through the
+- [ ] `src/core/rendering/stampCoverage.ts`: the tip's mask replacing the
+      radial profile inside `paintDab`, deterministic from the document and the
+      dab's direction.
+- [ ] `src/core/rendering/Canvas2DRenderer.ts`: wire the tip through the
       stamp path; the segment path and the grain post-pass stay untouched.
-- [ ] `src/features/brushes/BrushControls.tsx`: real texture controls, no
+- [ ] `src/features/brushes/BrushControls.tsx`: real tip controls, no
       placeholders.
-- [ ] `src/core/project/projectFormat.ts`: format v10 if the appearance changes,
-      validate the new fields, read v1-v9 unchanged.
-- [ ] Tests: default parity, deterministic texture at different zoom/scale, the
+- [ ] `src/core/project/projectFormat.ts`: format v11 if the appearance changes,
+      validate the new fields, read v1-v10 unchanged.
+- [ ] Tests: default parity, deterministic tip at different zoom/scale, the
       union still holds, live/commit/rebuild/export parity, format round-trip
       and old-file defaults.
 - [ ] Docs in the same commit: README, ARCHITECTURE, PROJECT_FORMAT, ROADMAP,
       HANDOFF + this brief.
-- [ ] Browser check: the default strokes unchanged, the texture visible, one
+- [ ] Browser check: the default strokes unchanged, the tip visible, one
       undo step, save/reopen and export agree; report automated/browser
       evidence separately.
 - [ ] `pnpm test`, `pnpm typecheck`, `pnpm build`; commit (`git commit -F`) and
@@ -670,13 +719,13 @@ without changing what current hard, soft, grain and stamped files look like.
 ### Acceptance criteria
 
 - Default hard, soft, grain and stamped output is unchanged pixel for pixel.
-- A textured dab stroke is one undo step; it never rewrites existing strokes.
-- Live drawing, undo/redo, reopen and export produce the same textured pixels.
+- A tipped dab stroke is one undo step; it never rewrites existing strokes.
+- Live drawing, undo/redo, reopen and export produce the same tipped pixels.
 - The union still holds: overlapping dabs and a self-crossing stroke do not
   darken.
-- The texture is anchored to the document, not to the frame: the same stroke
+- The tip is anchored to the document, not to the frame: the same stroke
   renders the same at every zoom and `rasterScale`.
-- Old projects open unchanged; a v10 file requires the new fields and an older
+- Old projects open unchanged; a v11 file requires the new fields and an older
   reader refuses it rather than drawing the wrong look.
 
 ## 10. First ten minutes of a new session
@@ -684,7 +733,7 @@ without changing what current hard, soft, grain and stamped files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 653 tests in 32 files).
+   anything (expect 728 tests in 34 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

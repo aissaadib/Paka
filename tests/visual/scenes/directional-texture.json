@@ -1,0 +1,59 @@
+{
+    "id":  "directional-texture",
+    "width":  120,
+    "height":  120,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Base",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "stamp":  true,
+                                                          "stampSpacing":  0.2,
+                                                          "stampHardness":  1,
+                                                          "stampTexture":  1,
+                                                          "hardness":  1,
+                                                          "texture":  0,
+                                                          "color":  "#16181c",
+                                                          "size":  22
+                                                      },
+                                            "xs":  [
+                                                       10,
+                                                       28,
+                                                       48
+                                                   ],
+                                            "ys":  [
+                                                       106,
+                                                       58,
+                                                       12
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "stamp":  true,
+                                                          "stampSpacing":  0.2,
+                                                          "stampHardness":  1,
+                                                          "stampTexture":  1,
+                                                          "hardness":  1,
+                                                          "texture":  0,
+                                                          "color":  "#16181c",
+                                                          "size":  22
+                                                      },
+                                            "xs":  [
+                                                       54,
+                                                       82,
+                                                       110
+                                                   ],
+                                            "ys":  [
+                                                       108,
+                                                       90,
+                                                       72
+                                                   ]
+                                        }
+                                    ]
+                   }
+               ]
+}

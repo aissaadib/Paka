@@ -192,9 +192,14 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Stamp-based brush engine behind the existing stroke interface (per-dab
       spacing and a true per-dab hardness curve, with the dabs unioned so a
       stroke never darkens where it crosses itself). Format v9.
-- [ ] Directional, image-based or per-dab stamp textures: a texture that varies
-      per dab and can follow the path direction, rather than one
-      document-anchored grain post-pass over the finished coverage.
+- [x] Per-dab directional texture: bristle lanes that run along the path and
+      follow the stroke's direction, multiplied into a dab's coverage before the
+      union, so the union is still a maximum and a stroke still cannot darken.
+      Deterministic from the document coordinates and the dab's direction.
+      Format v10.
+- [ ] Image-based or brush-tip stamp textures: a tip that is a mask rather than
+      a round disc, so a stroke can be stamped with a felt tip or a dry ink
+      blot. The per-dab machinery FF-01 added is what a tip would build on.
 
 ## Phase 4 - Layer system
 
@@ -257,34 +262,38 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 ## Next slice
 
-**Directional, image-based or per-dab stamp textures** (the rest of Phase 3).
-The stamp engine itself has shipped: a stroke can be drawn as a chain of round
-dabs placed along its path, unioned so it never darkens where it crosses
-itself, with a true per-dab hardness curve (format v9). The grain is still one
-document-anchored post-pass over the finished coverage.
+**Brush-tip and image-based stamp textures** (the rest of Phase 3). The stamp
+engine has shipped (a chain of round dabs placed along the path, unioned so it
+never darkens where it crosses itself, with a true per-dab hardness curve,
+format v9) and the per-dab **directional texture** has shipped with it (bristle
+lanes along the path, multiplied into a dab's coverage before the union, format
+v10). The grain is still one document-anchored post-pass over the finished
+coverage.
 
-This slice is about the texture layer of that engine: a texture that varies
-**per dab** and can follow the path direction, the way a bristle or a dry
-brush varies, rather than one grain over the whole stroke.
+This slice is about the **shape** of a dab rather than its texture: a brush tip
+that is a mask rather than a round disc, so a stroke can be stamped with a
+felt tip, a dry ink blot or a bristle bundle.
 
 Non-negotiable constraints:
 
 - `DrawingRenderer` and `StrokeRecord` remain the boundary. A texture is a
   rasterization strategy, not a new element kind; the vector samples stay the
   authoritative record for undo, reopen and export.
-- The existing segment path and the existing grain pass must stay unchanged by
-  default: a hard, soft or grain stroke drawn with no stamp settings stays
-  pixel-identical.
-- A per-dab texture must stay **deterministic from document coordinates**, so
-  live drawing, layer rebuild, undo/redo, reopen and PNG export agree at every
-  zoom and `rasterScale`. No `Math.random()` in a repaint path.
-- A texture that changes the pixels needs a format bump (v10 if a field
-  changes appearance), and the older reader must refuse the file rather than
-  draw the wrong look.
+- The existing segment path, the existing grain pass and the existing stamp
+  engine must stay unchanged by default: a hard, soft or grain stroke drawn
+  with no stamp settings stays pixel-identical.
+- A tip must stay **deterministic from document coordinates**, so live drawing,
+  layer rebuild, undo/redo, reopen and PNG export agree at every zoom and
+  `rasterScale`. No `Math.random()` in a repaint path.
+- A tip that changes the pixels needs a format bump (v11 if a field changes
+  appearance), and the older reader must refuse the file rather than draw the
+  wrong look.
+- A tip in the project file inflates the JSON: the tip must be a **mask** (no
+  colour), so the single-alpha composite and the union maximum still hold.
 - Keep `spacing` (sample density) distinct from the stamp's dab spacing.
 - UI: real texture controls only when the engine honours them, with no
   placeholders.
 
-Acceptance bar: existing output unchanged by default; a textured dab stroke is
-one undo step; live, committed, reopened and exported pixels match; the
-texture is anchored to the document, not to the frame.
+Acceptance bar: existing output unchanged by default; a tipped stroke is one
+undo step; live, committed, reopened and exported pixels match; the tip is
+anchored to the document, not to the frame.

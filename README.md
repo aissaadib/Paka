@@ -152,8 +152,9 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   pointer path; the line lags while moving and settles on the release point),
   **texture** (0-100 %: deterministic grain over the finished coverage), a
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
-  how far apart the dabs sit) and **stamp hardness** (the falloff of a single
-  dab), colour (picker, an 8-swatch palette and the colour wheel), and toggles for
+  how far apart the dabs sit), **stamp hardness** (the falloff of a single
+  dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
+  colour (picker, an 8-swatch palette and the colour wheel), and toggles for
   pressure-driven size and pressure-driven opacity. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;
   hardness and texture apply to the brush, the eraser and shapes, while sampling,
@@ -166,6 +167,15 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   curve - a true falloff inside the dab rather than a blur of the finished
   silhouette. Live drawing, undo/redo, reopening a file and exporting a PNG all
   produce the same dabs.
+- **Per-dab directional texture**: with the stamp texture switched on, each dab
+  is crossed by bristle lanes that run **along** the path, so a stroke reads as
+  a bundle of streaks rather than a line of dots, and the lanes rotate with the
+  stroke. The texture is multiplied into a dab's coverage *before* the dabs are
+  combined, so it can only take ink away and a stroke still never darkens where
+  it crosses itself. The lanes are laid out against the brush's centre line, so
+  the picture does not change when a stroke is drawn backwards, and against the
+  brush's nominal size, so the pattern is the same in document pixels at every
+  zoom.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -371,9 +381,11 @@ paste-ready version of the same briefing is in
   follow filter**: at high strength the line visibly lags the pointer and
   settles with one final segment on release; it has no look-ahead or rope-style
   catch-up, and shape tools ignore it.
-- **The stamp engine is round dabs only.** There is no directional, image-based
-  or per-dab texture, no scatter, rotation or jitter, and no per-dab opacity
-  (a stroke still gets one alpha). A stamped stroke's cost grows with the
+- **The stamp engine is round dabs only.** There is no brush **tip** - a felt
+  tip, a dry ink blot, a stamped bitmap - no scatter, rotation or jitter, and
+  no per-dab opacity
+  (a stroke still gets one alpha). The per-dab texture is a procedural
+  bristle pattern, not a picture. A stamped stroke's cost grows with the
   square of the brush radius, so a very large brush with a fine dab spacing is
   expensive to re-rasterize; the planner stops after a fixed amount of work, so
   an extreme stroke is cut short rather than stalling the app.
@@ -387,10 +399,11 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `9`** (`version: 1` to `8` files still
-  open and are written back as 9; their strokes default to a hard edge, texture
+- **The current project version is `10`** (`version: 1` to `9` files still
+  open and are written back as 10; their strokes default to a hard edge, texture
   0, a missing stabilizer reads as 0 because it was added additively within
-  version 6, and the stamp is off because it did not exist before version 9).
+  version 6, the stamp is off because it did not exist before version 9, and
+  the per-dab texture is off because it did not exist before version 10).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

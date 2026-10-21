@@ -54,6 +54,7 @@ describe("brush configuration", () => {
       stamp: true,
       stampSpacing: 9,
       stampHardness: -2,
+      stampTexture: 4,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -67,6 +68,7 @@ describe("brush configuration", () => {
     expect(normalized.texture).toBe(1);
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
+    expect(normalized.stampTexture).toBe(1);
   });
 
   it("applies a patch without mutating the current settings", () => {

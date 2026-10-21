@@ -455,6 +455,51 @@ path - a shape is an outline, and a filled shape is a flat polygon - and a
 shape's stroke record stores the stamp fields as they were not used, so the file
 says what was actually drawn.
 
+### The per-dab directional texture
+
+`BrushSettings.stampTexture` adds a texture **inside** each dab, so a stamped
+stroke reads as a bundle of bristle lanes rather than a line of dots. `0` is the
+plain round dab, byte for byte as before the field existed; above `0` the
+lanes take ink out of the dabs.
+
+The lanes run **along** the path. A dab knows the direction of the path at its
+own position (`StampDab.angle`), so the texture is laid out in the dab's own
+frame: the perpendicular offset from the brush's centre line picks the lane, and
+the lane's own width and offset come from a fixed 32-bit hash of the lane index.
+A horizontal stroke leaves horizontal streaks, a diagonal one leaves diagonal
+streaks, and the picture rotates with the stroke.
+
+Two properties follow from the layout, and both are what make the feature
+work inside the existing engine:
+
+- **The lanes are measured against the brush's nominal size**, so they are
+  anchored to the document: at `rasterScale` 2 they are twice as wide in device
+  pixels and the same distance apart in document pixels.
+- **The offset is taken from the brush's centre line, not from the side of it.**
+  Every dab on a straight path therefore sees the *same* offset at the same
+  pixel, so the lanes are consistent across overlapping dabs and the
+  per-pixel maximum union preserves them instead of filling them in. That is
+  also why the picture does not change when a stroke is drawn backwards: the
+  lanes belong to the path, not to the direction of travel.
+
+The texture multiplies a dab's coverage **before** the union, so it can only
+ever remove ink. The union is still a maximum, a self-crossing stamped stroke
+still cannot darken, and the stroke's opacity is still applied once.
+
+Two honest limits:
+
+- The **first dab** of a stroke carries the angle `0`, because the path has
+  not continued yet and a dab's direction must not depend on samples that
+  arrive later. Its lanes are therefore laid out along the document's x axis
+  rather than along the stroke. The neighbouring dabs overlap it, so the
+  effect is small, but it is there.
+- On a **tight curve** the lanes splay slightly, because each dab measures the
+  offset from its own centre. On a gentle curve the effect is below a pixel.
+
+The texture costs no extra allocation: it reuses the dab's own pixel loop and
+the coverage map's existing tiles, so the raster budget's 58 bytes per
+document pixel still holds.
+
 ### Eraser strokes
 
 An eraser is a brush whose strokes **subtract** coverage instead of adding it.

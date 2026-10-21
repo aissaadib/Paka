@@ -98,7 +98,8 @@ added without changing the model.
             "texture": 0,
             "stamp": false,
             "stampSpacing": 0.1,
-            "stampHardness": 1
+            "stampHardness": 1,
+            "stampTexture": 0
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -123,7 +124,8 @@ added without changing the model.
             "texture": 0,
             "stamp": false,
             "stampSpacing": 0.1,
-            "stampHardness": 1
+            "stampHardness": 1,
+            "stampTexture": 0
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -148,7 +150,8 @@ added without changing the model.
             "texture": 0,
             "stamp": false,
             "stampSpacing": 0.1,
-            "stampHardness": 1
+            "stampHardness": 1,
+            "stampTexture": 0
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -385,6 +388,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `stamp` | boolean | Whether the stroke is rasterized as a chain of round dabs instead of round-capped segments. `false` is the legacy segment path. Required in version 9; version-1 to -8 files have no field and read as `false`. |
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
+| `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
 
 ## Validation policy
 
@@ -446,6 +450,9 @@ looks like:
   `stampSpacing`/`stampHardness` → their defaults. The stamp did not exist
   before version 9, and the stamp off is exactly the segment path those files
   were written by;
+- a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
+  texture did not exist before version 10, and the texture off is exactly the
+  coverage those files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -482,7 +489,8 @@ Two further guarantees:
 | 6 | Requires `hardness` on every stroke brush; reads version-1 to -5 files unchanged and defaults their strokes to a hard edge (`1`). | Writes the additive `stabilizer` field too. |
 | 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | Writes the required `texture` field. |
 | 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | - |
-| 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | The current version; what this build always writes. |
+| 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
+| 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -496,9 +504,9 @@ Two further guarantees:
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
   as `0`; when present it must still be a number in `0..1`.
-- **`document.guides` is additive within version 9.** The composition guides are
-  display-only: they are painted over the artwork and never reach a layer
-  surface or a PNG export. A version-9 reader that skips the field draws the
+- **`document.guides` is additive within version 9 and later.** The composition
+  guides are display-only: they are painted over the artwork and never reach a
+  layer surface or a PNG export. A reader that skips the field draws the
   identical picture, so the field needed no version bump - the same situation as
   `stabilizer` within version 6. A file without the field opens with no guides;
   a file with them round-trips exactly.
@@ -511,6 +519,12 @@ Two further guarantees:
   version-8 reader that ignored it would draw a stamped stroke as a plain one,
   which is a different picture. Version-1 to -8 files read with the stamp off,
   which is exactly the path they were written by.
+- **`stampTexture` required version 10**, for the same reason. It changes how a
+  stamped stroke's samples are rasterized - the dabs carry bristle lanes
+  instead of being plain discs - so a version-9 reader that ignored it would
+  draw the same stroke as a plain chain of dabs, which is a different picture.
+  Version-1 to -9 files read with the texture off, which is exactly the
+  coverage they were written by.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
