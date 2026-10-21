@@ -49,6 +49,7 @@ report.
 > | "The blur cost is linear in the scratch area" (F3) | **Retracted** — the flush of the scratch is charged the scratch's area, so the reading was circular. The *structural* claim (every frame re-blurs the whole bbox) stands. |
 > | "A draw from a just-written canvas is a whole-canvas operation" (F7b) | **Retracted** — it was the flush of the canvas with pending work. |
 > | "The destination is the cost" (F7f) and the tile/batching lead | **Closed** — a read-back cost, not a rendering-path cost. It survives only for the rare read-back paths (PNG export, bucket scan, picker probe). |
+> | The last open question: how long does a rebuild take? | **Answered** — see F8: a rebuild of a 100-element layer costs a few milliseconds and scales with the **element count**, not the document area. The destination-area term is not in the rendering path, so the tile/batching work should not be scheduled. |
 >
 > The method lesson is the one this report's Appendix C already gave, and
 > which this audit then failed to apply to its own harness: **sample frame
@@ -754,6 +755,7 @@ reproduce.
 > What remains genuinely open is the one thing no measurement here settled:
 > **how long a rebuild actually takes in the packaged app.** That needs rAF
 > frame deltas in a visible window (Appendix C), not a harness read-back.
+> **Answered in a browser window since — see F8.**
 
 On an idle machine the last term was isolated with a micro-benchmark: 100
 blits of 80x80 px (0.64 Mpx written in total) from a small static source into
@@ -795,7 +797,78 @@ charged the destination's area.
   proportional to the destination area), not the constant, and it needs a
   packaged-app profile before anyone re-architects the surfaces around it.
 
-### F6 — The 1x1 readback itself dominates any display-canvas measurement
+### F8 — The last open question, answered: a rebuild costs a few milliseconds and does not scale with the document
+
+This audit's one remaining question was "how long does a rebuild actually
+take in the product?". It was measured afterwards (Agent 1) with the recipe
+Appendix C prescribes — the real `Canvas2DRenderer` against the dev server, a
+document-sized canvas attached to the DOM, a layer of N strokes, 20 rebuilds
+inside one frame, and a control that renders the same layer 20 times *without*
+invalidating it; the difference is the rebuild. The clock is
+`requestAnimationFrame`, and there is **no** `getImageData` inside the
+measured path (Chromium driven over the DevTools protocol from Node;
+`%TEMP%\opencode\rebuild-cost.mjs`).
+
+| Document | Elements | Composite only (ms) | With rebuild (ms) | Rebuild cost (ms) |
+| --- | --- | --- | --- | --- |
+| 1024^2 | 25 | 0.41 / 0.13 | 0.36 / 2.02 | -0.04 / 1.89 |
+| 1024^2 | 100 | 0.42 / 0.30 | 1.29 / 5.41 | 0.87 / 5.11 |
+| 4096^2 | 25 | 0.41 / 0.21 | 0.42 / 1.04 | 0.00 / 0.84 |
+| 4096^2 | 100 | 0.42 / 0.46 | 1.20 / 8.03 | 0.78 / 7.57 |
+
+(The two figures per cell are two runs — headless and headed; the runs differ
+by about 6x, so quote the range and the shape, never a single number.)
+
+What it says:
+
+* **A rebuild of a 100-element layer costs a few milliseconds** — the same
+  order as a frame. It is not a user-visible problem.
+* **The cost is dominated by the element count, not the document area.** Four
+  times the elements costs 2.7-6x more; sixteen times the document area costs
+  about the same (0.87 vs 0.78 ms at 100 elements, 1024^2 vs 4096^2). That is
+  exactly what F1b (`4ac040b`) bought: the bounded rebuild turned the cost
+  from "document area" into "stroke geometry", and the measurement now shows
+  it.
+* **The per-frame composite of a document-sized layer surface is cheap and
+  roughly flat** (0.30 ms at 1024^2, 0.46 ms at 4096^2 for 100 elements —
+  16x the area for 1.5x the cost). So the destination-area term is *not* in the
+  rendering path, F7f's lead is closed, and the tile/batching work should not
+  be scheduled on the strength of it.
+
+Caveats, stated plainly: this is a **browser window**, not the packaged Tauri
+window — the same Chromium and the same canvas implementation, but the packaged
+app was not measured and is not claimed; it is a micro-benchmark of the rebuild
+path, not a profile of the whole app; and the two runs disagree by ~6x, which
+is this audit's own lesson applied to these numbers too.
+
+#### F8b — the pixel question that is still open
+
+The F1b change (`4ac040b`) and the element-scratch variant that was reverted
+(`f7cf50c` / `2fa34cc`) both blend only the element's rectangle, so both could
+in principle clip the antialiased ring of a round cap or join that a
+full-surface blend keeps. The repository's software pixel canvas has **no
+antialiasing** (its coverage is a hard capsule inside the samples' radius),
+so the Vitest equality proves the composite *order* and the *placement* — it
+is not a browser proof of the antialiased edge.
+
+What F7d did establish, in Chromium, on the real renderer, with real pixels:
+the shipped F1b path and a faithful **emulation** of the pre-F1b path (the
+document-sized-buffer path with a *full* clear of the buffer — the only other
+difference) produced **0 differing bytes in all eight configurations** (hard,
+soft, grain, soft+grain at rasterScale 1 and 2), on the layer surface *and*
+the display canvas; and the emulation reproduced the pre-F1b *area* numbers
+exactly, which is the check that it is faithful.
+
+What that does **not** establish: that the emulation is bit-identical to the
+actual `520aa77` build in every respect. The decisive form of the proof is
+F1b versus the **real** pre-F1b build, and nobody has run it yet. It is
+cheap: a detached worktree at `520aa77` beside the dev server, rendered in
+Chromium and compared pixel-wise. The same test settles the reverted F7: the
+scratch path is byte-identical to the document-buffer path at rasterScale 1
+(Agent 1's browser A/B and this audit's F7d agree), and differs by at most
+1/255 on at most 44 bytes of 4.2 M at rasterScale 2 (F7d) — so the only open
+difference is that 1/255, and the keep-or-revert decision belongs to the
+coordinator with the numbers in hand.
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
 and 42.9 ms for an empty `render()` + readback. Any future benchmark of the
@@ -824,20 +897,21 @@ frame-rate number could be obtained in this environment.
 0. **DONE — R1 shipped.** `4ac040b` bounds the layer rebuild by each element's
    inked rectangle: the touched area per rebuild drops 47x-187x for typical
    strokes (F1b, F1c), and the pixels are unchanged (F7d — byte-identical to
-   the pre-F1b rendering in all eight measured configurations).
-1. **Measure what a rebuild actually costs, in the packaged app, with rAF
-   frame deltas and no read-back inside the measurement** (Appendix C). Every
-   millisecond in this report is retracted (errata), so the one thing this
-   audit cannot offer is a time budget for a layer rebuild. If the packaged
-   app shows the rebuild is slow, the durable levers are, in order: the
-   *number* of elements (a per-layer cache of the last rasterization, so an
-   undo re-rasterizes only the changed element) and the *blur* work of a
-   soft stroke (R2).
-2. **R2 — incremental feathering**, if the packaged-app profile says the
-   feather is the cost. It touches the "live preview == committed pixels"
-   invariant and needs a pixel proof, not just a timing.
-3. **R3 — composite cache**, if the profile says the per-frame composite is
-   the cost (it scales with the number of visible layers, and each layer is one
+   the pre-F1b rendering in all eight measured configurations). F8 now shows
+   what it bought: a rebuild of a 100-element layer costs a few milliseconds
+   and scales with the *element count*, not the document area.
+1. **The one open item is a pixel proof, not a timing** (F8b): F1b versus the
+   **real** pre-F1b build (`520aa77`) in Chromium, and the same comparison for
+   the reverted element-scratch variant. It is a detached worktree plus a
+   pixel comparison, and it decides the keep-or-revert of `f7cf50c`. The
+   durable lever if a layer's rebuild ever does show up as slow is the
+   *number* of elements — a per-layer cache of the last rasterization, so an
+   undo re-rasterizes only the changed element — not the area.
+2. **R2 — incremental feathering**, if a soft brush is still visibly slow in
+   the app. It touches the "live preview == committed pixels" invariant and
+   needs a pixel proof, not just a timing.
+3. **R3 — composite cache**, if a profile says the per-frame composite is the
+   cost (it scales with the number of visible layers, and each layer is one
    `drawImage`).
 4. **R4 — keep the shipped document budget** (Agent 4, `fae138c`: the peak is
    58 bytes per document pixel, 928 MiB at the cap) and treat the per-layer
