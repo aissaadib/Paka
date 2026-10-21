@@ -253,6 +253,67 @@ export function stampDabCoverage(distance: number, radius: number, hardness: num
 }
 
 /**
+ * The number of bristle lanes across the brush's nominal diameter.
+ *
+ * The lanes are a property of the **brush**, not of a dab: they are measured
+ * against the nominal size, so a lighter dab (a lower pressure) does not move
+ * them, and the layout is the same in document pixels at every `rasterScale`.
+ */
+export const STAMP_TEXTURE_LANES = 4;
+
+/**
+ * The directional texture a dab's coverage is modulated with.
+ *
+ * The lanes run **along** the dab's direction, so the pattern follows the
+ * path: a horizontal stroke leaves horizontal streaks, a diagonal one leaves
+ * diagonal streaks. The lanes are laid out across the brush's centre line, so
+ * the pattern is a function of the perpendicular offset only - which is what
+ * makes it the *same* for every dab on a path, and therefore what lets the
+ * per-pixel maximum union keep it instead of filling it in.
+ */
+export interface StampTexture {
+  /**
+   * The dab's direction, in radians.
+   *
+   * The first dab of a stroke carries `0`, because the path has not continued
+   * yet and a dab's direction must not depend on samples that arrive later.
+   */
+  readonly angle: number;
+  /** The distance between bristle lanes, in device pixels. */
+  readonly laneWidth: number;
+  /** How strongly the lanes modulate the coverage, in `[0, 1]`. */
+  readonly strength: number;
+}
+
+/**
+ * The distance between a brush's bristle lanes, in device pixels.
+ *
+ * The lanes are measured against the brush's **nominal** size, so the
+ * pattern is anchored to the document: at `rasterScale` 2 the lanes are twice
+ * as wide in device pixels and the same distance apart in document pixels.
+ */
+export function stampTextureLaneWidth(brush: BrushSettings, rasterScale: number): number {
+  return Math.max(1, (brush.size * rasterScale) / STAMP_TEXTURE_LANES);
+}
+
+/**
+ * A deterministic hash of one bristle lane, in `[0, 1]`.
+ *
+ * The same 32-bit xorshift the grain uses (`canvas2dStroke.ts`), so the two
+ * textures in the app share one idiom and neither depends on a clock, a random
+ * seed, or the order the dabs happen to be painted in.
+ */
+function laneHash(lane: number, salt: number): number {
+  let hash = (lane + salt * 0x9e3779b9) >>> 0;
+  hash ^= hash << 13;
+  hash >>>= 0;
+  hash ^= hash >>> 17;
+  hash ^= hash << 5;
+  hash >>>= 0;
+  return hash / 0xffffffff;
+}
+
+/**
  * The union of the dabs painted so far, in device pixels.
  *
  * Coverage is kept in tiles so the map never has to be re-anchored when a
@@ -270,8 +331,18 @@ export class StampCoverage {
    * The dab is given in device pixels, because that is the grid the coverage
    * is kept on: the same stroke at `rasterScale` 2 simply paints twice as many
    * pixels. The returned rectangle is the area the dab can reach.
+   *
+   * A `texture` modulates the dab's coverage **before** it is unioned, so the
+   * union is still a maximum and the stroke still cannot darken where its
+   * dabs overlap. A texture can therefore only ever remove ink.
    */
-  paintDab(centerX: number, centerY: number, radius: number, hardness: number): StampRect | null {
+  paintDab(
+    centerX: number,
+    centerY: number,
+    radius: number,
+    hardness: number,
+    texture: StampTexture | null = null,
+  ): StampRect | null {
     if (radius <= 0 || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
       return null;
     }
@@ -284,6 +355,24 @@ export class StampCoverage {
     const coreLimit = Math.max(radius - band - 0.5, 0);
     const outerLimit = radius + 0.5;
     const bandWidth = band + 1;
+
+    // The bristle lanes run along the dab's direction, so the texture is laid
+    // out in the dab's own frame rather than in the device's. `cos`/`sin` are
+    // hoisted out of the pixel loop: they are the dab's, not the pixel's.
+    const textured = texture !== null && texture.strength > 0 && texture.laneWidth > 0;
+    const laneWidth = textured ? texture.laneWidth : 0;
+    // The reciprocal is taken once per dab: the lane index is a multiply and
+    // a truncation per pixel, not a division.
+    const inverseLaneWidth = textured ? 1 / laneWidth : 0;
+    const strength = textured ? texture.strength : 0;
+    const directionX = textured ? Math.cos(texture.angle) : 0;
+    const directionY = textured ? Math.sin(texture.angle) : 0;
+    // The lane the pixels are currently in, and the bristle inside it. The
+    // lane only changes a few times along a row, so the hash is computed on a
+    // change rather than per pixel.
+    let lane = -1;
+    let bristleStart = 0;
+    let bristleEnd = 0;
 
     const firstTileX = Math.floor(left / COVERAGE_TILE_SIZE);
     const lastTileX = Math.floor((right - 1) / COVERAGE_TILE_SIZE);
@@ -322,7 +411,31 @@ export class StampCoverage {
               const t = clamp((outerLimit - distance) / bandWidth, 0, 1);
               coverage = t * t * (3 - 2 * t);
             }
-            const value = Math.round(coverage * 255);
+            let value: number;
+            if (textured) {
+              // The perpendicular offset from the brush's centre line. The
+              // absolute value is used so the pattern does not depend on which
+              // side of the line the pixel is on, and therefore does not
+              // change when a stroke is drawn backwards.
+              const perpendicular = Math.abs(-dx * directionY + dy * directionX);
+              const currentLane = (perpendicular * inverseLaneWidth) | 0;
+              if (currentLane !== lane) {
+                lane = currentLane;
+                const widthFraction = 0.45 + 0.55 * laneHash(currentLane, 0);
+                const width = laneWidth * widthFraction;
+                const start = laneWidth * laneHash(currentLane, 1) * (1 - widthFraction);
+                bristleStart = start;
+                bristleEnd = start + width;
+              }
+              const phase = perpendicular - currentLane * laneWidth;
+              const inside = phase - bristleStart;
+              const depth = inside < bristleEnd - inside ? inside : bristleEnd - inside;
+              // A one-device-pixel ramp on each bristle edge.
+              const bristle = depth >= 0.5 ? 1 : depth <= -0.5 ? 0 : depth + 0.5;
+              value = Math.round(coverage * 255 * ((1 - strength) + strength * bristle));
+            } else {
+              value = Math.round(coverage * 255);
+            }
             if (value > tile[index]) {
               tile[index] = value;
             }

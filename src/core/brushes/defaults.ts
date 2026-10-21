@@ -34,6 +34,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   stamp: false,
   stampSpacing: 0.1,
   stampHardness: 1,
+  stampTexture: 0,
 };
 
 /** Clamps and validates a brush configuration. */
@@ -52,6 +53,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     stamp: brush.stamp === true,
     stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
     stampHardness: clamp(brush.stampHardness, 0, 1),
+    stampTexture: clamp(brush.stampTexture, 0, 1),
   };
 }
 
@@ -77,7 +79,8 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.texture === b.texture &&
     a.stamp === b.stamp &&
     a.stampSpacing === b.stampSpacing &&
-    a.stampHardness === b.stampHardness
+    a.stampHardness === b.stampHardness &&
+    a.stampTexture === b.stampTexture
   );
 }
 

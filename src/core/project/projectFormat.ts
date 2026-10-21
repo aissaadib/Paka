@@ -96,16 +96,22 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * version was bumped and the fields are required. Version-1 to -8 files still
  * open unchanged, with the stamp off, which is exactly the segment path they
  * were written by.
+ * Version 10: a stroke's `brush` carries `stampTexture`, the strength of the
+ * per-dab directional texture. It changes how a stamped stroke's samples are
+ * rasterized, so a version-9 reader would draw the same stroke as a plain
+ * chain of dabs - a different picture - and the version was bumped with the
+ * field required. Version-1 to -9 files still open unchanged, with the
+ * texture off, which is exactly the coverage they were written by.
  *
- * Within version 9, `document.guides` is **additive**: the composition guides
+ * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
- * version 6. That is why the version was not bumped. A file without the field
- * opens with no guides at all.
+ * version 6. That is why the version was not bumped for them. A file without
+ * the field opens with no guides at all.
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 9;
+export const PROJECT_VERSION = 10;
 export const PROJECT_FILE_EXTENSION = "paka";
 
 const LAYER_BLEND_MODES: readonly LayerBlendMode[] = ["normal", "multiply", "screen"];
@@ -845,6 +851,13 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
       version >= 9
         ? readNumber(record.stampHardness, `${label} brush stamp hardness`, 0, 1)
         : DEFAULT_BRUSH.stampHardness,
+    // The per-dab directional texture changes how a stamped stroke's samples
+    // are rasterized, so it became a required field in version 10: a version-9
+    // reader ignores it and draws the same dabs plain, which is a different
+    // picture. Earlier files had no texture at all, and the texture off is
+    // exactly the coverage they were written by.
+    stampTexture:
+      version >= 10 ? readNumber(record.stampTexture, `${label} brush stamp texture`, 0, 1) : 0,
   });
 }
 

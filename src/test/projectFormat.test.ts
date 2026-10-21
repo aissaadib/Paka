@@ -562,7 +562,7 @@ describe("parseProject round trip", () => {
     expect(legacy.project.strokes[0].brush.stampHardness).toBe(DEFAULT_BRUSH.stampHardness);
   });
 
-  it("refuses a version-9 stroke brush without the stamp settings", () => {
+  it("refuses a current-version stroke brush without the stamp settings", () => {
     expect(
       rejectionOf(
         mutate((project) => {
@@ -588,7 +588,7 @@ describe("parseProject round trip", () => {
     ).toContain("brush stamp hardness");
   });
 
-  it("refuses a version-9 stroke brush with an invalid stamp setting", () => {
+  it("refuses a current-version stroke brush with an invalid stamp setting", () => {
     expect(
       rejectionOf(
         mutate((project) => {
@@ -612,6 +612,95 @@ describe("parseProject round trip", () => {
         }),
       ),
     ).toContain("brush stamp hardness");
+  });
+
+  it("round-trips the per-dab texture at version 10", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        stamp: true,
+        stampSpacing: 0.25,
+        stampHardness: 0.4,
+        stampTexture: 0.35,
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.stampTexture).toBe(0.35);
+
+    // The value is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stampTexture).toBe(0.35);
+  });
+
+  it("opens version 9 files with the texture off, which is the path they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stamp: true } });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 9;
+    delete payload.layers[0].elements[0].brush.stampTexture;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.stampTexture).toBe(0);
+  });
+
+  it("refuses a version-10 stroke brush without the texture", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampTexture;
+        }),
+      ),
+    ).toContain("brush stamp texture");
+  });
+
+  it("refuses a version-10 stroke brush with an invalid texture", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampTexture: 2 };
+        }),
+      ),
+    ).toContain("brush stamp texture");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampTexture: -1 };
+        }),
+      ),
+    ).toContain("brush stamp texture");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            stampTexture: "grain",
+          } as unknown as Record<string, unknown>;
+        }),
+      ),
+    ).toContain("brush stamp texture");
   });
 
   it("round-trips multiply and screen layer blend modes at version 8", () => {
@@ -1336,14 +1425,28 @@ describe("the composition guides in the project file", () => {
     expect(parsed.project.document.guides).toEqual([]);
   });
 
-  it("keeps the file version where it was, because the guides are display-only", () => {
-    expect(PROJECT_VERSION).toBe(9);
+  it("keeps the guides additive, so they never force a version bump of their own", () => {
+    // The guides arrived in version 9 and have stayed additive since: they are
+    // display-only, so a reader that does not know the field draws the very
+    // same picture. Version 10 was spent on the per-dab texture, not on the
+    // guides, and a version-9 file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(10);
+
     const document = {
       ...createDocument({ width: 100, height: 80 }),
       guides: [{ id: "guide-1", axis: "vertical" as const, position: 10 }],
     };
     const payload = JSON.parse(serializeProject(document, storeOf([]))) as { version: number };
     expect(payload.version).toBe(PROJECT_VERSION);
+
+    const legacy = JSON.parse(JSON.stringify(payload)) as { version: number };
+    legacy.version = 9;
+    const parsed = parseProject(JSON.stringify(legacy));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document.guides).toHaveLength(1);
   });
 
   it("repairs a broken guide instead of refusing the file", () => {
