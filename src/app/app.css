@@ -360,6 +360,7 @@
 }
 
 .gradient-controls {
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -374,6 +375,120 @@
 
 .gradient-controls__color:hover {
   color: var(--text);
+}
+
+.gradient-stops {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gradient-stops__preview {
+  height: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+}
+
+.gradient-stops__endpoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.gradient-stops__endpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gradient-stops__swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.gradient-stops__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gradient-stops__row {
+  display: grid;
+  grid-template-columns: 26px minmax(80px, 200px) 36px 22px;
+  align-items: center;
+  gap: 6px;
+}
+
+.gradient-stops__color {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+.gradient-stops__range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.gradient-stops__value {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gradient-stops__remove {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gradient-stops__remove:hover {
+  border-color: var(--accent);
+}
+
+.gradient-stops__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.gradient-stops__add {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gradient-stops__add:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.gradient-stops__add:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---------------------------------------------------------------- tool rail */

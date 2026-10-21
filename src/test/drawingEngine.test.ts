@@ -2607,6 +2607,44 @@ describe("DrawingEngine gradients", () => {
     expect(engine.getState().gradientEndColor).toBe("#00ff00");
   });
 
+  it("captures middle stops at press time and keeps them through undo/redo", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setGradientEndColor("#0000ff");
+    engine.setGradientMidStops([
+      { offset: 0.7, color: "#00ff00" },
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0, color: "#ffffff" },
+    ]);
+    expect(engine.getState().gradientMidStops).toEqual([
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0.7, color: "#00ff00" },
+    ]);
+
+    pressGradient(engine, 2, 2);
+    // Options describe the next drag; changing them mid-drag must not rewrite
+    // the gradient already being previewed.
+    engine.setGradientMidStops([]);
+    releaseGradient(engine, 18, 18);
+
+    const expectedStops = [
+      { offset: 0, color: "#ff0000" },
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0.7, color: "#00ff00" },
+      { offset: 1, color: "#0000ff" },
+    ];
+    let gradient = engine.listElements(layerId)[0];
+    expect(isGradient(gradient)).toBe(true);
+    expect(isGradient(gradient) ? gradient.stops : []).toEqual(expectedStops);
+    expect(engine.getState().history.depth).toBe(1);
+
+    engine.undo();
+    expect(engine.listElements(layerId)).toEqual([]);
+    engine.redo();
+    gradient = engine.listElements(layerId)[0];
+    expect(isGradient(gradient) ? gradient.stops : []).toEqual(expectedStops);
+  });
+
   it("copies gradients with fresh ids through layer duplication", () => {
     const { engine } = createGradientEngine();
     const sourceId = engine.getState().document.activeLayerId as string;

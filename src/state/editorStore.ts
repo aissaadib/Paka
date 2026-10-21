@@ -12,7 +12,7 @@ import {
   type EditorSnapshot,
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
-import type { LayerBlendMode, LayerId } from "../core/document/types";
+import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
@@ -49,6 +49,8 @@ export interface EditorActions {
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
   setGradientEndColor(color: string): void;
+  /** Sets the middle stops of the next gradient; endpoints stay the colours above. */
+  setGradientMidStops(stops: readonly GradientStop[]): void;
   /** Shows or hides the grid; display state, never exported. */
   setGridVisible(visible: boolean): void;
   /** Distance between grid lines in document pixels (`2..500`). */
@@ -137,6 +139,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
+    setGradientMidStops: (stops) => engine.setGradientMidStops(stops),
     setGridVisible: (visible) => engine.setGridVisible(visible),
     setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
     setGridSnapping: (snap) => engine.setGridSnapping(snap),
@@ -197,3 +200,4 @@ export function createEditor(options: EditorOptions = {}): Editor {
     subscribe: (listener) => engine.subscribe(listener),
   };
 }
+

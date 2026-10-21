@@ -373,10 +373,11 @@ the current guarantee.
 A linear gradient interpolates along the segment from `(x1, y1)` to `(x2, y2)`.
 A radial gradient centres on `(x1, y1)` and uses the distance to `(x2, y2)` as
 its outer radius (the inner radius is always `0`). Stop `offset` is `0..1` along
-that axis, and its `color` is a `#rrggbb` or `#rgb` hex string. The current engine
-writes exactly two stops (the brush colour at `0`, the toolbar end colour at
-`1`), but the schema allows a future stop editor to write more without another
-version bump.
+that axis, and its `color` is a `#rrggbb` or `#rgb` hex string. The gradient
+tool writes the brush colour at `0`, the toolbar end colour at `1`, and any
+middle stops the stop editor added between them. The schema already allowed
+2-64 stops, so the editor needed no version bump; an older reader in the same
+version range paints every stop it is given.
 
 A gradient element paints over its entire layer, in element order. There is no
 bounding box because the colour function covers the whole surface; an opaque

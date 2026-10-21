@@ -938,9 +938,10 @@ then added per-stroke hardness without changing gradient records.
 The gesture is a drag, and the live preview is real layer content:
 
 1. On pointer-down `beginGradient` captures the current options - linear/radial,
-   brush colour as stop `0`, toolbar end colour as stop `1`, brush opacity - and
-   inserts a zero-length record at the end of the active layer's element list.
-   Nothing enters history and the revision does not move.
+   brush colour as stop `0`, the toolbar's middle stops, toolbar end colour as
+   stop `1`, brush opacity - and inserts a zero-length record at the end of the
+   active layer's element list. Nothing enters history and the revision does not
+   move.
 2. Every move replaces that record (same id, same index) with a new endpoint.
    The engine invalidates the layer, so the renderer rebuilds it in painting
    order: content below the gradient stays below, content above stays above.

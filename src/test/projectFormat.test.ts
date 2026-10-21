@@ -450,6 +450,32 @@ describe("parseProject round trip", () => {
     expect(restored.stops[1]).not.toBe(gradient.stops[1]);
   });
 
+  it("round-trips every gradient stop without a format change", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const gradient = gradientFor(layerId, {
+      stops: [
+        { offset: 0, color: "#000000" },
+        { offset: 0.2, color: "#ff0000" },
+        { offset: 0.55, color: "#00ff00" },
+        { offset: 0.9, color: "#0000ff" },
+        { offset: 1, color: "#ffffff" },
+      ],
+    });
+    const text = serializeProject(document, storeOf([[layerId, [gradient]]]));
+    const payload = JSON.parse(text) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const restored = parsed.project.elements[0];
+    expect(isGradient(restored)).toBe(true);
+    expect(isGradient(restored) ? restored.stops : []).toEqual(gradient.stops);
+  });
+
   it("round-trips brush hardness, and opens older files with a hard edge", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;

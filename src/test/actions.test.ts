@@ -50,6 +50,7 @@ beforeEach(() => {
     setFillTolerance: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
+    setGradientMidStops: vi.fn(),
     setGridVisible: vi.fn(),
     setGridSpacing: vi.fn(),
     setGridSnapping: vi.fn(),

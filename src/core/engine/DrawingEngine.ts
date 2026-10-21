@@ -116,6 +116,7 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  GradientStop,
   Guide,
   GuideAxis,
   LayerBlendMode,
@@ -131,7 +132,9 @@ import {
   cloneGradient,
   createGradientRecord,
   gradientIsDegenerate,
+  gradientStopsEqual,
   moveGradientEnd,
+  normalizeGradientMidStops,
 } from "../gradient/gradientRecord";
 import {
   CanvasInputBinder,
@@ -233,6 +236,13 @@ export interface EditorSnapshot {
   readonly gradientType: "linear" | "radial";
   /** End colour of the next gradient; its start is the current brush colour. */
   readonly gradientEndColor: string;
+  /**
+   * Middle stops of the next gradient, sorted strictly between the endpoints.
+   *
+   * Editor state like the end colour: a committed gradient carries its own
+   * stops, so changing this never edits an existing gradient.
+   */
+  readonly gradientMidStops: readonly GradientStop[];
   /**
    * Whether the grid is drawn.
    *
@@ -567,6 +577,7 @@ export class DrawingEngine implements StrokeSource {
   /** Gradient options for the next drag, captured when the gesture starts. */
   private gradientType: "linear" | "radial" = "linear";
   private gradientEndColor = DEFAULT_GRADIENT_END_COLOR;
+  private gradientMidStops: readonly GradientStop[] = [];
   private activeGradient: ActiveGradient | null = null;
   /**
    * Grid display settings. Session state: the grid is an aid, not document
@@ -1356,6 +1367,24 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
+   * Sets the middle stops of the next gradient.
+   *
+   * Endpoints stay the brush colour and `gradientEndColor`; a stop at either
+   * edge is dropped, invalid colours are ignored and offsets are sorted and
+   * clamped. Like the other gradient options this describes the next drag only:
+   * a committed gradient keeps the stops it was drawn with.
+   */
+  setGradientMidStops(stops: readonly GradientStop[]): void {
+    const next = normalizeGradientMidStops(stops);
+    if (gradientStopsEqual(this.gradientMidStops, next)) {
+      return;
+    }
+    this.gradientMidStops = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
    * Shows or hides the grid.
    *
    * Display state, not an edit: it changes no pixels on a layer, writes
@@ -1886,6 +1915,7 @@ export class DrawingEngine implements StrokeSource {
       this.brush.color,
       this.gradientEndColor,
       this.brush.opacity,
+      this.gradientMidStops,
     );
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(gradient);
@@ -3401,6 +3431,7 @@ export class DrawingEngine implements StrokeSource {
       fillTolerance: this.fillTolerance,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
+      gradientMidStops: this.gradientMidStops,
       gridVisible: this.gridVisible,
       gridSpacing: this.gridSpacing,
       gridSnapping: this.gridSnapping,
@@ -3429,6 +3460,7 @@ export class DrawingEngine implements StrokeSource {
       previous.fillTolerance === next.fillTolerance &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&
+      gradientStopsEqual(previous.gradientMidStops, next.gradientMidStops) &&
       previous.gridVisible === next.gridVisible &&
       previous.gridSpacing === next.gridSpacing &&
       previous.gridSnapping === next.gridSnapping &&
@@ -3439,3 +3471,4 @@ export class DrawingEngine implements StrokeSource {
     this.store.setState(next);
   }
 }
+

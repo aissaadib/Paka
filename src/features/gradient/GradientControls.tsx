@@ -8,6 +8,7 @@
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { GradientStopEditor } from "./GradientStopEditor";
 
 export function GradientControls() {
   const { actions } = useEditor();
@@ -44,6 +45,7 @@ export function GradientControls() {
             onChange={(event) => actions.setGradientEndColor(event.target.value)}
           />
         </label>
+        <GradientStopEditor />
       </div>
     </>
   );
