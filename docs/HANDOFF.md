@@ -67,16 +67,17 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-21)
 
-- Branch `integration/t10-hsv-color-wheel` at `bc062c7`, after the
+- Branch `integration/phase1-settings-texture-transforms`, after the
   live-preview compositing, layer-safety, raster-budget, bounded-rasterization,
-  **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
-  slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
-  merged; nothing is waiting in the working tree.
-- **`pnpm test` → 711 tests in 34 files, all pass** (the scale/rotate slice: 653
-  before it).
+  **stamp (dab) brush engine**, **HSV colour wheel**, **composition guides**,
+  **polygon and star**, **scale/rotate**, **fixed-step transforms**, **settings
+  persistence** and **per-dab directional texture** slices. All of those are
+  committed and merged on that branch; nothing is waiting in the working tree.
+- **`pnpm test` → 791 tests in 37 files, all pass** (the scale/rotate slice: 653,
+  the settings slice: 742). `pnpm test:visual` 25 tests pass.
   `pnpm typecheck` clean; `pnpm build` succeeds.
-- **Project file format version 9** (`PROJECT_VERSION = 9`). `document.guides` is
-  additive within version 9.
+- **Project file format version 10** (`PROJECT_VERSION = 10`). `document.guides` is
+  additive within version 9 and later.
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
@@ -515,27 +516,32 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 9. Next move
 
-**Directional, image-based or per-dab stamp textures** (the rest of the Phase 3
-work). The stamp engine itself has shipped: a stroke can be drawn as a chain of
-round dabs placed along its path, unioned so it never darkens where it crosses
-itself, with a true per-dab hardness curve (format version 9). The grain is
-still one document-anchored post-pass over the finished coverage. The "Next
-slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the authority.
+**Brush-tip and image-based stamp textures** (the rest of the Phase 3 work).
+The stamp engine has shipped: a stroke can be drawn as a chain of round dabs
+placed along its path, unioned so it never darkens where it crosses
+itself, with a true per-dab hardness curve (format version 9). The per-dab
+**directional texture** has shipped with it: bristle lanes that run along the
+path, multiplied into a dab's coverage before the union (format version 10).
+The grain is still one document-anchored post-pass over the finished coverage.
+The "Next slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the
+authority.
 
 The constraints that matter:
 
 - keep `DrawingRenderer`/`StrokeRecord` as the boundary; samples stay the
   authoritative record for undo, reopen and export;
-- keep the segment path, the grain pass and the stamp engine as the defaults and
-  preserve hard/soft/grain/stamped output;
-- a per-dab texture multiplies a dab's coverage **before** the union, so the
+- keep the segment path, the grain pass, the stamp engine and the per-dab
+  texture as the defaults and preserve hard/soft/grain/stamped output;
+- a tip multiplies a dab's coverage **before** the union, so the
   union stays a maximum and a stroke still cannot darken;
-- keep the texture deterministic from document coordinates (and from the dab's
+- keep the tip deterministic from document coordinates (and from the dab's
   own direction, if it follows the path) so live, rebuild, undo/redo, reopen and
   PNG export agree at every zoom and `rasterScale`;
-- a non-default texture appearance cannot be ignored by a v9 reader without
-  changing the picture, so expect **format version 10** if fields change
+- a non-default tip appearance cannot be ignored by a v10 reader without
+  changing the picture, so expect **format version 11** if fields change
   output;
+- a tip in the project file inflates the JSON, so it must be a **mask** and not
+  a colour, and it must be a bounded shape the parser can validate;
 - keep `spacing` (sample density) distinct from the stamp's dab spacing;
 - the coverage map stays footprint-bounded and the upload stays one tile at a
   time: the raster budget's 58 bytes per document pixel must not move.
@@ -616,8 +622,9 @@ Optional polish, deliberately not done yet:
   hardness is a Gaussian feather of the stroke silhouette (not a stamp profile);
   spacing controls sample density rather than stamp spacing; the stabilizer is an
   exponential follow filter with visible lag and no look-ahead/rope catch-up;
-  texture is a single grain pass, not a stamped/directional/image texture;
-  there is no stamp engine yet; blend modes are limited to `normal`, `multiply`
+  texture is a single grain pass, not an image texture; the stamp engine's own
+  per-dab texture is a procedural bristle pattern, not a picture, and there is
+  no brush tip; blend modes are limited to `normal`, `multiply`
   and `screen`, composited against the paper and lower layers with no group or
   clipping context.
 

@@ -10,6 +10,10 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import {
+  FIXED_ROTATION_DEGREES,
+  FIXED_SCALE_FACTOR,
+} from "../../core/document/selectionTransform";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { IconChevronDown } from "../icons";
 
@@ -164,6 +168,25 @@ export function AppMenuBar({
           shortcut: "↓",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.nudgeSelection(0, 1),
+        },
+        { type: "separator" },
+        {
+          type: "item",
+          label: "Scale by 150%",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.scaleSelection(FIXED_SCALE_FACTOR),
+        },
+        {
+          type: "item",
+          label: "Rotate 15° Clockwise",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.rotateSelection(FIXED_ROTATION_DEGREES),
+        },
+        {
+          type: "item",
+          label: "Rotate 15° Counter-Clockwise",
+          disabled: selectedStrokes === 0,
+          onSelect: () => actions.rotateSelection(-FIXED_ROTATION_DEGREES),
         },
         { type: "separator" },
         {

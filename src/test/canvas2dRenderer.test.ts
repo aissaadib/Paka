@@ -50,6 +50,7 @@ const BRUSH: BrushSettings = {
   stamp: false,
   stampSpacing: 0.1,
   stampHardness: 1,
+  stampTexture: 0,
 };
 
 let recording: RecordingDocument;
@@ -3111,6 +3112,48 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
 
   it("agrees for a soft dab", () => {
     checkEveryPathAgrees({ ...STAMP_BRUSH, stampHardness: 0.25 });
+  });
+
+  it("agrees with a directional texture", () => {
+    checkEveryPathAgrees({ ...STAMP_BRUSH, stampTexture: 1 });
+  });
+
+  it("shows the texture: a textured stroke is not the plain stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const surface = harness.surfaces[0] as unknown as { pixels: Float32Array };
+
+        const plain = createStampStroke(layerId, STAMP_BRUSH, "plain");
+        harness.elements.set(layerId, [plain]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const plainPixels = Array.from(surface.pixels);
+
+        const textured = createStampStroke(
+          layerId,
+          { ...STAMP_BRUSH, stampTexture: 1 },
+          "textured",
+        );
+        harness.elements.set(layerId, [textured]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const texturedPixels = Array.from(surface.pixels);
+
+        // The lanes take ink out of the dabs, so the picture really changes.
+        expect(texturedPixels).not.toEqual(plainPixels);
+        // And the texture only ever removes ink.
+        let removed = 0;
+        for (let index = 0; index < plainPixels.length; index += 1) {
+          expect(texturedPixels[index]).toBeLessThanOrEqual(plainPixels[index]);
+          if (texturedPixels[index] < plainPixels[index]) {
+            removed += 1;
+          }
+        }
+        expect(removed).toBeGreaterThan(0);
+      },
+    );
   });
 
   it("shows the same pixels while the stroke grows as after a full redraw", () => {

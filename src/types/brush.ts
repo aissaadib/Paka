@@ -95,4 +95,25 @@ export interface BrushSettings {
    * `hardness`, which feathers the whole stroke after its coverage exists.
    */
   readonly stampHardness: number;
+  /**
+   * Strength of the **per-dab directional texture**, in `[0, 1]`.
+   *
+   * `0` is the plain round dab, byte for byte as before this field existed.
+   * Above `0` each dab's coverage is modulated by a set of bristle lanes that
+   * run **along the path**, so a stroke reads as a bundle of streaks rather
+   * than a line of dots - the way a bristle or a ribbed brush marks.
+   *
+   * This is **not** {@link texture}, which is one document-anchored grain pass
+   * over the finished coverage and applies to every stroke. The per-dab
+   * texture only applies to a stamped stroke, is multiplied into a dab's
+   * coverage *before* the dabs are unioned, and therefore can only ever
+   * remove ink - a stroke still cannot darken where its dabs overlap.
+   *
+   * The lanes are laid out in the brush's own frame and follow the path's
+   * direction, so they rotate with the stroke. The pattern is a function of
+   * the document coordinates and the dab's direction only: it is the same in
+   * live drawing, in a layer rebuild, after undo/redo, in a reopened project
+   * and in a PNG export, at every zoom and `rasterScale`.
+   */
+  readonly stampTexture: number;
 }

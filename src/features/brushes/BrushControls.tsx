@@ -112,6 +112,16 @@ export function BrushControls() {
             format={(value) => `${Math.round(value * 100)}%`}
             onChange={(stampHardness) => actions.setBrush({ stampHardness })}
           />
+          <SliderField
+            label="Stamp texture"
+            min={0}
+            max={1}
+            step={0.01}
+            value={brush.stampTexture}
+            title="Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect"
+            format={(value) => `${Math.round(value * 100)}%`}
+            onChange={(stampTexture) => actions.setBrush({ stampTexture })}
+          />
         </>
       ) : null}
       <label

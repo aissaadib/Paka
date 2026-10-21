@@ -64,7 +64,7 @@ architecture by browsing.
 `floodFill`, `document/types.ts`, `document/guides.ts`,
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
-`canvas2dStroke`, `stampCoverage`,
+`canvas2dStroke`,
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
@@ -74,10 +74,14 @@ feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
-rotation, the shape options and their clamps).
+rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
+(~300: the work-area clamp, the physical-pixel arithmetic and the cases).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
-shape geometry).
+shape geometry), `core/rendering/stampCoverage.ts` (501: the dab plan, the
+per-dab profile, the per-dab directional texture and the coverage union),
+`src/test/stampCoverage.test.ts` (508: the dab plan, the texture, the union
+and the budget).
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
@@ -97,7 +101,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
-| Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9) |
+| Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
 | Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L1324/L1350), `types/brush.ts`, `BrushControls.tsx`, format v7 |
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
@@ -114,6 +118,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
+| Window sizing / DPI | `src-tauri/src/window_fit.rs` (the clamp), `src-tauri/src/lib.rs` (`.setup`), `src-tauri/tauri.conf.json` (the default size), `docs/qa/PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md` (the measurement rule) |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
 | Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `docs/g1/reuse-decision.md`, `docs/g1/provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
 
@@ -152,10 +157,11 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 108, 443, 520 |
 | `readBrush` (format validation) | `core/project/projectFormat.ts` | ~675 |
-| `stampDabs`, `StampDabCursor` (dab plan) | `core/rendering/stampCoverage.ts` | 106, 150 |
-| `stampDabCoverage` (per-dab profile) | `core/rendering/stampCoverage.ts` | 218 |
-| `StampCoverage` (coverage union, tiles) | `core/rendering/stampCoverage.ts` | 246 |
-| `MAX_STAMP_COVERAGE_WORK`, `MIN_STAMP_SPACING_PX` | `core/rendering/stampCoverage.ts` | 39, 32 |
+| `stampDabs`, `StampDabCursor` (dab plan) | `core/rendering/stampCoverage.ts` | 90, 107 |
+| `stampDabCoverage` (per-dab profile) | `core/rendering/stampCoverage.ts` | 145 |
+| `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `StampTexture` (per-dab directional texture) | `core/rendering/stampCoverage.ts` | 256, 274, 243 |
+| `StampCoverage` (coverage union, tiles) | `core/rendering/stampCoverage.ts` | 264 |
+| `MAX_STAMP_COVERAGE_WORK`, `MIN_STAMP_SPACING_PX` | `core/rendering/stampCoverage.ts` | 52, 36 |
 | `extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage` | `core/rendering/Canvas2DRenderer.ts` | 1045, 1078, 1112 |
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
@@ -188,6 +194,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
 | `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
 | `docs/qa/T06-IMPLEMENTATION-REPORT.md` | The settings slice: what is implemented, what is blocked on the owner's autosave decisions, and the verified dirty-state invariants |
+| `docs/RELEASE-READINESS-R9-R3-PLAN.md` | The R9 (CI licence allow-list) and R3 (attestation countersignature) preparation: what is verified, what is proposed, and the open owner decisions |
 | `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
 | `THIRD_PARTY_NOTICES.md` | The notice file. Generated - read it, do not edit it; edit `scripts/generate-third-party-notices.mjs` or `licenses/dependency-inventory.json` |
 | `README.md` | Only for user-facing wording or the limitations list |
@@ -218,7 +225,8 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
 | Brush texture / grain | `canvas2dStroke.test.ts` (`textureCoverage`), `canvas2dRenderer.test.ts` (pattern pass), `projectFormat.test.ts`, `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
-| Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
+| Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, per-dab texture, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9/v10), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
+| Fixed-step transforms (the Selection menu) | `fixedStepTransform.test.ts` (the pivot, both directions, undo/redo, the two non-exact inverses), `tests/visual/selection-menu.spec.ts` (the menu in a real browser) |
 | Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
 | Stroke raster | `canvas2dStroke.test.ts` |
 | Shape geometry (line, rectangle, ellipse, polygon, star) | `shapeGeometry.test.ts` (the vertex counts, the inscribed ellipse, the clamps, the rotation, the closed polyline, the star's simple outline) |

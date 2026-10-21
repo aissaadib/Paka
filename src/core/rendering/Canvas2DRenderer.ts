@@ -42,6 +42,7 @@ import {
   StampCoverage,
   StampDabCursor,
   stampDabs,
+  stampTextureLaneWidth,
   unionStampRect,
   type StampRect,
 } from "./stampCoverage";
@@ -1105,6 +1106,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     const dabs = cursor.advance(stroke);
     const scale = this.rasterScale;
+    const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
+    const strength = stroke.brush.stampTexture;
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -1112,6 +1115,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.y * scale,
         dab.radius * scale,
         stroke.brush.stampHardness,
+        // The texture rides on the dab's own direction, so the live path and
+        // the rebuild path lay the same lanes out over the same pixels.
+        strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -1135,6 +1141,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     coverage.clear();
     const dabs = stampDabs(stroke, stroke.brush);
     const scale = this.rasterScale;
+    const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
+    const strength = stroke.brush.stampTexture;
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -1142,6 +1150,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.y * scale,
         dab.radius * scale,
         stroke.brush.stampHardness,
+        strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
