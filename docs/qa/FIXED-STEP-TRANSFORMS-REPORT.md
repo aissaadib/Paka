@@ -155,6 +155,7 @@ Two facts worth knowing, though no command uses them:
 | `src/state/editorStore.ts` | `EditorActions.scaleSelection(factor)` and `EditorActions.rotateSelection(degrees)`. |
 | `src/components/layout/AppMenuBar.tsx` | Three entries in the Selection menu, between the Nudge group and the Flip group. |
 | `src/test/fixedStepTransform.test.ts` | 17 engine-level tests (new file). |
+| `tests/visual/selection-menu.spec.ts` | 5 **browser** tests of the menu itself (new file): the entries exist, grey out with nothing selected, light up with a selection, and choosing one runs the real transform and leaves the right history entry. |
 | `README.md` | The sentence that said "the scale and the rotation are handle gestures" was **stale** after this change; it now lists the three commands and what they do. |
 | `docs/ARCHITECTURE.md` | Two bullets in §Selection: the fixed steps are the same transform with a different number, and undo is the exact inverse while the opposite command is not. |
 
@@ -242,6 +243,30 @@ still pass, which is the regression evidence that the handle path is intact.
 Test 16 additionally guards the one thing this slice changed in that path —
 the default history label.
 
+### 4.1 The menu, in a real browser
+
+`tests/visual/selection-menu.spec.ts` — 5 tests, driven with Playwright
+against the **running application** in Chromium. The application is served by
+the same Vite dev server the visual harness uses, so this needs no
+configuration of its own.
+
+| # | Test | What it pins |
+| --- | --- | --- |
+| 1 | *"the fixed-step commands are in the Selection menu"* | The three entries are in the Selection menu, with the exact labels. |
+| 2 | *"the fixed-step commands grey out when nothing is selected"* | The `disabled: selectedStrokes === 0` behaviour, in the real DOM. |
+| 3 | *"the fixed-step commands are enabled once something is selected"* | A stroke drawn with the mouse, a marquee over it, and the three entries light up. |
+| 4 | *"choosing a scale runs the real transform and leaves one undo step"* | Clicking **Scale by 150 %** makes the undo button read **"Undo Scale 150 %"** — so the command really ran and recorded a step — and the status bar shows **unsaved**, so the edit really happened. |
+| 5 | *"choosing a rotation runs the real transform, in both directions"* | The same, for **Rotate 15° Clockwise** ("Undo Rotate 15°") and **Rotate 15° Counter-Clockwise** ("Undo Rotate -15°"). |
+
+**What a browser result is, and is not.** Following Agent 1's labelling rule
+in `docs/qa/PACKAGED-TAURI-NIGHT-SHIFT.md`: *"A browser result is never
+presented as proof of desktop behaviour."* These five tests prove the
+**front end** — the menu's entries, their disabled state, and that choosing
+one reaches the real transform path and leaves the right history entry — in
+Chromium, which is the same engine family as the Windows WebView2 the
+packaged app uses. They are **not** a packaged-app result, and §5.1 says so
+where it matters.
+
 ---
 
 ## 5. Verification
@@ -252,14 +277,15 @@ Every command was run in the isolated worktree
 | # | Command | Result |
 | --- | --- | --- |
 | 1 | `pnpm exec vitest run src/test/fixedStepTransform.test.ts` | **17 passed (17)**, 1 file, 506 ms |
-| 2 | `pnpm test` | **728 passed (728)**, 35 files, 3.01 s — run five times, all green |
-| 3 | `pnpm typecheck` | **clean** (`tsc -p tsconfig.json --noEmit`, no output) |
-| 4 | `pnpm build` | **built in 396 ms**, 111 modules transformed; `dist/assets/index-DVW-pf_7.js` 361.58 kB (gzip 109.13 kB) |
-| 5 | `pnpm test:visual` | **19 passed (19)**, 7.5 s — every scene golden unchanged, including `transformed-selection` |
+| 2 | `pnpm exec playwright test tests/visual/selection-menu.spec.ts` | **5 passed (5)**, 6.8 s — the menu, in a real browser against the running app |
+| 3 | `pnpm test` | **728 passed (728)**, 35 files, 2.24 s — run six times, all green |
+| 4 | `pnpm typecheck` | **clean** (`tsc -p tsconfig.json --noEmit`, no output) |
+| 5 | `pnpm build` | **built in 396 ms**, 111 modules transformed; `dist/assets/index-DVW-pf_7.js` 361.58 kB (gzip 109.13 kB) |
+| 6 | `pnpm test:visual` | **24 passed (24)**, 9.4 s — the 19 scene goldens unchanged, plus the 5 new menu tests |
 
 **The full-suite count before this slice was 711 tests in 34 files** (the
-`docs/SESSION-BRIEF.md` §2 figure). The suite is now 728 in 35: **+17** tests,
-all in the new file.
+`docs/SESSION-BRIEF.md` §2 figure). The unit suite is now 728 in 35: **+17**
+tests, all in the new file. The Playwright suite is now 24: **+5**.
 
 **A note on the first full-suite run.** The very first `pnpm test` in this
 worktree reported one failure:
@@ -286,16 +312,17 @@ asserts.
 ### 5.1 What was **not** verified
 
 * **The packaged Tauri app was not built or run.** `pnpm tauri build` is a
-  Rust build and belongs to Agent 1, who owns the packaged verification; the
-  task said to avoid concurrent Rust builds, so none was started here.
-  **Nothing in this report claims packaged-app behaviour.** The menu's
-  appearance and the interaction of the new entries with the real window were
-  not observed.
-* **No in-app manual check was performed.** The React layer has no automated
-  tests in this repository, and the menu entries were not clicked in a running
-  app. The engine behaviour behind them is covered by the 17 tests; the
-  *menu's* behaviour (the items appearing, greying out, and invoking the
-  command) rests on it being the same `MenuItemSpec` as every other entry.
+  Rust build and belongs to Agent 1, who owns the packaged verification. When
+  this slice was checked, Agent 1's packaged release build was **running**
+  (`paka.exe`, started 09:42) and their report's runtime sections were still
+  placeholders, so **no Rust build was started here** — the instruction was to
+  avoid concurrent Rust builds, and the evidence of one in flight was enough.
+  **Nothing in this report claims packaged-app behaviour.** The front end is
+  verified in a real browser (§4.1); the desktop shell is not, and this slice
+  changes no native code.
+* **The desktop shell's own behaviour is unverified for this slice**: the
+  native window, the native file dialogs and the Tauri IPC are untouched by
+  the change, and the menu is ordinary React.
 * **The Rust side was not touched**, so there is nothing to verify there.
 
 ---
@@ -307,15 +334,17 @@ asserts.
 | `feat/stamp-brush-engine` (the development branch) | None in the files changed. | The work was done in an isolated worktree on a separate branch. The shared branch was not checked out or committed to. |
 | The scale/rotate feature (`1622517`, merged as `a42e67f`) | **Deliberate reuse**, not conflict: the same maps, the same command, the same pivot. | The only change to the merged feature is the **optional** label parameter, whose default keeps the handle's labels byte-identical. |
 | The HSV colour wheel (T-10) and the contrast readout (T-13) | None. | `src/test/color.test.ts` was left alone (§5). |
-| The visual-regression harness (T-01) | None. | The harness imports `Canvas2DRenderer` directly and never mounts the app shell, so the goldens cannot be affected by a menu entry. Its 19 tests pass unchanged. |
+| The visual-regression harness (T-01) | The **test directory** is shared: the new browser spec lives in `tests/visual/` as a **new file**, so no existing file is edited and the harness's own rules are untouched. The goldens cannot be affected by a menu entry — the harness imports `Canvas2DRenderer` directly and never mounts the app shell. | Its 19 golden tests pass unchanged, and the 5 new ones run in the same project with no configuration change. |
 | The project format, the brush, the guides, the colour workflow, autosave and project I/O | **None touched.** | The change is confined to the Selection menu, the transform commands and their tests. |
 
 ---
 
 ## 7. Remaining limitations
 
-1. **No packaged-app verification.** See §5.1. The menu entries have not been
-   seen in the running application.
+1. **No packaged-app verification.** See §5.1. The front end is verified in a
+   real browser (§4.1); the desktop shell is not. The change touches no Rust
+   code, and Agent 1's warm `CARGO_TARGET_DIR` makes their rebuild of this
+   branch a recompile of Paka's own crate only.
 2. **The brush width does not scale.** A scaled stroke is the same stroke
    drawn along a different path, so the *painted* extent grows by slightly less
    than the factor. This is the existing architecture's property, shared with
@@ -354,6 +383,14 @@ asserts.
 2. `src/core/engine/DrawingEngine.ts` — `scaleSelection` and
    `rotateSelection`, which are `flipSelection` with a different map.
 3. `src/components/layout/AppMenuBar.tsx` — the three entries.
-4. `src/test/fixedStepTransform.test.ts` — the 17 tests.
-5. This report — the pivot, the inverse semantics, the verification and what
+4. `src/test/fixedStepTransform.test.ts` — the 17 engine-level tests.
+5. `tests/visual/selection-menu.spec.ts` — the 5 browser tests of the menu.
+6. This report — the pivot, the inverse semantics, the verification and what
    is still open.
+
+**A note on where the browser spec lives.** `pnpm test:visual` now runs 24
+tests: the 19 visual goldens and the 5 menu tests. The menu spec is not a
+golden test — it asserts behaviour, not pixels — but it runs in the same
+Playwright project, against the same Vite server, with no configuration
+change and no new dependency, which is why it is there rather than in a
+second project.
