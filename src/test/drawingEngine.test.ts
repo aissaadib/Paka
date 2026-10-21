@@ -722,6 +722,12 @@ describe("DrawingEngine layer history", () => {
     engine.setLayerBlendMode(topLayerId, "screen");
     expect(engine.getState().history.depth).toBe(afterAdd + 2);
 
+    engine.setLayerBlendMode(topLayerId, "difference");
+    expect(engine.getState().document.layers[1].blendMode).toBe("difference");
+    expect(engine.getState().history.depth).toBe(afterAdd + 3);
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers[1].blendMode).toBe("screen");
     expect(engine.undo()).toBe(true);
     expect(engine.getState().document.layers[1].blendMode).toBe("multiply");
     expect(engine.undo()).toBe(true);

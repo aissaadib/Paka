@@ -26,6 +26,14 @@ const BLEND_MODE_OPTIONS: readonly { readonly value: LayerBlendMode; readonly la
   { value: "normal", label: "Normal" },
   { value: "multiply", label: "Multiply" },
   { value: "screen", label: "Screen" },
+  { value: "overlay", label: "Overlay" },
+  { value: "soft-light", label: "Soft light" },
+  { value: "hard-light", label: "Hard light" },
+  { value: "color-dodge", label: "Color dodge" },
+  { value: "darken", label: "Darken" },
+  { value: "lighten", label: "Lighten" },
+  { value: "difference", label: "Difference" },
+  { value: "exclusion", label: "Exclusion" },
 ];
 
 export function LayersPanel() {

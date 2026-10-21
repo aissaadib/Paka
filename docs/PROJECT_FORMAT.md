@@ -248,7 +248,7 @@ compositing order. A file must contain at least one layer.
 | `name` | string | Shown in the layers panel. |
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
-| `blendMode` | string | `"normal"`, `"multiply"` or `"screen"`; applied to the whole layer against the paper and the layers below it. |
+| `blendMode` | string | `"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` or `"exclusion"`; applied to the whole layer against the paper and the layers below it. |
 | `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
@@ -490,7 +490,8 @@ Two further guarantees:
 | 7 | Requires `texture` on every stroke brush; reads version-1 to -6 files unchanged and defaults their strokes to `0` (the plain coverage). | Writes the required `texture` field. |
 | 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | - |
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
-| 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | The current version; what this build always writes. |
+| 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
+| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -560,6 +561,12 @@ Two further guarantees:
   instead of silently compositing it normally - a visibly different picture.
   Version-1 to -7 files always carry `normal` and open unchanged; the field was
   already required, so there is no missing-value default.
+- **Version 11 extends the same closed set.** The added modes are standard
+  separable W3C blend functions (overlay, soft-light, hard-light, color-dodge,
+  darken, lighten, difference, exclusion), each mapped one-to-one to the Canvas
+  2D operation of the same name. A version-10 reader rejects those strings, so
+  the version was bumped rather than allowing a file to be silently composited
+  with the wrong mode. Version-1 to -10 files still open unchanged.
 - **Stroke flags are still written only when set.** A stroke that paints and
   traces carries no `erase` or `fill` field; the only new mandatory stroke field
   in version 4 is `kind: "stroke"`, which distinguishes it from the other element
@@ -621,9 +628,11 @@ The output has no border, no zoom and no surrounding UI.
   mask pixels per file.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
-- **Only three blend modes**: `normal`, `multiply` and `screen`. They compose
-  against the paper and lower layers; there are no group/clipping contexts,
-  alpha inheritance or the remaining canvas blend modes.
+- **No non-separable blend modes**: the layer menu offers the separable modes
+  (`normal`, `multiply`, `screen`, `overlay`, `soft-light`, `hard-light`,
+  `color-dodge`, `darken`, `lighten`, `difference`, `exclusion`). Hue,
+  saturation, color and luminosity are not exposed, and there are no
+  group/clipping contexts or alpha inheritance.
 - **No autosave and no recovery file.** An unclean exit loses unsaved work; the
   close guard is the only protection.
 - **Metadata is minimal**: no author, no timestamps, no thumbnails, no colour

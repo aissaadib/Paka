@@ -16,8 +16,22 @@ export type LayerId = string;
  * Layer compositing mode. Maps to the Canvas 2D composite operation used when
  * the finished layer is drawn over the paper and the layers below it; `normal`
  * is `source-over`, and the layer opacity scales the source first.
+ *
+ * The formulas behind each mode, and the list a reader accepts, live in
+ * `blendModes.ts`.
  */
-export type LayerBlendMode = "normal" | "multiply" | "screen";
+export type LayerBlendMode =
+  | "normal"
+  | "multiply"
+  | "screen"
+  | "overlay"
+  | "soft-light"
+  | "hard-light"
+  | "color-dodge"
+  | "darken"
+  | "lighten"
+  | "difference"
+  | "exclusion";
 
 export interface Layer {
   readonly id: LayerId;
