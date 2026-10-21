@@ -160,6 +160,15 @@ read is in flight does not apply anything.
 | 7 | A failed write leaves the document dirty and the next tick retries. | The failure path does not clear the change flag. | "leaves the document dirty when the write fails, and retries next time". |
 | 8 | A save racing a copy does not change the project's path or the dirty state. | The service never touches either. | "leaves a real save alone" (through the real `ProjectFiles.save()` path) and "does not change the project's path or the dirty state". |
 | 9 | A cancelled save changes nothing. | The service only reads the path and the dirty flag. | "is unaffected by a cancelled save". |
+| 10 | An edit that lands **during** a copy is not marked as copied. | The document the copy covered is compared with the newest one after the write. | "writes the newer content after an edit during an in-flight write". |
+
+**Row 10 was a bug, found by the test that now pins it.** The first
+implementation cleared the "changed" flag as soon as a copy landed, so an edit
+made while the copy was in flight was marked as *already copied* and was never
+protected - the newest work would have been left unprotected until the next
+edit. The service now compares the document the copy covered with the newest
+one, and only clears the flag when they are the same object. The engine
+replaces the document on every change, so the identity comparison is exact.
 
 **One detection gap, stated plainly.** The service recognises a user save by
 watching the document become clean. A save taken **while a guide drag is in

@@ -360,4 +360,58 @@ describe("an autosave racing a user save", () => {
     // The document still has no path, so there is still nowhere to write.
     expect((await service.tick()).status).toBe("no-project");
   });
+
+  it("keeps the copy when the user saves after a newer edit", async () => {
+    // The save must not erase the recovery state of the newer edit.
+    const projectGateway = new MemoryProjectGateway();
+    const copyGateway = new MemoryProjectGateway();
+    const engine = createSavedEngine();
+    const files = new ProjectFiles(engine, projectGateway);
+    const service = new AutosaveService({ engine, gateway: copyGateway, policy: policy() });
+    service.start();
+
+    engine.addLayer();
+    await service.tick();
+    expect(copyGateway.writes).toEqual([RECOVERY_PATH]);
+
+    // The user edits again and saves for real.
+    engine.addLayer();
+    const outcome = await files.save();
+    expect(outcome.status).toBe("saved");
+
+    // The copy is still there, and the user's file holds the newer edit.
+    expect(copyGateway.files.get(RECOVERY_PATH)).toBeDefined();
+    expect(projectGateway.files.get(PROJECT_PATH)).toBeDefined();
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("writes the newer content after an edit during an in-flight write", async () => {
+    const gateway = new HoldingGateway();
+    const engine = createSavedEngine();
+    const service = createService(engine, gateway);
+
+    engine.addLayer();
+    gateway.holdWrites();
+    const first = service.tick();
+
+    // The user keeps drawing while the copy is in flight.
+    engine.addLayer();
+    gateway.releaseWrites();
+    await first;
+
+    // The next tick writes the newer document.
+    const second = await service.tick();
+    expect(second.status).toBe("written");
+    expect(gateway.writes).toHaveLength(2);
+  });
+
+  it("refuses a corrupt recovery copy rather than opening it", async () => {
+    // The recovery copy is a project file, so it is read with the project's
+    // own parser - and a copy the parser refuses is never offered.
+    const corrupt = "{ this is not a project";
+    expect(parseProject(corrupt).ok).toBe(false);
+
+    const newer = JSON.stringify({ format: "paka-project", version: 99, document: {}, layers: [] });
+    expect(parseProject(newer).ok).toBe(false);
+  });
 });

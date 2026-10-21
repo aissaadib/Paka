@@ -178,6 +178,10 @@ export class AutosaveService {
     }
 
     const generation = this.generation;
+    // The document this copy covers. The engine replaces it on every change,
+    // so comparing it with the newest one after the write tells us whether
+    // an edit landed while the copy was in flight.
+    const documentAtCopy = this.engine.getState().document;
     let contents: string;
     try {
       contents = this.engine.serialize();
@@ -198,13 +202,18 @@ export class AutosaveService {
     let outcome: AutosaveOutcome;
     try {
       await this.gateway.writeTextFile(recoveryPath, contents);
-      if (this.generation === generation) {
-        outcome = { status: "written", path: recoveryPath };
-        this.changed = false;
-      } else {
+      if (this.generation !== generation) {
         // The user saved while the copy was in flight. The project file was
         // never touched, but this copy may now be older than what they saved.
         outcome = { status: "superseded", path: recoveryPath };
+      } else if (this.lastDocument !== documentAtCopy) {
+        // An edit landed while the copy was in flight, so the copy does not
+        // hold the newest work. It stays marked as changed, and the next tick
+        // copies the newer document.
+        outcome = { status: "written", path: recoveryPath };
+      } else {
+        outcome = { status: "written", path: recoveryPath };
+        this.changed = false;
       }
     } catch (error) {
       outcome = { status: "failed", message: `The recovery copy could not be written: ${describe(error)}` };
