@@ -513,6 +513,7 @@ Two further guarantees:
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
 | 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
+| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is

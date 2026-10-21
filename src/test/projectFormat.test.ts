@@ -762,6 +762,7 @@ describe("parseProject round trip", () => {
   });
 
   it("a version-10 reader refuses a newer file instead of compositing it normally", () => {
+  it("a version-10 reader refuses a version-11 file instead of compositing it normally", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     // `overlay` is the first mode a version-10 build does not know. A version-10
@@ -772,6 +773,7 @@ describe("parseProject round trip", () => {
       serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
     ) as { version: number };
     expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.version).toBe(11);
 
     // The current build reads it...
     expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
@@ -1493,6 +1495,9 @@ describe("the composition guides in the project file", () => {
     // bumps was for the guides, and a version-9 file that carries them still
     // opens.
     expect(PROJECT_VERSION).toBe(12);
+    // the extra blend modes, and neither bump was for the guides; a version-9
+    // file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(11);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),
