@@ -154,17 +154,23 @@ contaminated figure and is used for cross-environment reasoning.
 
 ### F1 — A layer rebuild touches the whole document-sized surface once per element (structural, confirmed)
 
-`rasterizeLayer()` (Canvas2DRenderer.ts:718) loops over the layer's elements.
-For each element it calls `rasterizeStrokeToBuffer()` (line 824), which
-**clears the entire document-sized stroke buffer** (`clearStrokeBuffer()`,
-line 1128) and then `compositeStrokeBuffer()` -> `paintStrokeCoverage()`
-(line 865), whose hard-brush path is:
+> **Line numbers in this section are from the renderer as it was when the
+> measurements were taken** (`e1071d9`, before R1 and the stamp engine). The
+> file has grown since; read the *symbols*, not the anchors: `rasterizeLayer`,
+> `rasterizeStrokeToBuffer`, `clearStrokeBufferRegion`, `compositeStrokeBuffer`,
+> `paintStrokeCoverage` in `src/core/rendering/Canvas2DRenderer.ts`.
+
+`rasterizeLayer()` loops over the layer's elements. For each element it calls
+`rasterizeStrokeToBuffer()`, which **clears the document-sized stroke buffer
+over that element's region** (after R1; the whole buffer before it) and then
+`compositeStrokeBuffer()` -> `paintStrokeCoverage()`, whose hard-brush path is:
 
 ```
-ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);   // line 873
+ctx.drawImage(this.strokeBuffer, 0, 0, doc.width, doc.height);
 ```
 
-i.e. the whole buffer is blended over the whole surface, at document size.
+i.e. the whole buffer is blended over the whole surface, at document size
+(before R1; after it, the same rectangle as the region that was cleared).
 
 Measured call counts (wrapper over the 2D context, 2048x2048 document):
 
@@ -323,10 +329,10 @@ structural):
 | soft | 2 | 3 | 1 | + clear + blurred copy of the stroke bbox, then draw the blurred copy |
 | soft + grain | 2 | 3 | 2 | + grain pattern fill over the scratch |
 
-`featherStroke()` (line 968) blurs the stroke's **whole** bounding box into a
-scratch canvas, and `render()` calls it again on every frame (line 384 ->
+`featherStroke()` blurs the stroke's **whole** bounding box into a scratch
+canvas, and `render()` calls it again on every frame (`render` ->
 `paintStrokeCoverage` -> `featherStroke`). The bounding box grows with the
-stroke, so the cost of every frame grows with the stroke, and the scratch is
+stroke, so the work of every frame grows with the stroke, and the scratch is
 sized in *raster* pixels, so it grows with `rasterScale^2` as well.
 
 Measured component costs (2048x2048 document; medians):
