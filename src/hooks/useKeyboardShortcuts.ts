@@ -25,6 +25,8 @@
  *   Ctrl+= / -     zoom in / out
  *   Ctrl+1         actual size
  *   Ctrl+0         fit to window
+ *   Ctrl+'         show / hide the grid
+ *   Ctrl+Shift+'   turn snapping to guides and grid lines on / off
  *   Ctrl+S         save
  *   Ctrl+Shift+S   save as
  *   Ctrl+O         open
@@ -137,6 +139,17 @@ export function useKeyboardShortcuts(
         if (key === "0") {
           event.preventDefault();
           actions.zoomToFit();
+          return;
+        }
+        // Ctrl+' toggles the grid; Ctrl+Shift+' toggles snapping. The shifted
+        // key arrives as `"` on a US layout, so both forms are accepted.
+        if (key === "'" || key === '"') {
+          event.preventDefault();
+          if (event.shiftKey) {
+            actions.setGridSnapping(!engine.getState().gridSnapping);
+          } else {
+            actions.setGridVisible(!engine.getState().gridVisible);
+          }
           return;
         }
         return;

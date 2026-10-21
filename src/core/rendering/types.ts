@@ -8,6 +8,7 @@
  */
 
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
+import type { GridSettings } from "../document/grid";
 import type { SelectionHandles } from "../document/selectionHandles";
 import type { Viewport } from "../../types/viewport";
 import type { Bounds } from "../../types/geometry";
@@ -98,6 +99,15 @@ export interface DrawingRenderer {
    * concern.
    */
   setSelectedGuide(guideId: string | null): void;
+  /**
+   * Sets the grid display settings.
+   *
+   * Display only, like the guides: the grid is painted on the display canvas
+   * and never reaches a layer surface or `composeDocumentImage`, so an export
+   * is identical whether the grid is on or off. The settings are editor state
+   * and do not travel with the document.
+   */
+  setGrid(grid: GridSettings): void;
   /**
    * Composites paper and visible layers into a **new** canvas at document pixel
    * size (no viewport, no border, no in-progress stroke). Used by PNG export, so

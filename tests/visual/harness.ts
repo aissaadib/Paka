@@ -50,6 +50,9 @@ import type {
 
 let elementCounter = 0;
 
+/** The grid settings of a scene that shows no grid. */
+const NO_GRID = { visible: false, spacing: 50, snap: false };
+
 function nextId(prefix: string): string {
   elementCounter += 1;
   return `${prefix}-${elementCounter}`;
@@ -295,6 +298,12 @@ export function runScene(
   renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
   renderer.setDisplaySize(scene.width, scene.height, 1);
   renderer.setRasterScale(1);
+  // The grid is display state: the scene may ask for it, and the harness
+  // turns it off again whenever it needs the picture the export must match.
+  const gridSettings = scene.grid
+    ? { visible: true, spacing: scene.grid.spacing, snap: false }
+    : NO_GRID;
+  renderer.setGrid(gridSettings);
 
   const lastLayerIndex = scene.layers.length - 1;
   const lastLayer = scene.layers[lastLayerIndex];
@@ -342,36 +351,35 @@ export function runScene(
   const rebuiltPixels = readPixels(display);
 
   // 4. The same display without the guides. The guides are display-only, so
-  // this is the picture the export has to agree with, and the difference
-  // between the two displays is the guides' own contribution.
+  // the difference between the two displays is the guides' own contribution.
+  renderer.setDocument(plainDocument);
+  renderer.render();
+  const withoutGuidesPixels = readPixels(display);
+  renderer.setDocument(drawingDocument);
+  renderer.render();
+
+  // 5. The same display without the grid. The grid is display-only too, so
+  // the difference between the two displays is the grid's own contribution.
+  renderer.setGrid(NO_GRID);
+  renderer.render();
+  const withoutGridPixels = readPixels(display);
+  renderer.setGrid(gridSettings);
+  renderer.render();
+
+  // 6. The display without either of them: the picture the export has to
+  // agree with, because neither a guide nor a grid reaches an export.
+  renderer.setGrid(NO_GRID);
   renderer.setDocument(plainDocument);
   renderer.render();
   const plainPixels = readPixels(display);
+  renderer.setGrid(gridSettings);
   renderer.setDocument(drawingDocument);
   renderer.render();
 
-  // 5. Exported: the document composite, which is what a PNG export writes.
-  const exported = renderer.composeDocumentImage();
-  const exportedPixels = readPixels(exported);
-
-  // The export of the same document without its guides: the two must be the
-  // same picture, because a guide never reaches an export.
-  renderer.setDocument(plainDocument);
-  const plainExport = renderer.composeDocumentImage();
-  const plainExportPixels = readPixels(plainExport);
-  renderer.setDocument(drawingDocument);
-
-  if (golden) {
-    golden.width = exported.width;
-    golden.height = exported.height;
-    golden.style.width = `${exported.width}px`;
-    golden.style.height = `${exported.height}px`;
-    const context = golden.getContext("2d");
-    if (!context) {
-      throw new Error("the harness needs a 2d context");
-    }
-    context.clearRect(0, 0, golden.width, golden.height);
-    context.drawImage(exported, 0, 0);
+  // 7. The display the user sees: the grid, at the scene's zoom.
+  if (scene.grid?.zoom !== undefined && scene.grid.zoom !== 1) {
+    renderer.setViewport({ zoom: scene.grid.zoom, offsetX: 0, offsetY: 0 });
+    renderer.render();
   }
 
   if (displayCanvas) {
@@ -384,9 +392,43 @@ export function runScene(
       throw new Error("the harness needs a 2d context");
     }
     context.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
-    // The display canvas still holds the last render: the document with its
-    // guides.
+    // The display canvas holds the render with the grid and the guides: the
+    // picture the user sees, which is the only place they can be seen.
     context.drawImage(display, 0, 0);
+  }
+
+  renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
+  renderer.render();
+
+  // 8. Exported: the document composite, which is what a PNG export writes.
+  const exported = renderer.composeDocumentImage();
+  const exportedPixels = readPixels(exported);
+
+  // The export of the same document without its guides: the two must be the
+  // same picture, because a guide never reaches an export.
+  renderer.setDocument(plainDocument);
+  const plainExport = renderer.composeDocumentImage();
+  const plainExportPixels = readPixels(plainExport);
+  renderer.setDocument(drawingDocument);
+
+  // The export of the same document with the grid off: it must be the same
+  // picture too, because the grid is display-only.
+  renderer.setGrid(NO_GRID);
+  const exportWithoutGrid = renderer.composeDocumentImage();
+  const exportWithoutGridPixels = readPixels(exportWithoutGrid);
+  renderer.setGrid(gridSettings);
+
+  if (golden) {
+    golden.width = exported.width;
+    golden.height = exported.height;
+    golden.style.width = `${exported.width}px`;
+    golden.style.height = `${exported.height}px`;
+    const context = golden.getContext("2d");
+    if (!context) {
+      throw new Error("the harness needs a 2d context");
+    }
+    context.clearRect(0, 0, golden.width, golden.height);
+    context.drawImage(exported, 0, 0);
   }
 
   const liveVsRebuilt = livePixels
@@ -402,9 +444,16 @@ export function runScene(
     true,
   );
   const guidesVisible =
-    compare(rebuiltPixels, plainPixels, scene.width, scene.height, false).differing > 0;
+    compare(rebuiltPixels, withoutGuidesPixels, scene.width, scene.height, false).differing > 0;
   const guidesNotExported =
     compare(exportedPixels, plainExportPixels, scene.width, scene.height, false).differing === 0;
+  // The grid's own contribution: the display with it and the display without
+  // it. It is display-only, so it never reaches the export.
+  const gridVisible =
+    compare(rebuiltPixels, withoutGridPixels, scene.width, scene.height, false).differing > 0;
+  const gridNotExported =
+    compare(exportedPixels, exportWithoutGridPixels, scene.width, scene.height, false).differing ===
+    0;
 
   return {
     sceneId: scene.id,
@@ -413,6 +462,8 @@ export function runScene(
     liveChecked: liveCapable,
     guidesVisible,
     guidesNotExported,
+    gridVisible,
+    gridNotExported,
     liveVsRebuiltDiffering: liveVsRebuilt.differing,
     rebuiltVsExportedDiffering: rebuiltVsExported.differing,
     firstDifference: liveVsRebuilt.first ?? rebuiltVsExported.first,

@@ -49,6 +49,12 @@ export interface EditorActions {
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
   setGradientEndColor(color: string): void;
+  /** Shows or hides the grid; display state, never exported. */
+  setGridVisible(visible: boolean): void;
+  /** Distance between grid lines in document pixels (`2..500`). */
+  setGridSpacing(spacing: number): void;
+  /** Turns snapping to guides and grid lines on or off. */
+  setGridSnapping(snap: boolean): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
   undo(): void;
@@ -131,6 +137,9 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
+    setGridVisible: (visible) => engine.setGridVisible(visible),
+    setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
+    setGridSnapping: (snap) => engine.setGridSnapping(snap),
     dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();

@@ -69,6 +69,9 @@ function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setFillTolerance(settings.fillTolerance);
   engine.setGradientType(settings.gradientType);
   engine.setGradientEndColor(settings.gradientEndColor);
+  engine.setGridVisible(settings.gridVisible);
+  engine.setGridSpacing(settings.gridSpacing);
+  engine.setGridSnapping(settings.gridSnapping);
 }
 
 /** Reads the preferences the editor currently holds. */
@@ -86,6 +89,9 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
     fillTolerance: snapshot.fillTolerance,
     gradientType: snapshot.gradientType,
     gradientEndColor: snapshot.gradientEndColor,
+    gridVisible: snapshot.gridVisible,
+    gridSpacing: snapshot.gridSpacing,
+    gridSnapping: snapshot.gridSnapping,
   };
 }
 

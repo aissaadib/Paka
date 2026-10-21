@@ -29,6 +29,7 @@ import {
   normalizeBrushPresets,
   type BrushPreset,
 } from "../brushes/presets";
+import { DEFAULT_GRID_SETTINGS, normalizeGridSpacing } from "../document/grid";
 import { DEFAULT_SHAPE_OPTIONS, normalizeShapeOptions } from "../tools/shapeGeometry";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { BrushSettings } from "../../types/brush";
@@ -69,6 +70,17 @@ export interface AppSettings {
   readonly gradientType: "linear" | "radial";
   /** End colour of the next gradient. */
   readonly gradientEndColor: string;
+  /**
+   * Whether the grid overlay is drawn over the paper.
+   *
+   * A view preference, like the brush: it describes what the screen shows, not
+   * what the document holds, so it is never part of a project file.
+   */
+  readonly gridVisible: boolean;
+  /** The distance between grid lines, in document pixels. */
+  readonly gridSpacing: number;
+  /** Whether a drawing sample follows the guides and the grid lines. */
+  readonly gridSnapping: boolean;
 }
 
 /** The settings a fresh installation starts from. */
@@ -84,6 +96,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fillTolerance: 24,
   gradientType: "linear",
   gradientEndColor: DEFAULT_GRADIENT_END_COLOR,
+  gridVisible: DEFAULT_GRID_SETTINGS.visible,
+  gridSpacing: DEFAULT_GRID_SETTINGS.spacing,
+  gridSnapping: DEFAULT_GRID_SETTINGS.snap,
 };
 
 const TOOL_IDS = new Set<string>(TOOL_DEFINITIONS.map((definition) => definition.id));
@@ -182,6 +197,13 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     ),
     gradientType: record.gradientType === "radial" ? "radial" : "linear",
     gradientEndColor: colorOr(record.gradientEndColor, DEFAULT_APP_SETTINGS.gradientEndColor),
+    // The grid fields are additive: a settings file written before the grid
+    // existed simply has none of them, and each one takes its default.
+    gridVisible: booleanOr(record.gridVisible, DEFAULT_APP_SETTINGS.gridVisible),
+    gridSpacing: normalizeGridSpacing(
+      numberOr(record.gridSpacing, DEFAULT_APP_SETTINGS.gridSpacing),
+    ),
+    gridSnapping: booleanOr(record.gridSnapping, DEFAULT_APP_SETTINGS.gridSnapping),
   };
 }
 
@@ -217,6 +239,9 @@ export function serializeAppSettings(settings: AppSettings): string {
       fillTolerance: settings.fillTolerance,
       gradientType: settings.gradientType,
       gradientEndColor: settings.gradientEndColor,
+      gridVisible: settings.gridVisible,
+      gridSpacing: settings.gridSpacing,
+      gridSnapping: settings.gridSnapping,
     },
     null,
     2,
@@ -236,6 +261,9 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
     a.shapeRotation === b.shapeRotation &&
     a.fillTolerance === b.fillTolerance &&
     a.gradientType === b.gradientType &&
-    a.gradientEndColor === b.gradientEndColor
+    a.gradientEndColor === b.gradientEndColor &&
+    a.gridVisible === b.gridVisible &&
+    a.gridSpacing === b.gridSpacing &&
+    a.gridSnapping === b.gridSnapping
   );
 }

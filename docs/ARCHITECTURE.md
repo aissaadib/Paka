@@ -1199,6 +1199,77 @@ stays on until the file is written again. The same rule as everywhere else in
 the editor applies - an operation must never mark the document clean when the
 document is not what was written.
 
+### Grid and snapping
+
+The grid is a lattice of lines over the paper and the snap is the rule that
+pulls a drawing point onto one of them - or onto a composition guide. Both are
+**view state**, not document state: the grid is not stored with the drawing, it
+changes no pixels, it enters no history and it never reaches an export.
+
+**The spacing is document space.** A spacing of 50 means 50 *document* pixels,
+never 50 CSS pixels, so the grid means the same thing at every zoom and pans
+with the paper: the canvas transform already maps document to device, so the
+lines need no special handling. The spacing is a whole document pixel (2-500),
+because a fractional lattice would draw a soft edge at some zooms.
+
+`core/document/grid.ts` is the pure module that holds the rules, and it is unit
+tested without a canvas:
+
+- `nearestGridLine(value, spacing)` - the line nearest a coordinate, or `null`
+  when there is no grid. The lines sit at whole multiples of the spacing, and a
+  coordinate exactly between two lines rounds up.
+- `gridLinesBetween(from, to, spacing)` - the lines between two coordinates.
+  The renderer draws these, so **the drawn grid and the snapped grid are the
+  same lines by construction**: what the user sees is what the pointer lands on.
+- `snapDocumentPoint(x, y, targets)` - the snap itself.
+
+**The snap is a magnet, not a lattice lock.** A point is pulled onto a target
+only when it is within **6 CSS pixels** of one (`SNAP_TOLERANCE_PX`). The
+tolerance is *screen* space and is converted with the live zoom
+(`6 / zoom` document px), so the same physical gesture snaps alike at 100 % and
+at 400 %, and a grid is equally magnetic at 2 % and at 6400 %. Between the
+magnet zones a point keeps its position, which is what stops a grid the user
+cannot even see from dragging the drawing around.
+
+The rules that pick the target:
+
+- the **nearest** target wins, whether it is a guide or a grid line;
+- on an exact tie a **guide** wins over a grid line - a guide is a mark the
+  user placed on purpose - and between two guides the **lower** position wins,
+  so the answer never depends on the order the guides are listed in;
+- each axis is decided on its own: a vertical guide can pull the x while the y
+  still falls on a grid line.
+
+**Where the snap happens.** The engine has one pointer entry point
+(`handlePointerSample`), and the snap is applied there, *after* the viewport
+transform and *before* the tool sees the sample. The sample the user drew and
+the sample that is committed therefore agree, and the rule is applied once
+rather than in every tool. Two rules keep the snap from changing what a
+gesture *is*: a press **outside the paper** is ignored by every drawing
+gesture, so the snap never pulls a point that started outside onto the paper,
+and a snap that would leave the paper is not applied, so a gesture can never be
+refused by its own snap.
+
+The tools that commit drawing samples - the brush, the eraser, the shape tools,
+the line and the gradient - follow the snap. The bucket and the colour picker
+read pixels rather than place geometry, and the select, guides and pan tools do
+not commit drawing samples, so they are left alone.
+
+**Display.** The grid is painted in the display pass, after the layers and
+before the guides, clipped to the **paper** (a grid belongs to the artwork,
+unlike a guide, which spans the whole viewport). It is one device pixel wide,
+like the guides and the document border, and it is hidden when the lines would
+be closer than 3 device pixels - below that they merge into a wash. The snap
+keeps working at that density; only the drawing is hidden. `composeDocumentImage`
+never sees the grid, so a PNG export of a document with the grid on is
+byte-identical to one with it off.
+
+**Preferences.** The grid visibility, the spacing and the snap switch are
+**view preferences**: they live in the editor, they are published in the
+`EditorSnapshot` and they are stored in the per-user settings file, so they
+survive a restart. Changing one is not an edit: no history step, no revision
+bump, no dirty flag.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its element list:

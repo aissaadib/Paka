@@ -61,7 +61,7 @@ architecture by browsing.
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
-`floodFill`, `document/types.ts`, `document/guides.ts`,
+`floodFill`, `document/types.ts`, `document/guides.ts`, `document/grid.ts`,
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`,
@@ -98,6 +98,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | --- | --- |
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
 | Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides` in `Canvas2DRenderer.ts` |
+| Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
@@ -153,6 +154,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `GuideAxis`, `Guide`, `DrawingDocument.guides` | `core/document/types.ts` | 40, 54, 85 |
 | `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
+| `GridSettings`, `DEFAULT_GRID_SETTINGS`, `nearestGridLine`, `gridLinesBetween`, `snapDocumentPoint`, `snapTolerance` | `core/document/grid.ts` | grep the symbol |
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
 | `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
@@ -223,6 +225,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |

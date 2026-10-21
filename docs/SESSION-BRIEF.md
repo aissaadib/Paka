@@ -69,6 +69,7 @@ visual-regression harness.
 | `feat/t06-settings-persistence` | **Settings persistence** - the nine editor preferences (brush, tool, shape fill, shape sides, star inner ratio, shape rotation, fill tolerance, gradient type, gradient end colour) live in a per-user settings file in the OS configuration folder and are restored at startup. The file holds preferences only - never a drawing - and changing one is not an edit, so it adds no history step and never marks the document unsaved. A missing, corrupt or future-versioned file starts the app with the defaults and no error. The **autosave** machinery and its policy seam exist and are covered by tests, but the decisions that govern autosaving are the owner's, so nothing is enabled and no recovery file is ever written. |
 | `feat/ff01-directional-texture` | **Per-dab directional texture** — a stamped stroke can carry **bristle lanes that run along the path**: each dab's coverage is multiplied by a lane pattern laid out in the dab's own frame, so the streaks rotate with the stroke. The lanes are measured against the brush's **centre line** (so every dab on a path sees the same offset at the same pixel, the union preserves the lanes instead of filling them in, and drawing a stroke backwards gives the same picture) and against the brush's **nominal size** (so the pattern is the same in document pixels at every `rasterScale`). The texture is multiplied in **before** the per-pixel maximum union, so it can only remove ink and a stroke still cannot darken. `stampTexture` is `0` by default, so every existing stroke is byte for byte unchanged. Format v10. |
 | `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
+| `feat/n4-grid-snapping` | **Grid and snapping** - a **Grid** switch draws a lattice over the paper and a **Snap** switch makes the drawing follow the guides and the grid lines, with a **Spacing** control in **document pixels** (2-500), so the grid means the same thing at every zoom and pans with the paper. The snap is a **magnet**: a drawing point within **6 screen pixels** of a guide or a grid line lands exactly on it, and a point that is nowhere near one keeps its position. The tolerance is screen space, so the same physical gesture snaps alike at 100 % and at 400 %. The snap is applied in the engine's single pointer entry point, so the sample the user drew and the sample that was committed agree. Both switches are **view state**: no pixels change, no history step, no dirty flag, nothing reaches an export, and the settings survive a restart in the per-user settings file. **No project-format change** - the grid is not in the drawing at all. |
 | `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
@@ -175,7 +176,20 @@ visual-regression harness.
   it, `Delete` removes it, `Esc` cancels a drag in flight. A guide is document
   state but **display-only**: it is painted over the artwork and never reaches a
   layer surface or a PNG export, so the format change is additive and the file
-  version stays 9. No snapping to guides yet, and no grids or rulers.
+  version stays 9.
+- **Grid and snapping**: a **Grid** switch draws a lattice over the paper and a
+  **Snap** switch makes the drawing follow the guides and the grid lines; the
+  **Spacing** control sets the distance between the lines in **document pixels**
+  (2-500), so the grid means the same thing at every zoom and pans with the
+  paper. The snap is a **magnet**: a drawing point within **6 screen pixels**
+  of a guide or a grid line lands exactly on it, and a point that is nowhere
+  near one keeps its position. The tolerance is screen space, so the same
+  physical gesture snaps alike at 100 % and at 400 %. The snap is applied in
+  the engine's single pointer entry point, so the sample the user drew and the
+  sample that was committed agree. Both switches are **view state**: no pixels
+  change, no history step, no dirty flag, nothing reaches an export, and they
+  are remembered in the per-user settings file. `Ctrl+'` and `Ctrl+Shift+'`
+  toggle them. No rulers yet.
 - **HSV colour wheel** (the **Colour** panel): a disc where the angle is the
   hue and the distance from the centre is the saturation, a value slider, and
   three sliders naming the same numbers. It writes the brush colour through
@@ -552,9 +566,12 @@ Product:
   preference change, so a preference changed in the last moments before the
   window closes can be lost.
 - Guides: axis-only (no diagonals), one guide per axis position (a duplicate is
-  refused), a fixed accent colour, no position label, and **no snapping to
-  guides** - snapping changes what a stroke does, so it is its own slice. No
-  grids and no rulers yet either.
+  refused), a fixed accent colour and no position label. A guide does take
+  part in the **snapping**, but only within the 6 screen pixel magnet radius.
+- Grid and snapping: the spacing is whole document pixels only, the snap is a
+  magnet rather than a lock (a point between two lines stays where it is), the
+  grid is hidden when its lines would be closer than 3 device pixels, and there
+  are no rulers yet.
 - A layer with a non-default opacity or blend mode spends one extra
   document-sized scratch canvas while it is being previewed.
 - The document pixel budget covers a one-layer document plus the working
