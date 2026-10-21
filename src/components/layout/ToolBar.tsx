@@ -7,13 +7,13 @@ import { GridControls } from "../../features/grid/GridControls";
 import { ToolOptionsPanel } from "../../features/options/ToolOptionsPanel";
 import { toolShowsBrushControls } from "../../features/options/toolOptionSchema";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
-import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { useEditor, useEditorToolId } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
 
 export function ToolBar() {
   const { actions } = useEditor();
-  const { toolId } = useEditorState();
+  const toolId = useEditorToolId();
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Document toolbar">
