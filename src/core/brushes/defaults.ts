@@ -13,6 +13,9 @@ import {
 /** The identity pressure response every pre-curve file behaves like. */
 export const DEFAULT_PRESSURE_CURVE = IDENTITY_PRESSURE_CURVE;
 
+/** The colour a right-button stroke paints with until the user changes it. */
+export const DEFAULT_SECONDARY_COLOR = "#ffffff";
+
 export const MIN_BRUSH_SIZE = 1;
 export const MAX_BRUSH_SIZE = 512;
 export const MIN_SPACING = 0.02;

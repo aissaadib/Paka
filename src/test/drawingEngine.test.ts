@@ -3539,3 +3539,114 @@ describe("DrawingEngine grid and snapping", () => {
     expect(engine.getState().gridSpacing).toBe(2);
   });
 });
+
+describe("DrawingEngine secondary colour", () => {
+  function createColourEngine() {
+    return new DrawingEngine({
+      document: createDocument({ name: "Test", width: 20, height: 20 }),
+      brush: { ...DEFAULT_BRUSH, color: "#ff0000" },
+    });
+  }
+
+  function drawStroke(
+    engine: DrawingEngine,
+    button: number,
+    from = { x: 2, y: 2 },
+    to = { x: 10, y: 10 },
+  ): void {
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from.x, docY: from.y, button, buttons: 3 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to.x, docY: to.y, button: 0, buttons: 3 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to.x, docY: to.y, button, buttons: 0 }),
+    );
+  }
+
+  it("paints a right-button stroke with the secondary colour and keeps the primary", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#00ff00");
+
+    drawStroke(engine, 2);
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.color).toBe("#00ff00");
+    // The palette itself did not change: the choice was per gesture.
+    expect(engine.getState().brush.color).toBe("#ff0000");
+  });
+
+  it("resolves the colour at press time, so later changes cannot repaint it", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#00ff00");
+
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 2, docY: 2, button: 2, buttons: 2 }),
+    );
+    engine.setSecondaryColor("#0000ff");
+    engine.setBrush({ color: "#ffff00" });
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 10, docY: 10, button: 2, buttons: 0 }),
+    );
+
+    expect(engine.listStrokes(layerId)[0].brush.color).toBe("#00ff00");
+    expect(engine.getState().brush.color).toBe("#ffff00");
+    expect(engine.getState().secondaryColor).toBe("#0000ff");
+  });
+
+  it("keeps the resolved colour through undo and redo", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#123456");
+
+    drawStroke(engine, 2);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toEqual([]);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.color).toBe("#123456");
+  });
+
+  it("uses the secondary colour for a right-button shape and gradient", () => {
+    const shapeEngine = createColourEngine();
+    const shapeLayer = shapeEngine.getState().document.activeLayerId as string;
+    shapeEngine.setTool("rectangle");
+    shapeEngine.setSecondaryColor("#00ff00");
+    drawStroke(shapeEngine, 2, { x: 2, y: 2 }, { x: 14, y: 12 });
+    expect(shapeEngine.listStrokes(shapeLayer)[0].brush.color).toBe("#00ff00");
+
+    const gradientEngine = createColourEngine();
+    const gradientLayer = gradientEngine.getState().document.activeLayerId as string;
+    gradientEngine.setTool("gradient");
+    gradientEngine.setSecondaryColor("#00ff00");
+    drawStroke(gradientEngine, 2, { x: 2, y: 2 }, { x: 18, y: 18 });
+    const gradient = gradientEngine.listElements(gradientLayer)[0];
+    expect(isGradient(gradient)).toBe(true);
+    expect(isGradient(gradient) ? gradient.stops[0] : null).toEqual({
+      offset: 0,
+      color: "#00ff00",
+    });
+  });
+
+  it("normalizes the secondary colour, swaps the pair and never dirties the file", () => {
+    const engine = createColourEngine();
+    expect(engine.getState().secondaryColor).toBe("#ffffff");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    engine.setSecondaryColor("#0f0");
+    expect(engine.getState().secondaryColor).toBe("#00ff00");
+    engine.setSecondaryColor("not a colour");
+    expect(engine.getState().secondaryColor).toBe("#00ff00");
+
+    engine.swapColors();
+    expect(engine.getState().brush.color).toBe("#00ff00");
+    expect(engine.getState().secondaryColor).toBe("#ff0000");
+    expect(engine.getState().file.dirty).toBe(false);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+});

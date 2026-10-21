@@ -21,7 +21,7 @@
  * leave a dot behind.
  */
 
-import type { PointerSample } from "../../types/pointer";
+import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolDefinition } from "../../types/tool";
 import {
   DEFAULT_SHAPE_OPTIONS,
@@ -58,7 +58,7 @@ export class ShapeTool implements Tool {
   }
 
   onPointerDown(context: ToolContext, sample: PointerSample): void {
-    if (sample.button !== 0) {
+    if (!isPaintButton(sample.button)) {
       return;
     }
     this.anchor = { x: sample.docX, y: sample.docY };
@@ -118,3 +118,4 @@ export class ShapeTool implements Tool {
     return shapeOutline(this.kind, drag, this.options);
   }
 }
+

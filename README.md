@@ -71,8 +71,10 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   refuses the scan with a status-bar message instead of freezing.
 - **Gradient** (`G`): drag across the canvas to paint a **linear** gradient from
   the current brush colour to the toolbar's **To** colour. The **Radial** switch
-  makes the press point the centre and the drag length the outer radius. Brush
-  opacity is applied once to the whole gradient. The preview is real layer
+  makes the press point the centre and the drag length the outer radius. The
+  stop editor adds, moves, recolours and removes middle stops with a live
+  preview; the endpoints stay the two colours above. Brush opacity is applied
+  once to the whole gradient. The preview is real layer
   content at its place in the painting order; releasing records one undo step,
   while cancelling (lost capture, tool switch, `pointercancel`) removes it and
   records nothing. A click without a drag leaves nothing behind. A gradient is
@@ -149,6 +151,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   toolbar's colour input and the swatches write, so the wheel follows a colour
   picked off the canvas - and choosing a colour is not an edit: it adds no
   history step and never marks the document dirty.
+- **Primary and secondary colours**: the toolbar keeps two colour chips. The
+  left button paints with the primary and the right button with the secondary;
+  the swap button exchanges them, and right-clicking a palette swatch assigns
+  it to the secondary chip. The colour is resolved when the gesture starts and
+  stored on the stroke, shape, fill or gradient, so swapping later never
+  repaints existing work. It is editor state, not a project field.
 - **Contrast and colour-difference readout**: under the wheel, the **WCAG 2.2
   contrast ratio** between the brush colour and the document's paper (with a
   plain-language band, from "excellent" to "low"), and the palette swatch
@@ -173,8 +181,10 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
   how far apart the dabs sit), **stamp hardness** (the falloff of a single
   dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
-  colour (picker, an 8-swatch palette and the colour wheel), and toggles for
-  pressure-driven size and pressure-driven opacity. Every brush setting is
+  colour (primary and secondary pickers, an 8-swatch palette and the colour
+  wheel), and toggles for pressure-driven size and pressure-driven opacity. Once
+  either pressure toggle is on, a **Pressure curve** editor shapes how raw pen
+  pressure maps to the response. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;
   hardness and texture apply to the brush, the eraser and shapes, while sampling,
   stabilizer and the stamp apply to the brush and eraser (a shape's geometry

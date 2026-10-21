@@ -11,7 +11,7 @@
  * history live in the engine.
  */
 
-import type { PointerSample } from "../../types/pointer";
+import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { Tool, ToolContext } from "./types";
 import { BUCKET_TOOL } from "./toolDefinitions";
 
@@ -20,7 +20,7 @@ export class BucketTool implements Tool {
   readonly cursor = "crosshair";
 
   onPointerDown(context: ToolContext, sample: PointerSample): void {
-    if (sample.button !== 0) {
+    if (!isPaintButton(sample.button)) {
       return;
     }
     context.beginFill(sample);
@@ -48,3 +48,4 @@ export class BucketTool implements Tool {
     }
   }
 }
+

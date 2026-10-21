@@ -10,7 +10,7 @@
  * identical, so the two tools differ only in their definition and in `erases`.
  */
 
-import type { PointerSample } from "../../types/pointer";
+import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolContext, Tool } from "./types";
 import { BRUSH_TOOL } from "./toolDefinitions";
 
@@ -26,7 +26,7 @@ export class BrushTool implements Tool {
   }
 
   onPointerDown(context: ToolContext, sample: PointerSample): void {
-    if (sample.button !== 0) {
+    if (!isPaintButton(sample.button)) {
       return;
     }
     context.beginStroke(sample);
@@ -57,3 +57,4 @@ export class BrushTool implements Tool {
     }
   }
 }
+

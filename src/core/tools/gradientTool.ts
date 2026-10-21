@@ -11,7 +11,7 @@
  * the engine, so the same rules apply to a reopened or redone gradient.
  */
 
-import type { PointerSample } from "../../types/pointer";
+import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { Tool, ToolContext } from "./types";
 import { GRADIENT_TOOL } from "./toolDefinitions";
 
@@ -20,7 +20,7 @@ export class GradientTool implements Tool {
   readonly cursor = "crosshair";
 
   onPointerDown(context: ToolContext, sample: PointerSample): void {
-    if (sample.button !== 0) {
+    if (!isPaintButton(sample.button)) {
       return;
     }
     context.beginGradient(sample);
@@ -50,3 +50,4 @@ export class GradientTool implements Tool {
     }
   }
 }
+

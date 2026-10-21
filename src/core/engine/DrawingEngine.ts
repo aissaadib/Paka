@@ -27,7 +27,7 @@ import { hexToRgb, rgbToHex } from "../../utils/color";
 import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
-import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
 import {
   brushPresetsEqual,
   createPresetId,
@@ -171,6 +171,14 @@ export interface EditorSnapshot {
   readonly document: DrawingDocument;
   readonly viewport: Viewport;
   readonly brush: BrushSettings;
+  /**
+   * The colour a right-button stroke paints with.
+   *
+   * Editor state: a right-button gesture resolves its colour at press time and
+   * stores it on the committed stroke, so changing this never repaints existing
+   * artwork and the choice is not part of the project file.
+   */
+  readonly secondaryColor: string;
   /**
    * The named brush presets the user has saved.
    *
@@ -541,6 +549,7 @@ export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private brush: BrushSettings;
+  private secondaryColor = DEFAULT_SECONDARY_COLOR;
   private presets: readonly BrushPreset[] = [];
   private currentToolId: ToolId;
   private readonly tools: ToolRegistry;
@@ -1120,6 +1129,60 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
+   * Sets the colour a right-button gesture paints with.
+   *
+   * Editor state, not a document edit: it describes the *next* gesture. The
+   * colour is resolved once at press time, so a stroke keeps the colour it was
+   * started with even if this changes before release.
+   */
+  setSecondaryColor(color: string): void {
+    const normalized = hexToRgb(color);
+    if (!normalized) {
+      return;
+    }
+    const next = rgbToHex(normalized);
+    if (this.secondaryColor === next) {
+      return;
+    }
+    this.secondaryColor = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Swaps the primary and secondary colours.
+   *
+   * The document is untouched: the swap changes which colour the next
+   * left/right-button gesture paints with, never the strokes already drawn.
+   */
+  swapColors(): void {
+    const primary = this.brush.color;
+    const secondary = this.secondaryColor;
+    if (primary === secondary) {
+      return;
+    }
+    this.secondaryColor = primary;
+    this.brush = updateBrushSettings(this.brush, { color: secondary });
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * The brush a gesture paints with, resolving the secondary colour for a
+   * right-button press.
+   *
+   * This runs at press time only. A shape, stroke, fill or gradient stores the
+   * resolved colour on its own record, so the rest of the gesture, undo/redo
+   * and a reopened file all agree without re-reading the current buttons.
+   */
+  private brushForSample(sample: PointerSample): BrushSettings {
+    if (sample.button !== 2 || this.secondaryColor === this.brush.color) {
+      return this.brush;
+    }
+    return { ...this.brush, color: this.secondaryColor };
+  }
+
+  /**
    * Replaces the preset library.
    *
    * The settings store calls this once while applying a file. It is editor
@@ -1653,7 +1716,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
 
-    const stroke = createStrokeRecord(layerId, this.brush, this.activeTool().erases === true);
+    const stroke = createStrokeRecord(layerId, this.brushForSample(sample), this.activeTool().erases === true);
     const builder = new StrokeBuilder(stroke);
     builder.addSample(toStrokeSample(sample));
 
@@ -1707,7 +1770,7 @@ export class DrawingEngine implements StrokeSource {
       // The stamp engine draws a chain of dabs along the path; a shape is an
       // outline (and, when filled, a flat polygon), so it keeps the plain
       // segment path even when the brush is stamped.
-      shapeBrush(this.brush),
+      shapeBrush(this.brushForSample(sample)),
       this.activeTool().erases === true,
       // Read here, at press time, so the preview and the committed stroke agree:
       // a shape keeps the fill setting it was started with. A line's definition
@@ -1806,6 +1869,7 @@ export class DrawingEngine implements StrokeSource {
 
     const seedX = Math.min(this.doc.width - 1, Math.max(0, Math.floor(sample.docX)));
     const seedY = Math.min(this.doc.height - 1, Math.max(0, Math.floor(sample.docY)));
+    const colour = this.brushForSample(sample).color;
     const region = floodFill(image, seedX, seedY, this.fillTolerance);
     if (!region) {
       return false;
@@ -1816,19 +1880,19 @@ export class DrawingEngine implements StrokeSource {
     // make the history button look broken.
     if (this.fillTolerance === 0) {
       const offset = (seedY * image.width + seedX) * 4;
-      const colour = hexToRgb(this.brush.color);
+      const seedColour = hexToRgb(colour);
       if (
-        colour &&
-        colour.r === image.data[offset] &&
-        colour.g === image.data[offset + 1] &&
-        colour.b === image.data[offset + 2] &&
+        seedColour &&
+        seedColour.r === image.data[offset] &&
+        seedColour.g === image.data[offset + 1] &&
+        seedColour.b === image.data[offset + 2] &&
         image.data[offset + 3] === 255
       ) {
         return false;
       }
     }
 
-    const patch = createFillPatch(layerId, this.brush.color, region);
+    const patch = createFillPatch(layerId, colour, region);
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(patch);
     this.beginGesture();
@@ -1912,7 +1976,7 @@ export class DrawingEngine implements StrokeSource {
     const gradient = createGradientRecord(
       layerId,
       { type: this.gradientType, x1: x, y1: y, x2: x, y2: y },
-      this.brush.color,
+      this.brushForSample(sample).color,
       this.gradientEndColor,
       this.brush.opacity,
       this.gradientMidStops,
@@ -3416,6 +3480,7 @@ export class DrawingEngine implements StrokeSource {
       document: this.doc,
       viewport: this.viewport,
       brush: this.brush,
+      secondaryColor: this.secondaryColor,
       presets: this.presets,
       toolId: this.currentToolId,
       history: this.commands.getState(),
@@ -3447,6 +3512,7 @@ export class DrawingEngine implements StrokeSource {
       previous.document === next.document &&
       previous.viewport === next.viewport &&
       previous.brush === next.brush &&
+      previous.secondaryColor === next.secondaryColor &&
       previous.presets === next.presets &&
       previous.toolId === next.toolId &&
       previous.history === next.history &&
