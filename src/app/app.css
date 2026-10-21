@@ -169,6 +169,127 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* ------------------------------------------------------- pressure curve */
+
+.pressure-curve__toggle {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pressure-curve__toggle:hover,
+.pressure-curve__toggle[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.pressure-curve {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+  width: 100%;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.pressure-curve__plot {
+  flex: 0 0 auto;
+  width: 200px;
+  height: 140px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  /* The pointer handlers own the gesture; do not scroll or zoom the page. */
+  touch-action: none;
+}
+
+.pressure-curve__surface {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.pressure-curve__grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.pressure-curve__identity {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+.pressure-curve__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pressure-curve__point {
+  fill: var(--bg-panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: grab;
+  outline: none;
+}
+
+.pressure-curve__point:hover,
+.pressure-curve__point:focus-visible {
+  fill: var(--accent-soft);
+}
+
+.pressure-curve__point.is-selected {
+  fill: var(--accent);
+  stroke: var(--text-strong);
+}
+
+.pressure-curve__point.is-endpoint {
+  stroke-width: 3;
+}
+
+.pressure-curve__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pressure-curve__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pressure-curve__button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pressure-curve__button:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.pressure-curve__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .brush-presets__field {
   display: inline-flex;
   align-items: center;

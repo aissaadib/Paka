@@ -99,7 +99,11 @@ added without changing the model.
             "stamp": false,
             "stampSpacing": 0.1,
             "stampHardness": 1,
-            "stampTexture": 0
+            "stampTexture": 0,
+            "pressureCurve": [
+              { "x": 0, "y": 0 },
+              { "x": 1, "y": 1 }
+            ]
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -125,7 +129,11 @@ added without changing the model.
             "stamp": false,
             "stampSpacing": 0.1,
             "stampHardness": 1,
-            "stampTexture": 0
+            "stampTexture": 0,
+            "pressureCurve": [
+              { "x": 0, "y": 0 },
+              { "x": 1, "y": 1 }
+            ]
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -151,7 +159,11 @@ added without changing the model.
             "stamp": false,
             "stampSpacing": 0.1,
             "stampHardness": 1,
-            "stampTexture": 0
+            "stampTexture": 0,
+            "pressureCurve": [
+              { "x": 0, "y": 0 },
+              { "x": 1, "y": 1 }
+            ]
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -381,6 +393,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `hardness` | 0-1 | Edge falloff: `1` is the hard edge, lower values feather the finished silhouette. Required in version 6; version-1 to -5 files have no field and read as `1`. |
 | `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
 | `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
+| `pressureCurve` | 2-32 points | Piecewise-linear map from raw device pressure (`x`) to the response the brush uses (`y`), both in 0-1. Stored samples keep raw pressure, so the map is applied once at rasterization and is identical in live drawing, layer rebuilds, undo/redo, reopen and export. Required in version 12; version-1 to -11 files read as the identity curve, which is the linear response they were written by. |
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
@@ -462,6 +475,12 @@ looks like:
   drawing unopenable;
 - a guide `position` that is not a whole pixel → rounded to the nearest one.
 
+A version-12 `pressureCurve` is repaired **without a warning**: a missing field, a
+non-list, fewer than two usable points, non-finite coordinates or a duplicate
+pressure becomes the identity curve. The stroke's samples are untouched and the
+field is a response map, so the fallback opens the file at exactly the linear
+profile a version-11 file had instead of refusing the drawing.
+
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
 
@@ -491,7 +510,8 @@ Two further guarantees:
 | 8 | Allows `blendMode` `"multiply"` and `"screen"` in addition to `"normal"`; reads version-1 to -7 files unchanged. | - |
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
+| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -526,6 +546,11 @@ Two further guarantees:
   draw the same stroke as a plain chain of dabs, which is a different picture.
   Version-1 to -9 files read with the texture off, which is exactly the
   coverage they were written by.
+- **`pressureCurve` required version 12.** It changes how stored samples are
+  rasterized - a bent response widens or narrows parts of the stroke - so a
+  version-11 reader that ignored it would draw the linear profile instead, which
+  is a different picture. Version-1 to -11 files read with the identity curve,
+  which is exactly the linear response they were written by.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

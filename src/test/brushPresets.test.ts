@@ -28,9 +28,16 @@ import {
   settingsEqual,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint } from "../types/brush";
 import type { PointerSample } from "../types/pointer";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
+
+/** A curve that is not the identity. */
+const BENT_CURVE: readonly PressureCurvePoint[] = [
+  { x: 0, y: 0 },
+  { x: 0.5, y: 0.8 },
+  { x: 1, y: 1 },
+];
 
 /**
  * A brush with every field set to a value that is not its default.
@@ -46,6 +53,7 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   hardness: 0.31,
   pressureSize: 0.77,
   pressureOpacity: 0.66,
+  pressureCurve: BENT_CURVE,
   minSizeRatio: 0.55,
   spacing: 0.44,
   stabilizer: 0.33,
@@ -57,7 +65,9 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
 };
 
 /** A value for one field that is neither its default nor its default again. */
-function distinctiveValue(field: keyof BrushSettings): number | string | boolean {
+function distinctiveValue(
+  field: keyof BrushSettings,
+): number | string | boolean | readonly PressureCurvePoint[] {
   const fallback = DEFAULT_BRUSH[field];
   if (typeof fallback === "boolean") {
     return !fallback;
@@ -65,11 +75,17 @@ function distinctiveValue(field: keyof BrushSettings): number | string | boolean
   if (typeof fallback === "string") {
     return "#0a1b2c";
   }
+  if (Array.isArray(fallback) || typeof fallback === "object") {
+    return BENT_CURVE;
+  }
   return (fallback + 0.07) % 1;
 }
 
 /** The brush with one field changed, clamped the way the reader clamps it. */
-function brushWith(field: keyof BrushSettings, value: number | string | boolean): BrushSettings {
+function brushWith(
+  field: keyof BrushSettings,
+  value: number | string | boolean | readonly PressureCurvePoint[],
+): BrushSettings {
   return normalizeBrush({ ...DEFAULT_BRUSH, [field]: value } as BrushSettings);
 }
 
@@ -382,7 +398,7 @@ describe("no brush field is dropped", () => {
       const parsed = parseAppSettings(
         JSON.stringify({ version: 1, brush: { [field]: raw } }),
       );
-      expect(parsed.brush[field], `the settings reader dropped "${field}"`).toBe(expected);
+      expect(parsed.brush[field], `the settings reader dropped "${field}"`).toEqual(expected);
 
       const withPreset = parseAppSettings(
         JSON.stringify({
@@ -393,7 +409,7 @@ describe("no brush field is dropped", () => {
       expect(
         withPreset.presets[0].brush[field],
         `the preset reader dropped "${field}"`,
-      ).toBe(expected);
+      ).toEqual(expected);
     }
   });
 

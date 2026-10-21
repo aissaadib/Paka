@@ -1,9 +1,17 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings } from "../../types/brush";
+import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
+import {
+  IDENTITY_PRESSURE_CURVE,
+  normalizePressureCurve,
+  pressureCurvesEqual,
+} from "./pressureCurve";
+
+/** The identity pressure response every pre-curve file behaves like. */
+export const DEFAULT_PRESSURE_CURVE = IDENTITY_PRESSURE_CURVE;
 
 export const MIN_BRUSH_SIZE = 1;
 export const MAX_BRUSH_SIZE = 512;
@@ -29,6 +37,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   hardness: 1,
   pressureSize: 0.6,
   pressureOpacity: 0,
+  pressureCurve: IDENTITY_PRESSURE_CURVE,
   minSizeRatio: 0.12,
   spacing: 0.12,
   stabilizer: 0,
@@ -48,6 +57,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     hardness: clamp(brush.hardness, 0, 1),
     pressureSize: clamp(brush.pressureSize, 0, 1),
     pressureOpacity: clamp(brush.pressureOpacity, 0, 1),
+    pressureCurve: normalizePressureCurve(brush.pressureCurve),
     minSizeRatio: clamp(brush.minSizeRatio, 0.02, 1),
     spacing: clamp(brush.spacing, MIN_SPACING, MAX_SPACING),
     stabilizer: clamp(brush.stabilizer, 0, 1),
@@ -107,11 +117,22 @@ export const BRUSH_FLAG_FIELDS = ["stamp"] as const satisfies readonly FlagBrush
 /** Every colour field of a brush. */
 export const BRUSH_COLOR_FIELDS = ["color"] as const satisfies readonly ColorBrushField[];
 
-/** Every field a brush has, according to the three lists above. */
+/** The fields whose value is a pressure curve. */
+type CurveBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends readonly PressureCurvePoint[] ? K : never;
+}[keyof BrushSettings];
+
+/** Every curve field of a brush. */
+export const BRUSH_CURVE_FIELDS = [
+  "pressureCurve",
+] as const satisfies readonly CurveBrushField[];
+
+/** Every field a brush has, according to the lists above. */
 type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
-  | (typeof BRUSH_COLOR_FIELDS)[number];
+  | (typeof BRUSH_COLOR_FIELDS)[number]
+  | (typeof BRUSH_CURVE_FIELDS)[number];
 
 /** A brush field that no list above claims. */
 type UnlistedBrushField = Exclude<keyof BrushSettings, ListedBrushField>;
@@ -182,6 +203,9 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_COLOR_FIELDS) {
     assign(merged, field, readColor(record[field], DEFAULT_BRUSH[field]));
   }
+  for (const field of BRUSH_CURVE_FIELDS) {
+    assign(merged, field, normalizePressureCurve(record[field]));
+  }
   return normalizeBrush(merged);
 }
 
@@ -201,6 +225,7 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.hardness === b.hardness &&
     a.pressureSize === b.pressureSize &&
     a.pressureOpacity === b.pressureOpacity &&
+    pressureCurvesEqual(a.pressureCurve, b.pressureCurve) &&
     a.minSizeRatio === b.minSizeRatio &&
     a.spacing === b.spacing &&
     a.stabilizer === b.stabilizer &&

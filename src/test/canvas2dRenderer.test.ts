@@ -14,6 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_PRESSURE_CURVE } from "../core/brushes/defaults";
 import {
   blendChannel,
   isLayerBlendMode,
@@ -57,6 +58,7 @@ const BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  pressureCurve: DEFAULT_PRESSURE_CURVE,
 };
 
 let recording: RecordingDocument;
@@ -3682,3 +3684,4 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
     expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
   });
 });
+

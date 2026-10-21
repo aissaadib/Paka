@@ -8,10 +8,21 @@
  * cannot claim capabilities the engine does not have.
  */
 
+/**
+ * One point of a pressure-response curve.
+ *
+ * `x` is the raw pressure the device reported and `y` is the pressure the
+ * brush uses, both in `[0, 1]`. A point at `(0, 0)` and one at `(1, 1)` is the
+ * identity mapping every file written before the curve existed behaves like.
+ */
+export interface PressureCurvePoint {
+  readonly x: number;
+  readonly y: number;
+}
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
-  readonly size: number;
-  /** Opacity of the whole stroke in `[0, 1]`. */
+  readonly size: number;  /** Opacity of the whole stroke in `[0, 1]`. */
   readonly opacity: number;
   /** CSS color of the stroke. */
   readonly color: string;
@@ -36,6 +47,17 @@ export interface BrushSettings {
    * 0 = constant opacity, 1 = opacity scales linearly with pressure.
    */
   readonly pressureOpacity: number;
+  /**
+   * Maps raw device pressure to the pressure the brush reacts to.
+   *
+   * Evaluated exactly once, at the brush's mapping boundary: stored samples
+   * keep the raw device pressure, so the mapping is the same in live drawing,
+   * a layer rebuild, undo/redo, a reopened project and export, and it is never
+   * applied twice. The identity curve (`(0,0) -> (1,1)`) reproduces the old
+   * linear behaviour exactly; a curve can flatten, steepen or invert a part of
+   * the response without changing the stroke geometry.
+   */
+  readonly pressureCurve: readonly PressureCurvePoint[];
   /** Diameter floor as a fraction of `size`, in `[0, 1]`. */
   readonly minSizeRatio: number;
   /**

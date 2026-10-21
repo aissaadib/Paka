@@ -29,7 +29,7 @@ import {
   serializeAppSettings,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint } from "../types/brush";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
 /** A scheduler the test drives by hand, so no test waits in real time. */
@@ -98,13 +98,21 @@ function createHarness(gateway: MemorySettingsGateway = new MemorySettingsGatewa
  * impossible: a field added to the brush without a value here fails the key
  * check, and a field the reader forgets fails the round-trip equality.
  */
-const NON_DEFAULT_BRUSH_VALUES: Record<keyof BrushSettings, string | number | boolean> = {
+const NON_DEFAULT_BRUSH_VALUES: Record<
+  keyof BrushSettings,
+  string | number | boolean | readonly PressureCurvePoint[]
+> = {
   size: 33,
   opacity: 0.42,
   color: "#123456",
   hardness: 0.37,
   pressureSize: 0.21,
   pressureOpacity: 0.73,
+  pressureCurve: [
+    { x: 0, y: 0 },
+    { x: 0.4, y: 0.7 },
+    { x: 1, y: 1 },
+  ],
   minSizeRatio: 0.55,
   spacing: 0.34,
   stabilizer: 0.66,
@@ -116,7 +124,7 @@ const NON_DEFAULT_BRUSH_VALUES: Record<keyof BrushSettings, string | number | bo
 };
 
 function nonDefaultBrush(): BrushSettings {
-  const brush: Record<string, string | number | boolean> = { ...DEFAULT_BRUSH };
+  const brush: Record<string, unknown> = { ...DEFAULT_BRUSH };
   for (const field of Object.keys(DEFAULT_BRUSH)) {
     const value = NON_DEFAULT_BRUSH_VALUES[field as keyof BrushSettings];
     if (value === undefined) {
