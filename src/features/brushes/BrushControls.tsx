@@ -10,6 +10,7 @@ import {
 } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
+import { BrushPresets } from "./BrushPresets";
 
 /** Pressure strength applied by the on/off toggles. */
 const PRESSURE_STRENGTH = 0.6;
@@ -20,6 +21,7 @@ export function BrushControls() {
 
   return (
     <div className="toolbar__group brush-controls">
+      <BrushPresets />
       <SliderField
         label="Size"
         scale="log"
