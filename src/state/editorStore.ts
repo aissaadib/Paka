@@ -29,6 +29,8 @@ export interface EditorActions {
   saveBrushPreset(name: string): BrushPreset | null;
   /** Renames a preset; `null` when the id is unknown or the name is empty. */
   renameBrushPreset(id: string, name: string): BrushPreset | null;
+  /** Duplicates a preset; `null` when the id is unknown. */
+  duplicateBrushPreset(id: string): BrushPreset | null;
   /** Deletes a preset. Editor state only: no history entry, no dirty flag. */
   deleteBrushPreset(id: string): boolean;
   /** Applies a preset through the normal brush setter. */
@@ -119,6 +121,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setBrush: (patch) => engine.setBrush(patch),
     saveBrushPreset: (name) => engine.saveBrushPreset(name),
     renameBrushPreset: (id, name) => engine.renameBrushPreset(id, name),
+    duplicateBrushPreset: (id) => engine.duplicateBrushPreset(id),
     deleteBrushPreset: (id) => engine.deleteBrushPreset(id),
     applyBrushPreset: (id) => engine.applyBrushPreset(id),
     setShapeFill: (filled) => engine.setShapeFill(filled),

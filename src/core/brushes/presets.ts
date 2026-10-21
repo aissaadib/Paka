@@ -13,7 +13,8 @@
 
 import type { BrushSettings } from "../../types/brush";
 import { createId, reserveId } from "../../utils/id";
-import { brushSettingsEqual } from "./defaults";
+import { asRecord } from "../../utils/record";
+import { brushSettingsEqual, readBrushSettings } from "./defaults";
 
 export interface BrushPreset {
   readonly id: string;
@@ -75,6 +76,63 @@ export function createPresetId(): string {
 /** Keeps generated ids clear of one loaded from the settings file. */
 export function reservePresetId(id: string): void {
   reserveId("preset", id);
+}
+
+/**
+ * Reads a preset list out of an untrusted value.
+ *
+ * This is the one place a preset list is rebuilt, so the settings file and
+ * the engine's `setPresets` agree on what a valid entry is. An entry that is
+ * not an object, or whose name is empty, is skipped rather than allowed to
+ * lose the rest of the list; a missing or duplicate id gets a fresh one; a
+ * duplicate name gets a numeric suffix, so the picker always has distinct
+ * entries. The brush of an entry is read through `readBrushSettings`, so it
+ * keeps every field a brush has.
+ */
+export function normalizeBrushPresets(value: unknown): readonly BrushPreset[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const presets: BrushPreset[] = [];
+  const ids = new Set<string>();
+  for (const entry of value) {
+    const record = asRecord(entry);
+    if (record === null) {
+      continue;
+    }
+    const name = normalizePresetName(typeof record.name === "string" ? record.name : "");
+    if (name === "") {
+      continue;
+    }
+    const rawId = typeof record.id === "string" ? record.id.trim() : "";
+    let id = rawId === "" || ids.has(rawId) ? createPresetId() : rawId;
+    while (ids.has(id)) {
+      id = createPresetId();
+    }
+    reservePresetId(id);
+    ids.add(id);
+    presets.push({
+      id,
+      name: uniquePresetName(name, presets),
+      brush: readBrushSettings(record.brush),
+    });
+  }
+  return presets;
+}
+
+/**
+ * A copy of a preset: the same brush under a fresh id and a name that does
+ * not clash with the ones already in the list.
+ */
+export function duplicatePreset(
+  preset: BrushPreset,
+  existing: readonly BrushPreset[],
+): BrushPreset {
+  return {
+    id: createPresetId(),
+    name: uniquePresetName(preset.name, existing),
+    brush: { ...preset.brush },
+  };
 }
 
 /** Field-wise comparison, used to skip redundant publishes and writes. */

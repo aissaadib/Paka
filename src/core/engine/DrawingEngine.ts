@@ -31,8 +31,9 @@ import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings 
 import {
   brushPresetsEqual,
   createPresetId,
+  duplicatePreset,
+  normalizeBrushPresets,
   normalizePresetName,
-  reservePresetId,
   uniquePresetName,
   type BrushPreset,
 } from "../brushes/presets";
@@ -1048,34 +1049,12 @@ export class DrawingEngine implements StrokeSource {
    *
    * The settings store calls this once while applying a file. It is editor
    * state, so it publishes without touching the document, the revision or
-   * history.
+   * history. The entries are read by `normalizeBrushPresets`, the same
+   * reader the settings file uses, so a malformed entry is handled the same
+   * way wherever it comes from.
    */
   setPresets(presets: readonly BrushPreset[]): void {
-    const next: BrushPreset[] = [];
-    const ids = new Set<string>();
-    for (const candidate of presets) {
-      if (typeof candidate.name !== "string") {
-        continue;
-      }
-      const name = normalizePresetName(candidate.name);
-      if (name === "") {
-        continue;
-      }
-      let id = typeof candidate.id === "string" ? candidate.id.trim() : "";
-      if (id === "" || ids.has(id)) {
-        id = createPresetId();
-      }
-      while (ids.has(id)) {
-        id = createPresetId();
-      }
-      reservePresetId(id);
-      ids.add(id);
-      next.push({
-        id,
-        name: uniquePresetName(name, next),
-        brush: normalizeBrush(candidate.brush),
-      });
-    }
+    const next = normalizeBrushPresets(presets);
     if (brushPresetsEqual(this.presets, next)) {
       return;
     }
@@ -1143,6 +1122,25 @@ export class DrawingEngine implements StrokeSource {
     this.commands.breakMerge();
     this.publish();
     return true;
+  }
+
+  /**
+   * Duplicates a preset: the same brush under a fresh id and a name that does
+   * not clash with the ones already saved.
+   *
+   * Editor state only: no history entry, no revision bump and no dirty flag.
+   * Returns the new entry, or `null` when the id is unknown.
+   */
+  duplicateBrushPreset(id: string): BrushPreset | null {
+    const preset = this.presets.find((candidate) => candidate.id === id);
+    if (!preset) {
+      return null;
+    }
+    const copy = duplicatePreset(preset, this.presets);
+    this.presets = [...this.presets, copy];
+    this.commands.breakMerge();
+    this.publish();
+    return copy;
   }
 
   /**

@@ -22,22 +22,20 @@
  * one of those paths ends in a usable set of settings rather than an error.
  */
 
-import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush } from "../brushes/defaults";
+import { DEFAULT_BRUSH, brushSettingsEqual, readBrushSettings } from "../brushes/defaults";
+import { DEFAULT_GRADIENT_END_COLOR } from "../gradient/gradientRecord";
 import {
   brushPresetsEqual,
-  createPresetId,
-  normalizePresetName,
-  reservePresetId,
-  uniquePresetName,
+  normalizeBrushPresets,
   type BrushPreset,
 } from "../brushes/presets";
-import { DEFAULT_GRADIENT_END_COLOR } from "../gradient/gradientRecord";
 import { DEFAULT_SHAPE_OPTIONS, normalizeShapeOptions } from "../tools/shapeGeometry";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { BrushSettings } from "../../types/brush";
 import type { ToolId } from "../../types/tool";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
+import { asRecord } from "../../utils/record";
 
 /** The version of the settings file this build reads and writes. */
 export const SETTINGS_VERSION = 1;
@@ -90,13 +88,6 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 const TOOL_IDS = new Set<string>(TOOL_DEFINITIONS.map((definition) => definition.id));
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
-
 function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -125,87 +116,31 @@ function toolIdOr(value: unknown): ToolId {
   return typeof value === "string" && TOOL_IDS.has(value) ? (value as ToolId) : DEFAULT_APP_SETTINGS.toolId;
 }
 
-/** A numeric brush field, or its default when it is missing or not a number. */
-function brushNumber(record: Record<string, unknown>, key: keyof BrushSettings): number {
-  const value = record[key];
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  const fallback = DEFAULT_BRUSH[key];
-  return typeof fallback === "number" ? fallback : 0;
-}
-
 /**
  * The brush, validated field by field.
  *
- * `normalizeBrush` does the clamping, but it assumes its input is a real
- * `BrushSettings`; a file that holds `{"size": "big"}` has to be turned into
- * something it can accept first.
+ * `readBrushSettings` does the work: it walks the brush's own field lists, so
+ * no field can be dropped from the round trip, and it clamps what it reads.
+ * A file that holds `{"size": "big"}` becomes a usable brush rather than an
+ * error.
  */
 function brushOr(value: unknown): BrushSettings {
-  const record = asRecord(value);
-  if (record === null) {
-    return DEFAULT_BRUSH;
-  }
-  const merged: BrushSettings = {
-    ...DEFAULT_BRUSH,
-    size: brushNumber(record, "size"),
-    opacity: brushNumber(record, "opacity"),
-    hardness: brushNumber(record, "hardness"),
-    pressureSize: brushNumber(record, "pressureSize"),
-    pressureOpacity: brushNumber(record, "pressureOpacity"),
-    minSizeRatio: brushNumber(record, "minSizeRatio"),
-    spacing: brushNumber(record, "spacing"),
-    stabilizer: brushNumber(record, "stabilizer"),
-    texture: brushNumber(record, "texture"),
-    stampSpacing: brushNumber(record, "stampSpacing"),
-    stampHardness: brushNumber(record, "stampHardness"),
-    stampTexture: brushNumber(record, "stampTexture"),
-    stamp: record.stamp === true,
-    color: colorOr(record.color, DEFAULT_BRUSH.color),
-  };
-  return normalizeBrush(merged);
+  return readBrushSettings(value);
 }
 
 /**
  * The preset library, validated entry by entry.
  *
  * A missing or non-array `presets` is an empty list, so files written before
- * presets existed load unchanged. One malformed entry (not an object, no
- * usable name) is skipped rather than allowed to lose the rest; a bad field
- * inside a preset's brush takes its default through `brushOr`, exactly like
- * the top-level brush. Duplicate or missing ids are replaced, and duplicate
- * names get a numeric suffix, so the picker always has distinct entries.
+ * presets existed load unchanged. The entries themselves are read by
+ * `normalizeBrushPresets`, which is the same reader the engine uses: one
+ * malformed entry (not an object, no usable name) is skipped rather than
+ * allowed to lose the rest, a bad field inside a preset's brush takes its
+ * default, duplicate or missing ids are replaced, and duplicate names get a
+ * numeric suffix, so the picker always has distinct entries.
  */
 function presetsOr(value: unknown): readonly BrushPreset[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const presets: BrushPreset[] = [];
-  const ids = new Set<string>();
-  for (const entry of value) {
-    const record = asRecord(entry);
-    if (record === null || typeof record.name !== "string") {
-      continue;
-    }
-    const name = normalizePresetName(record.name);
-    if (name === "") {
-      continue;
-    }
-    const rawId = typeof record.id === "string" ? record.id.trim() : "";
-    let id = rawId === "" || ids.has(rawId) ? createPresetId() : rawId;
-    while (ids.has(id)) {
-      id = createPresetId();
-    }
-    reservePresetId(id);
-    ids.add(id);
-    presets.push({
-      id,
-      name: uniquePresetName(name, presets),
-      brush: brushOr(record.brush),
-    });
-  }
-  return presets;
+  return normalizeBrushPresets(value);
 }
 
 /**
