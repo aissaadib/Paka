@@ -586,6 +586,70 @@ the wheel's state remembers the colour it was last reconciled against, and
 any change of the brush colour that the wheel did not write drops the request
 - once and for good, so a stale hue cannot come back.
 
+### Preferences that survive a restart
+
+The editor's preferences - the brush, the tool, the shape options, the fill
+tolerance and the gradient settings - are **session state that happens to
+survive a restart**. They live in a per-user settings file in the operating
+system's configuration directory, and they are restored at startup.
+
+The file is **not a project file**. It holds preferences only: no drawing, no
+document, no history. That is what keeps the two apart:
+
+- restoring a preference goes through the engine's **editor-state** setters,
+  so it costs no history entry, no revision bump and no dirty flag - the same
+  contract the brush settings have always had;
+- a project file is the user's work and is written only when the user asks;
+  the settings file is the app's own and is written when a preference
+  changes.
+
+**The path belongs to Rust.** Two native commands, `read_app_settings` and
+`write_app_settings`, own the configuration directory and the file name; the
+WebView asks for the settings and hands them back, and never learns where
+they live. The alternative - passing a frontend-chosen path to the generic
+project writer - would have widened the WebView's write scope from one file
+to any `.json` the user can name. The write reuses the project's own atomic
+replace, so a crash or a full disk cannot leave a half-written settings file.
+
+**Every field is validated on the way in**, because the file is on disk and a
+user can put anything in it: a missing field takes its default, an
+out-of-range value is clamped rather than rejected, a malformed value takes
+its default, and a file written by a newer version is ignored wholesale -
+its meaning is unknown rather than wrong. A corrupt settings file therefore
+cannot stop the editor from starting.
+
+The store (`src/core/settings/`) is framework-free: it reads the file, applies
+it, watches the editor's snapshot for changes, and writes the file back
+debounced, so a brush-slider drag is one write rather than sixty. A file that
+cannot be read or written is recorded and forgotten - it is a minor
+inconvenience, not something the user has to act on.
+
+### The autosave seam (not enabled)
+
+`src/core/autosave/` holds the machinery for writing a recovery copy of the
+drawing, and **nothing starts it**. The decisions that govern autosaving -
+whether it runs, at what interval, how a never-saved document is protected,
+whether recovery is automatic, prompted or manual, when a copy is deleted and
+how a conflict is presented - are the owner's, so the policy is *injected*
+rather than chosen: `enabled`, `intervalMs` and `recoveryPathFor`.
+
+What the code guarantees, and what its tests pin:
+
+- **an autosave never marks the document saved.** The service calls no engine
+  mutator, so the dirty flag, the close guard and the title dot keep saying
+  "unsaved" whatever it does;
+- **an autosave never writes the user's path.** The copy goes to the path the
+  policy derives, and the service refuses to write at all when that path is
+  the project's own;
+- **one write at a time**, and a copy written while the user saved is
+  reported as *superseded* rather than passed off as current.
+
+A recovery copy is a **project file** - the same format, the same parser - so
+it needs no new format, and it is written with the same `engine.serialize()`
+a save uses. It is named `<stem>.autosave.paka` beside the project: the
+marker cannot go at the end, because the native writer only accepts `.paka`
+and `.json` and the extension is the last part of the name.
+
 Like the rest of the brush, the wheel is session state for the next gesture:
 choosing a colour is not an edit, adds no history step and never marks the
 document dirty. The three sliders are native range inputs, so the wheel is

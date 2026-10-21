@@ -219,6 +219,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       truth, and choosing a colour is not an edit.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
+- [x] **Preferences survive a restart**: the brush, the tool, the shape options,
+      the fill tolerance and the gradient settings live in a per-user settings
+      file in the OS configuration folder, and are restored at startup. The
+      file holds preferences only - never a drawing - and changing one is not
+      an edit, so it never dirties a document. It is the file a palette list
+      and the autosave preferences would live in.
 
 ## Phase 6 - Aids and non-destructive editing
 
@@ -242,7 +248,10 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 
 - Undo history is not stored in the project file (reopening rebuilds one step
   per stored element: one per stroke, fill patch or gradient).
-- There is no autosave or crash recovery.
+- There is no autosave or crash recovery. The recovery machinery and its
+  policy seam exist and are covered by tests, but the decisions that govern
+  them are the owner's, so nothing is enabled and no recovery file is ever
+  written.
 - The React layer has no automated tests; it is verified in the running app.
 - `Ctrl+N` is not bound; use `File -> New Document...`.
 

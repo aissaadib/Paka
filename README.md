@@ -135,6 +135,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   toolbar's colour input and the swatches write, so the wheel follows a colour
   picked off the canvas - and choosing a colour is not an edit: it adds no
   history step and never marks the document dirty.
+- **Preferences survive a restart**: the brush, the active tool, the shape
+  options, the fill tolerance and the gradient settings are stored in a
+  per-user settings file in the operating system's configuration folder and
+  restored at startup. The file holds preferences only - never a drawing - and
+  changing one is not an edit, so it adds no history step and never marks the
+  document unsaved.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
   (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
   outer edge), **sampling** (2-200 % of the brush diameter: how densely fast
@@ -387,7 +393,9 @@ paste-ready version of the same briefing is in
   undoable step per stored element (stroke, fill patch or gradient), so the
   drawing stays editable, but there is no redo of edits made before the save.
 - There is **no autosave or crash recovery**: unsaved work is lost if the app or
-  the machine goes down.
+  the machine goes down. The machinery for a recovery copy exists and is
+  tested, but the decisions that govern it - when to save, how a recovery is
+  offered - are still open, so nothing is enabled.
 - `Ctrl+N` is not bound; use `File → New Document…`.
 - The React layer has **no automated tests**; it is verified manually in the
   running app. The format, file-service and export orchestration have Vitest

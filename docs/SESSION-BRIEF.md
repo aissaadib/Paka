@@ -31,14 +31,15 @@ visual-regression harness.
 
 ## 2. Current state (verified today)
 
-- Branch `integration/t10-hsv-color-wheel` at `bc062c7` — a merge of the
-  colour wheel branch (`dbcb446`) into the development branch — after the
-  live-preview compositing, layer-safety, raster-budget, bounded-
-  rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
-  The colour wheel slice is integrated, not a branch waiting for review.
-- `pnpm test` → **711 tests in 34 files, all pass** (the scale/rotate slice: 653
+- Branch `feat/t06-settings-persistence` (from `feat/stamp-brush-engine` at
+  `a1c9c1d`), after the live-preview compositing, layer-safety, raster-budget,
+  bounded-rasterization, **stamp (dab) brush engine**, **HSV colour wheel**,
+  **composition guides**, **polygon and star** and **scale/rotate** slices.
+  The settings slice is committed on its own branch, ready for review; it is
+  not merged into the development branch yet.
+- `pnpm test` → **742 tests in 36 files, all pass** (the settings slice: 711
   before it).
-- `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
+- `pnpm typecheck` clean; `pnpm build` succeeds (the settings slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
@@ -61,6 +62,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t06-settings-persistence` | **Settings persistence** - the nine editor preferences (brush, tool, shape fill, shape sides, star inner ratio, shape rotation, fill tolerance, gradient type, gradient end colour) live in a per-user settings file in the OS configuration folder and are restored at startup. The file holds preferences only - never a drawing - and changing one is not an edit, so it adds no history step and never marks the document unsaved. A missing, corrupt or future-versioned file starts the app with the defaults and no error. The **autosave** machinery and its policy seam exist and are covered by tests, but the decisions that govern autosaving are the owner's, so nothing is enabled and no recovery file is ever written. |
 | `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
 | `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
@@ -152,6 +154,13 @@ visual-regression harness.
   its frame and never on a marquee's rubber band.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
+- **Preferences survive a restart**: the brush, the tool, the shape options, the
+  fill tolerance and the gradient settings are stored in a per-user settings file
+  in the operating system's configuration folder (`%APPDATA%\com.paka.drawing\
+  settings.json` on Windows) and restored at startup. The file holds
+  preferences only - never a drawing - and changing one is not an edit, so it
+  adds no history step and never marks the document unsaved. A missing, corrupt
+  or future-versioned file starts the app with the defaults and no error.
 - **Composition guides** (`U`): a dedicated **Guides** tool. Drag on empty canvas
   to place a guide - the axis follows the dominant direction of the drag and the
   position is the **press** coordinate, so the guide marks where the drag
@@ -405,6 +414,18 @@ Key files for the next slice (directional / per-dab stamp textures):
   same: the current brush is session state, while every stroke stores the
   full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
   `texture`, `stamp`, `stampSpacing` and `stampHardness`.
+- **Preferences are session state that happens to survive a restart.** The
+  settings file holds the nine editor preferences and nothing else: no
+  drawing, no document, no history. Restoring them goes through the engine's
+  editor-state setters, so a restored preference costs no history entry, no
+  revision bump and no dirty flag - the same contract the brush settings have
+  always had. The file lives in the OS configuration directory, its path is
+  owned by Rust (the WebView never learns it), and it is written with the
+  same atomic replace the project file uses. Every field is validated on the
+  way in: a missing field takes its default, an out-of-range value is clamped,
+  a malformed value takes its default, and a file from a newer version is
+  ignored wholesale. A corrupt settings file cannot stop the editor from
+  starting.
 - **The colour wheel is a view of the brush colour, not a second source of
   truth.** The brush still stores an `#rrggbb` string, and the wheel writes
   through the same `setBrush` path as the toolbar's colour input, the swatches
@@ -481,8 +502,16 @@ Product:
   not scaled with the path.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
-  inheritance. No layer masks/groups; no adjustment layers; no autosave/crash
-  recovery; `Ctrl+N` unbound.
+  inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+- **There is no autosave and no crash recovery.** The recovery machinery and
+  its policy seam exist (`src/core/autosave/`) and are covered by tests, but
+  the decisions that govern autosaving - when it runs, how a never-saved
+  document is protected, whether recovery is automatic, prompted or manual,
+  when a recovery copy is deleted and how a conflict is presented - are the
+  owner's and are unanswered, so **nothing is enabled and no recovery file is
+  ever written**. The settings file is written 300 ms after the last
+  preference change, so a preference changed in the last moments before the
+  window closes can be lost.
 - Guides: axis-only (no diagonals), one guide per axis position (a duplicate is
   refused), a fixed accent colour, no position label, and **no snapping to
   guides** - snapping changes what a stroke does, so it is its own slice. No

@@ -131,7 +131,10 @@ fn require_extension(path: &Path, allowed: &[&str], kind: &str) -> Result<(), St
 ///
 /// The temporary file is removed on any failure, so a failed save cannot leave
 /// debris next to the project.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+///
+/// Shared with the settings store, which needs the same "old file or new file,
+/// never a half-written one" guarantee for the preferences file.
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
