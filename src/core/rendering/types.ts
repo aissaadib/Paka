@@ -78,6 +78,16 @@ export interface DrawingRenderer {
    */
   setSelection(selection: RendererSelection | null): void;
   /**
+   * Marks a composition guide as the selected one, or clears the selection.
+   *
+   * Overlay only, like the selection: the guide is drawn in the selection
+   * accent on the display canvas and never reaches a layer surface, the
+   * document or `composeDocumentImage`. The guides themselves are document
+   * state and arrive with `setDocument`; only the selection is an overlay
+   * concern.
+   */
+  setSelectedGuide(guideId: string | null): void;
+  /**
    * Composites paper and visible layers into a **new** canvas at document pixel
    * size (no viewport, no border, no in-progress stroke). Used by PNG export, so
    * it must not disturb the display, the document or the layer surfaces.

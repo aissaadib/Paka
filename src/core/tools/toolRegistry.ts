@@ -4,6 +4,7 @@ import type { ToolId } from "../../types/tool";
 import { BrushTool } from "./brushTool";
 import { BucketTool } from "./bucketTool";
 import { GradientTool } from "./gradientTool";
+import { GuidesTool } from "./guidesTool";
 import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
 import { SelectTool } from "./selectTool";
@@ -12,6 +13,7 @@ import {
   BRUSH_TOOL,
   ELLIPSE_TOOL,
   ERASER_TOOL,
+  GUIDES_TOOL,
   LINE_TOOL,
   POLYGON_TOOL,
   RECTANGLE_TOOL,
@@ -40,6 +42,8 @@ export function createToolRegistry(): ToolRegistry {
     // Gradient: a drag previews geometry and the release commits it.
     gradient: new GradientTool(),
     picker: new PickerTool(),
+    // Composition guides: a drag places one, a drag on one moves it.
+    guides: new GuidesTool(GUIDES_TOOL),
     pan: new PanTool(),
   };
 }

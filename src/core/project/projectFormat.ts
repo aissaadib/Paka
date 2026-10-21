@@ -39,6 +39,8 @@ import type {
   FillPatchRecord,
   GradientRecord,
   GradientStop,
+  Guide,
+  GuideAxis,
   Layer,
   LayerBlendMode,
   LayerElement,
@@ -95,6 +97,12 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * open unchanged, with the stamp off, which is exactly the segment path they
  * were written by.
  *
+ * Within version 9, `document.guides` is **additive**: the composition guides
+ * are display-only, so a reader that does not know the field ignores it and
+ * draws the very same picture - the same situation as `stabilizer` within
+ * version 6. That is why the version was not bumped. A file without the field
+ * opens with no guides at all.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
 export const PROJECT_VERSION = 9;
@@ -111,6 +119,13 @@ export const MAX_PROJECT_SAMPLES = 5_000_000;
 export const MAX_PROJECT_FILL_PIXELS = MAX_FILL_SCAN_PIXELS;
 /** Upper bound on colour stops in one gradient. */
 export const MAX_PROJECT_GRADIENT_STOPS = 64;
+/**
+ * Upper bound on the composition guides a file may carry.
+ *
+ * A guide is a handful of bytes, but the array is unbounded input, so the
+ * ceiling is the same kind of guard the sample and fill-pixel ceilings are.
+ */
+export const MAX_PROJECT_GUIDES = 10_000;
 
 export interface SerializedStroke {
   readonly kind: "stroke";
@@ -175,9 +190,24 @@ export interface SerializedProject {
     readonly height: number;
     readonly background: string;
     readonly activeLayerId: LayerId | null;
+    /**
+     * The composition guides.
+     *
+     * Additive within version 9: the guides are display-only, so a reader that
+     * does not know the field ignores it and draws the same picture. That is
+     * why the version was not bumped.
+     */
+    readonly guides: readonly SerializedGuide[];
   };
   /** Bottom-first, matching the in-memory document order. */
   readonly layers: readonly SerializedLayer[];
+}
+
+/** A composition guide: an axis and a position in document pixels. */
+export interface SerializedGuide {
+  readonly id: string;
+  readonly axis: GuideAxis;
+  readonly position: number;
 }
 
 export interface ParsedProject {
@@ -421,6 +451,11 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
       height: document.height,
       background: document.background,
       activeLayerId: document.activeLayerId,
+      guides: document.guides.map((guide) => ({
+        id: guide.id,
+        axis: guide.axis,
+        position: guide.position,
+      })),
     },
     layers: document.layers.map((layer) => ({
       id: layer.id,
@@ -654,6 +689,7 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
   });
 
   const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, seenLayerIds, layers, warnings);
+  const guides = readGuides(rawDocument.guides, warnings);
 
   const document: DrawingDocument = {
     id: documentId,
@@ -663,9 +699,71 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
     background,
     layers,
     activeLayerId,
+    guides,
   };
 
   return { document, elements, strokes, warnings };
+}
+
+/**
+ * Reads the composition guides.
+ *
+ * Reading is forgiving: a file without the field opens with no guides at all
+ * (that is every file written before version 9 carried them), and a guide that
+ * is broken in some way is dropped with a warning rather than making the whole
+ * file unopenable. A guide is a decorative overlay; refusing a drawing over
+ * one would be the wrong trade.
+ *
+ * The count ceiling is the exception: a file with an enormous guide array is
+ * refused outright, like the sample and fill-pixel ceilings.
+ */
+function readGuides(value: unknown, warnings: string[]): Guide[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    warnings.push("The guides were not a list and were ignored.");
+    return [];
+  }
+  if (value.length > MAX_PROJECT_GUIDES) {
+    fail(`This project contains more than ${MAX_PROJECT_GUIDES} guides and cannot be opened.`);
+  }
+
+  const guides: Guide[] = [];
+  const seenIds = new Set<string>();
+  value.forEach((raw, index) => {
+    const label = `Guide ${index + 1}`;
+    if (!isRecord(raw)) {
+      warnings.push(`${label} was not a guide and was ignored.`);
+      return;
+    }
+    const axis = raw.axis;
+    if (axis !== "vertical" && axis !== "horizontal") {
+      warnings.push(`${label} had an unknown axis and was ignored.`);
+      return;
+    }
+    const position = raw.position;
+    if (typeof position !== "number" || !Number.isFinite(position)) {
+      warnings.push(`${label} had an invalid position and was ignored.`);
+      return;
+    }
+    const id = raw.id;
+    if (typeof id !== "string" || id.trim() === "") {
+      warnings.push(`${label} had no identifier and was ignored.`);
+      return;
+    }
+    if (seenIds.has(id)) {
+      warnings.push(`Two guides share the id "${id}"; the second was ignored.`);
+      return;
+    }
+    seenIds.add(id);
+    reserveId("guide", id);
+    // A guide is a registration mark, so its position is a whole document
+    // pixel: a fractional one would draw a soft edge at some zooms.
+    guides.push({ id, axis, position: Math.round(position) });
+  });
+
+  return guides;
 }
 
 /** Keeps generated ids from colliding with ids that came out of a file. */

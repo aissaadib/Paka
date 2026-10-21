@@ -209,6 +209,30 @@ version described under [Versioning](#versioning).
 | `width`, `height` | number | Document size in document pixels; must be 8-8192 per side and at most 16,777,216 px in total. |
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
+| `guides` | array | The composition guides. **Additive**: a file without the field opens with no guides. |
+
+#### `guides[]`
+
+A guide is a marker on one axis, in document pixels.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Guide id; must be unique within the file. |
+| `axis` | string | `"vertical"` (the guide stands at an x) or `"horizontal"` (at a y). |
+| `position` | number | The position along the guide's axis, in document pixels. Rounded to a whole pixel when read. |
+
+The guides are **display-only**: they are painted over the artwork on the
+display canvas and never reach a layer surface or a PNG export. A reader that
+does not know the field therefore draws the very same picture, which is why the
+field is additive and the file version did not move.
+
+Reading is forgiving, like the rest of the format: a file with no `guides`
+field opens with no guides, a `guides` field that is not a list is ignored with
+a warning, and a guide with an unknown axis, a non-finite position, a missing
+id or a duplicate id is dropped with a warning rather than making the file
+unopenable - a decorative overlay must never cost the user their drawing. A
+file with more than 10,000 guides is **refused**, like the sample and
+fill-pixel ceilings.
 
 ### `layers[]`
 
@@ -399,7 +423,8 @@ looks like:
 - a gradient with an unknown `type`, fewer than two or more than
   `MAX_PROJECT_GRADIENT_STOPS` (64) stops, a non-hex stop colour, offsets outside
   `0..1` or not strictly ascending, endpoints outside the document, or opacity
-  outside `0..1`.
+  outside `0..1`;
+- more than `MAX_PROJECT_GUIDES` (10,000) composition guides.
 
 **Lenient - repaired with a warning** when only cosmetics are affected:
 
@@ -420,16 +445,25 @@ looks like:
 - a missing `stamp` in a version-1 to -8 file → `false`, and missing
   `stampSpacing`/`stampHardness` → their defaults. The stamp did not exist
   before version 9, and the stamp off is exactly the segment path those files
-  were written by.
+  were written by;
+- a missing `guides` field → no guides. This is an additive field within
+  version 9: the guides are display-only, so a file without them opens exactly
+  as it always did;
+- a `guides` field that is not a list → ignored;
+- a guide with an unknown `axis`, a non-finite `position`, a missing id or a
+  duplicate id → that guide is dropped. A decorative overlay must never make a
+  drawing unopenable;
+- a guide `position` that is not a whole pixel → rounded to the nearest one.
 
 Warnings are surfaced after opening, not hidden: `FileOutcome.opened` carries
 them and the status bar shows them.
 
 Two further guarantees:
 
-- **Ids are reserved.** Layer, document, stroke, fill and gradient ids read from
-  a file advance the id counters, so layers or elements created after opening a
-  project cannot collide with ids that came from the file.
+- **Ids are reserved.** Layer, document, stroke, fill, gradient and guide ids
+  read from a file advance the id counters, so layers, elements or guides
+  created after opening a project cannot collide with ids that came from the
+  file.
 - **A rejected file changes nothing.** Open parses and validates *before* the
   engine is touched, so a corrupt or unsupported file leaves the current drawing
   exactly as it was, unsaved marker included.
@@ -462,6 +496,12 @@ Two further guarantees:
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
   as `0`; when present it must still be a number in `0..1`.
+- **`document.guides` is additive within version 9.** The composition guides are
+  display-only: they are painted over the artwork and never reach a layer
+  surface or a PNG export. A version-9 reader that skips the field draws the
+  identical picture, so the field needed no version bump - the same situation as
+  `stabilizer` within version 6. A file without the field opens with no guides;
+  a file with them round-trips exactly.
 - **`texture` required version 7.** It changes how stored samples are
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field

@@ -57,7 +57,11 @@ const scenes = loadScenes();
 declare global {
   interface Window {
     __pakaVisual?: {
-      run(scene: Scene, golden?: HTMLCanvasElement): SceneVerdict;
+      run(
+        scene: Scene,
+        golden?: HTMLCanvasElement,
+        displayCanvas?: HTMLCanvasElement,
+      ): SceneVerdict;
     };
   }
 }
@@ -116,7 +120,11 @@ test.describe("Paka visual regression", () => {
         if (!api) {
           throw new Error("the harness did not mount");
         }
-        return api.run(input, document.getElementById("golden") as HTMLCanvasElement);
+        return api.run(
+          input,
+          document.getElementById("golden") as HTMLCanvasElement,
+          document.getElementById("display") as HTMLCanvasElement,
+        );
       }, scene);
 
       expect(errors, "the harness page must not raise").toEqual([]);
@@ -134,8 +142,27 @@ test.describe("Paka visual regression", () => {
         `rebuilt and exported differ in ${verdict.rebuiltVsExportedDiffering} pixel(s)`,
       ).toBe(true);
 
+      // The guides are display-only: they change the display and never the
+      // export.
+      expect(
+        verdict.guidesVisible,
+        `the guides of scene ${scene.id} are not visible on the display`,
+      ).toBe((scene.guides?.length ?? 0) > 0);
+      expect(
+        verdict.guidesNotExported,
+        `the guides of scene ${scene.id} reached the exported composite`,
+      ).toBe(true);
+
       // The golden is the exported picture: the thing a PNG export writes.
       await expect(page.locator("#golden")).toHaveScreenshot({ name: `${scene.id}.png` });
+
+      // A scene with guides is also captured from the display, because that is
+      // the only place they can be seen.
+      if ((scene.guides?.length ?? 0) > 0) {
+        await expect(page.locator("#display")).toHaveScreenshot({
+          name: `${scene.id}-display.png`,
+        });
+      }
     });
   }
 });

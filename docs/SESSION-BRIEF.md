@@ -36,13 +36,15 @@ visual-regression harness.
   live-preview compositing, layer-safety, raster-budget, bounded-
   rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
   The colour wheel slice is integrated, not a branch waiting for review.
-- `pnpm test` → **588 tests in 31 files, all pass** (the polygon and star
-  slice: 582 before it, and 554 before the colour wheel slice).
+- `pnpm test` → **653 tests in 32 files, all pass** (the composition-guides
+  slice: 588 before it).
 - `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
-  `stampSpacing` and `stampHardness` are required from v9.
+  `stampSpacing` and `stampHardness` are required from v9. `document.guides`
+  is **additive within v9** (missing = no guides), because the guides are
+  display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
   built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
   mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
@@ -59,6 +61,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
@@ -132,6 +135,16 @@ visual-regression harness.
   not clipped to it.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
+- **Composition guides** (`U`): a dedicated **Guides** tool. Drag on empty canvas
+  to place a guide - the axis follows the dominant direction of the drag and the
+  position is the **press** coordinate, so the guide marks where the drag
+  started. The drag has to travel **3 screen pixels** before its direction
+  decides the axis, so **a shorter drag creates no guide at all** (it is a
+  click). Drag an existing guide to move it along its own axis; a click selects
+  it, `Delete` removes it, `Esc` cancels a drag in flight. A guide is document
+  state but **display-only**: it is painted over the artwork and never reaches a
+  layer surface or a PNG export, so the format change is additive and the file
+  version stays 9. No snapping to guides yet, and no grids or rulers.
 - **HSV colour wheel** (the **Colour** panel): a disc where the angle is the
   hue and the distance from the centre is the saturation, a value slider, and
   three sliders naming the same numbers. It writes the brush colour through
@@ -188,7 +201,8 @@ src/
   hooks/        React bindings, keyboard shortcuts, native environment
   state/        editorStore (snapshot + intents) and context
   core/
-    document/   document/layer metadata, ordered element store, selection
+    document/   document/layer metadata, ordered element store, selection,
+                guides (the guide model, geometry and document operations)
     brushes/    defaults/normalization, strokeBuilder (sample capture)
     fill/       pure flood scan, fill-patch record
     gradient/   gradient geometry/stops/cloning
@@ -408,7 +422,7 @@ Key files for the next slice (directional / per-dab stamp textures):
 Product:
 
 - No text tool; only brush, eraser, select, line, rectangle, ellipse, polygon,
-  star, bucket, gradient, picker, pan.
+  star, bucket, gradient, picker, guides, pan.
 - Shapes: a committed shape stores its **points**, not its kind, so a polygon or
   a star cannot be re-edited as one - it is an ordinary stroke afterwards. There
   is no rotation *gesture* (the option covers the need), no irregular polygon,
@@ -446,8 +460,12 @@ Product:
   copy/paste across layers.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
-  inheritance. No layer masks/groups; no adjustment layers; no guides/grids; no
-  autosave/crash recovery; `Ctrl+N` unbound.
+  inheritance. No layer masks/groups; no adjustment layers; no autosave/crash
+  recovery; `Ctrl+N` unbound.
+- Guides: axis-only (no diagonals), one guide per axis position (a duplicate is
+  refused), a fixed accent colour, no position label, and **no snapping to
+  guides** - snapping changes what a stroke does, so it is its own slice. No
+  grids and no rulers yet either.
 - A layer with a non-default opacity or blend mode spends one extra
   document-sized scratch canvas while it is being previewed.
 - The document pixel budget covers a one-layer document plus the working
@@ -614,7 +632,7 @@ without changing what current hard, soft, grain and stamped files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 588 tests in 31 files).
+   anything (expect 653 tests in 32 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

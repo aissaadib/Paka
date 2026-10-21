@@ -62,8 +62,9 @@ layer list and the **ordered element data** - strokes and serialized fill
 patches - never a flattened image, so a reopened drawing is still editable
 element by element. A fill stores its committed pixels (colour, box and coverage
 mask), not its seed and tolerance, so reopening cannot re-derive a different
-region. The format, its validation rules and its versioning policy are
-documented in [`PROJECT_FORMAT.md`](./PROJECT_FORMAT.md).
+region. The document envelope also carries the **composition guides**, which
+are display-only metadata. The format, its validation rules and its versioning
+policy are documented in [`PROJECT_FORMAT.md`](./PROJECT_FORMAT.md).
 
 The pieces:
 
@@ -123,7 +124,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -904,6 +905,88 @@ The cost of the live move is honest: one full layer re-rasterization per pointer
 move. That is the price of never showing a preview that could differ from the
 committed result; caching the moved strokes' pixels is the obvious optimisation
 if a heavy layer makes dragging lag.
+
+### Composition guides
+
+A guide is a marker on an axis: a vertical guide stands at an x, a horizontal one
+at a y. It is **document state** - `DrawingDocument.guides` - because it is
+stored with the drawing and must mean the same thing at every zoom and on every
+machine. It is **display-only**: the renderer paints it over the artwork and it
+never reaches a layer surface or a PNG export, exactly like the selection
+overlay.
+
+The model is deliberately small (`core/document/types.ts`):
+
+```ts
+interface Guide { readonly id: string; readonly axis: "vertical" | "horizontal"; readonly position: number }
+```
+
+One number, not a point: a vertical guide's y is meaningless (it spans the
+page), so the axis plus a single position is the whole geometry and there is no
+second source of truth. The position is always a **whole document pixel**: a
+guide is a registration mark, and a fractional position would draw a soft edge
+at some zooms. `core/document/guides.ts` is the pure module that holds the
+rules - the axis heuristic, the rounding, the hit-test, the duplicate rule and
+the document operations - and it is unit tested without a canvas.
+
+**Two spaces, on purpose.** The guide's *position* is document space, so zoom
+and pan need no special handling: the canvas transform already maps document to
+device. Its *grab radius* is screen space (8 CSS px, `8 / zoom` document px),
+because a press is made with a finger or a mouse: a fixed document radius would
+make a guide ungrabbable when zoomed out and impossible to miss when zoomed in.
+
+The **Guides tool** (`core/tools/guidesTool.ts`) is one tool with two gestures,
+chosen by where the press lands - the same shape as the select tool:
+
+- **Press on empty canvas** - drag out a new guide. The axis comes from the
+  dominant direction of the drag (`|dx| > |dy|` is vertical, otherwise
+  horizontal), and the position is the **press** coordinate along that axis, so
+  the guide marks where the user started rather than where they let go. The
+  axis is decided once and never changes afterwards.
+- **The axis-decision threshold: 3 CSS pixels.** The drag has to travel
+  **3 CSS px** (the same distance on screen at every zoom, so `3 / zoom`
+  document px) before its direction decides the axis - otherwise the first
+  pixel of jitter would fix the axis for the whole drag. **A drag shorter than
+  3 CSS px creates no guide at all**: until the threshold is reached no guide
+  exists, so a press-and-release inside it is a click and a drag inside it
+  leaves the document untouched.
+- **Press on an existing guide** (within the grab radius) - drag it along its
+  own axis. A vertical guide follows x and ignores y.
+- **A press that never moves** is a click: on a guide it selects it, on empty
+  canvas it clears the selection. `Delete` removes the selected guide, `Esc`
+  cancels the drag in flight and clears the selection.
+
+The **duplicate rule**: two guides on the same axis at the same position are
+pointless, so a create or a move that would land on another guide is refused
+and the drag does nothing. A guide may sit **outside the paper** - a guide
+marks a position, and clamping would lose the intent; it is drawn across the
+whole viewport either way.
+
+**History.** A guide gesture never enters history while it is in flight. The
+guide lives in the document during the gesture - that is how the renderer shows
+it - and the release commits **one** document command; a cancel puts the
+document back exactly as it was and records nothing. A gesture that changed
+nothing (a click on empty canvas, or a drag that ended where it started) commits
+nothing either, so history never holds a step that appears to do nothing. The
+command is an ordinary `DocumentCommand`, so undo and redo restore the guide set
+exactly; the guide selection is *editor* state and is dropped when the guides
+tool is left or when the selected guide disappears.
+
+**Display.** The guides are painted in the display pass, after the layers and
+before the selection overlay and the document border, as full-viewport lines one
+device pixel wide (`1 / scale`, the same hairline idiom as the border). The
+selected guide is drawn in the selection accent so the two overlays can be told
+apart. `composeDocumentImage` never sees them, so a PNG export of a document
+with guides is byte-identical to one without - which is exactly why the project
+format needs no version bump for them.
+
+**Saving during a drag.** The live preview is part of the document while the
+gesture runs, so a save taken mid-drag writes the *preview*, not the document
+the user is going to keep. The file is therefore **not** marked clean by such a
+save: the engine remembers that the file holds a preview, and the dirty flag
+stays on until the file is written again. The same rule as everywhere else in
+the editor applies - an operation must never mark the document clean when the
+document is not what was written.
 
 ### Dirty surfaces
 

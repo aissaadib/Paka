@@ -19,6 +19,7 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  Guide,
   LayerElement,
   LayerId,
   StrokeRecord,
@@ -1444,6 +1445,159 @@ describe("Canvas2DRenderer selection overlay", () => {
     const composed = harness.composeDocument();
     expect(composed.named("stroke")).toHaveLength(0);
     expect(composed.named("strokeRect")).toHaveLength(0);
+  });
+});
+
+/**
+ * The composition guides.
+ *
+ * A guide is document state with no pixels: it is painted over the artwork on
+ * the display canvas only, so an export of a document with guides is
+ * byte-identical to one without.
+ */
+describe("Canvas2DRenderer composition guides", () => {
+  function renderWithGuides(
+    guides: readonly Guide[],
+    options: {
+      readonly zoom?: number;
+      readonly offsetX?: number;
+      readonly offsetY?: number;
+      readonly width?: number;
+      readonly height?: number;
+      readonly dpr?: number;
+      readonly selected?: string | null;
+    } = {},
+  ) {
+    const harness = createHarness();
+    const doc = { ...createDocument({ width: 100, height: 80 }), guides };
+    harness.renderer.setDocument(doc);
+    harness.renderer.setViewport({
+      zoom: options.zoom ?? 1,
+      offsetX: options.offsetX ?? 0,
+      offsetY: options.offsetY ?? 0,
+    });
+    harness.renderer.setDisplaySize(options.width ?? 200, options.height ?? 160, options.dpr ?? 1);
+    if (options.selected !== undefined) {
+      harness.renderer.setSelectedGuide(options.selected);
+    }
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+    return { harness, doc };
+  }
+
+  it("draws a vertical guide at its document position, whatever the zoom", () => {
+    for (const zoom of [0.25, 1, 4, 64]) {
+      const { harness } = renderWithGuides([{ id: "guide-1", axis: "vertical", position: 400 }], {
+        zoom,
+      });
+
+      const moves = harness.display.named("moveTo");
+      expect(moves).toHaveLength(1);
+      // The path is in document space; the canvas transform maps it to device
+      // pixels, so the device x is 400 * zoom * dpr.
+      expect(moves[0].args[0]).toBe(400);
+
+      const transform = harness.display.named("setTransform")[1];
+      const scale = (transform.args[0] as number) * 1;
+      expect(scale).toBeCloseTo(zoom, 10);
+      const deviceX = 400 * scale + (transform.args[4] as number);
+      expect(deviceX).toBeCloseTo(400 * zoom, 10);
+    }
+  });
+
+  it("keeps the guide one device pixel wide at every zoom", () => {
+    for (const zoom of [0.25, 1, 4, 64]) {
+      const { harness } = renderWithGuides([{ id: "guide-1", axis: "vertical", position: 400 }], {
+        zoom,
+      });
+      const strokes = harness.display.named("stroke");
+      expect(strokes).toHaveLength(1);
+      // One device pixel: the line width is divided by the display scale.
+      expect(strokes[0].lineWidth * zoom).toBeCloseTo(1, 10);
+    }
+  });
+
+  it("draws a guide that sits outside the paper, across the whole viewport", () => {
+    const { harness } = renderWithGuides([{ id: "guide-1", axis: "vertical", position: -50 }], {
+      width: 200,
+      height: 160,
+    });
+
+    const moves = harness.display.named("moveTo");
+    const lines = harness.display.named("lineTo");
+    expect(moves[0].args).toEqual([-50, 0]);
+    // The line spans the viewport, not the paper.
+    expect(lines[0].args).toEqual([-50, 160]);
+  });
+
+  it("draws a horizontal guide across the viewport", () => {
+    const { harness } = renderWithGuides([{ id: "guide-1", axis: "horizontal", position: 30 }], {
+      width: 200,
+      height: 160,
+    });
+
+    const moves = harness.display.named("moveTo");
+    const lines = harness.display.named("lineTo");
+    expect(moves[0].args).toEqual([0, 30]);
+    expect(lines[0].args).toEqual([200, 30]);
+  });
+
+  it("draws the guides after the layers and before the selection overlay", () => {
+    const harness = createHarness();
+    const doc = {
+      ...createDocument({ width: 100, height: 80 }),
+      guides: [{ id: "guide-1", axis: "vertical" as const, position: 40 }],
+    };
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.setSelection({ bounds: { x: 2, y: 3, width: 40, height: 20 }, strokes: [] });
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    const names = harness.display.calls.map((call) => call.name);
+    // The layers are composited first, then the guide, then the marquee, and
+    // the document border last.
+    expect(names.indexOf("stroke")).toBeGreaterThan(names.lastIndexOf("drawImage"));
+    expect(names.indexOf("stroke")).toBeLessThan(names.indexOf("strokeRect"));
+    expect(names.lastIndexOf("strokeRect")).toBe(names.length - 1);
+  });
+
+  it("draws the selected guide in the selection accent", () => {
+    const { harness } = renderWithGuides(
+      [
+        { id: "guide-1", axis: "vertical", position: 40 },
+        { id: "guide-2", axis: "horizontal", position: 30 },
+      ],
+      { selected: "guide-2" },
+    );
+
+    const strokes = harness.display.named("stroke");
+    expect(strokes).toHaveLength(2);
+    expect(strokes[0].strokeStyle).toBe("#e0567f");
+    expect(strokes[1].strokeStyle).toBe("#2f7bff");
+  });
+
+  it("keeps the guides out of the exported composite", () => {
+    const harness = createHarness();
+    const doc = {
+      ...createDocument({ width: 100, height: 80 }),
+      guides: [{ id: "guide-1", axis: "vertical" as const, position: 40 }],
+    };
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(200, 160, 1);
+    harness.renderer.render();
+
+    const composed = harness.composeDocument();
+    // The export is the document's pixels: no guide line, no border.
+    expect(composed.named("stroke")).toHaveLength(0);
+    expect(composed.named("strokeRect")).toHaveLength(0);
+    expect(composed.named("moveTo")).toHaveLength(0);
+  });
+
+  it("draws nothing when the document holds no guides", () => {
+    const { harness } = renderWithGuides([]);
+    expect(harness.display.named("stroke")).toHaveLength(0);
+    expect(harness.display.named("moveTo")).toHaveLength(0);
   });
 });
 

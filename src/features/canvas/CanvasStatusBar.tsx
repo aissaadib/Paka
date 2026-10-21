@@ -49,7 +49,15 @@ export function CanvasStatusBar({
   onDismissFileMessage,
 }: CanvasStatusBarProps) {
   const { engine, actions } = useEditor();
-  const { document, viewport, history, file, selectedStrokes, notice } = useEditorState();
+  const {
+    document,
+    viewport,
+    history,
+    file,
+    selectedStrokes,
+    selectedGuideId,
+    notice,
+  } = useEditorState();
   const native = useNativeEnvironment();
   const positionRef = useRef<HTMLSpanElement | null>(null);
   const inputRef = useRef<HTMLSpanElement | null>(null);
@@ -85,6 +93,13 @@ export function CanvasStatusBar({
       ? actions.dismissNotice
       : undefined;
 
+  // The guides: how many the document holds, and which one is selected.
+  const guideCount = document.guides.length;
+  const selectedGuide =
+    selectedGuideId === null
+      ? undefined
+      : document.guides.find((guide) => guide.id === selectedGuideId);
+
   return (
     <footer className="status-bar">
       <span className="status-bar__item" title={file.path ?? "Not saved to a file yet"}>
@@ -112,6 +127,18 @@ export function CanvasStatusBar({
           title="Selected strokes: drag or nudge with the arrow keys, Ctrl+D duplicates, Delete removes"
         >
           {selectedStrokes} selected
+        </span>
+      )}
+      {selectedGuide ? (
+        <span
+          className="status-bar__item"
+          title="Selected guide: drag it to move it, Delete removes it, Escape clears the selection"
+        >
+          {selectedGuide.axis} guide at {selectedGuide.position} px
+        </span>
+      ) : guideCount === 0 ? null : (
+        <span className="status-bar__item" title="Composition guides in this document">
+          {guideCount} guide{guideCount === 1 ? "" : "s"}
         </span>
       )}
       {fileLabel === "" ? null : (

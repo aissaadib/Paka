@@ -40,10 +40,10 @@ architecture by browsing.
 | `public/` | Static icons only |
 | `src-tauri/gen/` | Generated Tauri schemas, if present |
 | `licenses/*.txt` | Verbatim third-party licence texts; regenerate the notice file, do not read them |
-| All 31 test files | Use the test map in §8 |
+| All 32 test files | Use the test map in §8 |
 | `README.md` end to end | Feature prose duplicates SESSION-BRIEF; open only for user-facing wording |
 | `docs/HANDOFF.md` and `docs/SESSION-BRIEF.md` both, end to end | Read SESSION-BRIEF first; HANDOFF only §7/§8 when you need toolchain or verification detail |
-| `docs/ARCHITECTURE.md` end to end (976 lines) | Read the named section in §6 |
+| `docs/ARCHITECTURE.md` end to end (1549 lines) | Read the named section in §6 |
 
 ## 3. File sizes (source only)
 
@@ -51,19 +51,21 @@ architecture by browsing.
 
 | Lines | File | What is in it |
 | --- | --- | --- |
-| 2075 | `src/core/engine/DrawingEngine.ts` | snapshot, gestures, history, layers, selection |
-| 2527 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
-| 1342 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
-| 1050 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
-| 961 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
-| 724 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
+| 2703 | `src/core/engine/DrawingEngine.ts` | snapshot, gestures, history, layers, selection |
+| 2953 | `src/test/drawingEngine.test.ts` | engine behaviour (grep `it(`) |
+| 3451 | `src/test/canvas2dRenderer.test.ts` | renderer behaviour (grep `it(`) |
+| 1417 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
+| 1562 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
+| 865 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
-`floodFill`, `document/types.ts`, `canvas2dStroke`, `stampCoverage`,
+`floodFill`, `document/types.ts`, `document/guides.ts`,
+`canvas2dStroke`, `stampCoverage`,
 `strokeBuilder`, `strokeSelection`, `commandStack`,
-`types.ts` (tools), `features/color/wheelGeometry.ts` (102),
+`types.ts` (tools), `guidesTool.ts` (138),
+`features/color/wheelGeometry.ts` (102),
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
@@ -85,23 +87,24 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | Task | Open, in order |
 | --- | --- |
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
-| Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L915, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L927-962), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
-| Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-118), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
+| Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides` in `Canvas2DRenderer.ts` |
+| Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
+| Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9) |
-| Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L767/L870), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L675) |
-| Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L805/L831), `types/brush.ts`, `BrushControls.tsx`, format v7 |
-| Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1524), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
+| Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
+| Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L1324/L1350), `types/brush.ts`, `BrushControls.tsx`, format v7 |
+| Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts`, `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
 | Undo/redo behaviour | `core/commands/commandStack.ts`, the command in `core/commands/`, `engine.executeDocumentCommand`/`recordHistoryChange` |
-| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L77, `serializeProject` L384, `parseProject` L456, `readBrush` L670), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
+| Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
-| Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L685-790, `features/layers/LayersPanel.tsx` |
-| Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1572-1900, `strokeEditCommand.ts` |
+| Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
+| Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
-| Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L685) |
+| Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
 | Release readiness, licensing or provenance | `docs/RELEASE-READINESS.md`, `docs/g1/reuse-decision.md`, `docs/g1/provenance-record.json`, `THIRD_PARTY_NOTICES.md` |
@@ -110,47 +113,50 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 
 | Symbol | File | ≈Line |
 | --- | --- | --- |
-| `EditorSnapshot`, `DocumentFileState` | `core/engine/DrawingEngine.ts` | 119, 188 |
-| `DrawingEngine` (class) | `core/engine/DrawingEngine.ts` | 358 |
-| `handlePointerSample` (gesture router) | `core/engine/DrawingEngine.ts` | 2218 |
-| `beginStroke` / `extendStroke` / `finishStroke` / `cancelStroke` | `core/engine/DrawingEngine.ts` | 1169 / 1198 / 1524 / 1563 |
-| Shape lifecycle | `core/engine/DrawingEngine.ts` | 1209-1290 |
-| Fill lifecycle | `core/engine/DrawingEngine.ts` | 1292-1417 |
-| Gradient lifecycle | `core/engine/DrawingEngine.ts` | 1419-1570 |
-| Selection lifecycle | `core/engine/DrawingEngine.ts` | 1572-1900 |
-| `setBrush`, editor setters | `core/engine/DrawingEngine.ts` | 880-975 |
-| `buildSnapshot` | `core/engine/DrawingEngine.ts` | 2329 |
+| `EditorSnapshot`, `DocumentFileState` | `core/engine/DrawingEngine.ts` | 132, 209 |
+| `DrawingEngine` (class) | `core/engine/DrawingEngine.ts` | 402 |
+| `handlePointerSample` (gesture router) | `core/engine/DrawingEngine.ts` | 2542 |
+| `beginStroke` / `extendStroke` / `finishStroke` / `cancelStroke` | `core/engine/DrawingEngine.ts` | 1252 / 1281 / 1607 / 1646 |
+| Shape lifecycle | `core/engine/DrawingEngine.ts` | 1302-1371 |
+| Fill lifecycle | `core/engine/DrawingEngine.ts` | 1391-1485 |
+| Gradient lifecycle | `core/engine/DrawingEngine.ts` | 1511-1595 |
+| Selection lifecycle | `core/engine/DrawingEngine.ts` | 1665-1989 |
+| `setBrush`, editor setters | `core/engine/DrawingEngine.ts` | 957-1052 |
+| `buildSnapshot` | `core/engine/DrawingEngine.ts` | 2653 |
 | `BrushSettings` | `types/brush.ts` | 11 |
 | `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 28, 50 |
 | `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 46, 71, 86 |
 | `STABILIZER_MAX_LAG`, `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | 39, 114, 193 |
 | `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
 | `SOFT_EDGE_RADIUS_RATIO`, `strokeFeatherRadius` | `core/rendering/canvas2dStroke.ts` | 32, 43 |
-| `paintStrokeCoverage`, `featherStroke`, `compositeStrokeBuffer` | `core/rendering/Canvas2DRenderer.ts` | 767, 870, 742 |
-| `applyStrokeTexture`, `textureTile` | `core/rendering/Canvas2DRenderer.ts` | 805, 831 |
+| `paintStrokeCoverage`, `featherStroke`, `compositeStrokeBuffer` | `core/rendering/Canvas2DRenderer.ts` | 1263, 1389, 1227 |
+| `applyStrokeTexture`, `textureTile` | `core/rendering/Canvas2DRenderer.ts` | 1324, 1350 |
 | `TEXTURE_TILE_SIZE`, `textureCoverage` | `core/rendering/canvas2dStroke.ts` | 52, 65 |
-| `Canvas2DRenderer` (class) | `core/rendering/Canvas2DRenderer.ts` | 85 |
-| `StrokeRecord`, `FillPatchRecord`, `GradientRecord`, `LayerElement` | `core/document/types.ts` | 76, 126, 161, 176 |
+| `Canvas2DRenderer` (class) | `core/rendering/Canvas2DRenderer.ts` | 124 |
+| `StrokeRecord`, `FillPatchRecord`, `GradientRecord`, `LayerElement` | `core/document/types.ts` | 116, 166, 201, 216 |
+| `GuideAxis`, `Guide`, `DrawingDocument.guides` | `core/document/types.ts` | 40, 54, 85 |
+| `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
+| `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
-| `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 84, 384, 456 |
+| `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 108, 443, 520 |
 | `readBrush` (format validation) | `core/project/projectFormat.ts` | ~675 |
 | `stampDabs`, `StampDabCursor` (dab plan) | `core/rendering/stampCoverage.ts` | 106, 150 |
 | `stampDabCoverage` (per-dab profile) | `core/rendering/stampCoverage.ts` | 218 |
 | `StampCoverage` (coverage union, tiles) | `core/rendering/stampCoverage.ts` | 246 |
 | `MAX_STAMP_COVERAGE_WORK`, `MIN_STAMP_SPACING_PX` | `core/rendering/stampCoverage.ts` | 39, 32 |
-| `extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage` | `core/rendering/Canvas2DRenderer.ts` | 945, 985, 1020 |
+| `extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage` | `core/rendering/Canvas2DRenderer.ts` | 1045, 1078, 1112 |
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
-| `Tool`, `ToolContext` | `core/tools/types.ts` | 130, 17 |
+| `Tool`, `ToolContext` | `core/tools/types.ts` | 167, 17 |
 | `ShapeKind`, `ShapeOptions`, `normalizeShapeOptions` | `core/tools/shapeGeometry.ts` | 22, 42, 86 |
 | `shapeOutline`, `outlineExtent` | `core/tools/shapeGeometry.ts` | 120, 143 |
 | `rotateAboutCentre`, `polygonOutline`, `starOutline` (private) | `core/tools/shapeGeometry.ts` | 305, 349, 378 |
-| `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 915, 927 / 945 / 962 |
-| `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 100, 115 |
+| `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 992, 1004 / 1022 / 1039 |
+| `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
 | `EditorActions` | `state/editorStore.ts` | 24 |
-| `createDocument` | `core/document/document.ts` | 47 |
+| `createDocument` | `core/document/document.ts` | 183 |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
 | `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
@@ -191,6 +197,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 
 | Area | Test file |
 | --- | --- |
+| Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |

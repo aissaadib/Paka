@@ -10,6 +10,7 @@ import {
   IconEllipse,
   IconEraser,
   IconGradient,
+  IconGuides,
   IconHand,
   IconLine,
   IconPicker,
@@ -32,6 +33,7 @@ const TOOL_ICONS: Record<ToolId, ReactNode> = {
   bucket: <IconBucket />,
   gradient: <IconGradient />,
   picker: <IconPicker />,
+  guides: <IconGuides />,
   pan: <IconHand />,
 };
 

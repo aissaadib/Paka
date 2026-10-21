@@ -72,10 +72,11 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
   slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
   merged; nothing is waiting in the working tree.
-- **`pnpm test` → 588 tests in 31 files, all pass** (the polygon and star
-  slice: 582 before it, and 554 before the colour wheel slice).
+- **`pnpm test` → 653 tests in 32 files, all pass** (the composition-guides
+  slice: 588 before it).
   `pnpm typecheck` clean; `pnpm build` succeeds.
-- **Project file format version 9** (`PROJECT_VERSION = 9`).
+- **Project file format version 9** (`PROJECT_VERSION = 9`). `document.guides` is
+  additive within version 9.
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
   It is **unsigned** and its link emitted a MinGW `.rsrc merge failure: multiple
@@ -87,6 +88,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t11-guides` | **Composition guides** — a **Guides** tool (`U`) places a vertical or horizontal guide by dragging on empty canvas and moves an existing guide by dragging it; a click selects it, `Delete` removes it, `Esc` cancels a drag. The guide model, the axis heuristic, the rounding, the screen-space grab radius, the hit-test and the duplicate rule live in a pure module (`core/document/guides.ts`). The guides are document state but **display-only**, so the format change is additive and the version stays 9. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. |
@@ -322,7 +324,13 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `readCompositeImage`, element-ordered layer rebuilds, and the stamp path
   (`extendStampStroke`, `rasterizeStampStroke`, `writeStampCoverage`).
 - `src/core/document/types.ts` — `StrokeRecord` (incl. `fill?: boolean`),
-  `FillPatchRecord`, `GradientRecord`, `LayerElement`, type guards, `Layer`.
+  `FillPatchRecord`, `GradientRecord`, `Guide`/`GuideAxis`, `LayerElement`, type
+  guards, `Layer`.
+- `src/core/document/guides.ts` — the pure guide rules: the axis heuristic, the
+  integer rounding, the screen-space grab radius, the hit-test, the duplicate
+  rule and the document operations.
+- `src/core/tools/guidesTool.ts` — the guides tool: the two gestures (create by
+  drag, move by drag) and the click that selects.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, serialize/parse,
   version-history comment, fill/gradient validation, version-aware `readBrush`
   (required `hardness` in v6+, `texture` in v7+, `stamp`/`stampSpacing`/
@@ -349,7 +357,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `src/test/fillCommand.test.ts`,
   `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
   `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
-  `src/test/projectLifecycle.test.ts`, shared fakes in
+  `src/test/projectLifecycle.test.ts`, `src/test/guides.test.ts`, shared fakes in
   `src/test/support/recordingCanvas.ts` (gradient methods and `filter` state are
   injected alongside the recorded methods).
 
@@ -406,9 +414,24 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
   `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
-  `h` pan (middle-drag also pans);
+  `u` guides, `h` pan (middle-drag also pans);
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
-  duplicate; `Ctrl+Shift+H`/`V` flip.
+  duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
+  the guide drag and clears the guide selection, and `Delete` removes the
+  selected guide.
+- **Guides check (verified 2026-10-21).** Press `u`: the rail shows a **Guides**
+  button and the status bar counts the guides. A drag on empty canvas creates one
+  guide and raises `history` by one; the guide sits at the **press** coordinate
+  and the axis follows the dominant drag direction - but only once the drag has
+  travelled **3 CSS pixels**, so a shorter drag creates **nothing** (check it: a
+  two-pixel drag leaves the guide count and `history` untouched). Clicking the
+  guide selects it (the status bar reads `vertical guide at 88 px` and the line
+  is drawn in the selection accent); `Delete` removes it and `Esc` clears the
+  selection. `Esc` during a drag leaves no guide and no history step, and the
+  next press still works. `Ctrl+Z` brings a deleted guide back. Zooming with
+  `Ctrl+Wheel` over the guide keeps it under the pointer and at the same
+  document position. The guide is painted on the display canvas only: a PNG
+  export of the document contains no guide.
 - **Bucket fill check (verified 2026-10-19).** Override `rAF` first (§8), press
   `f`, click inside the paper with synthetic pointer events, wait one frame, then
   read the display canvas: the sampled pixel should be the brush colour and the
@@ -553,6 +576,13 @@ Optional polish, deliberately not done yet:
   about merged resource manifests; the app launches, its window responds and its
   title updates from the frontend, but DPI scaling of the packaged build was not
   visually checked.
+- **The composition guides were verified in the browser app** (§8: the tool, the
+  drag, the selection, `Delete`, `Esc`, the undo and the zoom) **and through the
+  real `Canvas2DRenderer`** (the unit suite plus a visual-regression scene with
+  a committed golden), but **not in the packaged Tauri window**. A native
+  save/reopen of a document with guides is unverified; save/reopen is covered by
+  Vitest at the format and lifecycle level. Snapping to guides, grids and rulers
+  are not implemented at all.
 - **`cargo test --lib` cannot run** on this toolchain (§7).
 - Product limitations documented in ROADMAP and not planned yet: undo history is
   not stored in the project file (reopening rebuilds one step per element); no

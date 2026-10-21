@@ -11,7 +11,7 @@ import type { BrushSettings } from "../../types/brush";
 import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
-import type { LayerId } from "../document/types";
+import type { Guide, GuideAxis, LayerId } from "../document/types";
 import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
@@ -125,6 +125,43 @@ export interface ToolContext {
   cancelGradient(): void;
   /** True while a gradient is previewed but not yet recorded in history. */
   isGradientActive(): boolean;
+  /**
+   * The composition guide a press grabs, or `null` when it grabs none.
+   *
+   * The grab radius is screen-space, so the engine converts it with the live
+   * zoom; a guide is therefore equally easy to grab at 2 % and at 6400 %.
+   */
+  findGuideAt(docX: number, docY: number): Guide | null;
+  /**
+   * Starts creating a guide at the press point.
+   *
+   * The axis is not decided yet: it comes from the direction the pointer
+   * travels, which only the drag knows. The guide's position is the *press*
+   * coordinate along that axis, so it does not follow the pointer.
+   */
+  beginGuideCreate(sample: PointerSample): void;
+  /**
+   * Puts the new guide on the canvas, on the axis the drag chose.
+   *
+   * A preview only: the guide reaches the document when `finishGuideGesture`
+   * commits the gesture.
+   */
+  setGuideAxis(axis: GuideAxis): void;
+  /** Starts moving an existing guide along its own axis. */
+  beginGuideMove(guide: Guide): void;
+  /** Moves the guide of a move gesture to follow the pointer. */
+  moveGuideTo(sample: PointerSample): void;
+  /**
+   * Commits the guide gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click on empty canvas, or a drag that
+   * ended where it started - commits nothing at all.
+   */
+  finishGuideGesture(): void;
+  /** Aborts the guide gesture, restoring the document. */
+  cancelGuideGesture(): void;
+  /** Selects a guide, or clears the selection with `null`. */
+  selectGuide(guideId: string | null): void;
 }
 
 export interface Tool {

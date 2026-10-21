@@ -24,6 +24,7 @@ import type { ToolId } from "../../types/tool";
 import type { FlipAxis } from "../../types/transform";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb, rgbToHex } from "../../utils/color";
+import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
@@ -60,6 +61,16 @@ import {
 } from "../commands/strokeEditCommand";
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
+import {
+  addGuideToDocument,
+  findGuide,
+  findGuideAt,
+  guidesEqual,
+  isDuplicateGuide,
+  removeGuideFromDocument,
+  roundGuidePosition,
+  setGuidePosition,
+} from "../document/guides";
 import { StrokeStore } from "../document/strokeStore";
 import {
   boundsContainPoint,
@@ -70,6 +81,8 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  Guide,
+  GuideAxis,
   LayerBlendMode,
   LayerElement,
   LayerId,
@@ -131,6 +144,14 @@ export interface EditorSnapshot {
    * renderable from React (the overlay is drawn by the renderer).
    */
   readonly selectedStrokes: number;
+  /**
+   * The id of the composition guide the guides tool has selected, or `null`.
+   *
+   * Editor state, like `selectedStrokes`: the guides themselves are document
+   * state and travel with the document, but which one is selected belongs to
+   * the tool that owns the selection.
+   */
+  readonly selectedGuideId: string | null;
   /**
    * Whether the shape tools fill their outline instead of tracing it.
    *
@@ -223,7 +244,8 @@ const WHEEL_ZOOM_FACTOR_LIMIT = 0.25;
  * in flight. One explanation per gesture is enough; see
  * `refuseLayerChangeDuringGesture`.
  */
-const GESTURE_REFUSAL_NOTICE = "Finish the current stroke or selection before changing layers.";
+const GESTURE_REFUSAL_NOTICE =
+  "Finish the current stroke, selection or guide drag before changing layers.";
 
 /**
  * True when a document-space point lies on the document rectangle.
@@ -340,6 +362,28 @@ interface ActiveGradient {
 }
 
 /**
+ * A guide gesture in flight.
+ *
+ * The guide lives in the document while the gesture runs - that is how the
+ * renderer shows it - but **nothing enters history until the gesture ends**:
+ * the release commits one command, and a cancel puts the document back exactly
+ * as it was. The document before the gesture is therefore kept here: it is
+ * both the command's revert point and the cancel's restore point.
+ */
+interface GuideGesture {
+  readonly mode: "create" | "move";
+  /** The document as it was before the gesture started. */
+  readonly before: DrawingDocument;
+  /** The press point, in document space (create only). */
+  readonly pressX: number;
+  readonly pressY: number;
+  /** The guide being moved (move only). */
+  readonly guideId: string | null;
+  /** The guide the create gesture put on the canvas (create only). */
+  createdId: string | null;
+}
+
+/**
  * Copies one element into a layer, generating a fresh id.
  *
  * Used when a layer is duplicated. Fills keep their raster mask and gradients
@@ -404,6 +448,10 @@ export class DrawingEngine implements StrokeSource {
   private refusalNoticeShown = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
+  /** The guide the guides tool has selected, or `null`. */
+  private selectedGuideId: string | null = null;
+  /** The guide gesture in flight, or `null`. */
+  private guideGesture: GuideGesture | null = null;
   /**
    * Identity counter for the current selection, restarted whenever the
    * selection is replaced. It is what scopes nudge coalescing to *one* run: two
@@ -423,6 +471,15 @@ export class DrawingEngine implements StrokeSource {
   private revision = 0;
   /** The revision that was last written to (or loaded from) disk. */
   private savedRevision = 0;
+  /**
+   * True when the file on disk holds a *preview* rather than the document.
+   *
+   * A save taken while a guide drag was in flight writes the live preview,
+   * not the document the user will keep: cancelling the drag then leaves the
+   * file and the document different. The file therefore cannot be called
+   * clean until it is written again. The flag is cleared by the next save.
+   */
+  private fileHoldsPreview = false;
   private fileState: DocumentFileState = { path: null, dirty: false };
 
   constructor(options: DrawingEngineOptions = {}) {
@@ -490,6 +547,14 @@ export class DrawingEngine implements StrokeSource {
       finishGradient: (sample) => engine.finishGradient(sample),
       cancelGradient: () => engine.cancelGradient(),
       isGradientActive: () => engine.activeGradient !== null,
+      findGuideAt: (docX, docY) => engine.findGuideAt(docX, docY),
+      beginGuideCreate: (sample) => engine.beginGuideCreate(sample),
+      setGuideAxis: (axis) => engine.setGuideAxis(axis),
+      beginGuideMove: (guide) => engine.beginGuideMove(guide),
+      moveGuideTo: (sample) => engine.moveGuideTo(sample),
+      finishGuideGesture: () => engine.finishGuideGesture(),
+      cancelGuideGesture: () => engine.cancelGuideGesture(),
+      selectGuide: (guideId) => engine.selectGuide(guideId),
     };
 
     this.commands.subscribe(() => this.publish());
@@ -532,6 +597,7 @@ export class DrawingEngine implements StrokeSource {
 
   detach(): void {
     this.abortStroke();
+    this.resetGuideGesture();
     this.binder?.detach();
     this.binder = null;
     this.renderer?.destroy();
@@ -606,6 +672,7 @@ export class DrawingEngine implements StrokeSource {
   newDocument(options: NewDocumentOptions): void {
     this.abortStroke();
     this.resetSelection();
+    this.resetGuideGesture();
     this.doc = documentOps.createDocument(options);
     this.strokes.clear();
     this.commands.clear();
@@ -613,6 +680,7 @@ export class DrawingEngine implements StrokeSource {
     this.filePath = null;
     this.revision = 0;
     this.savedRevision = 0;
+    this.fileHoldsPreview = false;
     if (this.laidOut) {
       this.viewport = this.initialViewport();
     }
@@ -636,6 +704,7 @@ export class DrawingEngine implements StrokeSource {
   loadProject(project: ParsedProject, path: string | null): void {
     this.abortStroke();
     this.resetSelection();
+    this.resetGuideGesture();
     this.doc = project.document;
     this.strokes.clear();
     this.commands.clear();
@@ -661,6 +730,7 @@ export class DrawingEngine implements StrokeSource {
     this.filePath = path;
     this.revision = 0;
     this.savedRevision = 0;
+    this.fileHoldsPreview = false;
 
     if (this.laidOut) {
       this.viewport = this.initialViewport();
@@ -696,10 +766,17 @@ export class DrawingEngine implements StrokeSource {
    * `sketch.paka` is still called "Still life". The file name is what the UI
    * shows once a project has a place on disk, and it is what a later Save As
    * suggests.
+   *
+   * A save taken **while a guide drag is in flight** writes the live preview,
+   * not the document the user is going to keep: cancelling the drag then
+   * leaves the file and the document different. Such a file is therefore not
+   * called clean - it has to be written again before the editor may claim
+   * that what is on disk is what is on screen.
    */
   markSaved(path: string): void {
     this.filePath = path;
     this.savedRevision = this.revision;
+    this.fileHoldsPreview = this.guideGesture !== null;
     this.publish();
   }
 
@@ -1042,6 +1119,11 @@ export class DrawingEngine implements StrokeSource {
     if (toolId !== "select") {
       this.resetSelection();
     }
+    // The guide selection belongs to the guides tool, exactly as the stroke
+    // selection belongs to the select tool.
+    if (toolId !== "guides") {
+      this.clearGuideSelection();
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -1091,7 +1173,8 @@ export class DrawingEngine implements StrokeSource {
       this.activeStroke !== null ||
       this.activeFill !== null ||
       this.activeGradient !== null ||
-      this.selectionGesture !== null
+      this.selectionGesture !== null ||
+      this.guideGesture !== null
     );
   }
 
@@ -2078,6 +2161,236 @@ export class DrawingEngine implements StrokeSource {
     return Number.isFinite(sample.docX) && Number.isFinite(sample.docY);
   }
 
+  // ------------------------------------------------------- composition guides
+
+  /**
+   * The guide a press grabs, or `null` when it grabs none.
+   *
+   * The grab radius is screen-space, so it is converted with the live zoom:
+   * a guide is equally easy to hit at 2 % and at 6400 %.
+   */
+  findGuideAt(docX: number, docY: number): Guide | null {
+    return findGuideAt(this.doc.guides, docX, docY, this.viewport.zoom);
+  }
+
+  /**
+   * Starts creating a guide at the press point.
+   *
+   * The axis is not decided yet: it comes from the direction the pointer
+   * travels, which only the drag knows. The guide's position is the *press*
+   * coordinate along that axis, so it marks where the user started rather than
+   * where they let go.
+   */
+  beginGuideCreate(sample: PointerSample): void {
+    if (!Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return;
+    }
+    this.abortGuideGesture();
+    this.beginGesture();
+    this.guideGesture = {
+      mode: "create",
+      before: this.doc,
+      pressX: sample.docX,
+      pressY: sample.docY,
+      guideId: null,
+      createdId: null,
+    };
+  }
+
+  /**
+   * Puts the new guide on the canvas, on the axis the drag chose.
+   *
+   * The axis is fixed at creation: a guide never changes the axis it was
+   * created on, because that would silently invalidate the user's mental model
+   * of where the marker sits. A guide that would land on top of an existing
+   * one is refused instead - two guides on the same spot are pointless, and
+   * the drag simply does nothing.
+   */
+  setGuideAxis(axis: GuideAxis): void {
+    const gesture = this.guideGesture;
+    if (!gesture || gesture.mode !== "create" || gesture.createdId !== null) {
+      return;
+    }
+    const position = roundGuidePosition(
+      axis === "vertical" ? gesture.pressX : gesture.pressY,
+    );
+    if (isDuplicateGuide(this.doc.guides, axis, position)) {
+      return;
+    }
+    const guide: Guide = { id: createId("guide"), axis, position };
+    gesture.createdId = guide.id;
+    this.applyDocumentState(addGuideToDocument(this.doc, guide));
+  }
+
+  /** Starts moving an existing guide along its own axis. */
+  beginGuideMove(guide: Guide): void {
+    this.abortGuideGesture();
+    this.beginGesture();
+    this.guideGesture = {
+      mode: "move",
+      before: this.doc,
+      pressX: 0,
+      pressY: 0,
+      guideId: guide.id,
+      createdId: null,
+    };
+  }
+
+  /**
+   * Moves the guide of a move gesture to follow the pointer.
+   *
+   * Only the coordinate across the guide's axis matters: a vertical guide
+   * follows x and ignores y, so it stays a vertical guide. A move that would
+   * land on another guide is refused, like a create that would.
+   */
+  moveGuideTo(sample: PointerSample): void {
+    const gesture = this.guideGesture;
+    if (!gesture || gesture.mode !== "move" || gesture.guideId === null) {
+      return;
+    }
+    if (!Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return;
+    }
+    const guide = findGuide(this.doc.guides, gesture.guideId);
+    if (!guide) {
+      return;
+    }
+    const position = roundGuidePosition(
+      guide.axis === "vertical" ? sample.docX : sample.docY,
+    );
+    if (position === guide.position) {
+      return;
+    }
+    if (isDuplicateGuide(this.doc.guides, guide.axis, position, guide.id)) {
+      return;
+    }
+    this.applyDocumentState(setGuidePosition(this.doc, guide.id, position));
+  }
+
+  /**
+   * Commits the guide gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click on empty canvas, or a drag that
+   * ended where it started - commits nothing at all, so history never holds a
+   * step that appears to do nothing.
+   */
+  finishGuideGesture(): void {
+    const gesture = this.guideGesture;
+    if (!gesture) {
+      return;
+    }
+    this.guideGesture = null;
+    const after = this.doc;
+    if (after === gesture.before || guidesEqual(gesture.before.guides, after.guides)) {
+      // Nothing changed: a click on empty canvas, or a drag that ended where
+      // it started. No history entry, so history never holds a step that
+      // appears to do nothing.
+      return;
+    }
+    if (gesture.mode === "create") {
+      this.commitDocumentChange("Add Guide", gesture.before, after);
+      return;
+    }
+    this.commitDocumentChange("Move Guide", gesture.before, after, {
+      mergeKey: gesture.guideId === null ? undefined : `guide-move:${gesture.guideId}`,
+    });
+  }
+
+  /**
+   * Aborts the guide gesture, restoring the document.
+   *
+   * The guide returns to the position it had before the gesture, or
+   * disappears when the gesture created it. Nothing entered history, so
+   * nothing has to be taken out of it.
+   *
+   * The tool owns its gesture bookkeeping, so it is told as well: a cancel
+   * that comes from outside the pointer pipeline - the `Esc` key - would
+   * otherwise leave the tool believing a drag is still in flight, and it
+   * would swallow the next press.
+   */
+  cancelGuideGesture(): void {
+    this.abortGuideGesture();
+    this.tools.guides.reset(this.toolContext);
+  }
+
+  /**
+   * Clears an in-flight guide gesture without telling the tool.
+   *
+   * Used when a *new* gesture starts: the tool is already running that
+   * gesture, and resetting it here would cancel the one being started.
+   */
+  private abortGuideGesture(): void {
+    const gesture = this.guideGesture;
+    if (!gesture) {
+      return;
+    }
+    this.guideGesture = null;
+    this.applyDocumentState(gesture.before);
+  }
+
+  /**
+   * Selects a guide, or clears the selection with `null`.
+   *
+   * The selection belongs to the guides tool: it is editor state, not document
+   * state, and it is dropped when the tool is left. Selecting also ends the
+   * current history merge run, so two drags of the same guide are two undo
+   * steps rather than one.
+   */
+  selectGuide(guideId: string | null): void {
+    this.commands.breakMerge();
+    if (this.selectedGuideId === guideId) {
+      this.publish();
+      return;
+    }
+    this.selectedGuideId = guideId;
+    this.renderer?.setSelectedGuide(guideId);
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Removes the selected guide as one undoable step.
+   *
+   * Returns whether a guide was removed, so a caller can tell a no-op (no
+   * guide is selected) from a deletion.
+   */
+  deleteSelectedGuide(): boolean {
+    const guideId = this.selectedGuideId;
+    if (guideId === null) {
+      return false;
+    }
+    const before = this.doc;
+    const after = removeGuideFromDocument(before, guideId);
+    if (after === before) {
+      return false;
+    }
+    this.clearGuideSelection();
+    this.commitDocumentChange("Delete Guide", before, after);
+    return true;
+  }
+
+  /** Forgets the guide selection, e.g. when the guides tool is left. */
+  private clearGuideSelection(): void {
+    if (this.selectedGuideId === null) {
+      return;
+    }
+    this.selectedGuideId = null;
+    this.renderer?.setSelectedGuide(null);
+  }
+
+  /**
+   * Aborts a guide gesture and forgets the guide selection.
+   *
+   * Used where the document is being replaced: the gesture's preview goes
+   * with the document, so there is nothing to restore. The tool is reset as
+   * well, so it cannot keep believing a drag is in flight.
+   */
+  private resetGuideGesture(): void {
+    this.guideGesture = null;
+    this.clearGuideSelection();
+    this.tools.guides.reset(this.toolContext);
+  }
+
   requestRender(): void {
     this.renderer?.requestRender();
   }
@@ -2164,6 +2477,14 @@ export class DrawingEngine implements StrokeSource {
     ) {
       this.resetSelection();
     }
+    // A guide that no longer exists cannot stay selected: an undo that removed
+    // it, or a document that was replaced.
+    if (
+      this.selectedGuideId !== null &&
+      !next.guides.some((guide) => guide.id === this.selectedGuideId)
+    ) {
+      this.clearGuideSelection();
+    }
     this.publish();
     this.requestRender();
   }
@@ -2194,7 +2515,10 @@ export class DrawingEngine implements StrokeSource {
 
   private refreshFileState(): void {
     const path = this.filePath;
-    const dirty = this.revision !== this.savedRevision;
+    // A file written while a guide drag was in flight holds the *preview*,
+    // not the document: the picture on disk and the picture in the editor can
+    // differ, so the file cannot be called clean until it is written again.
+    const dirty = this.revision !== this.savedRevision || this.fileHoldsPreview;
     if (path !== this.fileState.path || dirty !== this.fileState.dirty) {
       this.fileState = { path, dirty };
     }
@@ -2338,6 +2662,7 @@ export class DrawingEngine implements StrokeSource {
       // Counted from the store rather than from the selection's id list, so a
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
+      selectedGuideId: this.selectedGuideId,
       shapeFill: this.shapeFill,
       shapeSides: this.shapeSides,
       shapeInnerRatio: this.shapeInnerRatio,
@@ -2361,6 +2686,7 @@ export class DrawingEngine implements StrokeSource {
       previous.history === next.history &&
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
+      previous.selectedGuideId === next.selectedGuideId &&
       previous.shapeFill === next.shapeFill &&
       previous.shapeSides === next.shapeSides &&
       previous.shapeInnerRatio === next.shapeInnerRatio &&

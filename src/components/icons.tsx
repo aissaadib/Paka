@@ -137,6 +137,16 @@ export function IconHand(props: IconProps) {
   );
 }
 
+/** A dashed cross: the composition guides. */
+export function IconGuides(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.2v11.6" strokeDasharray="2 2" />
+      <path d="M2.2 8h11.6" strokeDasharray="2 2" />
+    </Icon>
+  );
+}
+
 export function IconUndo(props: IconProps) {
   return (
     <Icon {...props}>

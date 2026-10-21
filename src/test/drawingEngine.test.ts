@@ -20,6 +20,7 @@ import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
 import { isFillPatch, isGradient } from "../core/document/types";
+import type { Guide } from "../core/document/types";
 import type { PointerSample } from "../types/pointer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {  return {
@@ -64,6 +65,7 @@ function createSpyRenderer(
   const replaced: Array<{ xs: number[]; ys: number[] }> = [];
   const ended: StrokeRecord[] = [];
   const selections: Array<RendererSelection | null> = [];
+  const selectedGuides: Array<string | null> = [];
   let cancelled = 0;
   let documents = 0;
   let renders = 0;
@@ -100,6 +102,9 @@ function createSpyRenderer(
     setSelection: (selection) => {
       selections.push(selection);
     },
+    setSelectedGuide: (guideId) => {
+      selectedGuides.push(guideId);
+    },
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
@@ -127,6 +132,7 @@ function createSpyRenderer(
     replaced,
     ended,
     selections,
+    selectedGuides,
     getCancelled: () => cancelled,
     getDocuments: () => documents,
     getRenders: () => renders,
@@ -2523,5 +2529,425 @@ describe("DrawingEngine bucket fill", () => {
 
     engine.dismissNotice();
     expect(engine.getState().notice).toBeNull();
+  });
+});
+
+
+/**
+ * The composition guides.
+ *
+ * A guide is document state with no pixels: it is placed with a drag, moved
+ * with a drag, selected with a click, and every change is one undoable step.
+ * These tests drive the engine the way the app does - through normalized
+ * pointer samples - so the whole gesture path is covered.
+ */
+describe("DrawingEngine composition guides", () => {
+  function createGuideEngine(guides: readonly Guide[] = []) {
+    const spy = createSpyRenderer();
+    const base = createDocument({ name: "Test", width: 400, height: 300 });
+    const engine = new DrawingEngine({
+      document: { ...base, guides },
+      renderer: spy.renderer,
+    });
+    engine.setTool("guides");
+    return { engine, spy };
+  }
+
+  /** Drags with the pointer and releases it. */
+  function drag(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+    overrides: Partial<PointerSample> = {},
+  ): void {
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from[0], docY: from[1], ...overrides }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to[0], docY: to[1], ...overrides }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to[0], docY: to[1], ...overrides }),
+    );
+  }
+
+  function guidesOf(engine: DrawingEngine): readonly Guide[] {
+    return engine.getState().document.guides;
+  }
+
+  it("creates one guide at the press point, on the axis the drag chose", () => {
+    const { engine } = createGuideEngine();
+
+    // A drag that is wider than it is tall makes a vertical guide, and the
+    // guide sits where the pointer went down, not where it came up.
+    drag(engine, [100, 50], [220, 60]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.getState().file.dirty).toBe(true);
+  });
+
+  it("makes a horizontal guide from a drag that is taller than it is wide", () => {
+    const { engine } = createGuideEngine();
+
+    drag(engine, [100, 50], [110, 200]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].axis).toBe("horizontal");
+    expect(guides[0].position).toBe(50);
+  });
+
+  it("snaps the position to a whole document pixel", () => {
+    const { engine } = createGuideEngine();
+
+    drag(engine, [120.4, 50], [220, 60]);
+
+    expect(guidesOf(engine)[0].position).toBe(120);
+  });
+
+  it("moves an existing guide along its own axis", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    // Press on the guide - the y is irrelevant for a vertical guide - and drag.
+    drag(engine, [100, 200], [250, 210]);
+
+    const guides = guidesOf(engine);
+    expect(guides).toHaveLength(1);
+    expect(guides[0].id).toBe(id);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(250);
+    // The drag is one undo step, not one per pointer move.
+    expect(engine.getState().history.depth).toBe(2);
+  });
+
+  it("never changes the axis of a guide that is being moved", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // A drag that is much taller than it is wide still only moves the guide in
+    // x, because the guide is vertical.
+    drag(engine, [100, 200], [110, 300]);
+
+    const guides = guidesOf(engine);
+    expect(guides[0].axis).toBe("vertical");
+    expect(guides[0].position).toBe(110);
+  });
+
+  it("records nothing for a drag that ends where it started", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    // One drag that goes out and comes back: the guide ends where it began,
+    // so the gesture changed nothing and history must not grow.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 250, docY: 210 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("selects a guide that is pressed without moving", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(engine.getState().selectedGuideId).toBe(id);
+  });
+
+  it("clears the selection when empty canvas is pressed", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    expect(engine.getState().selectedGuideId).not.toBeNull();
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 250 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 300, docY: 250 }));
+
+    expect(engine.getState().selectedGuideId).toBeNull();
+  });
+
+  it("removes the selected guide as one undoable step", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    const depth = engine.getState().history.depth;
+
+    expect(engine.deleteSelectedGuide()).toBe(true);
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().selectedGuideId).toBeNull();
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    engine.undo();
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(100);
+  });
+
+  it("undoes and redoes a guide change exactly", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const before = guidesOf(engine).map((guide) => ({ ...guide }));
+
+    drag(engine, [100, 200], [250, 210]);
+    expect(guidesOf(engine)[0].position).toBe(250);
+
+    engine.undo();
+    expect(guidesOf(engine).map((guide) => ({ ...guide }))).toEqual(before);
+
+    engine.redo();
+    expect(guidesOf(engine)[0].position).toBe(250);
+    expect(guidesOf(engine)[0].id).toBe(before[0].id);
+  });
+
+  it("cancels a drag: the guide goes back where it was and history is untouched", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+    const dirty = engine.getState().file.dirty;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 300, docY: 210 }));
+    // The live preview is on screen...
+    expect(guidesOf(engine)[0].position).toBe(300);
+
+    engine.cancelGuideGesture();
+
+    // ...and the cancel puts it back.
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(dirty);
+  });
+
+  it("cancels a drag that was creating a guide: the guide disappears", () => {
+    const { engine } = createGuideEngine();
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(1);
+
+    engine.cancelGuideGesture();
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("refuses undo while a guide drag is in flight", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 300, docY: 210 }));
+
+    expect(engine.undo()).toBe(false);
+    expect(engine.getState().history.depth).toBe(depth);
+
+    engine.handlePointerSample(createSample({ phase: "up", docX: 300, docY: 210 }));
+    expect(engine.undo()).toBe(true);
+  });
+
+  it("pans with the middle button while the guides tool is active", () => {
+    const { engine } = createGuideEngine();
+    const before = engine.getState().viewport;
+
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 100, docY: 50, screenX: 100, screenY: 50, button: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 130, docY: 50, screenX: 130, screenY: 50, button: 1 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 130, docY: 50, screenX: 130, screenY: 50, button: 1 }),
+    );
+
+    expect(engine.getState().viewport.offsetX).toBe(before.offsetX + 30);
+    // Panning is not an edit.
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("places the same guide for a pen, a mouse and a touch", () => {
+    for (const kind of ["pen", "mouse", "touch"] as const) {
+      const { engine } = createGuideEngine();
+      drag(engine, [100, 50], [220, 60], { kind });
+      const guides = guidesOf(engine);
+      expect(guides).toHaveLength(1);
+      expect(guides[0].axis).toBe("vertical");
+      expect(guides[0].position).toBe(100);
+    }
+  });
+
+  it("grabs a guide within eight screen pixels at any zoom", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // 20 document pixels away is 20 screen pixels at 1x: out of reach.
+    expect(engine.findGuideAt(120, 50)).toBeNull();
+
+    // At a quarter zoom the same 20 screen pixels are 80 document pixels, and
+    // the radius is 32 document pixels: still out of reach.
+    engine.setViewport({ zoom: 0.25, offsetX: 0, offsetY: 0 });
+    expect(engine.findGuideAt(180, 50)).toBeNull();
+    // 28 document pixels is 7 screen pixels at that zoom: in reach.
+    expect(engine.findGuideAt(128, 50)?.position).toBe(100);
+  });
+
+  it("refuses a guide that would land on another one", () => {
+    // Two guides at the same spot, as a hand-edited file could carry.
+    const { engine } = createGuideEngine([
+      { id: "guide-a", axis: "vertical", position: 100 },
+      { id: "guide-b", axis: "vertical", position: 300 },
+    ]);
+
+    // Dragging the second one onto the first is refused: the guide stays put.
+    drag(engine, [300, 200], [100, 210]);
+    expect(guidesOf(engine).map((guide) => guide.position).sort()).toEqual([100, 300]);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("refuses a create that would land on an existing guide", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const depth = engine.getState().history.depth;
+
+    // At 64x the grab radius is an eighth of a document pixel, so a press a
+    // fifth of a document pixel away misses the guide - and the new guide
+    // would round onto the very same position.
+    engine.setViewport({ zoom: 64, offsetX: 0, offsetY: 0 });
+    drag(engine, [100.2, 50], [220, 60]);
+
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(100);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("creates nothing when the drag is shorter than the axis threshold", () => {
+    const { engine } = createGuideEngine();
+
+    // Two document pixels at 1x: under the three CSS pixels the tool needs
+    // before it decides which axis the guide takes, so nothing is created.
+    drag(engine, [100, 50], [102, 50]);
+
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("keeps the redo stack intact when a drag is cancelled", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+
+    // Undo leaves a redo entry, and a cancelled drag must not destroy it.
+    engine.undo();
+    expect(engine.getState().history.canRedo).toBe(true);
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 420, docY: 60 }));
+    engine.cancelGuideGesture();
+
+    expect(engine.getState().history.canRedo).toBe(true);
+    expect(engine.redo()).toBe(true);
+    expect(guidesOf(engine)).toHaveLength(1);
+  });
+
+  it("lets the tool start a new gesture after the engine cancelled the last one", () => {
+    const { engine } = createGuideEngine();
+
+    // The Escape key cancels the gesture without a pointer release, so the
+    // tool has to be told: it must not go on believing a drag is in flight.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    engine.cancelGuideGesture();
+
+    // The next press has to work.
+    drag(engine, [300, 50], [420, 60]);
+    expect(guidesOf(engine)).toHaveLength(1);
+    expect(guidesOf(engine)[0].position).toBe(300);
+  });
+
+  it("does not call the file clean when it is saved during a guide drag", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // A save while a drag is in flight writes the *preview*, not the document
+    // the user is going to keep, so the file cannot be called clean.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 300, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 420, docY: 60 }));
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(true);
+
+    // Cancelling the drag leaves the file and the document different, so the
+    // file has to stay dirty until it is written again.
+    engine.cancelGuideGesture();
+    expect(engine.getState().file.dirty).toBe(true);
+
+    // The next save writes the document and clears the marker.
+    engine.markSaved("C:\\art\\guided.paka");
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+
+  it("drops the guide selection when the guides tool is left", () => {
+    const { engine } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+    expect(engine.getState().selectedGuideId).not.toBeNull();
+
+    engine.setTool("brush");
+
+    expect(engine.getState().selectedGuideId).toBeNull();
+  });
+
+  it("drops the guide gesture when the document is replaced", () => {
+    const { engine } = createGuideEngine();
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(1);
+
+    engine.newDocument({ name: "Fresh", width: 400, height: 300 });
+
+    // The preview went with the document, and the gesture with it: a release
+    // that arrives afterwards must not bring the old guide back.
+    engine.handlePointerSample(createSample({ phase: "up", docX: 220, docY: 60 }));
+    expect(guidesOf(engine)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("changes no pixels: a guide never invalidates a layer", () => {
+    const { engine, spy } = createGuideEngine();
+
+    drag(engine, [100, 50], [220, 60]);
+    drag(engine, [100, 200], [250, 210]);
+
+    // A guide is metadata: no layer surface is invalidated and no stroke is
+    // re-rasterized, so the document's pixels are exactly what they were.
+    expect(spy.invalidated).toEqual([]);
+    expect(engine.listStrokes(engine.getState().document.activeLayerId as string)).toEqual([]);
+  });
+
+  it("tells the renderer which guide is selected", () => {
+    const { engine, spy } = createGuideEngine();
+    drag(engine, [100, 50], [220, 60]);
+    const id = guidesOf(engine)[0].id;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 200 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
+
+    expect(spy.selectedGuides).toContain(id);
   });
 });

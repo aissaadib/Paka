@@ -67,6 +67,13 @@ const SELECTION_TRACE_ALPHA = 0.85;
 /** Device pixels; divided by the display scale so it is constant at any zoom. */
 const SELECTION_TRACE_WIDTH = 1.5;
 const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
+/**
+ * Accent used for the composition guides.
+ *
+ * A different hue from the selection accent, so the two overlays can be told
+ * apart at a glance; the *selected* guide is drawn in the selection colour.
+ */
+const GUIDE_COLOR = "#e0567f";
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -194,6 +201,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private readonly stampScratch = new StampCoverage();
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
+  /**
+   * The guide the user has selected, or `null`.
+   *
+   * The guide *positions* are document state and arrive with the document; only
+   * the selection is an overlay concern, so it has its own channel.
+   */
+  private selectedGuideId: string | null = null;
   private rasterScale: number;
   private destroyed = false;
 
@@ -452,6 +466,20 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
+  /**
+   * Marks a guide as the selected one, or clears the selection.
+   *
+   * Overlay only: the selected guide is drawn in the selection accent on the
+   * display canvas, and never reaches a layer surface or an export.
+   */
+  setSelectedGuide(guideId: string | null): void {
+    if (this.destroyed || guideId === this.selectedGuideId) {
+      return;
+    }
+    this.selectedGuideId = guideId;
+    this.requestFrame();
+  }
+
   render(): void {
     if (this.destroyed) {
       return;
@@ -484,12 +512,63 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
 
+    this.paintGuides(ctx, scale);
+
     this.paintSelection(ctx, scale);
 
     // Hairline document boundary: exactly one device pixel at any zoom.
     ctx.lineWidth = 1 / scale;
     ctx.strokeStyle = DOCUMENT_BORDER_COLOR;
     ctx.strokeRect(0, 0, doc.width, doc.height);
+  }
+
+  /**
+   * Draws the composition guides over the artwork.
+   *
+   * A guide is a full-viewport line, not a mark on the paper: it stays visible
+   * while the paper is panned away, and a guide may sit outside the paper
+   * altogether. Its *position* is document space - the canvas transform already
+   * maps document to device - while its *appearance* is screen space: the line
+   * is one device pixel wide at any zoom, the same hairline idiom as the
+   * document border.
+   *
+   * The guides are not part of the document's pixels: they are drawn on the
+   * display canvas only, so an export of a document with guides is
+   * byte-identical to one without. The selected guide is drawn in the
+   * selection accent, so it is told apart from the others at a glance.
+   */
+  private paintGuides(ctx: CanvasRenderingContext2D, scale: number): void {
+    const doc = this.doc;
+    if (!doc || doc.guides.length === 0) {
+      return;
+    }
+
+    const { zoom, offsetX, offsetY } = this.viewport;
+    const viewWidth = this.canvas.width / this.devicePixelRatio;
+    const viewHeight = this.canvas.height / this.devicePixelRatio;
+    // The viewport in document space: what the user can see right now. The
+    // subtraction is written as `0 - x` so an edge at the origin is `+0`
+    // rather than the `-0` a plain negation would produce.
+    const left = 0 - offsetX / zoom;
+    const top = 0 - offsetY / zoom;
+    const right = left + viewWidth / zoom;
+    const bottom = top + viewHeight / zoom;
+
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1 / scale;
+    for (const guide of doc.guides) {
+      ctx.strokeStyle = guide.id === this.selectedGuideId ? SELECTION_COLOR : GUIDE_COLOR;
+      ctx.beginPath();
+      if (guide.axis === "vertical") {
+        ctx.moveTo(guide.position, top);
+        ctx.lineTo(guide.position, bottom);
+      } else {
+        ctx.moveTo(left, guide.position);
+        ctx.lineTo(right, guide.position);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /**
