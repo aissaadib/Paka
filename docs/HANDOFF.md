@@ -331,6 +331,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/document/guides.ts` — the pure guide rules: the axis heuristic, the
   integer rounding, the screen-space grab radius, the hit-test, the duplicate
   rule and the document operations.
+- `src/core/document/grid.ts` — the pure grid rules: the nearest grid line, the
+  lines between two coordinates, the screen-space magnet tolerance, the target
+  choice (nearest wins, a guide beats a grid line on a tie) and the snap
+  itself.
 - `src/core/document/selectionTransform.ts` — the pure transform geometry: the
   scale and rotation maps, the factor a pointer asks for, `MIN_SCALE_FACTOR`,
   the 15-degree angle snap and the selection's frame rule.
@@ -440,6 +444,17 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `Ctrl+Wheel` over the guide keeps it under the pointer and at the same
   document position. The guide is painted on the display canvas only: a PNG
   export of the document contains no guide.
+- **Grid and snap check (verified 2026-10-21).** Override `rAF` first (§8), then
+  tick **Grid** in the toolbar: the status bar reads `grid 50 px`, a **Spacing**
+  slider appears, and the live display canvas shows the lattice - one hairline
+  per spacing, measured in *document* pixels, so at 241 % zoom a 50 px spacing
+  is 120 screen pixels and the lines slide with the paper when it is panned.
+  Tick **Snap**: the status bar reads `snap on`. Draw a rectangle whose press is
+  a few screen pixels from a line: with the snap off the edge sits where the
+  pointer was, with it on the edge sits on the line. `Ctrl+'` and
+  `Ctrl+Shift+'` toggle the two switches. Neither switch dirties the document
+  (`history` stays where it was, `● unsaved` does not appear) and a PNG export
+  contains no grid line.
 - **Bucket fill check (verified 2026-10-19).** Override `rAF` first (§8), press
   `f`, click inside the paper with synthetic pointer events, wait one frame, then
   read the display canvas: the sampled pixel should be the brush colour and the
@@ -594,8 +609,9 @@ Optional polish, deliberately not done yet:
   real `Canvas2DRenderer`** (the unit suite plus a visual-regression scene with
   a committed golden), but **not in the packaged Tauri window**. A native
   save/reopen of a document with guides is unverified; save/reopen is covered by
-  Vitest at the format and lifecycle level. Snapping to guides, grids and rulers
-  are not implemented at all.
+  Vitest at the format and lifecycle level. Snapping to guides and the grid
+  shipped in the `feat/n4-grid-snapping` slice; rulers are not implemented at
+  all.
 - **The scale and rotate of a selection were verified in the browser app**: the
   four corner handles and the rotation handle appear on the selected frame, the
   cursor becomes a diagonal resize cursor over a corner and a grab cursor over
