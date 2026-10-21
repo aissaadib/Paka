@@ -68,6 +68,20 @@ export interface EditorActions {
   duplicateSelection(): void;
   /** Reflects the selected strokes about their own centre line. */
   flipSelection(axis: FlipAxis): void;
+  /**
+   * Scales the selected strokes about the centre of their frame.
+   *
+   * The factor is relative: 1.5 makes the selection one and a half times as
+   * large, and applying it again makes it two and a quarter times as large.
+   */
+  scaleSelection(factor: number): void;
+  /**
+   * Turns the selected strokes about the centre of their frame.
+   *
+   * A positive angle turns the content clockwise, because the document's y
+   * axis points down.
+   */
+  rotateSelection(degrees: number): void;
 }
 
 export interface Editor {
@@ -141,6 +155,12 @@ export function createEditor(options: EditorOptions = {}): Editor {
     },
     flipSelection: (axis) => {
       engine.flipSelection(axis);
+    },
+    scaleSelection: (factor) => {
+      engine.scaleSelection(factor);
+    },
+    rotateSelection: (degrees) => {
+      engine.rotateSelection(degrees);
     },
   };
 

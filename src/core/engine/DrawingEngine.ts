@@ -1939,6 +1939,106 @@ export class DrawingEngine implements StrokeSource {
     return true;
   }
 
+  /**
+   * Scales the selection about the centre of its frame.
+   *
+   * The same coordinate map the corner handle writes, with the factor
+   * supplied instead of dragged: a uniform scale about the centre of the
+   * selection's frame, clamped exactly as a drag's factor is, so a selection
+   * can never collapse or invert.
+   *
+   * The factor is **relative**. A factor of 1.5 makes the selection one and a
+   * half times as large; applying it again makes it two and a quarter times as
+   * large. It is not a target size, because the transform does not remember
+   * what the selection used to be, and a target could not be honoured.
+   *
+   * The brush is not scaled with the geometry: the transform moves the
+   * strokes' samples and nothing else, so a scaled stroke is the same stroke
+   * drawn along a different path.
+   *
+   * Returns false when there is nothing to scale - no selection, a gesture in
+   * flight, or a transform that would move nothing - so the selection and the
+   * history are left alone.
+   */
+  scaleSelection(factor: number): boolean {
+    const entries = this.beginSelectionEdit();
+    if (!entries) {
+      return false;
+    }
+    const bounds = boundsOfStrokes(entries.map((entry) => entry.stroke));
+    if (!bounds) {
+      return false;
+    }
+    const transform = createScaleTransform(
+      boundsCentre(bounds),
+      factor,
+      `Scale ${Math.round(factor * 100)}%`,
+    );
+    // A single dab, or a selection already at the centre, maps onto itself:
+    // nothing to record.
+    if (!transformChangesSamples(entries, transform)) {
+      return false;
+    }
+    for (const entry of entries) {
+      transformStrokeSamples(entry.stroke, entry.original, transform);
+    }
+    this.commitSelectionEdit(
+      entries,
+      createTransformStrokesCommand(entries, transform, this.commandHost),
+    );
+    return true;
+  }
+
+  /**
+   * Turns the selection about the centre of its frame.
+   *
+   * The same coordinate map the rotation handle writes, with the angle
+   * supplied instead of dragged. A **positive angle turns the content
+   * clockwise**, because the document's y axis points down.
+   *
+   * The angle is **not** snapped here: a fixed step is already a step, and
+   * snapping it again would only risk moving it. It is also not measured from
+   * a press, because there is no press.
+   *
+   * Note what an inverse of this operation is *not*: the turn moves the
+   * selection's frame - the axis-aligned envelope of a turned selection is
+   * not centred on the point it turned around - so a second turn is about the
+   * new frame's centre, not the first one's. Turning back by the same angle
+   * is therefore not a round trip. Undo is the exact inverse, because it
+   * restores the stored originals.
+   *
+   * Returns false when there is nothing to turn - no selection, a gesture in
+   * flight, or a turn that would move nothing, such as a turn of a selection
+   * that is already symmetric about its centre.
+   */
+  rotateSelection(degrees: number): boolean {
+    const entries = this.beginSelectionEdit();
+    if (!entries) {
+      return false;
+    }
+    const bounds = boundsOfStrokes(entries.map((entry) => entry.stroke));
+    if (!bounds) {
+      return false;
+    }
+    const radians = (degrees * Math.PI) / 180;
+    const transform = createRotateTransform(
+      boundsCentre(bounds),
+      radians,
+      `Rotate ${degrees}°`,
+    );
+    if (!transformChangesSamples(entries, transform)) {
+      return false;
+    }
+    for (const entry of entries) {
+      transformStrokeSamples(entry.stroke, entry.original, transform);
+    }
+    this.commitSelectionEdit(
+      entries,
+      createTransformStrokesCommand(entries, transform, this.commandHost),
+    );
+    return true;
+  }
+
   /** Starts a marquee gesture at the sample; the selection is decided on release. */
   private beginSelection(sample: PointerSample): void {
     if (!this.usableSelectionPoint(sample)) {

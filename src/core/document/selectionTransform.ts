@@ -47,6 +47,29 @@ export const MIN_SCALE_FACTOR = 0.05;
  */
 export const ROTATION_SNAP_DEGREES = 15;
 
+/**
+ * The factor the fixed-step scale applies.
+ *
+ * A fixed step is a **factor**, not a target size: it multiplies the
+ * selection's geometry by this much, so applying it twice gives 2.25×, not
+ * 150 % of what the selection used to be. The transform does not remember the
+ * original size, so it could not honour a target even if one were asked for.
+ *
+ * The factor is uniform and about the centre of the selection's frame, exactly
+ * like the corner handle's - the fixed step and the handle are the same
+ * operation with a different way of choosing the number.
+ */
+export const FIXED_SCALE_FACTOR = 1.5;
+
+/**
+ * The angle the fixed-step rotation applies, in degrees, clockwise.
+ *
+ * It is the same 15-degree step the rotation handle snaps to, so the two
+ * routes through the feature agree on what a step is. A positive angle turns
+ * the content clockwise, because the document's y axis points down.
+ */
+export const FIXED_ROTATION_DEGREES = ROTATION_SNAP_DEGREES;
+
 const DEGREES_TO_RADIANS = Math.PI / 180;
 
 /**
@@ -260,22 +283,43 @@ export function snapRotationAngle(radians: number): number {
   return signed * step;
 }
 
-/** The map a uniform scale about a centre applies to a sample. */
-export function createScaleTransform(centre: Point, factor: number): SampleTransform {
+/**
+ * The map a uniform scale about a centre applies to a sample.
+ *
+ * The label is the history entry's name, which the undo button shows. It
+ * defaults to the generic "Scale" of a corner-handle drag; a fixed-step
+ * command passes a more specific one so the two are told apart in the
+ * history.
+ */
+export function createScaleTransform(
+  centre: Point,
+  factor: number,
+  label = "Scale",
+): SampleTransform {
   const scale = clampScaleFactor(factor);
   return {
-    label: "Scale",
+    label,
     mapX: (x, _y) => centre.x + (x - centre.x) * scale,
     mapY: (_x, y) => centre.y + (y - centre.y) * scale,
   };
 }
 
-/** The map a rotation about a centre applies to a sample. */
-export function createRotateTransform(centre: Point, radians: number): SampleTransform {
+/**
+ * The map a rotation about a centre applies to a sample.
+ *
+ * The label is the history entry's name, which the undo button shows. It
+ * defaults to the generic "Rotate" of a handle drag; a fixed-step command
+ * passes a more specific one so the two are told apart in the history.
+ */
+export function createRotateTransform(
+  centre: Point,
+  radians: number,
+  label = "Rotate",
+): SampleTransform {
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   return {
-    label: "Rotate",
+    label,
     mapX: (x, y) => centre.x + (x - centre.x) * cos - (y - centre.y) * sin,
     mapY: (x, y) => centre.y + (x - centre.x) * sin + (y - centre.y) * cos,
   };
