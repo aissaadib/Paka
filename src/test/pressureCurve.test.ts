@@ -10,9 +10,13 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH, DEFAULT_PRESSURE_CURVE, normalizeBrush } from "../core/brushes/defaults";
 import {
+  MIN_PRESSURE_CURVE_GAP,
+  addPressureCurvePoint,
   evaluatePressureCurve,
+  movePressureCurvePoint,
   normalizePressureCurve,
   pressureCurvesEqual,
+  removePressureCurvePoint,
   IDENTITY_PRESSURE_CURVE,
   MAX_PRESSURE_CURVE_POINTS,
 } from "../core/brushes/pressureCurve";
@@ -170,6 +174,59 @@ describe("normalization", () => {
     expect(pressureCurvesEqual(BENT, BENT.map((point) => ({ ...point })))).toBe(true);
     expect(pressureCurvesEqual(BENT, DEFAULT_PRESSURE_CURVE)).toBe(false);
     expect(pressureCurvesEqual(BENT, BENT.slice(1))).toBe(false);
+  });
+});
+
+describe("editing a curve", () => {
+  it("moves a middle point freely in y and clamps x between its neighbours", () => {
+    const moved = movePressureCurvePoint(BENT, 1, 2, 0.25);
+    expect(moved[1]).toEqual({ x: 1 - MIN_PRESSURE_CURVE_GAP, y: 0.25 });
+
+    const clampedLow = movePressureCurvePoint(BENT, 1, 0, 0.9);
+    expect(clampedLow[1]).toEqual({ x: MIN_PRESSURE_CURVE_GAP, y: 0.9 });
+
+    // The endpoints keep their x and move only in y.
+    const first = movePressureCurvePoint(BENT, 0, 0.7, 0.4);
+    const last = movePressureCurvePoint(BENT, 2, 0.2, 0.6);
+    expect(first[0]).toEqual({ x: 0, y: 0.4 });
+    expect(last[2]).toEqual({ x: 1, y: 0.6 });
+  });
+
+  it("returns the same array when a move changes nothing", () => {
+    expect(movePressureCurvePoint(BENT, 1, 0.5, 0.8)).toBe(BENT);
+    expect(movePressureCurvePoint(BENT, 9, 0.2, 0.2)).toBe(BENT);
+  });
+
+  it("inserts a middle stop before the fixed end stop when the click is past the last middle", () => {
+    const added = addPressureCurvePoint(BENT, 0.95, 0.97);
+    expect(added).toHaveLength(4);
+    expect(added[2]).toEqual({ x: 0.95, y: 0.97 });
+    expect(added[added.length - 1]).toEqual({ x: 1, y: 1 });
+  });
+
+  it("ignores a click when the neighbouring stops are already too close, or the curve is full", () => {
+    const tight: PressureCurvePoint[] = [
+      { x: 0, y: 0 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.5 + MIN_PRESSURE_CURVE_GAP, y: 0.5 },
+      { x: 1, y: 1 },
+    ];
+    expect(addPressureCurvePoint(tight, 0.5 + MIN_PRESSURE_CURVE_GAP / 2, 0.4)).toBe(tight);
+    const full = Array.from({ length: MAX_PRESSURE_CURVE_POINTS }, (_, index) => ({
+      x: index / (MAX_PRESSURE_CURVE_POINTS - 1),
+      y: 0.5,
+    }));
+    expect(addPressureCurvePoint(full, 0.5, 0.5)).toBe(full);
+  });
+
+  it("removes only middle points", () => {
+    const removed = removePressureCurvePoint(BENT, 1);
+    expect(removed).toEqual([
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ]);
+    expect(removePressureCurvePoint(BENT, 0)).toBe(BENT);
+    expect(removePressureCurvePoint(BENT, BENT.length - 1)).toBe(BENT);
   });
 });
 

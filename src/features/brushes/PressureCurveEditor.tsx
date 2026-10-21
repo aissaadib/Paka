@@ -15,7 +15,11 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAX_PRESSURE_CURVE_POINTS } from "../../core/brushes/pressureCurve";
+import {
+  addPressureCurvePoint,
+  movePressureCurvePoint,
+  removePressureCurvePoint,
+} from "../../core/brushes/pressureCurve";
 import { DEFAULT_PRESSURE_CURVE } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import type { PressureCurvePoint } from "../../types/brush";
@@ -25,7 +29,6 @@ const HEIGHT = 140;
 const PAD = 14;
 const PLOT_WIDTH = WIDTH - PAD * 2;
 const PLOT_HEIGHT = HEIGHT - PAD * 2;
-const MIN_GAP = 0.005;
 
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
@@ -36,61 +39,6 @@ function toSvg(point: PressureCurvePoint): { x: number; y: number } {
     x: PAD + point.x * PLOT_WIDTH,
     y: PAD + (1 - point.y) * PLOT_HEIGHT,
   };
-}
-
-function movePoint(
-  curve: readonly PressureCurvePoint[],
-  index: number,
-  x: number,
-  y: number,
-): readonly PressureCurvePoint[] {
-  const next = curve.map((point) => ({ ...point }));
-  const isFirst = index === 0;
-  const isLast = index === curve.length - 1;
-  const lower = isFirst ? 0 : next[index - 1].x + MIN_GAP;
-  const upper = isLast ? 1 : next[index + 1].x - MIN_GAP;
-  const boundedX = lower > upper ? (lower + upper) / 2 : Math.min(Math.max(x, lower), upper);
-  next[index] = {
-    x: isFirst ? 0 : isLast ? 1 : clamp01(boundedX),
-    y: clamp01(y),
-  };
-  return next;
-}
-
-function addPoint(
-  curve: readonly PressureCurvePoint[],
-  x: number,
-  y: number,
-): readonly PressureCurvePoint[] {
-  if (curve.length >= MAX_PRESSURE_CURVE_POINTS) {
-    return curve;
-  }
-  const clampedX = Math.min(Math.max(x, MIN_GAP), 1 - MIN_GAP);
-  let insertAt = curve.findIndex((point) => point.x > clampedX);
-  if (insertAt === -1) {
-    insertAt = curve.length;
-  }
-  const before = curve[insertAt - 1];
-  const after = curve[insertAt];
-  if (!before || !after || after.x - before.x < MIN_GAP * 2) {
-    return curve;
-  }
-  const next = curve.slice();
-  next.splice(insertAt, 0, {
-    x: Math.min(Math.max(clampedX, before.x + MIN_GAP), after.x - MIN_GAP),
-    y: clamp01(y),
-  });
-  return next;
-}
-
-function removePoint(
-  curve: readonly PressureCurvePoint[],
-  index: number,
-): readonly PressureCurvePoint[] {
-  if (index <= 0 || index >= curve.length - 1) {
-    return curve;
-  }
-  return curve.filter((_, pointIndex) => pointIndex !== index);
 }
 
 export function PressureCurveEditor() {
@@ -125,6 +73,9 @@ export function PressureCurveEditor() {
   const handlePointDown = (index: number, event: ReactPointerEvent<SVGCircleElement>) => {
     event.preventDefault();
     event.stopPropagation();
+    // `preventDefault` suppresses the browser's implicit focus, so move focus
+    // here: the arrow keys and Delete act on the focused point.
+    event.currentTarget.focus();
     setSelected(index);
     setDragging(index);
     setDraft(curve);
@@ -136,7 +87,9 @@ export function PressureCurveEditor() {
       return;
     }
     const point = pointFromClient(event.clientX, event.clientY);
-    setDraft(movePoint(draft, dragging, point.x, point.y));
+    setDraft((current) =>
+      current ? movePressureCurvePoint(current, dragging, point.x, point.y) : current,
+    );
   };
 
   const finishDrag = (event: ReactPointerEvent<SVGSVGElement>) => {
@@ -144,7 +97,9 @@ export function PressureCurveEditor() {
       return;
     }
     if (draft) {
-      commit(draft);
+      // Merge the release position so a coalesced last move is not lost.
+      const point = pointFromClient(event.clientX, event.clientY);
+      commit(movePressureCurvePoint(draft, dragging, point.x, point.y));
     }
     setDragging(null);
     if (svgRef.current?.hasPointerCapture(event.pointerId)) {
@@ -154,7 +109,7 @@ export function PressureCurveEditor() {
 
   const addAt = (event: ReactPointerEvent<SVGRectElement>) => {
     const point = pointFromClient(event.clientX, event.clientY);
-    const next = addPoint(curve, point.x, point.y);
+    const next = addPressureCurvePoint(curve, point.x, point.y);
     if (next !== curve) {
       commit(next);
     }
@@ -164,7 +119,7 @@ export function PressureCurveEditor() {
     if (selected === null) {
       return;
     }
-    const next = removePoint(curve, selected);
+    const next = removePressureCurvePoint(curve, selected);
     if (next !== curve) {
       commit(next);
       setSelected(null);
@@ -179,7 +134,7 @@ export function PressureCurveEditor() {
   const handlePointKey = (index: number, event: ReactKeyboardEvent<SVGCircleElement>) => {
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
-      const next = removePoint(curve, index);
+      const next = removePressureCurvePoint(curve, index);
       if (next !== curve) {
         commit(next);
         setSelected(null);
@@ -203,7 +158,7 @@ export function PressureCurveEditor() {
       return;
     }
     event.preventDefault();
-    const next = movePoint(curve, index, x, y);
+    const next = movePressureCurvePoint(curve, index, x, y);
     commit(next);
   };
 
@@ -283,7 +238,7 @@ export function PressureCurveEditor() {
               )}% response${isEndpoint ? ", endpoint" : ""}`}
               onPointerDown={(event) => handlePointDown(index, event)}
               onDoubleClick={() => {
-                const next = removePoint(curve, index);
+                const next = removePressureCurvePoint(curve, index);
                 if (next !== curve) {
                   commit(next);
                   setSelected(null);
@@ -315,4 +270,5 @@ export function PressureCurveEditor() {
     </div>
   );
 }
+
 

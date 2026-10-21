@@ -163,3 +163,82 @@ export function pressureCurvesEqual(
   }
   return true;
 }
+
+/** Smallest distance the editor keeps between two points. */
+export const MIN_PRESSURE_CURVE_GAP = 0.005;
+
+/**
+ * Moves one point, keeping the x order and the fixed endpoints.
+ *
+ * The first point stays at x=0 and the last at x=1; their response (`y`) is
+ * free. A middle point is clamped between its neighbours so the list never has
+ * to be re-sorted while the pointer is down. Returns the same array when the
+ * point did not move, so a caller can skip a commit.
+ */
+export function movePressureCurvePoint(
+  curve: readonly PressureCurvePoint[],
+  index: number,
+  x: number,
+  y: number,
+): readonly PressureCurvePoint[] {
+  if (index < 0 || index >= curve.length) {
+    return curve;
+  }
+  const isFirst = index === 0;
+  const isLast = index === curve.length - 1;
+  const lower = isFirst ? 0 : curve[index - 1].x + MIN_PRESSURE_CURVE_GAP;
+  const upper = isLast ? 1 : curve[index + 1].x - MIN_PRESSURE_CURVE_GAP;
+  const boundedX = lower > upper ? (lower + upper) / 2 : Math.min(Math.max(x, lower), upper);
+  const nextX = isFirst ? 0 : isLast ? 1 : clamp01(boundedX);
+  const nextY = clamp01(y);
+  if (curve[index].x === nextX && curve[index].y === nextY) {
+    return curve;
+  }
+  const next = curve.slice();
+  next[index] = { x: nextX, y: nextY };
+  return next;
+}
+
+/**
+ * Inserts a point between its neighbours.
+ *
+ * A click past the last middle point lands before the fixed end stop. Returns
+ * the same array when the list is full or the gap is too small, so the editor
+ * can ignore a no-op click.
+ */
+export function addPressureCurvePoint(
+  curve: readonly PressureCurvePoint[],
+  x: number,
+  y: number,
+): readonly PressureCurvePoint[] {
+  if (curve.length >= MAX_PRESSURE_CURVE_POINTS) {
+    return curve;
+  }
+  const clampedX = Math.min(Math.max(x, MIN_PRESSURE_CURVE_GAP), 1 - MIN_PRESSURE_CURVE_GAP);
+  let insertAt = curve.findIndex((point) => point.x > clampedX);
+  if (insertAt === -1) {
+    insertAt = curve.length;
+  }
+  const before = curve[insertAt - 1];
+  const after = curve[insertAt] ?? { x: 1, y: 1 };
+  if (!before || after.x - before.x < MIN_PRESSURE_CURVE_GAP * 2) {
+    return curve;
+  }
+  const next = curve.slice();
+  next.splice(insertAt, 0, {
+    x: Math.min(Math.max(clampedX, before.x + MIN_PRESSURE_CURVE_GAP), after.x - MIN_PRESSURE_CURVE_GAP),
+    y: clamp01(y),
+  });
+  return next;
+}
+
+/** Removes a middle point; the endpoints are fixed and cannot be removed. */
+export function removePressureCurvePoint(
+  curve: readonly PressureCurvePoint[],
+  index: number,
+): readonly PressureCurvePoint[] {
+  if (index <= 0 || index >= curve.length - 1) {
+    return curve;
+  }
+  return curve.filter((_, pointIndex) => pointIndex !== index);
+}
