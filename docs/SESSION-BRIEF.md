@@ -49,7 +49,9 @@ visual-regression harness.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
   built before the fill, gradient, hardness, spacing/stabilizer, texture, blend
   mode, raster-budget, bounded-rasterization, stamp and colour-wheel slices);
-  packaged-app verification is still outstanding.
+  packaged-app verification is still outstanding, **except** for the settings
+  commands, which were verified in a release build driven through UI
+  Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
   stabilizer, grain texture and the stamp (dab) engine shipped; directional or
   per-dab stamp textures remain. Phase 4 has

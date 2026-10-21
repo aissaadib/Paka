@@ -243,15 +243,16 @@ Run in the worktree `C:\Users\aissa\Desktop\Paka-feature-factory\worktrees\t06-s
 
 ```
 pnpm install --frozen-lockfile      # 1.1 s
-pnpm test                           # 36 files, 742 tests, all pass
+pnpm test                           # 36 files, 749 tests, all pass
 pnpm typecheck                      # clean
 pnpm build                          # built
 pnpm test:visual                    # 19 passed (the scene goldens are unchanged)
+pnpm tauri build --no-bundle        # the release app, 9m 03s (see section 7)
 cargo test --manifest-path src-tauri\Cargo.toml
 ```
 
 The unit suite before this slice was **711 tests in 34 files**; this slice
-adds **31 tests in 2 files** (16 settings, 15 autosave) and one test support
+adds **38 tests in 2 files** (18 settings, 20 autosave) and one test support
 module.
 
 **The Rust tests could not be executed here, and the reason is not this
@@ -282,7 +283,50 @@ test binary - the same gap the project's other Rust tests have.
 
 ---
 
-## 7. Changed files
+## 7. Packaged desktop verification
+
+The two native commands are the part of this slice a browser cannot test, so
+they were verified in the **real desktop application**: a release build
+(`pnpm tauri build --no-bundle`, 9m 03s) launched and driven through **UI
+Automation**, with the settings file on disk as the observable.
+
+| Step | Result |
+| --- | --- |
+| A settings file with brush size 37, colour `#cc3366`, tool `eraser` and fill tolerance 99 is written to `%APPDATA%\com.paka.drawing\settings.json` | 657 bytes, no byte-order mark |
+| The app is launched and its controls are read through UI Automation | **10 sliders** exposed: Size, Opacity, Hardness, Sampling, Stabilizer, Texture, Hue, Saturation, Value, Opacity |
+| The controls hold the file's values | **Hue 340, Saturation 75, Value 80** - exactly `#cc3366` (h = 340, s = 75 %, v = 80 %); **Size 579** on the logarithmic track, which is 37 document px; Sampling 12 (0.12), Hardness 1, Opacity 1; the toolbar's **Stroke color** button reports *"80 % red 20 % green 40 % blue"* |
+| A preference is changed through the real control (the Sampling slider) | The file on disk afterwards holds `spacing: 0.02` - the change went **out** through `write_app_settings` |
+| The preferences that came *from* the file are still there afterwards | `brush.size: 37`, `brush.color: "#cc3366"`, `toolId: "eraser"`, `fillTolerance: 99`, `version: 1` |
+
+So the whole chain is proven in the shipping build: **native read → JSON
+parse → validate → apply to the engine → the real controls show it → a user
+change → the store writes → native write → the file on disk.**
+
+**A second run, with a broken file, proved the fallback.** The first attempt
+wrote the settings file with `Set-Content -Encoding UTF8`, which puts a
+**byte-order mark** in front of the JSON - which is not valid JSON. The app
+behaved exactly as the design says it must: it fell back to the **defaults**
+(size 6, `#16181c`, the brush tool, tolerance 24), raised no error, did not
+crash, and wrote those defaults back when the next preference changed. A
+corrupt settings file cannot stop the editor from starting - now verified in
+the packaged app and not only in the unit tests.
+
+**Two environment facts worth recording, because they cost time:**
+
+- The **debug** build (`tauri build --debug`) cannot create a WebView here:
+  `WebView2 error: HRESULT(0x8007139F)`. The **release** build has the same
+  problem *while another instance of the app is running*, because the second
+  instance cannot create a WebView in the user-data folder the first one
+  holds. Setting `WEBVIEW2_USER_DATA_FOLDER` to a separate folder lets a
+  second instance start, and that is how the verification above was run. This
+  is an environment fact, not a property of the change.
+- The Rust **unit tests** still cannot be executed here (§6): the test
+  harness binary aborts at startup with `STATUS_ENTRYPOINT_NOT_FOUND`, which
+  was reproduced on the base commit and with another agent's pre-existing
+  test binary. The **application** binary loads and runs, which is what made
+  the verification above possible.
+
+---
 
 | File | Change |
 | --- | --- |
