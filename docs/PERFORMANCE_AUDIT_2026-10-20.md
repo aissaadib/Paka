@@ -42,14 +42,15 @@ report.
 > | --- | --- |
 > | One full-document clear + one full-surface blend **per element** (F1) | **Stands** — call counts, not timings. |
 > | R1 cuts the touched area 47x-187x (F1c) | **Stands** — geometry, not timing. |
-> | F1b is byte-identical to the pre-F1b rendering in 8 configurations (F7d) | **Stands** — byte comparison. |
+> | F1b is byte-identical to the pre-F1b rendering in 8 configurations (F7d) | **Stands** — byte comparison (and now confirmed against the **real** pre-F1b build in F8b, with a canary). |
 > | F7 vs F1b: byte-identical at rasterScale 1, <=1/255 at rasterScale 2 (F7d) | **Stands** — byte comparison. |
 > | Live surfaces: 2 / 3 / 4, i.e. 48 / 58 / 74 bytes per document pixel (F5) | **Stands** — counted canvases and arithmetic. |
-> | Rebuild cost per element in ms (F2, F7, F7e) | **Retracted** — measured a flush. |
+> | Rebuild cost per element in ms (F2, F7, F7e) | **Retracted** — measured a flush. The real figure is in F8. |
 > | "The blur cost is linear in the scratch area" (F3) | **Retracted** — the flush of the scratch is charged the scratch's area, so the reading was circular. The *structural* claim (every frame re-blurs the whole bbox) stands. |
 > | "A draw from a just-written canvas is a whole-canvas operation" (F7b) | **Retracted** — it was the flush of the canvas with pending work. |
-> | "The destination is the cost" (F7f) and the tile/batching lead | **Closed** — a read-back cost, not a rendering-path cost. It survives only for the rare read-back paths (PNG export, bucket scan, picker probe). |
-> | The last open question: how long does a rebuild take? | **Answered** — see F8: a rebuild of a 100-element layer costs a few milliseconds and scales with the **element count**, not the document area. The destination-area term is not in the rendering path, so the tile/batching work should not be scheduled. |
+> | "The destination is the cost" (F7f) and the tile/batching lead | **Closed** — a read-back cost, not a rendering-path cost, and confirmed as such by the F8 measurement (the per-frame composite of a document-sized surface is cheap and roughly flat). |
+> | The last open question: how long does a rebuild take? | **Answered** — see F8: a rebuild of a 100-element layer costs a few milliseconds and scales with the **element count**, not the document area. |
+> | The last open item: does F1b change any pixel? | **Answered** — see F8b: zero differing bytes against the real pre-F1b build, eight configurations, with a canary proving the instrument is sensitive. |
 >
 > The method lesson is the one this report's Appendix C already gave, and
 > which this audit then failed to apply to its own harness: **sample frame
@@ -841,7 +842,7 @@ app was not measured and is not claimed; it is a micro-benchmark of the rebuild
 path, not a profile of the whole app; and the two runs disagree by ~6x, which
 is this audit's own lesson applied to these numbers too.
 
-#### F8b — the pixel question that is still open
+#### F8b — the pixel question: CLOSED (F1b vs the REAL pre-F1b build)
 
 The F1b change (`4ac040b`) and the element-scratch variant that was reverted
 (`f7cf50c` / `2fa34cc`) both blend only the element's rectangle, so both could
@@ -851,24 +852,46 @@ antialiasing** (its coverage is a hard capsule inside the samples' radius),
 so the Vitest equality proves the composite *order* and the *placement* — it
 is not a browser proof of the antialiased edge.
 
-What F7d did establish, in Chromium, on the real renderer, with real pixels:
-the shipped F1b path and a faithful **emulation** of the pre-F1b path (the
-document-sized-buffer path with a *full* clear of the buffer — the only other
-difference) produced **0 differing bytes in all eight configurations** (hard,
-soft, grain, soft+grain at rasterScale 1 and 2), on the layer surface *and*
-the display canvas; and the emulation reproduced the pre-F1b *area* numbers
-exactly, which is the check that it is faithful.
+**The decisive proof has now been run** (Agent 1): a detached git worktree at
+`520aa77` — the commit *before* F1b — with its own dev server, the current
+tree's dev server alongside it, and one browser instance driving both over the
+DevTools protocol, so that the same document and brush are rendered through
+the **real** `Canvas2DRenderer` of each *build* and compared byte for byte on
+the display canvas *and* the layer surface.
 
-What that does **not** establish: that the emulation is bit-identical to the
-actual `520aa77` build in every respect. The decisive form of the proof is
-F1b versus the **real** pre-F1b build, and nobody has run it yet. It is
-cheap: a detached worktree at `520aa77` beside the dev server, rendered in
-Chromium and compared pixel-wise. The same test settles the reverted F7: the
-scratch path is byte-identical to the document-buffer path at rasterScale 1
-(Agent 1's browser A/B and this audit's F7d agree), and differs by at most
-1/255 on at most 44 bytes of 4.2 M at rasterScale 2 (F7d) — so the only open
-difference is that 1/255, and the keep-or-revert decision belongs to the
-coordinator with the numbers in hand.
+| Brush | rasterScale 1 | rasterScale 2 |
+| --- | --- | --- |
+| hard | 0 / 0 | 0 / 0 |
+| soft | 0 / 0 | 0 / 0 |
+| grain | 0 / 0 | 0 / 0 |
+| soft + grain | 0 / 0 | 0 / 0 |
+
+(0 differing bytes, max delta 0, on the display and on the surface.)
+
+**And the instrument was canaried**, which is what makes the zeros mean
+something: the same build with the strokes moved by **one pixel** gives 4,566
+differing bytes (max delta 220) on the display and 4,452 (max delta 251) on
+the surface. A comparison that cannot see a one-pixel shift cannot certify a
+zero — so the canary belongs in the recipe, not just in the run.
+
+**What this closes:**
+
+* **F1b (`4ac040b`) changes zero pixels** against the real pre-F1b build —
+  not "zero within an emulation" (which is what this audit had), but zero
+  against the actual old code, in Chromium, for four brushes at two raster
+  scales, on the surface and on the display. Together with F1c (47x-187x less
+  area touched) and F8 (a rebuild costs a few milliseconds and scales with the
+  element count), R1 is fully validated: same picture, less work.
+* **The reverted element-scratch variant has nothing left to chase.** F7
+  differed from F1b by at most 1/255 of alpha on 44 bytes of 4.2 M at
+  rasterScale 2, and F1b is now proven identical to pre-F1b — so the 1/255 was
+  the only open difference in the rendering path, and the revert (`2fa34cc`)
+  stands without any pixel-based objection.
+* The method worth keeping: a pixel A/B needs **two real builds** (not one
+  build plus an emulation) **and a canary** that proves the instrument can see
+  a difference. This audit's own F7d had the canary missing and its reference
+  was an emulation; the pair of gaps is exactly what made the numbers
+  ambiguous for a day.
 
 A 1x1 `getImageData` on the 2560x1600 display canvas cost 18-23 ms on its own
 and 42.9 ms for an empty `render()` + readback. Any future benchmark of the
@@ -894,19 +917,17 @@ frame-rate number could be obtained in this environment.
 
 ## 4. Recommended order
 
-0. **DONE — R1 shipped.** `4ac040b` bounds the layer rebuild by each element's
-   inked rectangle: the touched area per rebuild drops 47x-187x for typical
-   strokes (F1b, F1c), and the pixels are unchanged (F7d — byte-identical to
-   the pre-F1b rendering in all eight measured configurations). F8 now shows
-   what it bought: a rebuild of a 100-element layer costs a few milliseconds
-   and scales with the *element count*, not the document area.
-1. **The one open item is a pixel proof, not a timing** (F8b): F1b versus the
-   **real** pre-F1b build (`520aa77`) in Chromium, and the same comparison for
-   the reverted element-scratch variant. It is a detached worktree plus a
-   pixel comparison, and it decides the keep-or-revert of `f7cf50c`. The
-   durable lever if a layer's rebuild ever does show up as slow is the
-   *number* of elements — a per-layer cache of the last rasterization, so an
-   undo re-rasterizes only the changed element — not the area.
+0. **DONE — R1 shipped and validated.** `4ac040b` bounds the layer rebuild by
+   each element's inked rectangle: the touched area per rebuild drops 47x-187x
+   for typical strokes (F1b, F1c), the pixels are unchanged — zero differing
+   bytes against the **real** pre-F1b build, in Chromium, with a canary (F8b) —
+   and the rebuild itself costs a few milliseconds and scales with the
+   *element count*, not the document area (F8).
+1. **Nothing is open.** The two questions this audit ended with are answered:
+   the rebuild cost (F8) and the pixel identity (F8b). If a layer's rebuild
+   ever does show up as slow in the app, the durable lever is the *number* of
+   elements — a per-layer cache of the last rasterization, so an undo
+   re-rasterizes only the changed element — not the area.
 2. **R2 — incremental feathering**, if a soft brush is still visibly slow in
    the app. It touches the "live preview == committed pixels" invariant and
    needs a pixel proof, not just a timing.
@@ -919,7 +940,8 @@ frame-rate number could be obtained in this environment.
    layer-count/surface budget, or lazy surface allocation for layers that are
    hidden or never drawn.
 5. **R5 — closed** as a lead (see the options table): its motivation was
-   retracted, and the stamp engine already tiles its coverage.
+   retracted, the stamp engine already tiles its coverage, and the per-frame
+   composite of a document-sized surface is cheap and roughly flat (F8).
 
 **Non-goals for this audit and for the follow-up slices:** no renderer
 replacement (WebGL/WebGPU stays out of scope until a profile shows Canvas 2D
@@ -946,10 +968,11 @@ and no change to the stamp-engine slice that is the current roadmap item.
 * The 8192^2 surface measurement (F5) is a single configuration with 3
   samples; it demonstrates a cliff, not a curve — and the cliff it shows is
   the *area* of the surface, which is arithmetic, not a timing.
-* Nothing here was measured in the packaged Tauri window, on a pen device, or
-  with a real GPU. No claim about packaged-app or hardware performance is
-  made, and the one open question — how long a rebuild takes in the product —
-  is exactly what Appendix C is for.
+* Nothing in this document was measured in the packaged Tauri window, on a pen
+  device, or on a real GPU. The rebuild cost and the per-frame composite were
+  measured in a **browser** window (F8) — the same Chromium and the same
+  canvas implementation, but not the packaged app, and no claim is made about
+  it.
 
 ---
 
