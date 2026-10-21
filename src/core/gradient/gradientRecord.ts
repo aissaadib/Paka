@@ -18,6 +18,15 @@ export const MIN_GRADIENT_LENGTH = 1;
 /** The end colour a new gradient starts with; the toolbar can change it. */
 export const DEFAULT_GRADIENT_END_COLOR = "#ffffff";
 
+/**
+ * Most middle stops the editor writes.
+ *
+ * The format allows 64 stops in total, so two are reserved for the endpoints.
+ * Persistence already accepts that many; this bound belongs to the editor, not
+ * the file.
+ */
+export const MAX_GRADIENT_MID_STOPS = 62;
+
 export interface GradientGeometry {
   readonly type: "linear" | "radial";
   readonly x1: number;
@@ -37,13 +46,94 @@ function normalizeStopColor(color: string, fallback: string): string {
   return rgb ? rgbToHex(rgb) : fallback;
 }
 
-/** Builds the two-stop gradient a drag creates. */
+/**
+ * Normalizes the middle stops of a gradient.
+ *
+ * Middle stops are everything strictly between the endpoints: offset `0` is the
+ * start colour and offset `1` the end colour, so a stop at either edge is
+ * dropped rather than allowed to fight the endpoint. Invalid colours and
+ * non-finite offsets are dropped, offsets are clamped, sorted and deduplicated,
+ * and the list is capped at `MAX_GRADIENT_MID_STOPS`.
+ */
+export function normalizeGradientMidStops(
+  stops: readonly GradientStop[],
+): readonly GradientStop[] {
+  if (!Array.isArray(stops)) {
+    return [];
+  }
+  const points: GradientStop[] = [];
+  for (const stop of stops) {
+    if (points.length >= MAX_GRADIENT_MID_STOPS) {
+      break;
+    }
+    if (typeof stop !== "object" || stop === null) {
+      continue;
+    }
+    if (typeof stop.offset !== "number" || !Number.isFinite(stop.offset)) {
+      continue;
+    }
+    if (typeof stop.color !== "string") {
+      continue;
+    }
+    const offset = clamp(stop.offset, 0, 1);
+    if (offset <= 0 || offset >= 1) {
+      continue;
+    }
+    const color = normalizeStopColor(stop.color, "");
+    if (!color) {
+      continue;
+    }
+    points.push({ offset, color });
+  }
+
+  points.sort((a, b) => a.offset - b.offset);
+  const deduped: GradientStop[] = [];
+  for (const point of points) {
+    const previous = deduped[deduped.length - 1];
+    if (previous && point.offset - previous.offset < 1e-6) {
+      continue;
+    }
+    deduped.push(point);
+    if (deduped.length >= MAX_GRADIENT_MID_STOPS) {
+      break;
+    }
+  }
+  return deduped;
+}
+
+/** True when two middle-stop lists describe the same stops. */
+export function gradientStopsEqual(
+  a: readonly GradientStop[],
+  b: readonly GradientStop[],
+): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index].offset !== b[index].offset || a[index].color !== b[index].color) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Builds the gradient a drag creates.
+ *
+ * `midStops` are the stops strictly between the start and end colours; the
+ * caller keeps the two endpoint colours as separate options. The result is
+ * always sorted and strictly ascending, which is what the file reader requires.
+ */
 export function createGradientRecord(
   layerId: LayerId,
   geometry: GradientGeometry,
   startColor: string,
   endColor: string,
   opacity: number,
+  midStops: readonly GradientStop[] = [],
 ): GradientRecord {
   return {
     id: createId("gradient"),
@@ -56,6 +146,9 @@ export function createGradientRecord(
     y2: geometry.y2,
     stops: [
       { offset: 0, color: normalizeStopColor(startColor, "#000000") },
+      ...normalizeGradientMidStops(midStops).map(
+        (stop): GradientStop => ({ offset: stop.offset, color: stop.color }),
+      ),
       { offset: 1, color: normalizeStopColor(endColor, DEFAULT_GRADIENT_END_COLOR) },
     ],
     opacity: clamp(opacity, 0, 1),

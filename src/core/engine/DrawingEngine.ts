@@ -27,7 +27,16 @@ import { hexToRgb, rgbToHex } from "../../utils/color";
 import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
-import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import {
+  brushPresetsEqual,
+  createPresetId,
+  duplicatePreset,
+  normalizeBrushPresets,
+  normalizePresetName,
+  uniquePresetName,
+  type BrushPreset,
+} from "../brushes/presets";
 import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
 import {
@@ -61,6 +70,11 @@ import {
 } from "../commands/strokeEditCommand";
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
+import {
+  DEFAULT_GRID_SETTINGS,
+  normalizeGridSpacing,
+  snapDocumentPoint,
+} from "../document/grid";
 import {
   addGuideToDocument,
   findGuide,
@@ -102,6 +116,7 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  GradientStop,
   Guide,
   GuideAxis,
   LayerBlendMode,
@@ -117,7 +132,9 @@ import {
   cloneGradient,
   createGradientRecord,
   gradientIsDegenerate,
+  gradientStopsEqual,
   moveGradientEnd,
+  normalizeGradientMidStops,
 } from "../gradient/gradientRecord";
 import {
   CanvasInputBinder,
@@ -154,6 +171,22 @@ export interface EditorSnapshot {
   readonly document: DrawingDocument;
   readonly viewport: Viewport;
   readonly brush: BrushSettings;
+  /**
+   * The colour a right-button stroke paints with.
+   *
+   * Editor state: a right-button gesture resolves its colour at press time and
+   * stores it on the committed stroke, so changing this never repaints existing
+   * artwork and the choice is not part of the project file.
+   */
+  readonly secondaryColor: string;
+  /**
+   * The named brush presets the user has saved.
+   *
+   * Editor preference, like the brush itself: applying, saving, renaming or
+   * deleting a preset never touches the document, the revision or history.
+   * The settings store persists the list.
+   */
+  readonly presets: readonly BrushPreset[];
   readonly toolId: ToolId;
   readonly history: CommandStackState;
   readonly file: DocumentFileState;
@@ -212,6 +245,30 @@ export interface EditorSnapshot {
   /** End colour of the next gradient; its start is the current brush colour. */
   readonly gradientEndColor: string;
   /**
+   * Middle stops of the next gradient, sorted strictly between the endpoints.
+   *
+   * Editor state like the end colour: a committed gradient carries its own
+   * stops, so changing this never edits an existing gradient.
+   */
+  readonly gradientMidStops: readonly GradientStop[];
+  /**
+   * Whether the grid is drawn.
+   *
+   * Editor state, like the guides: the grid is a display aid, not document
+   * content, so it never reaches a layer surface, an export or the project
+   * file. Off by default.
+   */
+  readonly gridVisible: boolean;
+  /** Distance between grid lines, in document pixels. */
+  readonly gridSpacing: number;
+  /**
+   * Whether a drawing sample snaps to the guides and the grid.
+   *
+   * Editor state: it changes where the *next* sample lands, not where the
+   * committed strokes already are. Off by default.
+   */
+  readonly gridSnapping: boolean;
+  /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
    * persisted.
@@ -259,6 +316,36 @@ const DEFAULT_DOCUMENT_HEIGHT = 1200;
 /** Wheel delta to zoom factor conversion (natural-exponential). */
 const WHEEL_ZOOM_SENSITIVITY = 0.0018;
 const WHEEL_ZOOM_FACTOR_LIMIT = 0.25;
+
+/**
+ * The tools whose samples follow the guides and the grid while snapping is on.
+ *
+ * Snapping is a drawing aid: it moves the samples a tool commits, so a stroke's
+ * samples land on the grid lines, a shape's corners sit on them and a gradient
+ * starts and ends on them.
+ *
+ * It is applied to every tool that commits drawing samples - the brush, the
+ * eraser, the shape tools, the line and the gradient - so "the sample I drew"
+ * and "the sample that was committed" agree. It is not applied to the bucket
+ * and the colour picker, whose presses read pixels rather than place geometry,
+ * nor to the select, guides and pan tools, whose gestures do not commit
+ * drawing samples at all.
+ *
+ * The snap is a *magnet* with a small screen-space radius (6 CSS pixels), not
+ * a lattice lock: a sample that is nowhere near a target keeps its position,
+ * so a freehand stroke is only nudged where it passes a line it would have
+ * crossed anyway.
+ */
+const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
+  "brush",
+  "eraser",
+  "line",
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+  "gradient",
+]);
 
 /**
  * Shown when a layer operation is refused because a pointer gesture is still
@@ -462,6 +549,8 @@ export class DrawingEngine implements StrokeSource {
   private doc: DrawingDocument;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private brush: BrushSettings;
+  private secondaryColor = DEFAULT_SECONDARY_COLOR;
+  private presets: readonly BrushPreset[] = [];
   private currentToolId: ToolId;
   private readonly tools: ToolRegistry;
   private readonly commands: CommandStack;
@@ -497,7 +586,15 @@ export class DrawingEngine implements StrokeSource {
   /** Gradient options for the next drag, captured when the gesture starts. */
   private gradientType: "linear" | "radial" = "linear";
   private gradientEndColor = DEFAULT_GRADIENT_END_COLOR;
+  private gradientMidStops: readonly GradientStop[] = [];
   private activeGradient: ActiveGradient | null = null;
+  /**
+   * Grid display settings. Session state: the grid is an aid, not document
+   * content, so it is not in the project file and never enters history.
+   */
+  private gridVisible = DEFAULT_GRID_SETTINGS.visible;
+  private gridSpacing = DEFAULT_GRID_SETTINGS.spacing;
+  private gridSnapping = DEFAULT_GRID_SETTINGS.snap;
   private notice: string | null = null;
   /**
    * Whether the gesture-refusal notice has already been raised for the
@@ -640,6 +737,11 @@ export class DrawingEngine implements StrokeSource {
     });
     renderer.setDocument(this.doc);
     renderer.setViewport(this.viewport);
+    renderer.setGrid({
+      visible: this.gridVisible,
+      spacing: this.gridSpacing,
+      snap: this.gridSnapping,
+    });
     if (this.viewportSize.width > 0) {
       renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, this.devicePixelRatio);
     }
@@ -1027,6 +1129,174 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
+   * Sets the colour a right-button gesture paints with.
+   *
+   * Editor state, not a document edit: it describes the *next* gesture. The
+   * colour is resolved once at press time, so a stroke keeps the colour it was
+   * started with even if this changes before release.
+   */
+  setSecondaryColor(color: string): void {
+    const normalized = hexToRgb(color);
+    if (!normalized) {
+      return;
+    }
+    const next = rgbToHex(normalized);
+    if (this.secondaryColor === next) {
+      return;
+    }
+    this.secondaryColor = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Swaps the primary and secondary colours.
+   *
+   * The document is untouched: the swap changes which colour the next
+   * left/right-button gesture paints with, never the strokes already drawn.
+   */
+  swapColors(): void {
+    const primary = this.brush.color;
+    const secondary = this.secondaryColor;
+    if (primary === secondary) {
+      return;
+    }
+    this.secondaryColor = primary;
+    this.brush = updateBrushSettings(this.brush, { color: secondary });
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * The brush a gesture paints with, resolving the secondary colour for a
+   * right-button press.
+   *
+   * This runs at press time only. A shape, stroke, fill or gradient stores the
+   * resolved colour on its own record, so the rest of the gesture, undo/redo
+   * and a reopened file all agree without re-reading the current buttons.
+   */
+  private brushForSample(sample: PointerSample): BrushSettings {
+    if (sample.button !== 2 || this.secondaryColor === this.brush.color) {
+      return this.brush;
+    }
+    return { ...this.brush, color: this.secondaryColor };
+  }
+
+  /**
+   * Replaces the preset library.
+   *
+   * The settings store calls this once while applying a file. It is editor
+   * state, so it publishes without touching the document, the revision or
+   * history. The entries are read by `normalizeBrushPresets`, the same
+   * reader the settings file uses, so a malformed entry is handled the same
+   * way wherever it comes from.
+   */
+  setPresets(presets: readonly BrushPreset[]): void {
+    const next = normalizeBrushPresets(presets);
+    if (brushPresetsEqual(this.presets, next)) {
+      return;
+    }
+    this.presets = next;
+    this.publish();
+  }
+
+  /**
+   * Saves the current brush as a new preset and returns it.
+   *
+   * Editor state only: no history entry, no revision bump and no dirty flag.
+   * An empty name is rejected (`null`); a duplicate name gets a numeric
+   * suffix so the picker can tell the entries apart.
+   */
+  saveBrushPreset(name: string): BrushPreset | null {
+    const trimmed = normalizePresetName(name);
+    if (trimmed === "") {
+      return null;
+    }
+    const preset: BrushPreset = {
+      id: createPresetId(),
+      name: uniquePresetName(trimmed, this.presets),
+      brush: { ...this.brush },
+    };
+    this.presets = [...this.presets, preset];
+    this.commands.breakMerge();
+    this.publish();
+    return preset;
+  }
+
+  /**
+   * Renames a preset and returns the stored entry, or `null` when the id is
+   * unknown or the name is empty. A duplicate name gets a numeric suffix.
+   */
+  renameBrushPreset(id: string, name: string): BrushPreset | null {
+    const trimmed = normalizePresetName(name);
+    if (trimmed === "") {
+      return null;
+    }
+    const index = this.presets.findIndex((preset) => preset.id === id);
+    if (index === -1) {
+      return null;
+    }
+    const current = this.presets[index];
+    const renamed: BrushPreset = {
+      ...current,
+      name: uniquePresetName(trimmed, this.presets, id),
+    };
+    if (renamed.name === current.name) {
+      return renamed;
+    }
+    this.presets = this.presets.map((preset) => (preset.id === id ? renamed : preset));
+    this.commands.breakMerge();
+    this.publish();
+    return renamed;
+  }
+
+  /** Deletes a preset. Returns whether the id was found. */
+  deleteBrushPreset(id: string): boolean {
+    const next = this.presets.filter((preset) => preset.id !== id);
+    if (next.length === this.presets.length) {
+      return false;
+    }
+    this.presets = next;
+    this.commands.breakMerge();
+    this.publish();
+    return true;
+  }
+
+  /**
+   * Duplicates a preset: the same brush under a fresh id and a name that does
+   * not clash with the ones already saved.
+   *
+   * Editor state only: no history entry, no revision bump and no dirty flag.
+   * Returns the new entry, or `null` when the id is unknown.
+   */
+  duplicateBrushPreset(id: string): BrushPreset | null {
+    const preset = this.presets.find((candidate) => candidate.id === id);
+    if (!preset) {
+      return null;
+    }
+    const copy = duplicatePreset(preset, this.presets);
+    this.presets = [...this.presets, copy];
+    this.commands.breakMerge();
+    this.publish();
+    return copy;
+  }
+
+  /**
+   * Applies a preset through the normal brush setter.
+   *
+   * The brush values are exactly what the preset stored; the setter keeps this
+   * an editor-only change, so applying a preset cannot dirty the drawing.
+   */
+  applyBrushPreset(id: string): boolean {
+    const preset = this.presets.find((candidate) => candidate.id === id);
+    if (!preset) {
+      return false;
+    }
+    this.setBrush(preset.brush);
+    return true;
+  }
+
+  /**
    * Sets whether the next shape is filled.
    *
    * Not undoable and not dirty: it changes what the *next* shape will be, and
@@ -1157,6 +1427,127 @@ export class DrawingEngine implements StrokeSource {
     this.gradientEndColor = next;
     this.commands.breakMerge();
     this.publish();
+  }
+
+  /**
+   * Sets the middle stops of the next gradient.
+   *
+   * Endpoints stay the brush colour and `gradientEndColor`; a stop at either
+   * edge is dropped, invalid colours are ignored and offsets are sorted and
+   * clamped. Like the other gradient options this describes the next drag only:
+   * a committed gradient keeps the stops it was drawn with.
+   */
+  setGradientMidStops(stops: readonly GradientStop[]): void {
+    const next = normalizeGradientMidStops(stops);
+    if (gradientStopsEqual(this.gradientMidStops, next)) {
+      return;
+    }
+    this.gradientMidStops = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Shows or hides the grid.
+   *
+   * Display state, not an edit: it changes no pixels on a layer, writes
+   * nothing to history and does not dirty the file. The grid is painted on the
+   * display canvas only, so an export is identical whether it was on or off.
+   */
+  setGridVisible(visible: boolean): void {
+    if (this.gridVisible === visible) {
+      return;
+    }
+    this.gridVisible = visible;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets the grid spacing in document pixels (`2..500`, whole pixels).
+   *
+   * Like the visibility, this is display state: a spacing change is not an
+   * edit and never rewrites a stroke. Out-of-range values are clamped and a
+   * non-finite value restores the default rather than producing an unreadable
+   * grid.
+   */
+  setGridSpacing(spacing: number): void {
+    const next = normalizeGridSpacing(spacing);
+    if (next === this.gridSpacing) {
+      return;
+    }
+    this.gridSpacing = next;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Turns snapping on or off.
+   *
+   * While it is on, a drawing sample within 6 CSS pixels of a guide or a grid
+   * line is committed exactly on that target. The tolerance is converted with
+   * the live zoom, so the same physical gesture snaps identically at every
+   * zoom. Snapping changes where the next sample lands; it never moves a
+   * committed stroke and is not an undoable step.
+   */
+  setGridSnapping(snap: boolean): void {
+    if (this.gridSnapping === snap) {
+      return;
+    }
+    this.gridSnapping = snap;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /** Pushes the current grid settings to the renderer, if one is attached. */
+  private syncGridToRenderer(): void {
+    this.renderer?.setGrid({
+      visible: this.gridVisible,
+      spacing: this.gridSpacing,
+      snap: this.gridSnapping,
+    });
+  }
+
+  /**
+   * The sample a drawing tool should see, with snapping applied.
+   *
+   * Tools that read pixels or do not commit drawing samples are left alone, so
+   * a bucket press fills under the pointer and a guide drag stays a guide drag.
+   * When snapping is off, or no target is in reach, the sample is returned
+   * as-is: enabling snapping never makes an untouched sample move.
+   *
+   * Two rules keep the snap from changing what a gesture *is*:
+   *
+   *  - a press outside the paper is ignored by every drawing gesture, so the
+   *    snap never pulls a point that started outside onto the paper;
+   *  - a snap that would leave the paper is not applied, so a gesture can
+   *    never be refused by its own snap.
+   */
+  private snapSample(sample: PointerSample): PointerSample {
+    if (!this.gridSnapping || !SNAPPING_TOOL_IDS.has(this.currentToolId)) {
+      return sample;
+    }
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return sample;
+    }
+    const result = snapDocumentPoint(sample.docX, sample.docY, {
+      enabled: true,
+      guides: this.doc.guides,
+      spacing: this.gridSpacing,
+      zoom: this.viewport.zoom,
+    });
+    const x = result.x >= 0 && result.x <= this.doc.width ? result.x : sample.docX;
+    const y = result.y >= 0 && result.y <= this.doc.height ? result.y : sample.docY;
+    if (!result.snappedX && !result.snappedY) {
+      return sample;
+    }
+    if (x === sample.docX && y === sample.docY) {
+      return sample;
+    }
+    return { ...sample, docX: x, docY: y };
   }
 
   /** Clears a user-facing notice raised by an editor action. */
@@ -1325,7 +1716,7 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
 
-    const stroke = createStrokeRecord(layerId, this.brush, this.activeTool().erases === true);
+    const stroke = createStrokeRecord(layerId, this.brushForSample(sample), this.activeTool().erases === true);
     const builder = new StrokeBuilder(stroke);
     builder.addSample(toStrokeSample(sample));
 
@@ -1379,7 +1770,7 @@ export class DrawingEngine implements StrokeSource {
       // The stamp engine draws a chain of dabs along the path; a shape is an
       // outline (and, when filled, a flat polygon), so it keeps the plain
       // segment path even when the brush is stamped.
-      shapeBrush(this.brush),
+      shapeBrush(this.brushForSample(sample)),
       this.activeTool().erases === true,
       // Read here, at press time, so the preview and the committed stroke agree:
       // a shape keeps the fill setting it was started with. A line's definition
@@ -1478,6 +1869,7 @@ export class DrawingEngine implements StrokeSource {
 
     const seedX = Math.min(this.doc.width - 1, Math.max(0, Math.floor(sample.docX)));
     const seedY = Math.min(this.doc.height - 1, Math.max(0, Math.floor(sample.docY)));
+    const colour = this.brushForSample(sample).color;
     const region = floodFill(image, seedX, seedY, this.fillTolerance);
     if (!region) {
       return false;
@@ -1488,19 +1880,19 @@ export class DrawingEngine implements StrokeSource {
     // make the history button look broken.
     if (this.fillTolerance === 0) {
       const offset = (seedY * image.width + seedX) * 4;
-      const colour = hexToRgb(this.brush.color);
+      const seedColour = hexToRgb(colour);
       if (
-        colour &&
-        colour.r === image.data[offset] &&
-        colour.g === image.data[offset + 1] &&
-        colour.b === image.data[offset + 2] &&
+        seedColour &&
+        seedColour.r === image.data[offset] &&
+        seedColour.g === image.data[offset + 1] &&
+        seedColour.b === image.data[offset + 2] &&
         image.data[offset + 3] === 255
       ) {
         return false;
       }
     }
 
-    const patch = createFillPatch(layerId, this.brush.color, region);
+    const patch = createFillPatch(layerId, colour, region);
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(patch);
     this.beginGesture();
@@ -1584,9 +1976,10 @@ export class DrawingEngine implements StrokeSource {
     const gradient = createGradientRecord(
       layerId,
       { type: this.gradientType, x1: x, y1: y, x2: x, y2: y },
-      this.brush.color,
+      this.brushForSample(sample).color,
       this.gradientEndColor,
       this.brush.opacity,
+      this.gradientMidStops,
     );
     const index = this.strokes.elementCount(layerId);
     this.strokes.insert(gradient);
@@ -2930,7 +3323,10 @@ export class DrawingEngine implements StrokeSource {
    * but it is not a UI-facing action.
    */
   handlePointerSample(sample: PointerSample): void {
+    // The cursor reports where the pointer *is*; snapping only moves the
+    // sample a drawing tool commits.
     this.reportCursor(sample);
+    const snapped = this.snapSample(sample);
 
     if (sample.phase === "down") {
       // Middle-button drag pans regardless of the active tool.
@@ -2939,7 +3335,7 @@ export class DrawingEngine implements StrokeSource {
         this.middlePanTool.onPointerDown(this.toolContext, sample);
         return;
       }
-      this.activeTool().onPointerDown(this.toolContext, sample);
+      this.activeTool().onPointerDown(this.toolContext, snapped);
       return;
     }
 
@@ -2948,7 +3344,7 @@ export class DrawingEngine implements StrokeSource {
         this.middlePanTool.onPointerMove(this.toolContext, sample);
         return;
       }
-      this.activeTool().onPointerMove(this.toolContext, sample);
+      this.activeTool().onPointerMove(this.toolContext, snapped);
       return;
     }
 
@@ -2960,7 +3356,7 @@ export class DrawingEngine implements StrokeSource {
 
     const tool = this.activeTool();
     if (sample.phase === "up") {
-      tool.onPointerUp(this.toolContext, sample);
+      tool.onPointerUp(this.toolContext, snapped);
     } else {
       tool.onPointerCancel(this.toolContext, sample);
     }
@@ -3084,6 +3480,8 @@ export class DrawingEngine implements StrokeSource {
       document: this.doc,
       viewport: this.viewport,
       brush: this.brush,
+      secondaryColor: this.secondaryColor,
+      presets: this.presets,
       toolId: this.currentToolId,
       history: this.commands.getState(),
       file: this.fileState,
@@ -3098,6 +3496,10 @@ export class DrawingEngine implements StrokeSource {
       fillTolerance: this.fillTolerance,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
+      gradientMidStops: this.gradientMidStops,
+      gridVisible: this.gridVisible,
+      gridSpacing: this.gridSpacing,
+      gridSnapping: this.gridSnapping,
       notice: this.notice,
     };
   }
@@ -3110,6 +3512,8 @@ export class DrawingEngine implements StrokeSource {
       previous.document === next.document &&
       previous.viewport === next.viewport &&
       previous.brush === next.brush &&
+      previous.secondaryColor === next.secondaryColor &&
+      previous.presets === next.presets &&
       previous.toolId === next.toolId &&
       previous.history === next.history &&
       previous.file === next.file &&
@@ -3122,6 +3526,10 @@ export class DrawingEngine implements StrokeSource {
       previous.fillTolerance === next.fillTolerance &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&
+      gradientStopsEqual(previous.gradientMidStops, next.gradientMidStops) &&
+      previous.gridVisible === next.gridVisible &&
+      previous.gridSpacing === next.gridSpacing &&
+      previous.gridSnapping === next.gridSnapping &&
       previous.notice === next.notice
     ) {
       return;

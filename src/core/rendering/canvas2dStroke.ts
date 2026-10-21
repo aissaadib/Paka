@@ -17,6 +17,7 @@
 import type { BrushSettings } from "../../types/brush";
 import type { StrokeRecord } from "../document/types";
 import { clamp } from "../../utils/math";
+import { evaluatePressureCurve } from "../brushes/pressureCurve";
 
 /**
  * Blur length applied to a stroke's finished silhouette at hardness `0`, as a
@@ -80,7 +81,8 @@ export function textureCoverage(index: number, strength: number): number {
 
 /** Diameter in document pixels for a given pressure. */
 export function strokeDiameter(brush: BrushSettings, pressure: number): number {
-  const factor = 1 - brush.pressureSize * (1 - pressure);
+  const mapped = evaluatePressureCurve(brush.pressureCurve, pressure);
+  const factor = 1 - brush.pressureSize * (1 - mapped);
   return Math.max(brush.size * brush.minSizeRatio, brush.size * factor);
 }
 
@@ -99,7 +101,7 @@ export function strokeOpacity(brush: BrushSettings, pressures: readonly number[]
   if (pressures.length > 0) {
     let sum = 0;
     for (const pressure of pressures) {
-      sum += clamp(pressure, 0, 1);
+      sum += evaluatePressureCurve(brush.pressureCurve, clamp(pressure, 0, 1));
     }
     meanPressure = sum / pressures.length;
   }

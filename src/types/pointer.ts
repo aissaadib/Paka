@@ -42,6 +42,14 @@ export interface PointerSample {
   readonly modifiers: PointerModifiers;
 }
 
+/**
+ * True for the buttons that paint: the primary (0) and secondary (2) mouse
+ * buttons. Middle-button panning is handled before a tool sees the sample.
+ */
+export function isPaintButton(button: number): boolean {
+  return button === 0 || button === 2;
+}
+
 /** A single point of a stroke, in document coordinates. */
 export interface StrokeSample {
   readonly x: number;

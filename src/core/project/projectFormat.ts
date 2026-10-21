@@ -23,12 +23,14 @@
 
 import {
   DEFAULT_BRUSH,
+  DEFAULT_PRESSURE_CURVE,
   MAX_BRUSH_SIZE,
   MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   MIN_STAMP_SPACING,
   normalizeBrush,
 } from "../brushes/defaults";
+import { normalizePressureCurve } from "../brushes/pressureCurve";
 import {
   DEFAULT_DOCUMENT_BACKGROUND,
   DOCUMENT_SIZE_LIMIT_DESCRIPTION,
@@ -108,6 +110,13 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * `exclusion`. A version-10 reader rejects those values, so the version was
  * bumped; version-1 to -10 files still open unchanged.
  *
+ * Version 12: a stroke's `brush` carries `pressureCurve`, the piecewise-linear
+ * mapping from raw device pressure to the pressure the brush uses. It changes
+ * how stored samples are rasterized, so a version-11 reader would draw a bent
+ * response linearly - a different picture - and the version was bumped with the
+ * field required. Version-1 to -11 files open unchanged with the identity curve,
+ * which is exactly the linear response they were written by.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -116,6 +125,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
+export const PROJECT_VERSION = 12;
 export const PROJECT_VERSION = 11;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
@@ -870,6 +880,11 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // exactly the coverage they were written by.
     stampTexture:
       version >= 10 ? readNumber(record.stampTexture, `${label} brush stamp texture`, 0, 1) : 0,
+    // The pressure curve changes how stored samples are rasterized, so it
+    // became a required field in version 12: older files use the identity
+    // curve, which is the linear response they were written by.
+    pressureCurve:
+      version >= 12 ? normalizePressureCurve(record.pressureCurve) : DEFAULT_PRESSURE_CURVE,
   });
 }
 

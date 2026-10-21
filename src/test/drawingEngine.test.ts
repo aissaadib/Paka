@@ -16,6 +16,7 @@ import {
   MIN_STAMP_SPACING,
 } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
+import { DEFAULT_GRID_SPACING } from "../core/document/grid";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
@@ -107,6 +108,7 @@ function createSpyRenderer(
     setSelectedGuide: (guideId) => {
       selectedGuides.push(guideId);
     },
+    setGrid: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
@@ -2605,6 +2607,44 @@ describe("DrawingEngine gradients", () => {
     expect(engine.getState().gradientEndColor).toBe("#00ff00");
   });
 
+  it("captures middle stops at press time and keeps them through undo/redo", () => {
+    const { engine } = createGradientEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setGradientEndColor("#0000ff");
+    engine.setGradientMidStops([
+      { offset: 0.7, color: "#00ff00" },
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0, color: "#ffffff" },
+    ]);
+    expect(engine.getState().gradientMidStops).toEqual([
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0.7, color: "#00ff00" },
+    ]);
+
+    pressGradient(engine, 2, 2);
+    // Options describe the next drag; changing them mid-drag must not rewrite
+    // the gradient already being previewed.
+    engine.setGradientMidStops([]);
+    releaseGradient(engine, 18, 18);
+
+    const expectedStops = [
+      { offset: 0, color: "#ff0000" },
+      { offset: 0.35, color: "#ff8800" },
+      { offset: 0.7, color: "#00ff00" },
+      { offset: 1, color: "#0000ff" },
+    ];
+    let gradient = engine.listElements(layerId)[0];
+    expect(isGradient(gradient)).toBe(true);
+    expect(isGradient(gradient) ? gradient.stops : []).toEqual(expectedStops);
+    expect(engine.getState().history.depth).toBe(1);
+
+    engine.undo();
+    expect(engine.listElements(layerId)).toEqual([]);
+    engine.redo();
+    gradient = engine.listElements(layerId)[0];
+    expect(isGradient(gradient) ? gradient.stops : []).toEqual(expectedStops);
+  });
+
   it("copies gradients with fresh ids through layer duplication", () => {
     const { engine } = createGradientEngine();
     const sourceId = engine.getState().document.activeLayerId as string;
@@ -3365,5 +3405,248 @@ describe("DrawingEngine composition guides", () => {
     engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 200 }));
 
     expect(spy.selectedGuides).toContain(id);
+  });
+});
+
+/**
+ * The grid and snapping.
+ *
+ * Both are session/display state: the grid changes no pixels, enters no
+ * history and never reaches the project file. Snapping moves the samples a
+ * drawing tool commits, so a stroke drawn near a guide lands exactly on it -
+ * still as one undo step.
+ */
+describe("DrawingEngine grid and snapping", () => {
+  function createSnappingEngine(guides: readonly Guide[] = []) {
+    const spy = createSpyRenderer();
+    const base = createDocument({ name: "Test", width: 400, height: 300 });
+    const engine = new DrawingEngine({
+      document: { ...base, guides },
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** One brush stroke through the engine's pointer router, down-move-up. */
+  function paintStroke(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+  ): void {
+    engine.handlePointerSample(createSample({ phase: "down", docX: from[0], docY: from[1] }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to[0], docY: to[1], timeStamp: 16 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to[0], docY: to[1], timeStamp: 32 }),
+    );
+  }
+
+  it("starts with the grid hidden, the default spacing and snapping off", () => {
+    const { engine } = createSnappingEngine();
+
+    expect(engine.getState()).toMatchObject({
+      gridVisible: false,
+      gridSpacing: DEFAULT_GRID_SPACING,
+      gridSnapping: false,
+    });
+  });
+
+  it("snaps a committed stroke sample onto a guide, as one undo step", () => {
+    const { engine, layerId } = createSnappingEngine([
+      { id: "guide-x", axis: "vertical", position: 100 },
+    ]);
+    engine.setGridSnapping(true);
+
+    // The press is 5 document pixels from the guide, inside the 6 CSS pixel
+    // tolerance at 1x.
+    paintStroke(engine, [95, 50], [130, 50]);
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs[0]).toBe(100);
+    expect(stroke.ys[0]).toBe(50);
+    expect(engine.getState().history).toMatchObject({
+      depth: 1,
+      canUndo: true,
+      undoLabel: "Stroke",
+    });
+
+    engine.undo();
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canRedo: true });
+  });
+
+  it("leaves the samples untouched while snapping is off", () => {
+    const { engine, layerId } = createSnappingEngine([
+      { id: "guide-x", axis: "vertical", position: 100 },
+    ]);
+    engine.setGridSnapping(false);
+
+    paintStroke(engine, [95, 50], [130, 50]);
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs[0]).toBe(95);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("snaps to grid lines at the configured spacing", () => {
+    const { engine, layerId } = createSnappingEngine();
+    engine.setGridSpacing(20);
+    engine.setGridSnapping(true);
+
+    paintStroke(engine, [58.5, 39], [130, 70]);
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs[0]).toBe(60);
+    expect(stroke.ys[0]).toBe(40);
+  });
+
+  it("derives the tolerance from the zoom, so the same gesture snaps alike", () => {
+    const guides: readonly Guide[] = [{ id: "guide-x", axis: "vertical", position: 100 }];
+
+    const atOne = createSnappingEngine(guides);
+    atOne.engine.setGridSnapping(true);
+    paintStroke(atOne.engine, [105, 50], [130, 50]);
+    expect(atOne.engine.listStrokes(atOne.layerId)[0].xs[0]).toBe(100);
+
+    // The same 5 document pixels are 20 CSS pixels at 4x, outside the 6 CSS
+    // tolerance, so the sample stays where the pointer is.
+    const atFour = createSnappingEngine(guides);
+    atFour.engine.setViewport({ zoom: 4, offsetX: 0, offsetY: 0 });
+    atFour.engine.setGridSnapping(true);
+    paintStroke(atFour.engine, [105, 50], [130, 50]);
+    expect(atFour.engine.listStrokes(atFour.layerId)[0].xs[0]).toBe(105);
+  });
+
+  it("is session state: no history step, no dirty file, no invalidated layer", () => {
+    const { engine, spy } = createSnappingEngine();
+
+    engine.setGridVisible(true);
+    engine.setGridSpacing(25);
+    engine.setGridSnapping(true);
+
+    expect(engine.getState()).toMatchObject({
+      gridVisible: true,
+      gridSpacing: 25,
+      gridSnapping: true,
+    });
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+    expect(spy.invalidated).toEqual([]);
+
+    // The spacing is clamped and rounded like every other editor setting.
+    engine.setGridSpacing(0);
+    expect(engine.getState().gridSpacing).toBe(2);
+  });
+});
+
+describe("DrawingEngine secondary colour", () => {
+  function createColourEngine() {
+    return new DrawingEngine({
+      document: createDocument({ name: "Test", width: 20, height: 20 }),
+      brush: { ...DEFAULT_BRUSH, color: "#ff0000" },
+    });
+  }
+
+  function drawStroke(
+    engine: DrawingEngine,
+    button: number,
+    from = { x: 2, y: 2 },
+    to = { x: 10, y: 10 },
+  ): void {
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from.x, docY: from.y, button, buttons: 3 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: to.x, docY: to.y, button: 0, buttons: 3 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: to.x, docY: to.y, button, buttons: 0 }),
+    );
+  }
+
+  it("paints a right-button stroke with the secondary colour and keeps the primary", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#00ff00");
+
+    drawStroke(engine, 2);
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.color).toBe("#00ff00");
+    // The palette itself did not change: the choice was per gesture.
+    expect(engine.getState().brush.color).toBe("#ff0000");
+  });
+
+  it("resolves the colour at press time, so later changes cannot repaint it", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#00ff00");
+
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: 2, docY: 2, button: 2, buttons: 2 }),
+    );
+    engine.setSecondaryColor("#0000ff");
+    engine.setBrush({ color: "#ffff00" });
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 10, docY: 10, button: 2, buttons: 0 }),
+    );
+
+    expect(engine.listStrokes(layerId)[0].brush.color).toBe("#00ff00");
+    expect(engine.getState().brush.color).toBe("#ffff00");
+    expect(engine.getState().secondaryColor).toBe("#0000ff");
+  });
+
+  it("keeps the resolved colour through undo and redo", () => {
+    const engine = createColourEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+    engine.setTool("brush");
+    engine.setSecondaryColor("#123456");
+
+    drawStroke(engine, 2);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toEqual([]);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.color).toBe("#123456");
+  });
+
+  it("uses the secondary colour for a right-button shape and gradient", () => {
+    const shapeEngine = createColourEngine();
+    const shapeLayer = shapeEngine.getState().document.activeLayerId as string;
+    shapeEngine.setTool("rectangle");
+    shapeEngine.setSecondaryColor("#00ff00");
+    drawStroke(shapeEngine, 2, { x: 2, y: 2 }, { x: 14, y: 12 });
+    expect(shapeEngine.listStrokes(shapeLayer)[0].brush.color).toBe("#00ff00");
+
+    const gradientEngine = createColourEngine();
+    const gradientLayer = gradientEngine.getState().document.activeLayerId as string;
+    gradientEngine.setTool("gradient");
+    gradientEngine.setSecondaryColor("#00ff00");
+    drawStroke(gradientEngine, 2, { x: 2, y: 2 }, { x: 18, y: 18 });
+    const gradient = gradientEngine.listElements(gradientLayer)[0];
+    expect(isGradient(gradient)).toBe(true);
+    expect(isGradient(gradient) ? gradient.stops[0] : null).toEqual({
+      offset: 0,
+      color: "#00ff00",
+    });
+  });
+
+  it("normalizes the secondary colour, swaps the pair and never dirties the file", () => {
+    const engine = createColourEngine();
+    expect(engine.getState().secondaryColor).toBe("#ffffff");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    engine.setSecondaryColor("#0f0");
+    expect(engine.getState().secondaryColor).toBe("#00ff00");
+    engine.setSecondaryColor("not a colour");
+    expect(engine.getState().secondaryColor).toBe("#00ff00");
+
+    engine.swapColors();
+    expect(engine.getState().brush.color).toBe("#00ff00");
+    expect(engine.getState().secondaryColor).toBe("#ff0000");
+    expect(engine.getState().file.dirty).toBe(false);
+    expect(engine.getState().history.depth).toBe(0);
   });
 });

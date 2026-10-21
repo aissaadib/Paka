@@ -19,10 +19,17 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
-import { DEFAULT_APP_SETTINGS, SETTINGS_VERSION } from "../core/settings/appSettings";
+import {
+  DEFAULT_APP_SETTINGS,
+  SETTINGS_VERSION,
+  parseAppSettings,
+  serializeAppSettings,
+} from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
+import type { BrushSettings, PressureCurvePoint } from "../types/brush";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
 /** A scheduler the test drives by hand, so no test waits in real time. */
@@ -80,6 +87,52 @@ function createHarness(gateway: MemorySettingsGateway = new MemorySettingsGatewa
     cancel: timers.cancel,
   });
   return { engine, gateway, timers, store };
+}
+
+/**
+ * One non-default value for every brush field.
+ *
+ * The test below asserts this table's keys are exactly `Object.keys(DEFAULT_BRUSH)`,
+ * and then round-trips the constructed brush through the settings file. That
+ * makes the whole class of "field silently dropped by the reader" bug
+ * impossible: a field added to the brush without a value here fails the key
+ * check, and a field the reader forgets fails the round-trip equality.
+ */
+const NON_DEFAULT_BRUSH_VALUES: Record<
+  keyof BrushSettings,
+  string | number | boolean | readonly PressureCurvePoint[]
+> = {
+  size: 33,
+  opacity: 0.42,
+  color: "#123456",
+  hardness: 0.37,
+  pressureSize: 0.21,
+  pressureOpacity: 0.73,
+  pressureCurve: [
+    { x: 0, y: 0 },
+    { x: 0.4, y: 0.7 },
+    { x: 1, y: 1 },
+  ],
+  minSizeRatio: 0.55,
+  spacing: 0.34,
+  stabilizer: 0.66,
+  texture: 0.47,
+  stamp: true,
+  stampSpacing: 0.28,
+  stampHardness: 0.61,
+  stampTexture: 0.52,
+};
+
+function nonDefaultBrush(): BrushSettings {
+  const brush: Record<string, unknown> = { ...DEFAULT_BRUSH };
+  for (const field of Object.keys(DEFAULT_BRUSH)) {
+    const value = NON_DEFAULT_BRUSH_VALUES[field as keyof BrushSettings];
+    if (value === undefined) {
+      throw new Error(`No non-default value for brush field "${field}"`);
+    }
+    brush[field] = value;
+  }
+  return brush as unknown as BrushSettings;
 }
 
 describe("the settings file", () => {
@@ -193,6 +246,42 @@ describe("the settings file", () => {
   });
 });
 
+describe("every brush field survives the settings file", () => {
+  it("round-trips a brush with every field set to a non-default value", () => {
+    expect(Object.keys(NON_DEFAULT_BRUSH_VALUES).sort()).toEqual(
+      Object.keys(DEFAULT_BRUSH).sort(),
+    );
+
+    const brush = nonDefaultBrush();
+    for (const field of Object.keys(DEFAULT_BRUSH) as (keyof BrushSettings)[]) {
+      expect(brush[field]).not.toEqual(DEFAULT_BRUSH[field]);
+    }
+
+    const text = serializeAppSettings({ ...DEFAULT_APP_SETTINGS, brush });
+    const parsed = parseAppSettings(text);
+
+    expect(JSON.parse(text).version).toBe(SETTINGS_VERSION);
+    expect(parsed.brush).toEqual(brush);
+  });
+
+  it("round-trips a preset whose brush has every field set", () => {
+    const brush = nonDefaultBrush();
+    const preset = { id: "preset-every-field", name: "Every field", brush };
+
+    const text = serializeAppSettings({
+      ...DEFAULT_APP_SETTINGS,
+      presets: [preset],
+    });
+    const parsed = parseAppSettings(text);
+
+    expect(JSON.parse(text).version).toBe(SETTINGS_VERSION);
+    expect(parsed.presets).toHaveLength(1);
+    expect(parsed.presets[0].id).toBe(preset.id);
+    expect(parsed.presets[0].name).toBe(preset.name);
+    expect(parsed.presets[0].brush).toEqual(brush);
+  });
+});
+
 describe("the preferences survive a restart", () => {
   it("writes the changed preferences and reads them back", async () => {
     const gateway = new MemorySettingsGateway();
@@ -230,6 +319,49 @@ describe("the preferences survive a restart", () => {
     expect(state.gradientEndColor).toBe("#abcdef");
   });
 
+  it("restores the grid and the snapping", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setGridVisible(true);
+    first.engine.setGridSpacing(25);
+    first.engine.setGridSnapping(true);
+    first.timers.runAll();
+    await settle();
+
+    // The grid is a view preference, so it belongs to the settings file.
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.gridVisible).toBe(true);
+    expect(written.gridSpacing).toBe(25);
+    expect(written.gridSnapping).toBe(true);
+
+    // And a restart puts it back into the editor, which is what the user sees.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const state = second.engine.getState();
+    expect(state.gridVisible).toBe(true);
+    expect(state.gridSpacing).toBe(25);
+    expect(state.gridSnapping).toBe(true);
+  });
+
+  it("defaults the grid for a settings file written before the grid existed", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({ version: SETTINGS_VERSION, toolId: "brush" });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    // An older file still restores every field it does carry, and the grid
+    // takes its default instead of failing.
+    const state = engine.getState();
+    expect(state.toolId).toBe("brush");
+    expect(state.gridVisible).toBe(DEFAULT_APP_SETTINGS.gridVisible);
+    expect(state.gridSpacing).toBe(DEFAULT_APP_SETTINGS.gridSpacing);
+    expect(state.gridSnapping).toBe(DEFAULT_APP_SETTINGS.gridSnapping);
+  });
+
   it("restores the directional stamp texture", async () => {
     const gateway = new MemorySettingsGateway();
 
@@ -250,6 +382,48 @@ describe("the preferences survive a restart", () => {
     const state = second.engine.getState();
     expect(state.brush.stamp).toBe(true);
     expect(state.brush.stampTexture).toBe(0.4);
+  });
+
+  it("persists a preset and every field of its brush across a restart", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setBrush({
+      size: 44,
+      opacity: 0.55,
+      hardness: 0.4,
+      pressureSize: 0.3,
+      pressureOpacity: 0.2,
+      minSizeRatio: 0.5,
+      spacing: 0.25,
+      stabilizer: 0.6,
+      texture: 0.45,
+      stamp: true,
+      stampSpacing: 0.3,
+      stampHardness: 0.7,
+      stampTexture: 0.35,
+      color: "#0a0b0c",
+    });
+    const saved = first.engine.saveBrushPreset("  Ink  ");
+    expect(saved?.name).toBe("Ink");
+    first.timers.runAll();
+    await settle();
+
+    expect(gateway.writes).toHaveLength(1);
+    const file = JSON.parse(gateway.writes[0]);
+    expect(file.version).toBe(SETTINGS_VERSION);
+    expect(file.presets).toHaveLength(1);
+    expect(file.presets[0].brush.stampTexture).toBe(0.35);
+
+    // A restart: a new engine, a new store, the same file.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const presets = second.engine.getState().presets;
+    expect(presets).toHaveLength(1);
+    expect(presets[0].name).toBe("Ink");
+    expect(presets[0].brush).toEqual(first.engine.getState().brush);
   });
 
   it("defaults the stamp texture for a file written before the field existed", async () => {

@@ -12,10 +12,11 @@ import {
   type EditorSnapshot,
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
-import type { LayerBlendMode, LayerId } from "../core/document/types";
+import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
+import type { BrushPreset } from "../core/brushes/presets";
 import type { BrushSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
 import type { FlipAxis } from "../types/transform";
@@ -24,6 +25,20 @@ import type { Listener } from "../utils/store";
 export interface EditorActions {
   setTool(toolId: ToolId): void;
   setBrush(patch: Partial<BrushSettings>): void;
+  /** Sets the colour a right-button gesture paints with. */
+  setSecondaryColor(color: string): void;
+  /** Exchanges the primary and secondary colours. */
+  swapColors(): void;
+  /** Saves the current brush under a name; `null` when the name is empty. */
+  saveBrushPreset(name: string): BrushPreset | null;
+  /** Renames a preset; `null` when the id is unknown or the name is empty. */
+  renameBrushPreset(id: string, name: string): BrushPreset | null;
+  /** Duplicates a preset; `null` when the id is unknown. */
+  duplicateBrushPreset(id: string): BrushPreset | null;
+  /** Deletes a preset. Editor state only: no history entry, no dirty flag. */
+  deleteBrushPreset(id: string): boolean;
+  /** Applies a preset through the normal brush setter. */
+  applyBrushPreset(id: string): boolean;
   /** Whether the shape tools fill their outline instead of tracing it. */
   setShapeFill(filled: boolean): void;
   /** Sides of the next polygon, and points of the next star (3-24). */
@@ -38,6 +53,14 @@ export interface EditorActions {
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
   setGradientEndColor(color: string): void;
+  /** Sets the middle stops of the next gradient; endpoints stay the colours above. */
+  setGradientMidStops(stops: readonly GradientStop[]): void;
+  /** Shows or hides the grid; display state, never exported. */
+  setGridVisible(visible: boolean): void;
+  /** Distance between grid lines in document pixels (`2..500`). */
+  setGridSpacing(spacing: number): void;
+  /** Turns snapping to guides and grid lines on or off. */
+  setGridSnapping(snap: boolean): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
   undo(): void;
@@ -108,6 +131,13 @@ export function createEditor(options: EditorOptions = {}): Editor {
   const actions: EditorActions = {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
+    setSecondaryColor: (color) => engine.setSecondaryColor(color),
+    swapColors: () => engine.swapColors(),
+    saveBrushPreset: (name) => engine.saveBrushPreset(name),
+    renameBrushPreset: (id, name) => engine.renameBrushPreset(id, name),
+    duplicateBrushPreset: (id) => engine.duplicateBrushPreset(id),
+    deleteBrushPreset: (id) => engine.deleteBrushPreset(id),
+    applyBrushPreset: (id) => engine.applyBrushPreset(id),
     setShapeFill: (filled) => engine.setShapeFill(filled),
     setShapeSides: (sides) => engine.setShapeSides(sides),
     setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),
@@ -115,6 +145,10 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
+    setGradientMidStops: (stops) => engine.setGradientMidStops(stops),
+    setGridVisible: (visible) => engine.setGridVisible(visible),
+    setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
+    setGridSnapping: (snap) => engine.setGridSnapping(snap),
     dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();

@@ -60,6 +60,7 @@ function describe(error: unknown): string {
 /** Writes the preferences into the editor. Editor state only: no history, no dirty. */
 function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setBrush(settings.brush);
+  engine.setPresets(settings.presets);
   engine.setTool(settings.toolId);
   engine.setShapeFill(settings.shapeFill);
   engine.setShapeSides(settings.shapeSides);
@@ -68,6 +69,9 @@ function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setFillTolerance(settings.fillTolerance);
   engine.setGradientType(settings.gradientType);
   engine.setGradientEndColor(settings.gradientEndColor);
+  engine.setGridVisible(settings.gridVisible);
+  engine.setGridSpacing(settings.gridSpacing);
+  engine.setGridSnapping(settings.gridSnapping);
 }
 
 /** Reads the preferences the editor currently holds. */
@@ -76,6 +80,7 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
   return {
     version: SETTINGS_VERSION,
     brush: snapshot.brush,
+    presets: snapshot.presets,
     toolId: snapshot.toolId,
     shapeFill: snapshot.shapeFill,
     shapeSides: snapshot.shapeSides,
@@ -84,6 +89,9 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
     fillTolerance: snapshot.fillTolerance,
     gradientType: snapshot.gradientType,
     gradientEndColor: snapshot.gradientEndColor,
+    gridVisible: snapshot.gridVisible,
+    gridSpacing: snapshot.gridSpacing,
+    gridSnapping: snapshot.gridSnapping,
   };
 }
 

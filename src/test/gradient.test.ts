@@ -10,11 +10,14 @@ import { describe, expect, it } from "vitest";
 import { createGradientCommand } from "../core/commands/gradientCommand";
 import {
   MIN_GRADIENT_LENGTH,
+  MAX_GRADIENT_MID_STOPS,
   cloneGradient,
   createGradientRecord,
   gradientIsDegenerate,
   gradientLength,
+  gradientStopsEqual,
   moveGradientEnd,
+  normalizeGradientMidStops,
 } from "../core/gradient/gradientRecord";
 import type { GradientRecord, LayerElement } from "../core/document/types";
 import type { StrokeCommandHost } from "../core/commands/strokeCommand";
@@ -138,6 +141,90 @@ describe("gradient records", () => {
     expect(copy.opacity).toBe(gradient.opacity);
     expect(copy.stops).toEqual(gradient.stops);
     expect(copy.stops[0]).not.toBe(gradient.stops[0]);
+  });
+});
+
+describe("gradient middle stops", () => {
+  it("sorts middle stops between the endpoint colours and drops edge stops", () => {
+    const gradient = createGradientRecord(
+      "layer-a",
+      { type: "linear", x1: 0, y1: 0, x2: 10, y2: 0 },
+      "#000000",
+      "#ffffff",
+      1,
+      [
+        { offset: 0.6, color: "#00ff00" },
+        { offset: 0.3, color: "#ff0000" },
+        { offset: 0, color: "#123456" },
+        { offset: 1, color: "#654321" },
+        { offset: 0.3, color: "#0000ff" },
+        { offset: Number.NaN, color: "#abcdef" },
+        { offset: 0.45, color: "not-a-colour" },
+      ],
+    );
+
+    expect(gradient.stops).toEqual([
+      { offset: 0, color: "#000000" },
+      { offset: 0.3, color: "#ff0000" },
+      { offset: 0.6, color: "#00ff00" },
+      { offset: 1, color: "#ffffff" },
+    ]);
+  });
+
+  it("caps the editor's list and keeps every offset strictly inside the endpoints", () => {
+    const stops = Array.from({ length: MAX_GRADIENT_MID_STOPS + 20 }, (_, index) => ({
+      offset: (index + 1) / (MAX_GRADIENT_MID_STOPS + 21),
+      color: "#336699",
+    }));
+    const normalized = normalizeGradientMidStops(stops);
+    expect(normalized).toHaveLength(MAX_GRADIENT_MID_STOPS);
+    expect(normalized[0].offset).toBeGreaterThan(0);
+    expect(normalized[normalized.length - 1].offset).toBeLessThan(1);
+    for (let index = 1; index < normalized.length; index += 1) {
+      expect(normalized[index].offset).toBeGreaterThan(normalized[index - 1].offset);
+    }
+  });
+
+  it("treats a non-list or an unusable list as no middle stops", () => {
+    expect(normalizeGradientMidStops([])).toEqual([]);
+    expect(
+      normalizeGradientMidStops([
+        { offset: 0, color: "#ffffff" },
+        { offset: 1, color: "#000000" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("compares middle stops by value", () => {
+    const stops = [
+      { offset: 0.25, color: "#112233" },
+      { offset: 0.75, color: "#445566" },
+    ];
+    expect(gradientStopsEqual(stops, stops.map((stop) => ({ ...stop })))).toBe(true);
+    expect(gradientStopsEqual(stops, [stops[0]])).toBe(false);
+    expect(gradientStopsEqual(stops, [stops[0], { ...stops[1], color: "#000000" }])).toBe(
+      false,
+    );
+  });
+
+  it("keeps every stop when the command is undone and redone", () => {
+    const gradient = createGradient({
+      stops: [
+        { offset: 0, color: "#000000" },
+        { offset: 0.25, color: "#ff0000" },
+        { offset: 0.75, color: "#00ff00" },
+        { offset: 1, color: "#ffffff" },
+      ],
+    });
+    const { host, elements } = createHost();
+    const command = createGradientCommand(gradient, 0, host);
+
+    command.apply();
+    command.revert();
+    command.apply();
+
+    expect(elements[0]).toBe(gradient);
+    expect((elements[0] as GradientRecord).stops).toBe(gradient.stops);
   });
 });
 

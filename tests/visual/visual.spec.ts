@@ -157,12 +157,31 @@ test.describe("Paka visual regression", () => {
         `the guides of scene ${scene.id} reached the exported composite`,
       ).toBe(true);
 
+      // The grid is display-only as well: it changes the display and never
+      // the export.
+      expect(
+        verdict.gridVisible,
+        `the grid of scene ${scene.id} is not visible on the display`,
+      ).toBe(scene.grid !== undefined);
+      expect(
+        verdict.gridNotExported,
+        `the grid of scene ${scene.id} reached the exported composite`,
+      ).toBe(true);
+
       // The golden is the exported picture: the thing a PNG export writes.
       await expect(page.locator("#golden")).toHaveScreenshot({ name: `${scene.id}.png` });
 
       // A scene with guides is also captured from the display, because that is
       // the only place they can be seen.
       if ((scene.guides?.length ?? 0) > 0) {
+        await expect(page.locator("#display")).toHaveScreenshot({
+          name: `${scene.id}-display.png`,
+        });
+      }
+
+      // The same for a scene with a grid: the lattice is display-only, so the
+      // export golden and the display golden are two different pictures.
+      if (scene.grid !== undefined) {
         await expect(page.locator("#display")).toHaveScreenshot({
           name: `${scene.id}-display.png`,
         });

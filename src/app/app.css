@@ -159,9 +159,209 @@
   gap: 4px 12px;
 }
 
+.brush-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  width: 100%;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ------------------------------------------------------- pressure curve */
+
+.pressure-curve__toggle {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pressure-curve__toggle:hover,
+.pressure-curve__toggle[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.pressure-curve {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 12px;
+  width: 100%;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.pressure-curve__plot {
+  flex: 0 0 auto;
+  width: 200px;
+  height: 140px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  /* The pointer handlers own the gesture; do not scroll or zoom the page. */
+  touch-action: none;
+}
+
+.pressure-curve__surface {
+  fill: transparent;
+  cursor: crosshair;
+}
+
+.pressure-curve__grid line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.pressure-curve__identity {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+}
+
+.pressure-curve__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pressure-curve__point {
+  fill: var(--bg-panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: grab;
+  outline: none;
+}
+
+.pressure-curve__point:hover,
+.pressure-curve__point:focus-visible {
+  fill: var(--accent-soft);
+}
+
+.pressure-curve__point.is-selected {
+  fill: var(--accent);
+  stroke: var(--text-strong);
+}
+
+.pressure-curve__point.is-endpoint {
+  stroke-width: 3;
+}
+
+.pressure-curve__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pressure-curve__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pressure-curve__button {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pressure-curve__button:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.pressure-curve__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.brush-presets__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brush-presets__label {
+  color: var(--text-dim);
+  min-width: 46px;
+}
+
+.brush-presets__select {
+  width: 140px;
+  height: var(--control-height);
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+.brush-presets__select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.brush-presets__name {
+  width: 150px;
+}
+
+.brush-presets__action {
+  padding: 0 8px;
+}
+
 .color-controls {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.color-controls__pickers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.color-controls__picker--secondary {
+  /* A smaller chip makes the primary colour the obvious left-button choice. */
+  width: 22px;
+  height: calc(var(--control-height) - 4px);
+}
+
+.color-controls__swap {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.color-controls__swap:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.color-controls__swap:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .color-controls__picker {
@@ -194,6 +394,7 @@
 }
 
 .gradient-controls {
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -208,6 +409,120 @@
 
 .gradient-controls__color:hover {
   color: var(--text);
+}
+
+.gradient-stops {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gradient-stops__preview {
+  height: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+}
+
+.gradient-stops__endpoints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.gradient-stops__endpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gradient-stops__swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.gradient-stops__list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gradient-stops__row {
+  display: grid;
+  grid-template-columns: 26px minmax(80px, 200px) 36px 22px;
+  align-items: center;
+  gap: 6px;
+}
+
+.gradient-stops__color {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+.gradient-stops__range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.gradient-stops__value {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gradient-stops__remove {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gradient-stops__remove:hover {
+  border-color: var(--accent);
+}
+
+.gradient-stops__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.gradient-stops__add {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.gradient-stops__add:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.gradient-stops__add:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---------------------------------------------------------------- tool rail */

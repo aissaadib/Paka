@@ -22,14 +22,21 @@
  * one of those paths ends in a usable set of settings rather than an error.
  */
 
-import { DEFAULT_BRUSH, brushSettingsEqual, normalizeBrush } from "../brushes/defaults";
+import { DEFAULT_BRUSH, brushSettingsEqual, readBrushSettings } from "../brushes/defaults";
 import { DEFAULT_GRADIENT_END_COLOR } from "../gradient/gradientRecord";
+import {
+  brushPresetsEqual,
+  normalizeBrushPresets,
+  type BrushPreset,
+} from "../brushes/presets";
+import { DEFAULT_GRID_SETTINGS, normalizeGridSpacing } from "../document/grid";
 import { DEFAULT_SHAPE_OPTIONS, normalizeShapeOptions } from "../tools/shapeGeometry";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { BrushSettings } from "../../types/brush";
 import type { ToolId } from "../../types/tool";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
+import { asRecord } from "../../utils/record";
 
 /** The version of the settings file this build reads and writes. */
 export const SETTINGS_VERSION = 1;
@@ -45,6 +52,8 @@ export interface AppSettings {
   readonly version: typeof SETTINGS_VERSION;
   /** The brush the editor starts with. */
   readonly brush: BrushSettings;
+  /** Named brush presets. Missing in older files, which load as an empty list. */
+  readonly presets: readonly BrushPreset[];
   /** The tool the editor starts with. */
   readonly toolId: ToolId;
   /** Whether the shape tools fill their outline. */
@@ -61,12 +70,24 @@ export interface AppSettings {
   readonly gradientType: "linear" | "radial";
   /** End colour of the next gradient. */
   readonly gradientEndColor: string;
+  /**
+   * Whether the grid overlay is drawn over the paper.
+   *
+   * A view preference, like the brush: it describes what the screen shows, not
+   * what the document holds, so it is never part of a project file.
+   */
+  readonly gridVisible: boolean;
+  /** The distance between grid lines, in document pixels. */
+  readonly gridSpacing: number;
+  /** Whether a drawing sample follows the guides and the grid lines. */
+  readonly gridSnapping: boolean;
 }
 
 /** The settings a fresh installation starts from. */
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
   brush: DEFAULT_BRUSH,
+  presets: [],
   toolId: "brush",
   shapeFill: false,
   shapeSides: DEFAULT_SHAPE_OPTIONS.sides,
@@ -75,16 +96,12 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fillTolerance: 24,
   gradientType: "linear",
   gradientEndColor: DEFAULT_GRADIENT_END_COLOR,
+  gridVisible: DEFAULT_GRID_SETTINGS.visible,
+  gridSpacing: DEFAULT_GRID_SETTINGS.spacing,
+  gridSnapping: DEFAULT_GRID_SETTINGS.snap,
 };
 
 const TOOL_IDS = new Set<string>(TOOL_DEFINITIONS.map((definition) => definition.id));
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
 
 function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -114,46 +131,31 @@ function toolIdOr(value: unknown): ToolId {
   return typeof value === "string" && TOOL_IDS.has(value) ? (value as ToolId) : DEFAULT_APP_SETTINGS.toolId;
 }
 
-/** A numeric brush field, or its default when it is missing or not a number. */
-function brushNumber(record: Record<string, unknown>, key: keyof BrushSettings): number {
-  const value = record[key];
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-  const fallback = DEFAULT_BRUSH[key];
-  return typeof fallback === "number" ? fallback : 0;
-}
-
 /**
  * The brush, validated field by field.
  *
- * `normalizeBrush` does the clamping, but it assumes its input is a real
- * `BrushSettings`; a file that holds `{"size": "big"}` has to be turned into
- * something it can accept first.
+ * `readBrushSettings` does the work: it walks the brush's own field lists, so
+ * no field can be dropped from the round trip, and it clamps what it reads.
+ * A file that holds `{"size": "big"}` becomes a usable brush rather than an
+ * error.
  */
 function brushOr(value: unknown): BrushSettings {
-  const record = asRecord(value);
-  if (record === null) {
-    return DEFAULT_BRUSH;
-  }
-  const merged: BrushSettings = {
-    ...DEFAULT_BRUSH,
-    size: brushNumber(record, "size"),
-    opacity: brushNumber(record, "opacity"),
-    hardness: brushNumber(record, "hardness"),
-    pressureSize: brushNumber(record, "pressureSize"),
-    pressureOpacity: brushNumber(record, "pressureOpacity"),
-    minSizeRatio: brushNumber(record, "minSizeRatio"),
-    spacing: brushNumber(record, "spacing"),
-    stabilizer: brushNumber(record, "stabilizer"),
-    texture: brushNumber(record, "texture"),
-    stampSpacing: brushNumber(record, "stampSpacing"),
-    stampHardness: brushNumber(record, "stampHardness"),
-    stampTexture: brushNumber(record, "stampTexture"),
-    stamp: record.stamp === true,
-    color: colorOr(record.color, DEFAULT_BRUSH.color),
-  };
-  return normalizeBrush(merged);
+  return readBrushSettings(value);
+}
+
+/**
+ * The preset library, validated entry by entry.
+ *
+ * A missing or non-array `presets` is an empty list, so files written before
+ * presets existed load unchanged. The entries themselves are read by
+ * `normalizeBrushPresets`, which is the same reader the engine uses: one
+ * malformed entry (not an object, no usable name) is skipped rather than
+ * allowed to lose the rest, a bad field inside a preset's brush takes its
+ * default, duplicate or missing ids are replaced, and duplicate names get a
+ * numeric suffix, so the picker always has distinct entries.
+ */
+function presetsOr(value: unknown): readonly BrushPreset[] {
+  return normalizeBrushPresets(value);
 }
 
 /**
@@ -184,6 +186,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   return {
     version: SETTINGS_VERSION,
     brush: brushOr(record.brush),
+    presets: presetsOr(record.presets),
     toolId: toolIdOr(record.toolId),
     shapeFill: booleanOr(record.shapeFill, DEFAULT_APP_SETTINGS.shapeFill),
     shapeSides: shape.sides,
@@ -194,6 +197,13 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     ),
     gradientType: record.gradientType === "radial" ? "radial" : "linear",
     gradientEndColor: colorOr(record.gradientEndColor, DEFAULT_APP_SETTINGS.gradientEndColor),
+    // The grid fields are additive: a settings file written before the grid
+    // existed simply has none of them, and each one takes its default.
+    gridVisible: booleanOr(record.gridVisible, DEFAULT_APP_SETTINGS.gridVisible),
+    gridSpacing: normalizeGridSpacing(
+      numberOr(record.gridSpacing, DEFAULT_APP_SETTINGS.gridSpacing),
+    ),
+    gridSnapping: booleanOr(record.gridSnapping, DEFAULT_APP_SETTINGS.gridSnapping),
   };
 }
 
@@ -220,6 +230,7 @@ export function serializeAppSettings(settings: AppSettings): string {
     {
       version: SETTINGS_VERSION,
       brush: settings.brush,
+      presets: settings.presets,
       toolId: settings.toolId,
       shapeFill: settings.shapeFill,
       shapeSides: settings.shapeSides,
@@ -228,6 +239,9 @@ export function serializeAppSettings(settings: AppSettings): string {
       fillTolerance: settings.fillTolerance,
       gradientType: settings.gradientType,
       gradientEndColor: settings.gradientEndColor,
+      gridVisible: settings.gridVisible,
+      gridSpacing: settings.gridSpacing,
+      gridSnapping: settings.gridSnapping,
     },
     null,
     2,
@@ -239,6 +253,7 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
   return (
     a.version === b.version &&
     brushSettingsEqual(a.brush, b.brush) &&
+    brushPresetsEqual(a.presets, b.presets) &&
     a.toolId === b.toolId &&
     a.shapeFill === b.shapeFill &&
     a.shapeSides === b.shapeSides &&
@@ -246,6 +261,9 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
     a.shapeRotation === b.shapeRotation &&
     a.fillTolerance === b.fillTolerance &&
     a.gradientType === b.gradientType &&
-    a.gradientEndColor === b.gradientEndColor
+    a.gradientEndColor === b.gradientEndColor &&
+    a.gridVisible === b.gridVisible &&
+    a.gridSpacing === b.gridSpacing &&
+    a.gridSnapping === b.gridSnapping
   );
 }

@@ -1,0 +1,27 @@
+{
+  "id": "grid",
+  "width": 160,
+  "height": 120,
+  "background": "#ffffff",
+  "grid": {
+    "spacing": 40,
+    "zoom": 2
+  },
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        {
+          "kind": "stroke",
+          "brush": {
+            "hardness": 1,
+            "color": "#16181c",
+            "size": 8
+          },
+          "xs": [20, 140],
+          "ys": [90, 30]
+        }
+      ]
+    }
+  ]
+}

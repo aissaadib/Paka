@@ -92,6 +92,24 @@ export interface SceneGuide {
   readonly position: number;
 }
 
+/**
+ * The grid overlay a scene draws.
+ *
+ * The grid is display-only, like the guides: it is painted over the artwork on
+ * the display canvas and never reaches an export. The spacing is in **document
+ * pixels**, so the same scene at two zooms shows the same lattice at two
+ * scales.
+ *
+ * The zoom belongs to the **display capture** only: the product's invariant is
+ * checked at 1x, and the display golden is the picture the user sees.
+ */
+export interface SceneGrid {
+  /** The distance between grid lines, in document pixels. */
+  readonly spacing: number;
+  /** The zoom of the display capture; 1 by default. */
+  readonly zoom?: number;
+}
+
 export interface SceneLayer {
   /** The layer's name; it is also the layer's identity in the document. */
   readonly id: string;
@@ -109,6 +127,8 @@ export interface Scene {
   readonly layers: readonly SceneLayer[];
   /** The composition guides; omitted means the document has none. */
   readonly guides?: readonly SceneGuide[];
+  /** The grid overlay; omitted means the document shows no grid. */
+  readonly grid?: SceneGrid;
 }
 
 /** True when the element is a stroke, which is the only kind with a live path. */
@@ -136,6 +156,10 @@ export interface SceneVerdict {
   readonly guidesVisible: boolean;
   /** The guides did not change the export: they are display-only. */
   readonly guidesNotExported: boolean;
+  /** The grid changed the display: it is painted over the artwork. */
+  readonly gridVisible: boolean;
+  /** The grid did not change the export: it is display-only. */
+  readonly gridNotExported: boolean;
   readonly liveVsRebuiltDiffering: number;
   readonly rebuiltVsExportedDiffering: number;
   readonly firstDifference: { x: number; y: number } | null;

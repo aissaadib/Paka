@@ -198,18 +198,27 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       union, so the union is still a maximum and a stroke still cannot darken.
       Deterministic from the document coordinates and the dab's direction.
       Format v10.
+- [x] Brush presets: the brush panel saves the current brush under a name and
+      switches, renames and deletes saved brushes, and the library survives a
+      restart in the per-user settings file. Applying a preset is not an edit
+      (no history step, no dirty flag), a preset stores every `BrushSettings`
+      field, and a table-driven guard over the default brush prevents a field
+      from being silently dropped by the settings reader. Settings stay v1.
 - [ ] Image-based or brush-tip stamp textures: a tip that is a mask rather than
       a round disc, so a stroke can be stamped with a felt tip or a dry ink
       blot. The per-dab machinery FF-01 added is what a tip would build on.
 
 ## Phase 4 - Layer system
 
-- [x] Blend modes beyond `normal`: `multiply` and `screen` on a layer, applied
+- [x] Blend modes beyond `normal`: eleven modes on a layer - `multiply`,
+      `screen`, `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`,
+      `lighten`, `difference` and `exclusion` - applied
       when the finished layer composites over the paper and the layers below it.
       Changing the mode is one undoable step and does not re-rasterize layer
       pixels - it only changes the final composite. Display, PNG export, bucket
-      sampling and the colour picker share that composite. Format v8, because a
-      v7 reader rejects the new values instead of drawing them as `normal`.
+      sampling and the colour picker share that composite. Format v11, because a
+      v10 reader rejects the new values instead of drawing them as `normal`; a
+      v10 file still opens.
 - [ ] Layer masks and clipping.
 - [ ] Groups.
 
@@ -229,6 +238,11 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       two questions - a contrast ratio is a lightness comparison and a colour
       difference is a perceptual one - and neither is used as a proxy for the
       other. A read-only view: no control, no state, no history entry.
+- [x] Wider colour input: the colour field accepts 8-digit hex, `hsl()` /
+      `hsla()` and `oklch()`, clamps an out-of-gamut `oklch()` into sRGB,
+      reverts garbage input to the last valid colour, and reports a translucent
+      colour as **not a solid colour** instead of silently measuring it. The
+      stored colour stays a hex string, so there is no project-format change.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
 - [x] **Preferences survive a restart**: the brush, the tool, the shape options,
@@ -246,10 +260,19 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       guide by dragging it; a click selects it, `Delete` removes it, `Esc`
       cancels a drag. A guide is document state but **display-only**, so the
       project format change is additive and the file version stays 9.
-- [ ] Grids, rulers.
-- [ ] Snapping to guides. Snapping changes what a stroke *does* - it alters the
-      pointer's position - so it touches the shared input path and changes the
-      stored samples. It is a separate slice with its own version decision.
+- [x] **Grid**: a **Grid** switch draws a lattice over the paper, and a
+      **Spacing** control sets the distance between the lines in **document
+      pixels** (2-500), so the grid means the same thing at every zoom and
+      pans with the paper. The grid is **view state**: it changes no pixels,
+      adds no history step, never dirties a document and never reaches an
+      export, and it is remembered in the per-user settings file.
+- [x] **Snapping to guides and to the grid**: a **Snap** switch makes a
+      drawing point that comes within 6 *screen* pixels of a guide or a grid
+      line land exactly on it. The tolerance is screen space, so the same
+      physical gesture snaps alike at every zoom. The snapping is applied in
+      the engine's single pointer entry point, so the sample the user drew and
+      the sample that was committed agree. Off by default.
+- [ ] Rulers.
 - [ ] Adjustment layers / non-destructive effects.
 
 ## Phase 7 - Advanced

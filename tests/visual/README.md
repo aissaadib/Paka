@@ -90,6 +90,7 @@ source alpha and a transparent source.
 | `polygon` | a **filled** five-sided polygon, inscribed in the dragged box's ellipse |
 | `star` | a **filled** five-point star, with the inner radius at 50 % |
 | `guides` | a document with **composition guides**: a vertical and a horizontal one |
+| `grid` | a document with the **grid overlay** on, at a 40 px spacing and a 2x zoom |
 | `transformed-selection` | a **scaled and rotated** stroke: the picture a transformed selection draws |
 | `contrast-readout` | the palette's inks on the white paper the contrast readout measures |
 
@@ -113,6 +114,14 @@ the display (which contains the two guide lines). The harness also asserts the
 two properties the format depends on: the guides change the display and do
 **not** change the export. A scene that declares no guide is captured from the
 export only, exactly as before.
+
+`grid` is the scene that pins the **grid overlay**. The grid is display-only
+like the guides, so the scene has **two** goldens as well: `grid-<platform>.png`
+is the export (which contains no grid line at all) and `grid-display-<platform>.png`
+is the display, captured at a **2x zoom** so the lattice is seen at another
+scale - the spacing is in document pixels, so the lines move with the document
+and not with the screen. The harness asserts the two properties the grid
+depends on: the grid changes the display and does **not** change the export.
 
 `transformed-selection` is the scene that pins a **transformed selection**. A
 stroke may declare a `transform` - a uniform scale and a rotation about a

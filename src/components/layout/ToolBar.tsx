@@ -2,16 +2,18 @@
 
 import { BrushControls } from "../../features/brushes/BrushControls";
 import { ColorControls } from "../../features/color/ColorControls";
-import { FillControls } from "../../features/fill/FillControls";
 import { GradientControls } from "../../features/gradient/GradientControls";
-import { ShapeControls } from "../../features/shapes/ShapeControls";
+import { GridControls } from "../../features/grid/GridControls";
+import { ToolOptionsPanel } from "../../features/options/ToolOptionsPanel";
+import { toolShowsBrushControls } from "../../features/options/toolOptionSchema";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
-import { useEditor } from "../../hooks/useEditor";
+import { useEditor, useEditorToolId } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
 
 export function ToolBar() {
   const { actions } = useEditor();
+  const toolId = useEditorToolId();
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Document toolbar">
@@ -32,9 +34,9 @@ export function ToolBar() {
         </IconButton>
       </div>
       <div className="toolbar__divider" />
-      <BrushControls />
-      <ShapeControls />
-      <FillControls />
+      <GridControls />
+      {toolShowsBrushControls(toolId) ? <BrushControls /> : null}
+      <ToolOptionsPanel />
       <GradientControls />
       <div className="toolbar__divider" />
       <ColorControls />

@@ -450,6 +450,32 @@ describe("parseProject round trip", () => {
     expect(restored.stops[1]).not.toBe(gradient.stops[1]);
   });
 
+  it("round-trips every gradient stop without a format change", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const gradient = gradientFor(layerId, {
+      stops: [
+        { offset: 0, color: "#000000" },
+        { offset: 0.2, color: "#ff0000" },
+        { offset: 0.55, color: "#00ff00" },
+        { offset: 0.9, color: "#0000ff" },
+        { offset: 1, color: "#ffffff" },
+      ],
+    });
+    const text = serializeProject(document, storeOf([[layerId, [gradient]]]));
+    const payload = JSON.parse(text) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const restored = parsed.project.elements[0];
+    expect(isGradient(restored)).toBe(true);
+    expect(isGradient(restored) ? restored.stops : []).toEqual(gradient.stops);
+  });
+
   it("round-trips brush hardness, and opens older files with a hard edge", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -735,6 +761,7 @@ describe("parseProject round trip", () => {
     }
   });
 
+  it("a version-10 reader refuses a newer file instead of compositing it normally", () => {
   it("a version-10 reader refuses a version-11 file instead of compositing it normally", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -745,6 +772,7 @@ describe("parseProject round trip", () => {
     const payload = JSON.parse(
       serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
     ) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
     expect(payload.version).toBe(11);
 
     // The current build reads it...
@@ -1463,6 +1491,10 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
+    // the extra blend modes and version 12 on the pressure curve; none of those
+    // bumps was for the guides, and a version-9 file that carries them still
+    // opens.
+    expect(PROJECT_VERSION).toBe(12);
     // the extra blend modes, and neither bump was for the guides; a version-9
     // file that carries them still opens.
     expect(PROJECT_VERSION).toBe(11);
