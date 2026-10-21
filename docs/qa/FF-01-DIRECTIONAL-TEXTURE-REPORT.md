@@ -411,7 +411,7 @@ dab loop, so this does not move the number the audit reports.
 | --- | --- |
 | Branch | `feat/ff01-directional-texture` |
 | Base | `feat/stamp-brush-engine` at `a1c9c1d` ("docs: extend the overnight log with scale/rotate, the merged concurrent commit and the withdrawn export claim") |
-| Feature commit | the branch's single feature commit, "feat: per-dab directional texture for the stamp engine" (its hash is recorded in the handoff message; `git log --oneline -1` is the authority) |
+| Feature commit | `dc378791c21ec06276f60d1b38f536110108cede` — "feat: per-dab directional texture for the stamp engine" |
 | Worktree | `C:\Users\aissa\.local\share\opencode\worktree\252257\ff01-directional-texture` |
 | Files changed | 20 (18 modified, 2 added) |
 | Diff | +1431 / -137 (source, tests and docs) |
