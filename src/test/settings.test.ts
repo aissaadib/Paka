@@ -230,6 +230,49 @@ describe("the preferences survive a restart", () => {
     expect(state.gradientEndColor).toBe("#abcdef");
   });
 
+  it("restores the grid and the snapping", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setGridVisible(true);
+    first.engine.setGridSpacing(25);
+    first.engine.setGridSnapping(true);
+    first.timers.runAll();
+    await settle();
+
+    // The grid is a view preference, so it belongs to the settings file.
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.gridVisible).toBe(true);
+    expect(written.gridSpacing).toBe(25);
+    expect(written.gridSnapping).toBe(true);
+
+    // And a restart puts it back into the editor, which is what the user sees.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const state = second.engine.getState();
+    expect(state.gridVisible).toBe(true);
+    expect(state.gridSpacing).toBe(25);
+    expect(state.gridSnapping).toBe(true);
+  });
+
+  it("defaults the grid for a settings file written before the grid existed", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({ version: SETTINGS_VERSION, toolId: "brush" });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    // An older file still restores every field it does carry, and the grid
+    // takes its default instead of failing.
+    const state = engine.getState();
+    expect(state.toolId).toBe("brush");
+    expect(state.gridVisible).toBe(DEFAULT_APP_SETTINGS.gridVisible);
+    expect(state.gridSpacing).toBe(DEFAULT_APP_SETTINGS.gridSpacing);
+    expect(state.gridSnapping).toBe(DEFAULT_APP_SETTINGS.gridSnapping);
+  });
+
   it("restores the directional stamp texture", async () => {
     const gateway = new MemorySettingsGateway();
 

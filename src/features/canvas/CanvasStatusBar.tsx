@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { SNAP_TOLERANCE_PX } from "../../core/document/grid";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useNativeEnvironment } from "../../hooks/useNativeEnvironment";
 import type { CursorReport } from "../../types/pointer";
@@ -57,6 +58,9 @@ export function CanvasStatusBar({
     selectedStrokes,
     selectedGuideId,
     notice,
+    gridVisible,
+    gridSpacing,
+    gridSnapping,
   } = useEditorState();
   const native = useNativeEnvironment();
   const positionRef = useRef<HTMLSpanElement | null>(null);
@@ -141,6 +145,19 @@ export function CanvasStatusBar({
           {guideCount} guide{guideCount === 1 ? "" : "s"}
         </span>
       )}
+      {gridVisible ? (
+        <span className="status-bar__item" title="The grid overlay is drawn over the paper">
+          grid {gridSpacing} px
+        </span>
+      ) : null}
+      {gridSnapping ? (
+        <span
+          className="status-bar__item"
+          title={`Snapping is on: a drawing point within ${SNAP_TOLERANCE_PX} screen pixels of a guide or a grid line lands on it`}
+        >
+          snap on
+        </span>
+      ) : null}
       {fileLabel === "" ? null : (
         <span
           className={[

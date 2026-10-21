@@ -4,6 +4,7 @@ import { BrushControls } from "../../features/brushes/BrushControls";
 import { ColorControls } from "../../features/color/ColorControls";
 import { FillControls } from "../../features/fill/FillControls";
 import { GradientControls } from "../../features/gradient/GradientControls";
+import { GridControls } from "../../features/grid/GridControls";
 import { ShapeControls } from "../../features/shapes/ShapeControls";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
 import { useEditor } from "../../hooks/useEditor";
@@ -32,6 +33,7 @@ export function ToolBar() {
         </IconButton>
       </div>
       <div className="toolbar__divider" />
+      <GridControls />
       <BrushControls />
       <ShapeControls />
       <FillControls />

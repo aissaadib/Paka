@@ -240,10 +240,19 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       guide by dragging it; a click selects it, `Delete` removes it, `Esc`
       cancels a drag. A guide is document state but **display-only**, so the
       project format change is additive and the file version stays 9.
-- [ ] Grids, rulers.
-- [ ] Snapping to guides. Snapping changes what a stroke *does* - it alters the
-      pointer's position - so it touches the shared input path and changes the
-      stored samples. It is a separate slice with its own version decision.
+- [x] **Grid**: a **Grid** switch draws a lattice over the paper, and a
+      **Spacing** control sets the distance between the lines in **document
+      pixels** (2-500), so the grid means the same thing at every zoom and
+      pans with the paper. The grid is **view state**: it changes no pixels,
+      adds no history step, never dirties a document and never reaches an
+      export, and it is remembered in the per-user settings file.
+- [x] **Snapping to guides and to the grid**: a **Snap** switch makes a
+      drawing point that comes within 6 *screen* pixels of a guide or a grid
+      line land exactly on it. The tolerance is screen space, so the same
+      physical gesture snaps alike at every zoom. The snapping is applied in
+      the engine's single pointer entry point, so the sample the user drew and
+      the sample that was committed agree. Off by default.
+- [ ] Rulers.
 - [ ] Adjustment layers / non-destructive effects.
 
 ## Phase 7 - Advanced

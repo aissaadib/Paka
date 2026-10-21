@@ -24,6 +24,8 @@ import type {
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
 import type { SelectionHandles } from "../document/selectionHandles";
+import type { GridSettings } from "../document/grid";
+import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import type { Bounds } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
@@ -82,6 +84,23 @@ const HANDLE_FILL_COLOR = "#ffffff";
  * apart at a glance; the *selected* guide is drawn in the selection colour.
  */
 const GUIDE_COLOR = "#e0567f";
+/**
+ * The grid, deliberately fainter than the guides.
+ *
+ * A grid is a background reference: it has to be readable without competing
+ * with the guides or the artwork, so it uses a low-alpha neutral rather than
+ * the guides' accent hue.
+ */
+const GRID_COLOR = "rgba(70, 84, 104, 0.22)";
+/**
+ * The closest two grid lines may be on screen before the grid is hidden, in
+ * device pixels.
+ *
+ * Below roughly this gap the lines merge into a wash and cost a stroke per
+ * line for nothing. Hiding the grid at that density keeps a 2 px spacing usable
+ * when zoomed in and quiet when zoomed out.
+ */
+const MIN_GRID_GAP_PX = 3;
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -216,6 +235,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * the selection is an overlay concern, so it has its own channel.
    */
   private selectedGuideId: string | null = null;
+  /**
+   * Grid display settings.
+   *
+   * Editor state, like the guide selection: the renderer owns only how the
+   * grid is painted, not whether the user wants it. Off by default.
+   */
+  private grid: GridSettings = DEFAULT_GRID_SETTINGS;
   private rasterScale: number;
   private destroyed = false;
 
@@ -488,6 +514,24 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
+  /**
+   * Sets the grid's visibility and spacing.
+   *
+   * Overlay only, like the guides: the grid is drawn on the display canvas and
+   * never reaches a layer surface, a project file or an export. A no-op change
+   * asks for no frame.
+   */
+  setGrid(grid: GridSettings): void {
+    if (
+      this.destroyed ||
+      (grid.visible === this.grid.visible && grid.spacing === this.grid.spacing)
+    ) {
+      return;
+    }
+    this.grid = grid;
+    this.requestFrame();
+  }
+
   render(): void {
     if (this.destroyed) {
       return;
@@ -520,6 +564,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
 
+    this.paintGrid(ctx, scale);
+
     this.paintGuides(ctx, scale);
 
     this.paintSelection(ctx, scale);
@@ -528,6 +574,70 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.lineWidth = 1 / scale;
     ctx.strokeStyle = DOCUMENT_BORDER_COLOR;
     ctx.strokeRect(0, 0, doc.width, doc.height);
+  }
+
+  /**
+   * Draws the grid over the artwork, beneath the guides.
+   *
+   * The lines are document-space multiples of the spacing, so they zoom and pan
+   * with the paper, and they are clipped to the document rectangle: a grid
+   * belongs to the artwork, unlike a guide, which spans the whole viewport.
+   * The appearance is screen space - one device pixel wide - the same hairline
+   * idiom as the guides and the document border.
+   *
+   * Nothing here reaches a layer surface or `composeDocumentImage`, so a PNG
+   * export is byte-identical whether the grid was shown or not.
+   */
+  private paintGrid(ctx: CanvasRenderingContext2D, scale: number): void {
+    const doc = this.doc;
+    if (!doc || !this.grid.visible) {
+      return;
+    }
+
+    const spacing = this.grid.spacing;
+    // Device pixels between two lines: below this the grid is a wash, so it is
+    // hidden rather than drawn as an unreadable block.
+    if (!(spacing > 0) || spacing * scale < MIN_GRID_GAP_PX) {
+      return;
+    }
+
+    const { zoom, offsetX, offsetY } = this.viewport;
+    const viewWidth = this.canvas.width / this.devicePixelRatio;
+    const viewHeight = this.canvas.height / this.devicePixelRatio;
+    const left = 0 - offsetX / zoom;
+    const top = 0 - offsetY / zoom;
+    const right = left + viewWidth / zoom;
+    const bottom = top + viewHeight / zoom;
+
+    // The visible part of the paper, which is all the grid covers.
+    const startX = Math.max(0, left);
+    const endX = Math.min(doc.width, right);
+    const startY = Math.max(0, top);
+    const endY = Math.min(doc.height, bottom);
+    if (startX > endX || startY > endY) {
+      return;
+    }
+
+    const verticals = gridLinesBetween(startX, endX, spacing);
+    const horizontals = gridLinesBetween(startY, endY, spacing);
+    if (verticals.length === 0 && horizontals.length === 0) {
+      return;
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = GRID_COLOR;
+    ctx.lineWidth = 1 / scale;
+    ctx.beginPath();
+    for (const x of verticals) {
+      ctx.moveTo(x, startY);
+      ctx.lineTo(x, endY);
+    }
+    for (const y of horizontals) {
+      ctx.moveTo(startX, y);
+      ctx.lineTo(endX, y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
 
   /**

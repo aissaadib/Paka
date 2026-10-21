@@ -130,8 +130,18 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   reports the selected guide and its position. Every change is one undo step.
   A guide is part of the document, but it is **display-only**: it is drawn over
   the artwork and never reaches a PNG export, so an exported picture is
-  exactly the artwork. There is no snapping to guides yet, and no grids or
-  rulers.
+  exactly the artwork.
+- **Grid and snapping**: a **Grid** switch draws a lattice over the paper, a
+  **Snap** switch makes the drawing follow the guides and the grid lines, and a
+  **Spacing** control sets the distance between the lines in **document
+  pixels**, so the grid means the same thing at every zoom. The snap is a
+  *magnet*: a point within **6 screen pixels** of a guide or a grid line lands
+  exactly on it, and a point that is nowhere near one keeps its position. The
+  two switches are independent - the grid can be hidden while the snapping
+  stays on - and both have shortcuts (`Ctrl+'` and `Ctrl+Shift+'`). The grid
+  and the snapping are **view state**: they change no pixels, add no history
+  step, never mark the document dirty and never reach an export, and they are
+  remembered in the per-user settings file. There are no rulers yet.
 - **HSV colour wheel**: a **Colour** panel beside the layers. The disc picks a
   hue (the angle) and a saturation (the distance from the centre), the value
   slider picks the brightness, and the three sliders name the same numbers and
@@ -305,11 +315,11 @@ paste-ready version of the same briefing is in
   **ellipse**, **polygon**, **star**, **bucket**, **gradient**, **colour
   picker** and **guides** tools exist, plus
   pan. There is no text tool.
-- **Guides are axis-only and are not a snapping aid.** A guide is vertical or
-  horizontal, a second guide on the same position is refused, the colour is
-  fixed, and there is no position label. Nothing snaps to a guide yet: the
-  guides mark positions, they do not change what a stroke does. There are no
-  grids and no rulers.
+- **Guides are axis-only.** A guide is vertical or horizontal, a second guide on
+  the same position is refused, the colour is fixed, and there is no position
+  label. The guides *do* take part in the snapping (the **Snap** switch), but
+  the snapping is a magnet with a 6 screen pixel radius, not a lock: a guide
+  pulls a point that comes close to it and nothing else. There are no rulers.
 - **Gradients are two-stop, linear or radial, and paint the whole layer.**
   There is no draggable stop editor, no angle snapping and no gradient with a
   transparent stop (opacity applies to the whole element). A gradient is

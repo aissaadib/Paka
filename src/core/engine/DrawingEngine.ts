@@ -62,6 +62,11 @@ import {
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
 import {
+  DEFAULT_GRID_SETTINGS,
+  normalizeGridSpacing,
+  snapDocumentPoint,
+} from "../document/grid";
+import {
   addGuideToDocument,
   findGuide,
   findGuideAt,
@@ -212,6 +217,23 @@ export interface EditorSnapshot {
   /** End colour of the next gradient; its start is the current brush colour. */
   readonly gradientEndColor: string;
   /**
+   * Whether the grid is drawn.
+   *
+   * Editor state, like the guides: the grid is a display aid, not document
+   * content, so it never reaches a layer surface, an export or the project
+   * file. Off by default.
+   */
+  readonly gridVisible: boolean;
+  /** Distance between grid lines, in document pixels. */
+  readonly gridSpacing: number;
+  /**
+   * Whether a drawing sample snaps to the guides and the grid.
+   *
+   * Editor state: it changes where the *next* sample lands, not where the
+   * committed strokes already are. Off by default.
+   */
+  readonly gridSnapping: boolean;
+  /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
    * persisted.
@@ -259,6 +281,36 @@ const DEFAULT_DOCUMENT_HEIGHT = 1200;
 /** Wheel delta to zoom factor conversion (natural-exponential). */
 const WHEEL_ZOOM_SENSITIVITY = 0.0018;
 const WHEEL_ZOOM_FACTOR_LIMIT = 0.25;
+
+/**
+ * The tools whose samples follow the guides and the grid while snapping is on.
+ *
+ * Snapping is a drawing aid: it moves the samples a tool commits, so a stroke's
+ * samples land on the grid lines, a shape's corners sit on them and a gradient
+ * starts and ends on them.
+ *
+ * It is applied to every tool that commits drawing samples - the brush, the
+ * eraser, the shape tools, the line and the gradient - so "the sample I drew"
+ * and "the sample that was committed" agree. It is not applied to the bucket
+ * and the colour picker, whose presses read pixels rather than place geometry,
+ * nor to the select, guides and pan tools, whose gestures do not commit
+ * drawing samples at all.
+ *
+ * The snap is a *magnet* with a small screen-space radius (6 CSS pixels), not
+ * a lattice lock: a sample that is nowhere near a target keeps its position,
+ * so a freehand stroke is only nudged where it passes a line it would have
+ * crossed anyway.
+ */
+const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
+  "brush",
+  "eraser",
+  "line",
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+  "gradient",
+]);
 
 /**
  * Shown when a layer operation is refused because a pointer gesture is still
@@ -498,6 +550,13 @@ export class DrawingEngine implements StrokeSource {
   private gradientType: "linear" | "radial" = "linear";
   private gradientEndColor = DEFAULT_GRADIENT_END_COLOR;
   private activeGradient: ActiveGradient | null = null;
+  /**
+   * Grid display settings. Session state: the grid is an aid, not document
+   * content, so it is not in the project file and never enters history.
+   */
+  private gridVisible = DEFAULT_GRID_SETTINGS.visible;
+  private gridSpacing = DEFAULT_GRID_SETTINGS.spacing;
+  private gridSnapping = DEFAULT_GRID_SETTINGS.snap;
   private notice: string | null = null;
   /**
    * Whether the gesture-refusal notice has already been raised for the
@@ -640,6 +699,11 @@ export class DrawingEngine implements StrokeSource {
     });
     renderer.setDocument(this.doc);
     renderer.setViewport(this.viewport);
+    renderer.setGrid({
+      visible: this.gridVisible,
+      spacing: this.gridSpacing,
+      snap: this.gridSnapping,
+    });
     if (this.viewportSize.width > 0) {
       renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, this.devicePixelRatio);
     }
@@ -1157,6 +1221,109 @@ export class DrawingEngine implements StrokeSource {
     this.gradientEndColor = next;
     this.commands.breakMerge();
     this.publish();
+  }
+
+  /**
+   * Shows or hides the grid.
+   *
+   * Display state, not an edit: it changes no pixels on a layer, writes
+   * nothing to history and does not dirty the file. The grid is painted on the
+   * display canvas only, so an export is identical whether it was on or off.
+   */
+  setGridVisible(visible: boolean): void {
+    if (this.gridVisible === visible) {
+      return;
+    }
+    this.gridVisible = visible;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets the grid spacing in document pixels (`2..500`, whole pixels).
+   *
+   * Like the visibility, this is display state: a spacing change is not an
+   * edit and never rewrites a stroke. Out-of-range values are clamped and a
+   * non-finite value restores the default rather than producing an unreadable
+   * grid.
+   */
+  setGridSpacing(spacing: number): void {
+    const next = normalizeGridSpacing(spacing);
+    if (next === this.gridSpacing) {
+      return;
+    }
+    this.gridSpacing = next;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Turns snapping on or off.
+   *
+   * While it is on, a drawing sample within 6 CSS pixels of a guide or a grid
+   * line is committed exactly on that target. The tolerance is converted with
+   * the live zoom, so the same physical gesture snaps identically at every
+   * zoom. Snapping changes where the next sample lands; it never moves a
+   * committed stroke and is not an undoable step.
+   */
+  setGridSnapping(snap: boolean): void {
+    if (this.gridSnapping === snap) {
+      return;
+    }
+    this.gridSnapping = snap;
+    this.syncGridToRenderer();
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /** Pushes the current grid settings to the renderer, if one is attached. */
+  private syncGridToRenderer(): void {
+    this.renderer?.setGrid({
+      visible: this.gridVisible,
+      spacing: this.gridSpacing,
+      snap: this.gridSnapping,
+    });
+  }
+
+  /**
+   * The sample a drawing tool should see, with snapping applied.
+   *
+   * Tools that read pixels or do not commit drawing samples are left alone, so
+   * a bucket press fills under the pointer and a guide drag stays a guide drag.
+   * When snapping is off, or no target is in reach, the sample is returned
+   * as-is: enabling snapping never makes an untouched sample move.
+   *
+   * Two rules keep the snap from changing what a gesture *is*:
+   *
+   *  - a press outside the paper is ignored by every drawing gesture, so the
+   *    snap never pulls a point that started outside onto the paper;
+   *  - a snap that would leave the paper is not applied, so a gesture can
+   *    never be refused by its own snap.
+   */
+  private snapSample(sample: PointerSample): PointerSample {
+    if (!this.gridSnapping || !SNAPPING_TOOL_IDS.has(this.currentToolId)) {
+      return sample;
+    }
+    if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return sample;
+    }
+    const result = snapDocumentPoint(sample.docX, sample.docY, {
+      enabled: true,
+      guides: this.doc.guides,
+      spacing: this.gridSpacing,
+      zoom: this.viewport.zoom,
+    });
+    const x = result.x >= 0 && result.x <= this.doc.width ? result.x : sample.docX;
+    const y = result.y >= 0 && result.y <= this.doc.height ? result.y : sample.docY;
+    if (!result.snappedX && !result.snappedY) {
+      return sample;
+    }
+    if (x === sample.docX && y === sample.docY) {
+      return sample;
+    }
+    return { ...sample, docX: x, docY: y };
   }
 
   /** Clears a user-facing notice raised by an editor action. */
@@ -2930,7 +3097,10 @@ export class DrawingEngine implements StrokeSource {
    * but it is not a UI-facing action.
    */
   handlePointerSample(sample: PointerSample): void {
+    // The cursor reports where the pointer *is*; snapping only moves the
+    // sample a drawing tool commits.
     this.reportCursor(sample);
+    const snapped = this.snapSample(sample);
 
     if (sample.phase === "down") {
       // Middle-button drag pans regardless of the active tool.
@@ -2939,7 +3109,7 @@ export class DrawingEngine implements StrokeSource {
         this.middlePanTool.onPointerDown(this.toolContext, sample);
         return;
       }
-      this.activeTool().onPointerDown(this.toolContext, sample);
+      this.activeTool().onPointerDown(this.toolContext, snapped);
       return;
     }
 
@@ -2948,7 +3118,7 @@ export class DrawingEngine implements StrokeSource {
         this.middlePanTool.onPointerMove(this.toolContext, sample);
         return;
       }
-      this.activeTool().onPointerMove(this.toolContext, sample);
+      this.activeTool().onPointerMove(this.toolContext, snapped);
       return;
     }
 
@@ -2960,7 +3130,7 @@ export class DrawingEngine implements StrokeSource {
 
     const tool = this.activeTool();
     if (sample.phase === "up") {
-      tool.onPointerUp(this.toolContext, sample);
+      tool.onPointerUp(this.toolContext, snapped);
     } else {
       tool.onPointerCancel(this.toolContext, sample);
     }
@@ -3098,6 +3268,9 @@ export class DrawingEngine implements StrokeSource {
       fillTolerance: this.fillTolerance,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
+      gridVisible: this.gridVisible,
+      gridSpacing: this.gridSpacing,
+      gridSnapping: this.gridSnapping,
       notice: this.notice,
     };
   }
@@ -3122,6 +3295,9 @@ export class DrawingEngine implements StrokeSource {
       previous.fillTolerance === next.fillTolerance &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&
+      previous.gridVisible === next.gridVisible &&
+      previous.gridSpacing === next.gridSpacing &&
+      previous.gridSnapping === next.gridSnapping &&
       previous.notice === next.notice
     ) {
       return;
