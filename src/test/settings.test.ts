@@ -354,4 +354,44 @@ describe("writing the settings", () => {
 
     expect(gateway.writes).toHaveLength(0);
   });
+
+  it("never writes twice at the same time", async () => {
+    const gateway = new MemorySettingsGateway();
+    const { store, engine, timers } = createHarness(gateway);
+    await store.load();
+
+    gateway.holdWrites();
+    engine.setBrush({ size: 10 });
+    timers.runAll();
+    await settle();
+
+    // A change while the first write is still in flight.
+    engine.setBrush({ size: 20 });
+    timers.runAll();
+    await settle();
+
+    expect(gateway.maxConcurrent).toBe(1);
+
+    gateway.release();
+    await settle();
+
+    // Both changes are on disk, one after the other.
+    expect(gateway.writes).toHaveLength(2);
+    expect(JSON.parse(gateway.writes[1]).brush.size).toBe(20);
+  });
+
+  it("writes a pending change when the store is torn down", async () => {
+    const { store, engine, timers, gateway } = createHarness();
+    await store.load();
+
+    engine.setBrush({ size: 33 });
+    // The change is waiting for the debounce.
+    expect(timers.pendingCount).toBe(1);
+
+    store.destroy();
+    await settle();
+
+    expect(gateway.writes).toHaveLength(1);
+    expect(JSON.parse(gateway.writes[0]).brush.size).toBe(33);
+  });
 });

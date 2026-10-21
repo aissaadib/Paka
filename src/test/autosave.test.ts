@@ -25,6 +25,7 @@ import { isRecoveryPath, recoveryPathFor } from "../core/autosave/recovery";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
+import { ProjectFiles } from "../core/project/projectFiles";
 import { MemoryProjectGateway } from "./support/memoryGateway";
 
 const PROJECT_PATH = "C:\\art\\cat.paka";
@@ -310,5 +311,53 @@ describe("an autosave racing a user save", () => {
     const state = engine.getState();
     expect(state.file.path).toBe(PROJECT_PATH);
     expect(state.file.dirty).toBe(false);
+  });
+
+  it("leaves a real save alone", async () => {
+    // The hazard, with the real save path: the user saves through the file
+    // service while a copy is in flight. The user's file is theirs; the copy
+    // goes elsewhere; and the copy is reported as superseded rather than
+    // passed off as current.
+    const projectGateway = new MemoryProjectGateway();
+    const copyGateway = new HoldingGateway();
+    const engine = createSavedEngine();
+    const files = new ProjectFiles(engine, projectGateway);
+    const service = new AutosaveService({ engine, gateway: copyGateway, policy: policy() });
+    service.start();
+
+    engine.addLayer();
+    copyGateway.holdWrites();
+    const copy = service.tick();
+
+    const outcome = await files.save();
+    expect(outcome.status).toBe("saved");
+    expect(engine.getState().file.dirty).toBe(false);
+
+    copyGateway.releaseWrites();
+    const copyOutcome = await copy;
+
+    expect(copyOutcome.status).toBe("superseded");
+    expect(copyGateway.writes).toEqual([RECOVERY_PATH]);
+    expect(projectGateway.writes).toEqual([PROJECT_PATH]);
+  });
+
+  it("is unaffected by a cancelled save", async () => {
+    // The user opens the save dialog and cancels it. The chosen path and the
+    // dirty state must not move, and the recovery state must not either.
+    const projectGateway = new MemoryProjectGateway();
+    projectGateway.savePath = null;
+    const engine = createEngine();
+    const files = new ProjectFiles(engine, projectGateway);
+    const service = new AutosaveService({ engine, gateway: projectGateway, policy: policy() });
+    service.start();
+
+    engine.addLayer();
+    const outcome = await files.save();
+
+    expect(outcome.status).toBe("cancelled");
+    expect(engine.getState().file.path).toBeNull();
+    expect(engine.getState().file.dirty).toBe(true);
+    // The document still has no path, so there is still nowhere to write.
+    expect((await service.tick()).status).toBe("no-project");
   });
 });

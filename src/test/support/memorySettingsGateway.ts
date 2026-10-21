@@ -18,9 +18,12 @@ export class MemorySettingsGateway implements SettingsGateway {
   readFailure: string | null = null;
   /** When set, the write fails with this message. */
   writeFailure: string | null = null;
+  /** How many writes were in flight at the same time. */
+  maxConcurrent = 0;
 
   private hold: Promise<void> | null = null;
   private releaseHold: (() => void) | null = null;
+  private concurrent = 0;
 
   async read(): Promise<string | null> {
     if (this.readFailure !== null) {
@@ -33,11 +36,17 @@ export class MemorySettingsGateway implements SettingsGateway {
     if (this.writeFailure !== null) {
       throw new Error(this.writeFailure);
     }
-    if (this.hold !== null) {
-      await this.hold;
+    this.concurrent += 1;
+    this.maxConcurrent = Math.max(this.maxConcurrent, this.concurrent);
+    try {
+      if (this.hold !== null) {
+        await this.hold;
+      }
+      this.contents = contents;
+      this.writes.push(contents);
+    } finally {
+      this.concurrent -= 1;
     }
-    this.contents = contents;
-    this.writes.push(contents);
   }
 
   /** Holds every later write until {@link release} is called. */

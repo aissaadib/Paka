@@ -158,7 +158,19 @@ read is in flight does not apply anything.
 | 5 | A copy is a valid project file. | It is written with `engine.serialize()`, the same call a save uses. | "writes a copy that is a valid project file" - it parses with `parseProject`. |
 | 6 | Nothing is written for a clean document, an unsaved document, or an unchanged one. | The tick checks the dirty flag, the path and the change flag. | Three tests. |
 | 7 | A failed write leaves the document dirty and the next tick retries. | The failure path does not clear the change flag. | "leaves the document dirty when the write fails, and retries next time". |
-| 8 | A save racing a copy does not change the project's path or the dirty state. | The service never touches either. | Two tests. |
+| 8 | A save racing a copy does not change the project's path or the dirty state. | The service never touches either. | "leaves a real save alone" (through the real `ProjectFiles.save()` path) and "does not change the project's path or the dirty state". |
+| 9 | A cancelled save changes nothing. | The service only reads the path and the dirty flag. | "is unaffected by a cancelled save". |
+
+**One detection gap, stated plainly.** The service recognises a user save by
+watching the document become clean. A save taken **while a guide drag is in
+flight** does not make the document clean - `markSaved` sets
+`fileHoldsPreview`, so the file holds the live preview and the document stays
+dirty (`DrawingEngine.ts:838-843`, `:2811`). The service therefore cannot see
+that save, and a copy written at that moment is reported as `written` rather
+than `superseded`. Nothing is lost: the user's file is intact and the copy is
+a *stale* extra, never a replacement. The fix would be to publish the saved
+revision in the snapshot so every save is visible - an engine change to a
+public type, which is not made for a service that is not enabled.
 
 ### 4.3 The blocked steps - marked, not quietly chosen
 
@@ -338,6 +350,11 @@ licensing files (`LICENSE`, `THIRD_PARTY_NOTICES.md`, `licenses/`,
    crate compiles, but the test binary fails to start with
    `STATUS_ENTRYPOINT_NOT_FOUND`, identically on the base commit. The four
    tests in `settings_io.rs` are written and unexecuted; see section 6.
+9. **A save taken during a guide drag is invisible to the autosave
+   service.** The document stays dirty after such a save, so the service
+   cannot see it and does not report a concurrent copy as superseded. Nothing
+   is lost - the user's file is intact and the copy is a stale extra - but
+   the detection would need the saved revision in the snapshot.
 
 ---
 
