@@ -602,9 +602,13 @@ Verification gaps:
   edge moves onto the line when the snap is on), through the real
   `Canvas2DRenderer` (the unit suite plus a visual-regression scene with a
   committed golden), and at the state level (the status bar reads `grid 50 px`
-  and `snap on`). The **packaged Tauri window is unverified**, and a native
-  save/reopen of a document with the grid on is unverified: the grid is view
-  state, so it is not in the file at all, and that is covered by Vitest.
+  and `snap on`). The **packaged Tauri window is now verified** (see the
+  packaged section of `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md`): the lattice
+  draws over the paper, the Grid switch writes `gridVisible: true` to the
+  per-user settings file, and after a relaunch the switch is on and the status
+  bar reads `grid 50 px`. A native save/reopen of a document with the grid on is
+  unverified: the grid is view state, so it is not in the file at all, and that
+  is covered by Vitest.
 - Gradients were checked in the browser at state level and their pixels through
   the real `Canvas2DRenderer`; the live display canvas was not sampled because
   the harness suspends animation frames.

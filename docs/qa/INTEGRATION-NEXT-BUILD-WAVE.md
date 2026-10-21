@@ -4,9 +4,16 @@
 **Base:** `38efc1f` — the phase-1 integration tip (`integration/phase1-settings-texture-transforms`)
 **Integrated tip:** filled in by the final commit of this report (see `git log` on the branch)
 **Ownership:** the four feature branches and this integration branch are local to
-`C:\Users\aissa\Desktop\Paka-feature-factory\worktrees\`. Nothing was pushed,
-`main` was not touched, and the shared checkout
-`C:\Users\aissa\Desktop\Paka` was not modified.
+`C:\Users\aissa\Desktop\Paka-feature-factory\worktrees\`. **No branch was pushed
+by the coordinator**, and `main` and the shared checkout
+`C:\Users\aissa\Desktop\Paka` were not modified.
+
+**Remote caveat, measured:** the concurrent writer described in §2 pushed two of
+the wave branches to `origin` itself — `feat/n2-n3-colour-workflow` at
+`b0cbee6` and `feat/n6-blend-modes` at `6a0cae8` (confirmed with
+`git ls-remote --heads origin`). That was not the coordinator's action and it
+was not undone, because undoing it would mean rewriting remote history. `main`
+on the remote is `b5fa8df` and is unrelated to this wave.
 
 ## 1. What this wave is
 
@@ -176,7 +183,10 @@ at 125 %). Those stay in §7.
 
 - Shared checkout `C:\Users\aissa\Desktop\Paka`: not modified by this wave; it
   remains on `feat/stamp-brush-engine` with its pre-existing untracked `qa/`.
-- `main` and `origin/main`: untouched. Nothing was pushed from any wave branch.
+- `main` and `origin/main`: untouched by this work. The only remote change
+  attributable to the wave is the concurrent writer's push of
+  `feat/n2-n3-colour-workflow` and `feat/n6-blend-modes` (see the header
+  caveat); the coordinator pushed nothing, and no branch was force-pushed.
 - Existing worktrees: inspected, never removed or reset.
 - Dependencies, lockfiles, licences, notices, Cargo manifests and the
   wry/Tauri DPI path: unchanged.
