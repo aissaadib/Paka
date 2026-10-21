@@ -2,7 +2,9 @@
 
 **Branch:** `integration/next-build-wave`
 **Base:** `38efc1f` — the phase-1 integration tip (`integration/phase1-settings-texture-transforms`)
-**Integrated tip:** filled in by the final commit of this report (see `git log` on the branch)
+**Integrated tip:** the production-code tip is `fdba3eb`; everything after it on
+this branch is documentation plus one test-only guard, so the packaged binary
+built from `fdba3eb` is behaviourally the integrated tip.
 **Ownership:** the four feature branches and this integration branch are local to
 `C:\Users\aissa\Desktop\Paka-feature-factory\worktrees\`. **No branch was pushed
 by the coordinator**, and `main` and the shared checkout
@@ -116,7 +118,7 @@ Run serially, one command at a time, against the exact integrated HEAD:
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Unit + integration | `pnpm test` | **967 tests in 44 files, all pass** |
+| Unit + integration | `pnpm test` | **968 tests in 44 files, all pass** |
 | Types | `pnpm typecheck` | exit 0 |
 | Production build | `pnpm build` | succeeded, 114 modules, `index-*.js` 389.84 kB |
 | Visual regression | `pnpm test:visual` | **30 passed** |
@@ -124,10 +126,60 @@ Run serially, one command at a time, against the exact integrated HEAD:
 | Packaged Tauri | `pnpm tauri build --no-bundle` | see §6 |
 
 Baseline before the wave, measured the same way on `38efc1f`: 791 tests in 37
-files, 25 visual tests. The wave adds **176 tests in 7 files** and **5 visual
+files, 25 visual tests. The wave adds **177 tests in 7 files** and **5 visual
 scenes**.
 
 No test was run concurrently with the Rust build.
+
+## 5.1 Independent acceptance pass
+
+A reviewer that wrote none of this code inspected the diff and ran its own
+checks (9 focused files, **246 tests, all pass**, no `.only`/`.skip`):
+
+- **N1 PASS WITH NOTE.** The "no field dropped" guard was proven to fire, not
+  just asserted: deleting `stampTexture` from the settings field list made
+  **9 tests fail** with `the settings reader dropped "stampTexture"`, and
+  restoring the file made them green again. Applying and deleting a preset are
+  structurally free of history and dirty side effects (`setBrush` only breaks
+  the merge window and publishes; `revision` is untouched).
+- **Gap found and closed.** The project reader (`projectFormat.ts` `readBrush`)
+  is a *second* hand-written field list that the guard did not walk. A
+  field-by-field project round-trip test was added; removing `opacity` from the
+  reader now fails with
+  `the project reader dropped "opacity": expected 1 to deeply equal 0.07`.
+  With the reader intact it passes, so the gap was coverage, not a live bug.
+- **N2 PASS.** The CIEDE2000 fixture is the published Sharma/Wu/Dalal table and
+  the implementation converts every angle through degrees-to-radians; two pairs
+  were recomputed by hand (1.000 vs 1.0, 2.0420 vs 2.0425, drift from manual
+  rounding). The readout is reachable through `ColorPanel`, translucent input is
+  a deliberate in-UI rejection, and `oklch()` clamps every channel into
+  `[0, 255]` (proved to touch 255 for an out-of-gamut input).
+- **N4 PASS.** The six-screen-pixel tolerance is divided by zoom, and a test
+  drags three CSS pixels away from a line at 0.5×, 1×, 2.5× and 4× and gets the
+  same snapped coordinate. Nearest-wins, ties and out-of-tolerance behaviour are
+  all tested. The grid is painted only from `render()`, never from the export
+  path, and enabling it leaves `serialize()` byte-identical.
+- **N6 PASS WITH NOTE.** Eight of the eleven expected pixels were recomputed
+  from the W3C formulas and match. The old two-mode mapping test was superseded
+  by a superset that still asserts `source-over`/`multiply`/`screen`, and the
+  multiply/screen pixel tests are untouched. The v11 refusal gate is real (the
+  base build refused version 11 the same way), with two notes: the gate is
+  exercised through a test-only `maxVersion` parse option that no production
+  caller uses, and the "v10 file" is a relabelled v11 payload rather than a
+  frozen v10 fixture.
+- **No dependency, lockfile, licence, notice, Cargo or Rust change** in the
+  wave (`git diff 38efc1f..HEAD` on those paths is empty).
+
+### Incident: a transient write to the shared checkout
+
+While reproducing the guard-firing proof, a temporary edit was written to
+`C:\Users\aissa\Desktop\Paka\src\core\project\projectFormat.ts` instead of the
+worktree, because a .NET file API resolved a relative path against the process
+directory rather than the shell's location. It was detected on the next check,
+reverted with `git checkout --`, and verified: the file's blob hash equals
+`HEAD:src/core/project/projectFormat.ts`, the shared checkout is back on
+`bc39597` with only its pre-existing untracked `qa/`, and no other shared-checkout
+file was touched. The proof was then re-run correctly inside the worktree.
 
 ## 6. Packaged desktop
 
@@ -203,3 +255,20 @@ at 125 %). Those stay in §7.
 4. **Owner decisions still open:** the v11 acknowledgement, the T-06 autosave
    gates, R3 countersignature, R6 patent position, R9 CI licence allow-list,
    and the D-1 font-identity policy.
+
+## 10. Closure
+
+**CLOSED WITH BOUNDED BLOCKERS.**
+
+Four lanes landed on one local branch from the verified phase-1 tip `38efc1f`,
+one trivial import conflict was resolved deliberately, the union of both
+writers' work was preserved, and the integrated code tip `fdba3eb` passed the
+full matrix: **968 unit/integration tests in 44 files**, typecheck clean,
+production build, **30 visual tests**, `cargo check --lib`. The packaged binary
+was rebuilt from that source and the wave's user-facing paths were driven on it.
+
+The blockers are bounded and named in §7: native-dialog save/reopen of a v11
+project, scaling other than 125 %, OS-level pointer input, `cargo test --lib`
+on this machine, and the owner's acknowledgement of the project-format 11 bump.
+The shared checkout was left exactly at its original commit and content, the
+coordinator pushed nothing, and `main` was not touched.

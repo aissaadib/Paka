@@ -40,7 +40,7 @@ visual-regression harness.
   brush engine**, **HSV colour wheel**, **composition guides**, **polygon and
   star** and **scale/rotate** slices. The feature branches remain; nothing was
   rewritten.
-- Measured on this branch: `pnpm test` **967 tests in 44 files, all pass**;
+- Measured on this branch: `pnpm test` **968 tests in 44 files, all pass**;
   `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual`
   **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
   by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
@@ -780,7 +780,7 @@ mask rather than a radial falloff.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 967 tests in 44 files).
+   anything (expect 968 tests in 44 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

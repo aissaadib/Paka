@@ -335,6 +335,42 @@ describe("no brush field is dropped", () => {
     expect(parsed.project.strokes[0].brush).toEqual(BRUSH_WITH_EVERY_FIELD_SET);
   });
 
+  it("reads every field of the brush through a project file, one field at a time", () => {
+    // The project format has its own hand-written brush reader, separate from
+    // the settings one. Walk it field by field too: a field the reader forgets
+    // comes back as its default, and no default below is the distinctive value.
+    const document = createDocument({ name: "Test", width: 200, height: 120 });
+    const layerId = document.layers[0].id;
+    for (const field of everyBrushField()) {
+      const expected = brushWith(field, distinctiveValue(field));
+      const stroke: StrokeRecord = {
+        id: "stroke-1",
+        layerId,
+        brush: expected,
+        xs: [1, 2.5, 3],
+        ys: [4, 5.5, 6],
+        pressures: [0.25, 0.5, 1],
+        times: [0, 16, 40],
+        startTime: 1000,
+      };
+      const store: StrokeSource = {
+        listStrokes: () => [stroke],
+        listElements: () => [stroke],
+      };
+
+      const parsed = parseProject(serializeProject(document, store));
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) {
+        return;
+      }
+      expect(
+        parsed.project.strokes[0].brush[field],
+        `the project reader dropped "${String(field)}"`,
+      ).toEqual(expected[field]);
+    }
+  });
+
   it("reads every field the brush has, one field at a time", () => {
     // The reader is walked field by field here on purpose: a mapping that
     // forgets one field falls back to the default for it, and the default is
