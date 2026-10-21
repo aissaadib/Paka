@@ -988,6 +988,25 @@ transform on apply:
   samples. What *is* guaranteed is that the scaled stroke is an ordinary
   stroke whose samples are the transformed ones, so it re-rasterizes, reopens,
   undoes, redoes and exports exactly like any other.
+- **The fixed-step commands are the same transform with a different number.**
+  The Selection menu offers **Scale by 150 %**, **Rotate 15 degrees clockwise**
+  and **Rotate 15 degrees counter-clockwise** alongside the handles. They write
+  the same coordinate maps, through the same history command, about the same
+  pivot - the centre of the selection's frame, which `selectionBounds()`
+  gives the handle and `boundsOfStrokes(...)` gives the command, one function
+  and one point. The scale is a **factor**, not a target: 1.5 makes the
+  selection one and a half times as large, and applying it again makes it two
+  and a quarter times as large, because the transform does not remember what
+  the selection used to be. The rotation step is the same 15 degrees the
+  handle snaps to.
+- **Undo is the exact inverse; the opposite command is not.** Undo restores the
+  stored originals verbatim, so it is the only exact way back. A counter-turn
+  is **not** a round trip, because a turn moves the frame's centre (the first
+  limit above), so the second turn pivots elsewhere. A scale undone by another
+  scale is close but not exact: the reciprocal of 1.5 is not a number binary
+  floating point can hold, and with strokes of different brush widths the
+  frame's centre moves as well. The labels therefore say what the commands do
+  and nothing more - no command is called an inverse of another.
 
 ### Composition guides
 

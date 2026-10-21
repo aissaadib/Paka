@@ -108,7 +108,11 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   colour, the opacity and the pressure are untouched, so a scaled stroke is
   still the same stroke and a saved file reopens exactly as it looks. The move,
   duplicate, nudge, flip and delete actions also live in the **Selection**
-  menu; the scale and the rotation are handle gestures. Selecting is not an
+  menu, together with three **fixed-step** transforms for precision without
+  dragging: **Scale by 150 %**, **Rotate 15 degrees clockwise** and **Rotate 15
+  degrees counter-clockwise**. They pivot on the same centre as the handles and
+  are one undo step each; the scale multiplies the geometry by 1.5, so using it
+  twice gives 2.25, and undo is the exact way back. Selecting is not an
   edit: it adds no history step and never marks the document dirty.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
