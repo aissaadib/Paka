@@ -2607,6 +2607,36 @@ describe("Canvas2DRenderer live preview compositing (real pixels)", () => {
     );
   });
 
+  it("mixes a semi-transparent top layer in each added blend mode", () => {
+    withPixels(
+      (doc) => addLayer(doc),
+      (harness) => {
+        const topId = harness.doc.layers[1].id;
+        // Backdrop #6699cc and source #cc6633, both opaque, then the whole top
+        // layer at 50 %. Over an opaque backdrop the result is
+        // 0.5 * B(Cb, Cs) + 0.5 * Cb, per channel.
+        paintPixels(harness.surfaces[0], [102, 153, 204, 255], 0, 0, 32, 32);
+        paintPixels(harness.surfaces[1], [204, 102, 51, 255], 0, 0, 32, 32);
+
+        const cases: ReadonlyArray<readonly [LayerBlendMode, readonly [number, number, number]]> = [
+          ["overlay", [133, 143, 189]],
+          ["soft-light", [120, 147, 192]],
+          ["hard-light", [148, 138, 143]],
+          ["color-dodge", [179, 204, 230]],
+          ["difference", [102, 102, 179]],
+        ];
+
+        for (const [mode, expected] of cases) {
+          harness.renderer.setDocument(
+            updateLayer(harness.doc, topId, { opacity: 0.5, blendMode: mode }),
+          );
+          harness.renderer.render();
+          expectPixel(harness.display, 16, 16, expected);
+        }
+      },
+    );
+  });
+
   it("leaves a transparent source untouched for every blend mode", () => {
     withPixels(
       (doc) => addLayer(doc),

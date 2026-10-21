@@ -242,6 +242,13 @@ export interface ParseProjectOptions {
   readonly maxSamples?: number;
   /** Fill-mask pixel ceiling; overridable so the guard itself can be tested cheaply. */
   readonly maxFillPixels?: number;
+  /**
+   * Highest file version this reader accepts. Defaults to `PROJECT_VERSION`.
+   *
+   * Only tests set this: it stands in for an older build when proving that a
+   * bumped file is refused by the version gate instead of being mis-read.
+   */
+  readonly maxVersion?: number;
 }
 
 /** Thrown internally so validation reads as a sequence of assertions. */
@@ -530,6 +537,7 @@ export function parseProject(text: string, options: ParseProjectOptions = {}): P
         text,
         options.maxSamples ?? MAX_PROJECT_SAMPLES,
         options.maxFillPixels ?? MAX_PROJECT_FILL_PIXELS,
+        options.maxVersion ?? PROJECT_VERSION,
       ),
     };
   } catch (error) {
@@ -541,7 +549,12 @@ export function parseProject(text: string, options: ParseProjectOptions = {}): P
   }
 }
 
-function readProject(text: string, maxSamples: number, maxFillPixels: number): ParsedProject {
+function readProject(
+  text: string,
+  maxSamples: number,
+  maxFillPixels: number,
+  maxVersion: number,
+): ParsedProject {
   const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
   let raw: unknown;
@@ -560,10 +573,10 @@ function readProject(text: string, maxSamples: number, maxFillPixels: number): P
     fail("The project file is missing a version number.");
   }
   const version = root.version;
-  if (version > PROJECT_VERSION) {
+  if (version > maxVersion) {
     fail(
       `This project was created by a newer version of Paka (file version ${version}, ` +
-        `this build reads up to ${PROJECT_VERSION}).`,
+        `this build reads up to ${maxVersion}).`,
     );
   }
   if (version < 1) {

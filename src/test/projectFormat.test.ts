@@ -735,6 +735,31 @@ describe("parseProject round trip", () => {
     }
   });
 
+  it("a version-10 reader refuses a version-11 file instead of compositing it normally", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    // `overlay` is the first mode a version-10 build does not know. A version-10
+    // reader that ignored the version gate could only fall back to `normal`,
+    // which would be a different picture, so it must refuse the file.
+    const overlaid = updateLayer(document, layerId, { blendMode: "overlay" });
+    const payload = JSON.parse(
+      serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
+    ) as { version: number };
+    expect(payload.version).toBe(11);
+
+    // The current build reads it...
+    expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
+
+    // ... while a reader that accepts no higher than version 10 refuses it at
+    // the version gate, before any layer is composited.
+    const older = parseProject(JSON.stringify(payload), { maxVersion: 10 });
+    expect(older.ok).toBe(false);
+    if (!older.ok) {
+      expect(older.error).toContain("newer version of Paka");
+      expect(older.error).toContain("reads up to 10");
+    }
+  });
+
   it("opens version 7 files with the normal blend mode", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
