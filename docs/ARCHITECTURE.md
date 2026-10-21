@@ -701,6 +701,53 @@ document dirty. The three sliders are native range inputs, so the wheel is
 fully operable from the keyboard, and the disc is a pointer affordance on top
 of them.
 
+### Colour metrics
+
+Under the wheel the **Colour** panel carries a readout with two numbers about
+the brush colour: the contrast ratio between the ink and the document's
+paper, and the palette swatch that is perceptually closest to the ink. They
+are two numbers because they answer two different questions.
+
+- **Contrast ratio** - WCAG 2.2's relative luminance and its contrast ratio,
+  `(L_lighter + 0.05) / (L_darker + 0.05)`, over the sRGB transfer function
+  linearised with the standard's 0.04045 breakpoint. It is a *lightness*
+  comparison and says nothing about hue: a dark blue against a dark red is
+  1.44:1 while the two are far apart to the eye. The bands are WCAG 2.2's
+  own thresholds (7:1, 4.5:1, 3:1), taken from the unrounded ratio, and they
+  are named as contrast - never as visibility, which a luminance comparison
+  cannot promise.
+- **Colour difference** - CIEDE2000 (CIE 142-2001 / ISO 11664-6) over CIELAB
+  (D65). It is the standard for *small* colour differences and the only CIE
+  formula that stays meaningful in the blue region and at low chroma, where
+  the plain Lab distance over-reports. The implementation reproduces all 34
+  published verification pairs of Sharma, Wu & Dalal (2005) to 1e-4
+  (`src/test/colorMetrics.test.ts`).
+
+Both live in `src/utils/colorMetrics.ts`, which is **DOM-free** and total: it
+reads no canvas, no clock and no randomness, it never throws, and every
+function returns a usable result for any input. The metric functions fold a
+broken channel into the sRGB cube rather than poisoning the result with a
+`NaN`, and the formatters render a value that is not a number as *unknown*,
+so no `NaN` can reach the readout.
+
+Three rules keep the readout honest:
+
+- **It is a read, not an edit.** The readout computes from the brush colour
+  and the document's paper and writes nothing: no control, no document state,
+  no history entry, no dirty flag, and no change to the project format. The
+  ink it measures is the brush colour, so it follows a colour chosen on the
+  wheel, in the toolbar's colour input, in a swatch or picked off the canvas.
+- **A colour that is not a hex colour is not measured.** A project file may
+  hold any non-empty string as a colour, so the module parses with
+  `hexToRgb` and reports *unknown* together with the reason. It never
+  guesses and never throws; the palette itself lives in
+  `src/features/color/palette.ts` and is passed in, so the metric module
+  knows nothing about the app's colours.
+- **The numbers are text.** The ratio, the band and the swatch are words and
+  digits, never a coloured chip that has to be interpreted; the ratio also
+  carries a spoken form ("17.8 to 1") because "17.8:1" would be announced as
+  "seventeen point eight colon one".
+
 ### Shape tools
 
 A line, rectangle, ellipse, polygon or star is a **stroke whose samples trace
