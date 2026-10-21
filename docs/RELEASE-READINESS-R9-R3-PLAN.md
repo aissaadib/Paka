@@ -7,9 +7,9 @@ agent that cannot take the decisions it describes.
 | Field | Value |
 | --- | --- |
 | Repository | `https://github.com/aissaadib/Paka.git` |
-| Commit inspected | `47e309fe4a31c877adbfa44eada580620ed5d05b` ("chore: make docs/g1/ the canonical provenance record, and cross-link it") |
+| Commit inspected | `fac64419247923746b05c319f9a80a5089c41327` ("docs: close the audit with the real-build pixel proof"), branch `feat/stamp-brush-engine`. The document was first written against `47e309f` and **re-validated at `fac6441`** after the tree moved; the numbers below are the current ones, and the addendum records what changed in between. |
 | Branch | `feat/stamp-brush-engine` (`main` is at `ad2ef11`; the stamp engine is **not** in `main`) |
-| Inspection worktree | detached at `47e309f`; all measurements below were taken there, not in the shared checkout |
+| Inspection worktree | detached, at the commit named above; the shared checkout was only read, and every measurement was taken from `git show` blobs so that it cannot be contaminated by another agent's working tree |
 | Items covered | **R9** (CI licence allow-list) and **R3** (clean-room attestation countersignature), per `docs/RELEASE-READINESS.md:15` and `:21` |
 | What was **not** done | no CI workflow created, no allow-list written, no notices regenerated, no attestation edited, no item marked resolved, nothing staged or committed |
 
@@ -38,12 +38,12 @@ directory listing:
 
 **The licence inventory is the project's own source of truth, and it is
 currently honest.** `licenses/dependency-inventory.json` (schema
-`paka.dependency-inventory/1`, `generatedAt` 2026-10-20) holds **503 entries**:
-82 npm + 421 cargo. I compared it against both lockfiles:
+`paka.dependency-inventory/1`, `generatedAt` 2026-10-20) holds **506 entries**:
+85 npm + 421 cargo. I compared it against both lockfiles:
 
 | Ecosystem | Lockfile packages | Inventory entries | In lock, not in inventory | In inventory, not in lock |
 | --- | --- | --- | --- | --- |
-| npm (`pnpm-lock.yaml` `packages:`) | 82 | 82 | **0** | **0** |
+| npm (`pnpm-lock.yaml` `packages:`) | 85 | 85 | **0** | **0** |
 | cargo (`src-tauri/Cargo.lock`) | 422 | 421 | 1 — `paka@0.1.0` | **0** |
 
 The single difference is Paka's own crate, which the inventory's `note` field
@@ -128,7 +128,7 @@ generator's own resolution rules (`scripts/generate-third-party-notices.mjs:34-4
 | MIT | 454 |
 | Unicode-3.0 | 19 |
 | MPL-2.0 | 17 |
-| Apache-2.0 | 7 (10 after the Playwright merge — see the addendum) |
+| Apache-2.0 | 10 |
 | BSD-3-Clause | 4 |
 | ISC | 2 |
 | Zlib | 2 |
@@ -376,7 +376,7 @@ have the scripts import it — **owner decision D6**).
 | T-20 | **exception — version drift invalidates it** | exception for `r-efi@5.3.0`, entry `r-efi@6.0.0` | **fail** — a version bump re-opens the decision |
 | T-21 | **exception — incomplete metadata** | exception without `approvedBy`/`approvedOn` | **fail** (`malformed-exception`) |
 | T-22 | **copyright null is not a licence failure** | `copyright: null`, valid licence | pass (warning at most) |
-| T-23 | **regression — the real tree** | the committed inventory + the committed lockfiles + the proposed policy | **pass**, with the expected elected-family census (MIT 454, Unicode-3.0 19, MPL-2.0 17, Apache-2.0 7, BSD-3-Clause 4, ISC 2, Zlib 2, LLVM-exception 1) — a golden test that pins today's compliance |
+| T-23 | **regression — the real tree** | the committed inventory + the committed lockfiles + the proposed policy | **pass**, with the expected elected-family census (MIT 454, Unicode-3.0 19, MPL-2.0 17, Apache-2.0 10, BSD-3-Clause 4, ISC 2, Zlib 2, LLVM-exception 1) over 506 entries — a golden test that pins today's compliance |
 | T-24 | **regression — the notices are current** | run the generator, compare with the committed file | byte-identical (verified today) |
 | T-25 | **malformed input** | inventory that is not valid JSON, a lockfile that cannot be parsed | exit code 3 with a clear message, not a stack trace |
 
@@ -534,9 +534,12 @@ Two further precision points (not defects, but worth stating when the
 statement is finalised):
 
 * The attestation is scoped to the base commit `ad2ef11` (`:13`), but the
-  implementation spans `ad2ef11..47e309f` (five commits, including the
-  release-readiness merge `a897b76` and the g1 reorganisation `47e309f`). A
-  countersignature should name **the tree it covers**, not only the base.
+  implementation spans `ad2ef11..9b2aceb` (the stamp engine's own commit, plus
+  the release-readiness merge `a897b76` and the g1 reorganisation `47e309f`
+  around it). A countersignature should name **the tree it covers**, not only
+  the base — and if the owner signs for the branch as it stands, that is a wider
+  range (`ad2ef11..fac6441` at the time of writing) that includes unrelated
+  work.
 * The evidence row "`package.json`, `src-tauri/Cargo.toml` | Unchanged" is true
   *of the slice* but not of the range `ad2ef11..HEAD` (`Cargo.toml` gained
   `license = "MIT"` in `a9c67cb`). Rephrasing to "the slice changes neither"
@@ -551,7 +554,7 @@ and what happens if they cannot:
 
 > **What this countersignature covers.** The statement above is about your own
 > reading and directing of the `PHASE3-STAMP-ENGINE` slice, on the branch
-> `feat/stamp-brush-engine`, over the range `ad2ef11..47e309f`. The
+> `feat/stamp-brush-engine`, over the range `ad2ef11..9b2aceb`. The
 > implementation files are listed in the table above; the agents' own
 > attestation and its evidence are in `docs/CLEAN-ROOM-ATTESTATION.md` and
 > `docs/g1/`.
@@ -643,20 +646,21 @@ is true.
 | --- | --- | --- |
 | CI absence | `git log --all --diff-filter=A --name-only --pretty=format:` filtered for CI file names | no matches, ever |
 | CI absence | `Get-ChildItem -Force` at the root; `Get-ChildItem .git/hooks` (excluding samples) | no `.github/`, no hooks |
-| Inventory ↔ lockfile coverage | scratch script `s8-inventory-coverage.mjs` (outside the repository) parsing `pnpm-lock.yaml` `packages:` and `Cargo.lock` | npm 82/82 exact; cargo 421/422, the only difference being `paka@0.1.0` |
+| Inventory ↔ lockfile coverage | scratch script `s8-coverage-at-rev.mjs` (outside the repository), reading `git show` blobs | npm 85/85 exact; cargo 421/422, the only difference being `paka@0.1.0` |
 | Licence surface, unmatched, masked alternatives, AND cases | scratch script `s8-licence-surface.mjs`, replicating `effectiveFamilies()` from `scripts/generate-third-party-notices.mjs:34-155` | 0 unmatched; 8 elected families; 4 masked alternatives; 3 AND packages |
 | Generator idempotence | `node scripts/generate-third-party-notices.mjs` then `git diff -- THIRD_PARTY_NOTICES.md` | byte-identical, exit 0 |
 | Attestation evidence | import scan of `src/core/rendering/stampCoverage.ts`; attribution/brush-engine greps over `src/` | 5 internal imports, 0 attribution hits, 0 brush-engine hits |
-| Slice footprint | `git diff --stat ad2ef11..HEAD -- src/` | 13 files — 3 more than the attestation lists |
+| Slice footprint | `git diff --name-only ad2ef11..9b0a885 -- src/` | 13 files — 3 more than the attestation lists |
 | Slice dependency claim | `git show --stat 9b2aceb -- package.json src-tauri/Cargo.toml pnpm-lock.yaml src-tauri/Cargo.lock` | empty — the slice adds no dependency |
 | Merge precondition | `git merge-base --is-ancestor 9b2aceb main` | false — `main` does not contain the stamp engine |
 | Inventory coverage at `47e309f` / at `9b0a885` | `s8-coverage-at-rev.mjs` (scratch, outside the repo) against `git show` blobs | 82/82 exact at `47e309f`; **85 vs 82 (3 missing) at `9b0a885`** — see the addendum |
-| Staged inventory vs the committed lockfile | `s8-staged-numbers.mjs` (scratch) | 85 / 85, 0 missing, 0 extra |
-| "notices are current" check on the real staged content | `s8-notices-check.mjs` (scratch): render from the staged inventory with the staged generator, compare with the staged notices | **identical, 81,473 bytes** |
+| Inventory coverage at `fac6441` (after `3c2df3f`) | the same script | **85 / 85, 0 missing, 0 extra** |
+| "notices are current" check on the real content | `s8-notices-check.mjs` (scratch): render from the inventory with the generator, compare with the committed notices | **identical, 81,473 bytes** |
+| Re-validation after the tree moved | all of the above re-run at `fac6441` | every finding above still holds; only the inventory totals changed (506 entries) |
 
 Both scratch scripts live outside the repository
 (`C:\Users\aissa\AppData\Local\Temp\opencode\`) and are not part of the project.
-All inspection was done in the detached worktree at `47e309f`; the shared
+All inspection was done from `git show` blobs in a detached worktree; the shared
 checkout was only read.
 
 ---
@@ -684,19 +688,21 @@ the tree. The three Apache-2.0 packages also ship a `NOTICE` file, which
 Apache-2.0 §4(d) requires to be carried forward, so the gap was an obligation
 gap, not only a bookkeeping gap.
 
-**It was closed manually, in the working tree, by another agent** (staged, not
-committed at the time of writing): three entries added to the inventory, a
+**It was closed manually, in the working tree, by another agent** — and has since
+landed as commit **`3c2df3f`** ("chore: record the Playwright packages in the
+dependency inventory and notices"): three entries added to the inventory, a
 "### The Apache-2.0 NOTICE" section added to the generator's template, and the
-notices regenerated. I verified the staged state end to end:
+notices regenerated. I verified that state end to end (the numbers below are
+re-measured at `fac6441`, where the fix is committed):
 
 | Check | Result |
 | --- | --- |
-| staged inventory vs the committed lockfile | **85 / 85, 0 missing, 0 extra** — the gap is closed |
-| staged inventory size | 506 entries (85 npm + 421 cargo) |
-| elected families on the staged inventory | MIT 454, Unicode-3.0 19, MPL-2.0 17, **Apache-2.0 10**, BSD-3-Clause 4, ISC 2, Zlib 2, Apache-2.0 WITH LLVM-exception 1 — **0 unmatched** |
+| committed inventory vs the committed lockfile (at `fac6441`) | **85 / 85, 0 missing, 0 extra** — the gap is closed |
+| committed inventory size | 506 entries (85 npm + 421 cargo) |
+| elected families on the committed inventory | MIT 454, Unicode-3.0 19, MPL-2.0 17, **Apache-2.0 10**, BSD-3-Clause 4, ISC 2, Zlib 2, Apache-2.0 WITH LLVM-exception 1 — **0 unmatched** |
 | distinct licence expressions | 27 (unchanged) |
 | masked alternatives | unchanged: `dunce` → CC0-1.0 / MIT-0; `r-efi@5.3.0` and `r-efi@6.0.0` → LGPL-2.1-or-later |
-| **the proposed "notices are current" check** (render the notices from the staged inventory with the staged generator, compare byte-for-byte with the staged notices) | **IDENTICAL — 81,473 bytes both sides** |
+| **the proposed "notices are current" check** (render the notices from the inventory with the generator, compare byte-for-byte with the committed notices) | **IDENTICAL — 81,473 bytes both sides** |
 
 **What this demonstrates (VERIFIED):**
 
@@ -718,8 +724,8 @@ notices regenerated. I verified the staged state end to end:
 
 **What this does not change.** It does not alter the R9 design above; it
 confirms it, and it shows that the gap is *live* rather than hypothetical. It
-also does **not** resolve R9: the staged fix is not committed, there is still no
-inventory builder, and the next dependency bump will repeat the same manual
-sequence unless the CI check exists.
+also does **not** resolve R9: the fix is committed (`3c2df3f`) but there is still
+no inventory builder and no CI check, so the next dependency bump will repeat
+the same manual sequence unless the check exists.
 
 ---
