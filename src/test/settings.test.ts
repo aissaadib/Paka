@@ -229,6 +229,60 @@ describe("the preferences survive a restart", () => {
     expect(state.gradientType).toBe("radial");
     expect(state.gradientEndColor).toBe("#abcdef");
   });
+
+  it("restores the directional stamp texture", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setBrush({ stamp: true, stampTexture: 0.4 });
+    first.timers.runAll();
+    await settle();
+
+    // The value reaches the file: the writer serializes the whole brush.
+    expect(gateway.writes).toHaveLength(1);
+    expect(JSON.parse(gateway.contents as string).brush.stampTexture).toBe(0.4);
+
+    // And a restart puts it back into the engine, which is what the user sees.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const state = second.engine.getState();
+    expect(state.brush.stamp).toBe(true);
+    expect(state.brush.stampTexture).toBe(0.4);
+  });
+
+  it("defaults the stamp texture for a file written before the field existed", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      brush: { size: 30, stamp: true, stampSpacing: 0.2, stampHardness: 0.5 },
+    });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    // An older file still restores every field it does carry, and the new one
+    // takes its default instead of failing.
+    const brush = engine.getState().brush;
+    expect(brush.size).toBe(30);
+    expect(brush.stamp).toBe(true);
+    expect(brush.stampHardness).toBe(0.5);
+    expect(brush.stampTexture).toBe(0);
+  });
+
+  it("clamps a stamp texture outside 0..1", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      brush: { stampTexture: 4 },
+    });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    expect(engine.getState().brush.stampTexture).toBe(1);
+  });
 });
 
 describe("settings are not document state", () => {

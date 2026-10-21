@@ -149,6 +149,7 @@ function brushOr(value: unknown): BrushSettings {
     texture: brushNumber(record, "texture"),
     stampSpacing: brushNumber(record, "stampSpacing"),
     stampHardness: brushNumber(record, "stampHardness"),
+    stampTexture: brushNumber(record, "stampTexture"),
     stamp: record.stamp === true,
     color: colorOr(record.color, DEFAULT_BRUSH.color),
   };
