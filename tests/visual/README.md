@@ -82,10 +82,18 @@ The corpus covers the current feature set, not only the brush:
 | `gradient` | a linear gradient, with a stroke over it |
 | `multi-layer` | a three-layer stack, one of them hidden |
 | `soft-erase-rim` | a painted stroke with a **soft eraser** across it |
+| `contrast-readout` | the palette's inks on the white paper the contrast readout measures |
 
 `soft-erase-rim` is the scene that catches the audited **region-rounding**
 defect: the composited region floored instead of ceiled clips the erase's
 padded edge, and the live erase and the rebuilt erase then disagree.
+
+`contrast-readout` is the scene behind the colour panel's contrast readout:
+the palette's inks drawn on the white paper the readout measures them
+against. The harness drives the **renderer**, not the UI, so the scene pins
+the colours the readout reports on - the swatches and the paper they are
+measured against - rather than the readout's own text. The readout itself is
+a React component and is verified by hand in the running app.
 
 ## The rules the suite enforces on itself
 

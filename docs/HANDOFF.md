@@ -67,13 +67,13 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 4. Current state (verified 2026-10-21)
 
-- Branch `integration/t10-hsv-color-wheel` at `bc062c7`, after the
-  live-preview compositing, layer-safety, raster-budget, bounded-rasterization,
-  **stamp (dab) brush engine** and **HSV colour wheel** slices. Both the stamp
-  slice (`9b2aceb`) and the colour wheel slice (`dbcb446`) are committed and
-  merged; nothing is waiting in the working tree.
-- **`pnpm test` → 554 tests in 31 files, all pass** (the colour wheel slice).
-  `pnpm typecheck` clean; `pnpm build` succeeds.
+- Branch `feat/t13-contrast-dee`, on top of the live-preview compositing,
+  layer-safety, raster-budget, bounded-rasterization, **stamp (dab) brush
+  engine** and **HSV colour wheel** slices. The stamp slice (`9b2aceb`) and
+  the colour wheel slice (`dbcb446`) are committed and merged; the colour
+  metrics slice is on its own branch.
+- **`pnpm test` → 589 tests in 32 files, all pass** (the colour-metrics
+  slice). `pnpm typecheck` clean; `pnpm build` succeeds.
 - **Project file format version 9** (`PROJECT_VERSION = 9`).
 - A release executable has been built and launched successfully:
   `src-tauri/target/release/paka.exe` (4.58 MB) next to `WebView2Loader.dll`.
@@ -86,6 +86,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t13-contrast-dee` | **Contrast and colour-difference readout** — under the colour wheel: the **WCAG 2.2 contrast ratio** between the brush colour and the document's paper, and the palette swatch **perceptually closest** to the ink (CIEDE2000). Two numbers for two questions: a contrast ratio is a lightness comparison and a colour difference is a perceptual one. The arithmetic is pure (`src/utils/colorMetrics.ts`) and verified against the 34 published CIEDE2000 verification pairs. No dependency, no format change, no control, no history entry. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format version 9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. |
@@ -334,6 +335,12 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/features/shapes/ShapeControls.tsx` — the **Fill shape** switch.
 - `src/features/fill/FillControls.tsx` — the bucket **Tolerance** control.
 - `src/features/gradient/GradientControls.tsx` — **Radial** and **To** colour.
+- `src/utils/colorMetrics.ts` — the pure colour metrics: `relativeLuminance`
+  and `contrastRatio` (WCAG 2.2), `srgbToLab` and `deltaE2000` (CIEDE2000),
+  `nearestByDeltaE`, `contrastBand` and `measureColor` (the string-level
+  entry point that reports *unknown* for a colour that is not a hex colour).
+- `src/features/color/ContrastReadout.tsx`, `src/features/color/palette.ts` —
+  the readout under the wheel and the palette it measures against.
 - `src/state/editorStore.ts` — editor (UI) state actions, e.g. `setShapeFill`,
   `setFillTolerance`, `setGradientType`, `setGradientEndColor`, `dismissNotice`.
 - Tests: `src/test/brushSettings.test.ts`, `src/test/canvas2dStroke.test.ts`,
@@ -341,7 +348,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `src/test/fillCommand.test.ts`,
   `src/test/gradient.test.ts`, `src/test/canvas2dRenderer.test.ts`,
   `src/test/drawingEngine.test.ts`, `src/test/projectFormat.test.ts`,
-  `src/test/projectLifecycle.test.ts`, shared fakes in
+  `src/test/projectLifecycle.test.ts`, `src/test/colorMetrics.test.ts`,
+  shared fakes in
   `src/test/support/recordingCanvas.ts` (gradient methods and `filter` state are
   injected alongside the recorded methods).
 

@@ -1,0 +1,125 @@
+{
+    "id": "contrast-readout",
+    "width":  160,
+    "height":  160,
+    "background":  "#ffffff",
+    "layers":  [
+                   {
+                       "id":  "Inks",
+                       "elements":  [
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#16181c",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       12,
+                                                       12
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#e5484d",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       34,
+                                                       34
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#e8a33d",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       56,
+                                                       56
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#3fb950",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       78,
+                                                       78
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#3b82f6",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       100,
+                                                       100
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#8b5cf6",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       122,
+                                                       122
+                                                   ]
+                                        },
+                                        {
+                                            "kind":  "stroke",
+                                            "brush":  {
+                                                          "hardness":  1,
+                                                          "color":  "#d946a0",
+                                                          "size":  14
+                                                      },
+                                            "xs":  [
+                                                       16,
+                                                       144
+                                                   ],
+                                            "ys":  [
+                                                       144,
+                                                       144
+                                                   ]
+                                        }
+                                    ]
+                   }
+               ]
+}

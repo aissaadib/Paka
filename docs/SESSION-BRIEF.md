@@ -6,8 +6,9 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-21**, at `dbcb446` - the **HSV colour wheel**
-slice, merged into the development branch.
+Last verified: **2026-10-21**, on `feat/t13-contrast-dee` - the **contrast
+and colour-difference readout** slice, built on the **HSV colour wheel**
+slice merged into the development branch.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
@@ -30,13 +31,14 @@ slice, merged into the development branch.
 
 ## 2. Current state (verified today)
 
-- Branch `integration/t10-hsv-color-wheel` at `bc062c7` — a merge of the
-  colour wheel branch (`dbcb446`) into the development branch — after the
-  live-preview compositing, layer-safety, raster-budget, bounded-
-  rasterization, **stamp (dab) brush engine** and **HSV colour wheel** slices.
-  The colour wheel slice is integrated, not a branch waiting for review.
-- `pnpm test` → **554 tests in 31 files, all pass** (the colour wheel slice).
-- `pnpm typecheck` clean; `pnpm build` succeeds (the colour wheel slice).
+- Branch `feat/t13-contrast-dee` - the **contrast and colour-difference
+  readout** slice, on top of the live-preview compositing, layer-safety,
+  raster-budget, bounded-rasterization, **stamp (dab) brush engine** and
+  **HSV colour wheel** slices. The colour wheel slice is integrated, not a
+  branch waiting for review.
+- `pnpm test` → **589 tests in 32 files, all pass** (the colour-metrics
+  slice).
+- `pnpm typecheck` clean; `pnpm build` succeeds (the colour-metrics slice).
 - Project file format **version 9** (`PROJECT_VERSION = 9`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
@@ -57,6 +59,7 @@ slice, merged into the development branch.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/t13-contrast-dee` | **Contrast and colour-difference readout** — under the colour wheel: the **WCAG 2.2 contrast ratio** between the brush colour and the document's paper, and the palette swatch **perceptually closest** to the ink (CIEDE2000). Two numbers for two questions: a contrast ratio is a *lightness* comparison and a colour difference is a *perceptual* one, so neither stands in for the other. The arithmetic is pure and in `src/utils/colorMetrics.ts`, verified against the 34 published CIEDE2000 verification pairs. No dependency, no format change, no control, no history entry, no dirty flag. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
 | `2fa34cc` | **Element-scratch variant reverted** — the experiment in `f7cf50c` was reverted: it bought nothing demonstrable, it differed by 1/255 of alpha on a few dozen pixels at rasterScale 2, and it would have moved the raster budget from 58 to 59 bytes per document pixel. The reverted commit stays in the history. |
@@ -119,6 +122,16 @@ slice, merged into the development branch.
   `setBrush`, so it follows a colour picked off the canvas and the toolbar's
   colour input; the sliders are keyboard-operable; choosing a colour is not an
   edit.
+- **Contrast and colour-difference readout** (under the wheel): the **WCAG 2.2
+  contrast ratio** between the brush colour and the document's paper, named by
+  a band ("excellent", "good", "fair", "low"), and the palette swatch
+  **perceptually closest** to the ink, with its CIEDE2000 distance. The ratio
+  is a lightness comparison and the distance a perceptual one, so the readout
+  shows both and claims neither for the other. It is a read-only view: no
+  control, no state, no history entry, no dirty flag, and it follows a colour
+  chosen anywhere (wheel, toolbar input, swatches, canvas picker). A colour
+  that is not a hex value - which a project file may hold - is reported as
+  unknown rather than guessed at.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
   eraser and shapes), sampling (2–200 % of diameter, sample density),
   stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
@@ -182,7 +195,7 @@ src/
     project/    format v9, gateway port, file orchestration
     export/     PNG export
   types/        shared value types
-  utils/        math, colour, ids, paths, store
+  utils/        math, colour, colour metrics, ids, paths, store
 src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
@@ -363,6 +376,27 @@ Key files for the next slice (directional / per-dab stamp textures):
   hue is 220° - and any colour changed elsewhere replaces it with the stored
   colour. Choosing a colour is session state for the next gesture, not an
   edit.
+- **Contrast and colour difference are two metrics, and neither stands in for
+  the other.** The contrast ratio is WCAG 2.2's relative luminance - a
+  *lightness* comparison - and the nearest-swatch distance is CIEDE2000 - a
+  *perceptual* one. A dark blue and a dark red are 1.44:1 apart and 38.6
+  ΔE apart: the ratio says nothing about hue, and the distance says nothing
+  about whether a mark will read. The readout therefore names the contrast
+  and never promises visibility, and it measures the ink against the
+  document's paper only - not against whatever is already under the ink.
+- **The metric module is DOM-free and total.** `src/utils/colorMetrics.ts`
+  reads no canvas, no clock and no randomness, never throws, and returns a
+  usable result for any input; a broken channel is folded into the sRGB cube
+  instead of producing a `NaN`, and a value that is not a number is rendered
+  as *unknown* rather than as the text `NaN`. The CIEDE2000 implementation is
+  verified against all 34 published verification pairs (Sharma, Wu & Dalal
+  2005) to 1e-4. The palette is passed in, so the module knows nothing about
+  the app's colours.
+- **A colour that is not a hex colour is not measured.** The stored colour may
+  be any non-empty string (a project file may set `"red"`), so the readout
+  parses with `hexToRgb`, reports *unknown* with the reason, and never
+  guesses. The wheel has the same rule: an unreadable colour shows the wheel
+  at its neutral state.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
@@ -418,6 +452,12 @@ Product:
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
   switch/tool switch, not a painting mask, no scale/rotate/perspective, no
   copy/paste across layers.
+- The contrast readout measures the brush colour against the document's
+  **paper** colour only: it does not account for the colour already under the
+  ink (a stroke over another stroke), and the paper colour is not
+  user-settable yet, so it is the project's background rather than a choice.
+  The nearest-swatch distance is CIEDE2000, a colour-*difference* measure and
+  not a "same colour" test: 0.2 is one 8-bit step, not an identity.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; no guides/grids; no
@@ -476,6 +516,15 @@ Verification gaps:
   layers, preview pixels equal to the post-release pixels). The layer-safety
   and raster-budget changes are covered by Vitest. No manual browser check and
   no packaged Tauri or high-DPI check was done for these three slices.
+- The contrast and colour-difference readout was checked in the browser app:
+  the ratio, the band and the nearest swatch followed a colour chosen on the
+  wheel, in the toolbar's colour input, in a swatch and with the canvas
+  picker; the status bar stayed at `history 0` with no unsaved marker, so the
+  readout is not an edit; and a colour that is not a hex value showed
+  *unknown* with its reason instead of a wrong number. The arithmetic, the
+  34-pair CIEDE2000 corpus and the invalid/short-hand hex cases are covered
+  by Vitest, and the palette-on-paper scene is in the visual-regression
+  corpus. No packaged Tauri or high-DPI check.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
@@ -588,7 +637,7 @@ without changing what current hard, soft, grain and stamped files look like.
 1. `git status -sb` and `git log --oneline -8` — confirm `main` is at the
    commit this file names.
 2. `pnpm test` and `pnpm typecheck` — establish the baseline before touching
-   anything (expect 554 tests in 31 files).
+   anything (expect 589 tests in 32 files).
 3. Read the **"Next slice"** section of `docs/ROADMAP.md`; it is the authority
    if it differs from this brief.
 4. Pick **one** slice, implement it end to end, and add its regression tests.

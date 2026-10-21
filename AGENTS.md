@@ -40,7 +40,7 @@ architecture by browsing.
 | `public/` | Static icons only |
 | `src-tauri/gen/` | Generated Tauri schemas, if present |
 | `licenses/*.txt` | Verbatim third-party licence texts; regenerate the notice file, do not read them |
-| All 31 test files | Use the test map in §8 |
+| All 32 test files | Use the test map in §8 |
 | `README.md` end to end | Feature prose duplicates SESSION-BRIEF; open only for user-facing wording |
 | `docs/HANDOFF.md` and `docs/SESSION-BRIEF.md` both, end to end | Read SESSION-BRIEF first; HANDOFF only §7/§8 when you need toolchain or verification detail |
 | `docs/ARCHITECTURE.md` end to end (976 lines) | Read the named section in §6 |
@@ -57,6 +57,8 @@ architecture by browsing.
 | 1050 | `src/test/projectFormat.test.ts` | format round-trips/rejections |
 | 961 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
 | 724 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
+| 583 | `src/utils/colorMetrics.ts` | luminance/contrast, CIELAB, CIEDE2000, the bands |
+| 401 | `src/test/colorMetrics.test.ts` | the WCAG values, the 34 CIEDE2000 pairs, the bands, invalid hex |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
@@ -64,11 +66,13 @@ architecture by browsing.
 `floodFill`, `document/types.ts`, `canvas2dStroke`, `stampCoverage`,
 `shapeGeometry`, `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `features/color/wheelGeometry.ts` (102),
+`features/color/ContrastReadout.tsx` (107),
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
+`features/color/palette.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 `scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
@@ -93,6 +97,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | Selection / transform | `core/document/strokeSelection.ts`, `core/tools/selectTool.ts`, `DrawingEngine.ts` L1291-1780, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
+| Change the contrast / colour-difference readout | `utils/colorMetrics.ts` (`relativeLuminance`/`contrastRatio`/`srgbToLab`/`deltaE2000`/`measureColor`/`contrastBand`), `features/color/ContrastReadout.tsx`, `features/color/palette.ts`, `features/color/color.css` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L627) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
@@ -145,6 +150,12 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 47, 66, 92 |
 | `createWheelState`, `reduceWheelState` | `features/color/wheelState.ts` | 41, 53 |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
+| `relativeLuminance`, `contrastRatio` | `utils/colorMetrics.ts` | 149, 165 |
+| `srgbToLab`, `deltaE2000` | `utils/colorMetrics.ts` | 197, 268 |
+| `nearestByDeltaE`, `measureColor`, `contrastBand` | `utils/colorMetrics.ts` | 375, 525, 422 |
+| `UNKNOWN_REASONS`, `MetricUnavailable` | `utils/colorMetrics.ts` | 578, 481 |
+| `PALETTE` | `features/color/palette.ts` | 13 |
+| `ContrastReadout` | `features/color/ContrastReadout.tsx` | 36 |
 
 ## 6. Docs → section
 
@@ -153,7 +164,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`,
 | `docs/SESSION-BRIEF.md` | Whole file once (370 lines) for state, workflow, next slice |
 | `docs/ROADMAP.md` | L171-197 ("Next slice"); phase checkboxes only when deciding scope |
 | `docs/HANDOFF.md` | §7 toolchain, §8 verification recipes, §9 next move; skip the rest |
-| `docs/ARCHITECTURE.md` | `## Rendering pipeline` (141), `### Why a stroke buffer` (186), `### Eraser strokes` (223), `### Shape tools` (309), `### Bucket` (360), `### Gradients` (424), `### Selection` (465), `## Undo / redo` (606), `## Testing` (749) |
+| `docs/ARCHITECTURE.md` | `## Rendering pipeline` (141), `### Why a stroke buffer` (186), `### Eraser strokes` (223), `### The colour wheel` (544), `### Colour metrics` (594), `### Shape tools` (309), `### Bucket` (360), `### Gradients` (424), `### Selection` (465), `## Undo / redo` (606), `## Testing` (749) |
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
 | `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
 | `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
@@ -199,6 +210,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
 | Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |
+| Colour metrics / contrast readout | `colorMetrics.test.ts` (WCAG contrast values, the 34 CIEDE2000 verification pairs, the bands, invalid and short-hand hex) |
 
 ## 9. Keep this file useful
 

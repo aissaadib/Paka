@@ -181,6 +181,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       naming the same numbers. It writes the same brush colour the canvas
       picker and the toolbar's colour input write, so colour has one source of
       truth, and choosing a colour is not an edit.
+- [x] Contrast and colour-difference readout: the **WCAG 2.2 contrast ratio**
+      between the brush colour and the document's paper, and the palette
+      swatch perceptually closest to the ink (**CIEDE2000**). Two numbers for
+      two questions - a contrast ratio is a lightness comparison and a colour
+      difference is a perceptual one - and neither is used as a proxy for the
+      other. A read-only view: no control, no state, no history entry.
 - [ ] Open/import raster images.
 - [ ] Palettes, colour history, swatch management.
 
