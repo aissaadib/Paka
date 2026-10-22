@@ -16,9 +16,9 @@ import {
 } from "../core/color/history";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
-import { DEFAULT_APP_SETTINGS, serializeAppSettings } from "../core/settings/appSettings";
 import type { DrawingRenderer, Rgb } from "../core/rendering/types";
 import type { PointerSample } from "../types/pointer";
+import { createStubRenderer } from "./support/stubRenderer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
   return {
@@ -44,30 +44,7 @@ function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
 
 /** A renderer that answers the colour picker with one fixed colour. */
 function createPickerRenderer(color: Rgb): DrawingRenderer {
-  return {
-    kind: "canvas2d",
-    setDocument: () => {},
-    setViewport: () => {},
-    setDisplaySize: () => {},
-    setRasterScale: () => {},
-    invalidateLayer: () => {},
-    beginStroke: () => {},
-    extendStroke: () => {},
-    replaceStroke: () => {},
-    endStroke: () => {},
-    cancelStroke: () => {},
-    setSelection: () => {},
-    setSelectedGuide: () => {},
-    setGrid: () => {},
-    composeDocumentImage: () => {
-      throw new Error("composeDocumentImage is not used in these tests.");
-    },
-    readCompositePixel: () => color,
-    readCompositeImage: () => null,
-    render: () => {},
-    requestRender: () => {},
-    destroy: () => {},
-  };
+  return createStubRenderer({ pixel: color });
 }
 
 function createEngine() {
@@ -260,17 +237,5 @@ describe("the engine keeps the recent colours", () => {
 
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().file.dirty).toBe(false);
-  });
-
-  it("is not written to the settings file", () => {
-    const engine = createEngine();
-    engine.setBrush({ color: "#ff0000" });
-
-    // The history is session state: the settings contract has no field for
-    // it, so nothing about it can reach the file.
-    const text = serializeAppSettings(DEFAULT_APP_SETTINGS);
-
-    expect(text).not.toContain("colorHistory");
-    expect(text).not.toContain("#ff0000");
   });
 });

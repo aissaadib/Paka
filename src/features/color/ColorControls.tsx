@@ -13,7 +13,7 @@
  * is a toolbar that pushes the canvas off the screen.
  */
 
-import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR } from "../../core/brushes/defaults";
+import { canSwapColors, isDefaultColors } from "../../core/color/colors";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { colorInputValue } from "../../utils/color";
 
@@ -22,9 +22,8 @@ export function ColorControls() {
   const { brush, secondaryColor } = useEditorState();
   const current = brush.color;
   const secondary = secondaryColor;
-  const canSwap = current !== secondary;
-  const isDefault =
-    current === DEFAULT_BRUSH.color && secondary === DEFAULT_SECONDARY_COLOR;
+  const canSwap = canSwapColors(current, secondary);
+  const isDefault = isDefaultColors(current, secondary);
 
   return (
     <div className="toolbar__group color-controls">

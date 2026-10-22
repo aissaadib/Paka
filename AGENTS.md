@@ -102,10 +102,11 @@ commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/color/ColorDock.tsx`, `features/color/RecentColors.tsx`,
 `features/color/SwatchGrid.tsx`,
-`core/color/history.ts`,
+`core/color/history.ts`, `core/color/colors.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
 `core/autosave/recovery.ts`,
+`test/support/stubRenderer.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 `scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
@@ -219,7 +220,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
 | `PaletteSwatch`, `DEFAULT_PALETTE`, `normalizePalette`, `addPaletteSwatch`, `renamePaletteSwatch`, `removePaletteSwatch`, `findSwatchByColor` | `core/color/palette.ts` | grep the symbol |
-| `COLOR_HISTORY_LIMIT`, `pushColorHistory`, `normalizeColorHistory`, `colorHistoryEqual` | `core/color/history.ts` | 30, 49 |
+| `COLOR_HISTORY_LIMIT`, `pushColorHistory`, `normalizeColorHistory`, `colorHistoryEqual`, `ColorPickOptions` | `core/color/history.ts` | 30, 49 |
+| `canSwapColors`, `isDefaultColors` | `core/color/colors.ts` | grep the symbol |
 | `ColorDock`, `PalettePanel`, `RecentColors`, `SwatchGrid`, `ColorTextField` | `features/color/ColorDock.tsx`, `features/color/PalettePanel.tsx`, `features/color/RecentColors.tsx`, `features/color/SwatchGrid.tsx`, `features/color/ColorTextField.tsx` | grep the symbol |
 
 ## 6. Docs → section

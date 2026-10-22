@@ -19,7 +19,7 @@
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR } from "../../core/brushes/defaults";
+import { canSwapColors, isDefaultColors } from "../../core/color/colors";
 import { colorInputValue } from "../../utils/color";
 import { ColorTextField } from "./ColorTextField";
 
@@ -61,9 +61,8 @@ export function ColorDock() {
 
   const ink = brush.color;
   const alt = secondaryColor;
-  const canSwap = ink !== alt;
-  const isDefault =
-    ink === DEFAULT_BRUSH.color && alt === DEFAULT_SECONDARY_COLOR;
+  const canSwap = canSwapColors(ink, alt);
+  const isDefault = isDefaultColors(ink, alt);
 
   return (
     <div className="color-dock">

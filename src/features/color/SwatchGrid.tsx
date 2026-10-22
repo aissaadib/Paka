@@ -30,7 +30,7 @@ export interface SwatchGridProps<T> {
    * element inside it needs the attribute `data-swatch-focusable`, so the
    * arrow keys can find it.
    */
-  readonly renderItem: (item: T, index: number) => ReactNode;
+  readonly renderItem: (item: T) => ReactNode;
 }
 
 const ARROW_KEYS = new Set(["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"]);
@@ -87,7 +87,7 @@ export function SwatchGrid<T>({
       onKeyDown={onKeyDown}
       style={{ "--swatch-columns": columns } as CSSProperties}
     >
-      {items.map((item, index) => renderItem(item, index))}
+      {items.map((item) => renderItem(item))}
     </div>
   );
 }

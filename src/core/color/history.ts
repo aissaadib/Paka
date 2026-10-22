@@ -18,7 +18,7 @@
  * that cannot be painted is not a colour the history can hold.
  */
 
-import { hexToRgb, rgbToHex } from "../../utils/color";
+import { normalizeHexColor } from "../../utils/color";
 
 /**
  * How many recent colours are kept.
@@ -50,11 +50,7 @@ export interface ColorPickOptions {
 
 /** A colour as a lowercase `#rrggbb`, or `null` when it is not a colour. */
 function normalizeHistoryColor(color: unknown): string | null {
-  if (typeof color !== "string") {
-    return null;
-  }
-  const rgb = hexToRgb(color.trim());
-  return rgb === null ? null : rgbToHex(rgb);
+  return normalizeHexColor(color);
 }
 
 /**

@@ -196,6 +196,23 @@ export function hexToHsv(hex: string): Hsv | null {
 }
 
 /**
+ * A colour as a lowercase `#rrggbb`, or `null` when it is not one.
+ *
+ * The app stores and paints opaque hex colours, so this is the one place a
+ * colour of any shape is reduced to the shape the app can store: `#abc`
+ * becomes `#aabbcc`, and anything that is not a hex colour - a translucent
+ * one included, because the app paints opaque colours only - is `null`
+ * rather than a guess.
+ */
+export function normalizeHexColor(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const rgb = hexToRgb(value.trim());
+  return rgb === null ? null : rgbToHex(rgb);
+}
+
+/**
  * The value an `input[type=color]` can hold.
  *
  * The native control accepts only `#rrggbb`, so a colour stored in another
@@ -204,8 +221,7 @@ export function hexToHsv(hex: string): Hsv | null {
  * accepts rather than an empty one.
  */
 export function colorInputValue(color: string, fallback = "#000000"): string {
-  const rgb = hexToRgb(color.trim());
-  return rgb === null ? fallback : rgbToHex(rgb);
+  return normalizeHexColor(color) ?? fallback;
 }
 
 /* ------------------------------------------------------------------ input */

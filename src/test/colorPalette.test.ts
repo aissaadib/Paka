@@ -31,6 +31,7 @@ import {
   serializeAppSettings,
 } from "../core/settings/appSettings";
 import type { PointerSample } from "../types/pointer";
+import { createStubRenderer, flatImage } from "./support/stubRenderer";
 
 function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
   return {
@@ -56,41 +57,10 @@ function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
 
 /** A renderer that answers the bucket's composite read with a flat colour. */
 function createFlatRenderer(color: Rgb): DrawingRenderer {
-  const width = 40;
-  const height = 40;
-  const data = new Uint8ClampedArray(width * height * 4);
-  for (let offset = 0; offset < data.length; offset += 4) {
-    data[offset] = color.r;
-    data[offset + 1] = color.g;
-    data[offset + 2] = color.b;
-    data[offset + 3] = 255;
-  }
-  const composite = { data, width, height, colorSpace: "srgb" } as ImageData;
-
-  return {
-    kind: "canvas2d",
-    setDocument: () => {},
-    setViewport: () => {},
-    setDisplaySize: () => {},
-    setRasterScale: () => {},
-    invalidateLayer: () => {},
-    beginStroke: () => {},
-    extendStroke: () => {},
-    replaceStroke: () => {},
-    endStroke: () => {},
-    cancelStroke: () => {},
-    setSelection: () => {},
-    setSelectedGuide: () => {},
-    setGrid: () => {},
-    composeDocumentImage: () => {
-      throw new Error("composeDocumentImage is not used in these tests.");
-    },
-    readCompositePixel: () => color,
-    readCompositeImage: () => composite,
-    render: () => {},
-    requestRender: () => {},
-    destroy: () => {},
-  };
+  return createStubRenderer({
+    pixel: color,
+    image: flatImage(40, 40, color),
+  });
 }
 
 function createEngine(renderer?: DrawingRenderer) {

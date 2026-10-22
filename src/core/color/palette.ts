@@ -17,7 +17,7 @@
  * rather than guessed at.
  */
 
-import { hexToRgb, rgbToHex } from "../../utils/color";
+import { normalizeHexColor } from "../../utils/color";
 import { createId, reserveId } from "../../utils/id";
 import { asRecord } from "../../utils/record";
 
@@ -105,12 +105,8 @@ export function uniqueSwatchName(
 }
 
 /** A colour as a lowercase `#rrggbb`, or `null` when it is not a colour. */
-export function normalizeSwatchColor(color: unknown): string | null {
-  if (typeof color !== "string") {
-    return null;
-  }
-  const rgb = hexToRgb(color.trim());
-  return rgb === null ? null : rgbToHex(rgb);
+function normalizeSwatchColor(color: unknown): string | null {
+  return normalizeHexColor(color);
 }
 
 /**
