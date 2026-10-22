@@ -145,6 +145,7 @@ import { toStrokeSample } from "../input/pointer";
 import { serializeProject, type ParsedProject } from "../project/projectFormat";
 import { Canvas2DRenderer } from "../rendering/Canvas2DRenderer";
 import { strokeDiameter } from "../rendering/canvas2dStroke";
+import { resolveDevicePixelRatio, watchDevicePixelRatio } from "../rendering/displayScale";
 import type { DrawingRenderer, StrokeSource } from "../rendering/types";
 import {
   ZOOM_STEP,
@@ -565,6 +566,8 @@ export class DrawingEngine implements StrokeSource {
 
   private renderer: DrawingRenderer | null = null;
   private binder: CanvasInputBinder | null = null;
+  /** Stops the device-pixel-ratio watcher; see `attach`. */
+  private stopDisplayScaleWatch: (() => void) | null = null;
   private strokeBuilder: StrokeBuilder | null = null;
   private activeStroke: StrokeRecord | null = null;
   private panGestureActive = false;
@@ -742,19 +745,26 @@ export class DrawingEngine implements StrokeSource {
       spacing: this.gridSpacing,
       snap: this.gridSnapping,
     });
-    if (this.viewportSize.width > 0) {
-      renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, this.devicePixelRatio);
-    }
     this.renderer = renderer;
+    // The display size and the raster scale follow the device pixel ratio, so
+    // they are applied together, here and whenever the ratio changes.
+    this.applyDisplayMetrics();
 
     const handlers: CanvasInputHandlers = {
       getViewport: () => this.viewport,
-      onPointerSample: (sample) => this.handlePointerSample(sample),
+      onPointerSamples: (samples) => this.handlePointerSamples(samples),
       onWheel: (input) => this.handleWheel(input),
       onPointerPresence: (inside) => this.handlePresence(inside),
     };
     this.binder = new CanvasInputBinder(canvas, handlers);
     this.binder.attach();
+    // A window that moves to a display with a different ratio does not have to
+    // resize, and a ratio change fires no `resize` event, so the ratio is
+    // watched directly: otherwise the surface would keep the old backing
+    // store and the layers would keep the old raster scale.
+    this.stopDisplayScaleWatch = watchDevicePixelRatio({
+      onChange: () => this.applyDisplayMetrics(),
+    });
     this.syncSelectionOverlay();
     this.requestRender();
   }
@@ -762,6 +772,14 @@ export class DrawingEngine implements StrokeSource {
   detach(): void {
     this.abortStroke();
     this.resetGuideGesture();
+    // A selection gesture owns samples that are not in history yet, and a
+    // middle-button pan owns the viewport: both have to be given back, or the
+    // document would keep a transform that was never recorded and the next
+    // pointer move would pan instead of drawing.
+    this.cancelSelectionGesture();
+    this.panGestureActive = false;
+    this.stopDisplayScaleWatch?.();
+    this.stopDisplayScaleWatch = null;
     this.binder?.detach();
     this.binder = null;
     this.renderer?.destroy();
@@ -788,16 +806,36 @@ export class DrawingEngine implements StrokeSource {
       this.setViewport(this.initialViewport(), false);
     }
 
-    const dpr = this.readDevicePixelRatio();
-    const scaleChanged = dpr !== this.devicePixelRatio;
-    this.devicePixelRatio = dpr;
-    this.rasterScale = clamp(dpr, 1, this.maxRasterScale);
+    this.applyDisplayMetrics();
+  }
 
-    if (this.renderer) {
-      if (scaleChanged) {
-        this.renderer.setRasterScale(this.rasterScale);
-      }
-      this.renderer.setDisplaySize(width, height, dpr);
+  /**
+   * Applies the current device pixel ratio to the renderer.
+   *
+   * The ratio decides two things: how big the display surface's backing store
+   * is (the CSS size times the ratio) and how finely the layer surfaces are
+   * rasterized. Both have to move together, so the ratio is applied in one
+   * place - when the surface is measured *and* when the ratio changes under a
+   * window that did not resize.
+   */
+  private applyDisplayMetrics(): void {
+    const ratio = this.readDevicePixelRatio();
+    const rasterScale = clamp(ratio, 1, this.maxRasterScale);
+    const scaleChanged = rasterScale !== this.rasterScale;
+    this.devicePixelRatio = ratio;
+    this.rasterScale = rasterScale;
+
+    const renderer = this.renderer;
+    if (!renderer) {
+      return;
+    }
+    if (scaleChanged) {
+      // The layer surfaces are re-rasterized at the new scale, so an in-flight
+      // stroke is abandoned by the renderer; the next sample redraws it whole.
+      renderer.setRasterScale(rasterScale);
+    }
+    if (this.viewportSize.width > 0 && this.viewportSize.height > 0) {
+      renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, ratio);
     }
   }
 
@@ -3311,8 +3349,7 @@ export class DrawingEngine implements StrokeSource {
     if (typeof window === "undefined") {
       return 1;
     }
-    const ratio = window.devicePixelRatio;
-    return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+    return resolveDevicePixelRatio(window.devicePixelRatio);
   }
 
   /**
@@ -3323,9 +3360,33 @@ export class DrawingEngine implements StrokeSource {
    * but it is not a UI-facing action.
    */
   handlePointerSample(sample: PointerSample): void {
+    this.handlePointerSamples([sample]);
+  }
+
+  /**
+   * Feeds one pointer event - possibly several coalesced samples - to the
+   * active tool.
+   *
+   * Every sample of the batch is a position the pointer really passed
+   * through, so every one of them reaches the tool: a stroke must not lose a
+   * sample. The *cursor* is reported once, for the newest sample: the
+   * intermediate positions belong to the same physical move, so republishing
+   * them only costs a DOM write per sample without telling the user anything
+   * new.
+   */
+  handlePointerSamples(samples: readonly PointerSample[]): void {
+    const lastIndex = samples.length - 1;
+    for (let index = 0; index <= lastIndex; index += 1) {
+      this.routePointerSample(samples[index], index === lastIndex);
+    }
+  }
+
+  private routePointerSample(sample: PointerSample, reportCursor: boolean): void {
     // The cursor reports where the pointer *is*; snapping only moves the
     // sample a drawing tool commits.
-    this.reportCursor(sample);
+    if (reportCursor) {
+      this.reportCursor(sample);
+    }
     const snapped = this.snapSample(sample);
 
     if (sample.phase === "down") {

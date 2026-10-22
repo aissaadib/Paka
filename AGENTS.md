@@ -99,7 +99,7 @@ commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
-`core/autosave/recovery.ts`,
+`core/autosave/recovery.ts`, `core/rendering/displayScale.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 `scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
@@ -133,6 +133,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
+| Change the pointer lifecycle or the coordinate mapping | `core/input/canvasInputBinder.ts` (the capture, the cancel, the lost capture, the window losing the focus, the coalesced batch), `core/input/pointer.ts` (the normalization), `core/rendering/viewport.ts` (the screen↔document math), `core/rendering/displayScale.ts` (the device pixel ratio), `DrawingEngine.ts` (`handlePointerSamples`, `routePointerSample`, `applyDisplayMetrics`), `features/canvas/CanvasStage.tsx` (the measured rectangle) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Window sizing / DPI | `src-tauri/src/window_fit.rs` (the clamp), `src-tauri/src/lib.rs` (`.setup`), `src-tauri/tauri.conf.json` (the default size), `docs/qa/PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md` (the measurement rule) |
 | Decide what to build next | `docs/SESSION-BRIEF.md` §9 and `docs/ROADMAP.md` §Next slice only |
@@ -145,6 +146,10 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `EditorSnapshot`, `DocumentFileState` | `core/engine/DrawingEngine.ts` | 132, 209 |
 | `DrawingEngine` (class) | `core/engine/DrawingEngine.ts` | 402 |
 | `handlePointerSample` (gesture router) | `core/engine/DrawingEngine.ts` | 2542 |
+| `handlePointerSamples` / `routePointerSample` (the gesture router) | `core/engine/DrawingEngine.ts` | grep the symbol |
+| `applyDisplayMetrics` (the device pixel ratio) | `core/engine/DrawingEngine.ts` | grep the symbol |
+| `CanvasInputBinder` (the DOM binding) | `core/input/canvasInputBinder.ts` | grep the symbol |
+| `watchDevicePixelRatio` / `resolveDevicePixelRatio` | `core/rendering/displayScale.ts` | grep the symbol |
 | `beginStroke` / `extendStroke` / `finishStroke` / `cancelStroke` | `core/engine/DrawingEngine.ts` | 1252 / 1281 / 1607 / 1646 |
 | Shape lifecycle | `core/engine/DrawingEngine.ts` | 1302-1371 |
 | Fill lifecycle | `core/engine/DrawingEngine.ts` | 1391-1485 |
@@ -275,6 +280,8 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
+| Pointer lifecycle (capture, cancel, blur) | `canvasInputBinder.test.ts` (the DOM boundary: the capture, the cancel, the lost capture, the window losing the focus), `pointerLifecycle.test.ts` (the engine: a batch of coalesced samples, a cancelled gesture) |
+| The device pixel ratio | `displayScale.test.ts` (the resolver, the ratio watcher) |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
 | Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |

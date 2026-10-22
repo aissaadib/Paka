@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent29-pointer` | **Pointer lifecycle, high-DPI and viewport robustness** - a **window that loses the focus ends the gesture**. A window that is not focused is not given a `pointerup`, so a stroke that was in flight stayed in flight: the preview stayed on the canvas, the stroke kept growing with the next move, and nothing was ever committed; a shape, a gradient, a fill or a selection that was interrupted this way was committed by a release the user never made. The DOM binder now watches `blur` and `visibilitychange` and ends the gesture with the tool's own cancel, exactly like a lost capture. A **release for a pointer the binder never tracked is ignored** (it belongs to another device or to a synthetic event, and forwarding it ended the tracked gesture at a place the user never released at), and a **cancelled gesture gives the pointer capture back**. A **device pixel ratio change is noticed** even when the window does not resize: the ratio decides the display surface's backing store and the layer surfaces' raster scale, and a window moved between monitors kept the old ones, so the drawing stayed soft until the next resize. The **canvas element is the measured rectangle**, so the display transform and the pointer mapping cannot drift apart. And a **move event is handed over as one batch**: every coalesced sample still reaches the tool, but the cursor is published once per event instead of once per sample. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -250,7 +251,16 @@ visual-regression harness.
   opacity and blend mode, leaves the document untouched.
 - **Status bar**: document size, zoom, history depth, selected count, cursor
   position, file name/messages, `● unsaved`.
-- **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
+- **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR. A
+  **device pixel ratio change is noticed even when the window does not
+  resize** (moving the window to a display with a different ratio fires no
+  `resize` event), so the display surface's backing store and the layers'
+  raster scale follow the ratio instead of waiting for the next resize.
+- **A window that loses the focus ends the gesture in flight**: a stroke, a
+  shape, a gradient, a fill or a selection that was interrupted by an
+  alt-tab is finished the way a lost capture finishes it - the brush commits
+  its pixels, everything else is discarded - so nothing stays stuck on the
+  canvas and no late release commits work the user never finished.
 - **New document**: 8–8192 px per side and at most 16,777,216 px in total,
   validated. The total limit is a raster-memory budget (three 2× RGBA surfaces
   plus a transient scan buffer, 58 bytes per document pixel, inside 1 GiB), so
@@ -665,6 +675,20 @@ Verification gaps:
   layers, preview pixels equal to the post-release pixels). The layer-safety
   and raster-budget changes are covered by Vitest. No manual browser check and
   no packaged Tauri or high-DPI check was done for these three slices.
+- The **pointer lifecycle** was checked in the browser app at state level, on
+  the **fixed** build and on the **base** build for contrast: a drag that
+  loses the focus mid-way used to be committed by a release the user never
+  made (history 0 at the blur, history 1 at the late release) and is now
+  finished at the blur (a rectangle and a gradient record nothing and the
+  late release records nothing; a brush stroke is committed once, by the
+  blur, because its pixels are real). A device pixel ratio change without a
+  resize used to leave the display surface's backing store at the old size
+  (930×583 for a 744×406 canvas at 1.25) and now resizes it with the ratio
+  (1488×933 at 2). The **pixels** were not checked: the harness tab is
+  hidden, so `requestAnimationFrame` is suspended and the display canvas
+  never repaints - the visual-regression harness is the tool for that. The
+  scale/rotate **handle** gesture could not be driven reliably through
+  synthetic events; its cancel path is covered by Vitest.
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use

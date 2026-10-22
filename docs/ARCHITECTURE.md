@@ -111,6 +111,27 @@ tested directly.
 in the app). Raising it makes strokes crisper on HiDPI displays at the cost of
 memory; it never changes document size or stroke coordinates.
 
+### The device pixel ratio
+
+The ratio decides two things: how big the display canvas's backing store is
+(the canvas's CSS box times the ratio) and how finely the layer surfaces are
+rasterized (`rasterScale`). Both have to move together, so the engine applies
+the ratio in one place (`applyDisplayMetrics`).
+
+**Noticing** that the ratio changed is the hard part. A ratio change fires no
+`resize` event, and a window that moves to a display with a different ratio does
+not have to resize at all. The only signal that does fire is a media query on
+the ratio itself: `(resolution: 2dppx)` stops matching the moment the ratio
+becomes 1.5. `core/rendering/displayScale.ts` watches that query and re-arms
+itself at the new ratio after every change, because a media query is pinned to
+the ratio it was created for. Without the watch, a window moved between
+monitors kept the old backing store and the old raster scale, so the drawing
+stayed soft until the window was resized.
+
+The canvas element is the rectangle everything is measured against: it is the
+box the drawing is shown in *and* the rectangle the pointer is mapped against,
+so the display transform and the input mapping cannot drift apart.
+
 ## Module map
 
 | Path | Responsibility | Depends on |
@@ -1511,6 +1532,19 @@ React render. Behaviour:
 - **Pointer capture** keeps a stroke alive when the pointer leaves the canvas;
   a lost capture cancels the stroke (or an uncommitted fill) explicitly rather
   than leaving it dangling.
+- **A window that loses the focus ends the gesture.** A window that is not
+  focused is not given a `pointerup`: the browser stops delivering pointer
+  events to it, and a release that happened in the background is never seen.
+  Without this the gesture stayed in flight - the preview stayed on the canvas,
+  the stroke kept growing with the next move, and nothing was ever committed.
+  The binder watches `blur` and `visibilitychange` and ends the gesture with
+  the tool's own cancel, exactly like a lost capture. The brush commits on a
+  cancel (its pixels are real), so a stroke interrupted this way is committed
+  once; a shape, a gradient, a fill and a selection are discarded, so they
+  record nothing and the late release commits nothing either.
+- **A release for a pointer the binder never tracked is ignored.** It belongs
+  to another device or to a synthetic event, and forwarding it would end the
+  tracked gesture at a place the user never released at.
 - **Presses outside the paper are ignored.** The canvas is larger than the
   document, so `beginStroke` rejects a sample that is not on the document
   rectangle (an inclusive test, so the edge pixel still paints). Without this a
@@ -1521,7 +1555,11 @@ React render. Behaviour:
 - **One pointer at a time** (`activePointerId`), so a second finger or device
   cannot interleave samples into a single stroke.
 - **Coalesced events** are replayed, so high-frequency pen input is not dropped
-  between frames.
+  between frames. A whole event is handed to the engine as one batch: every
+  coalesced sample reaches the tool (a stroke must not lose a sample), but the
+  *cursor* is published once, for the newest sample. The intermediate positions
+  belong to the same physical move, so republishing them only cost a DOM write
+  per sample in the brush outline and the status bar.
 - **Middle-button drag pans** regardless of the active tool; `mousedown` on
   button 1 is suppressed to stop Chromium's autoscroll.
 - **Wheel** scrolls vertically, `Shift+Wheel` scrolls horizontally, and

@@ -51,17 +51,28 @@ export function CanvasStage() {
 
     engine.attach(canvas);
 
+    // The viewport is measured from the **canvas element**, not from its
+    // frame: the canvas is the box the drawing is shown in, and it is also
+    // the rectangle the pointer is mapped against. Measuring the same
+    // rectangle for both means the display's backing store always matches the
+    // box the pixels are shown in, so the drawing cannot drift away from the
+    // pointer - at any zoom and at any device pixel ratio.
+    //
+    // The surface is sized by CSS (`width: 100%; height: 100%`), so the
+    // backing store the renderer writes never changes the observed size and
+    // the observer cannot feed back into itself.
     const reportSize = () => {
-      const rect = frame.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
       engine.setViewportSize(rect.width, rect.height);
     };
 
     const observer = new ResizeObserver(reportSize);
-    observer.observe(frame);
+    observer.observe(canvas);
     reportSize();
 
     // A DPR change (moving the window to another monitor) does not always
-    // resize the element, so it is checked on window resize as well.
+    // resize the element, so it is checked on window resize as well. A change
+    // that comes without a resize is caught by the engine's own ratio watch.
     window.addEventListener("resize", reportSize);
 
     return () => {
