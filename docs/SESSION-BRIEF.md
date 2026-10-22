@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent27-context-menu` | **Canvas context menu and command palette** - the canvas answers a **right-click** with a menu of the commands that make sense there: undo and redo, select all and deselect, duplicate and delete the selection, scale, rotate and flip it, the zoom commands, the grid switches and the layer commands. The menu owns **no commands of its own**: every row is a registry action, so the name, the chord and the enabled state come from the same table the keyboard uses, and a command that cannot run right now is shown **greyed out with the reason** (*Nothing is selected.*, *There is nothing to undo.*) instead of vanishing - the menu keeps its shape, so the user learns where a command lives. The keyboard drives it: the arrow keys walk the rows and **skip the disabled ones**, `Home`/`End` jump to the ends, `Enter` runs the command, `Escape` closes it, and a click outside dismisses it. The menu is **kept inside the window** (clamped in CSS pixels, so a high-density screen and a small window are both fine) and the first enabled row takes the focus when it opens. A **right-button click never paints**: the right-button gesture waits for the first movement, so a click opens the menu on an empty canvas while a **right-drag still paints with the secondary colour**, from the position the button went down. The **command palette** (`Ctrl+K`) filters the same table: type a few letters to find any command - the tools, the view commands, the file commands, the selection transforms - and `Enter` runs it. The matching is loose on purpose (*dup* finds *Duplicate Selection*, *ctrl+z* finds Undo), every word of the query has to match, and the palette shows each command's chord. There is **no second command list** to keep in step: a command that is added to the keyboard table is in the palette too. **No project-format change.** |
 | `feat/agent09-view-navigation` | **Status bar, zoom, pan and view navigation** - the status bar now reports what the engine actually holds: the file name and its unsaved marker, the document's size, the **active tool**, the **active layer**, the zoom, the history depth, the selection, the guides, the grid and the live cursor position. Every field is read from the engine's own snapshot, so none of them can drift away from the canvas, and a field that does not apply is not shown at all. The **zoom is an editable field**: it shows the zoom the canvas really has and takes a typed one (`150`, `150%` or `1.5x`), clamped to the range the viewport supports (2 %-6400 %), so it can never ask for a zoom the canvas cannot show; `Enter` commits, `Escape` throws the typing away. The zoom **buttons are bounded** - they grey out at the ends of the range - and a zoom keeps the point under the pointer where it is (the middle of the window when the pointer is elsewhere). The canvas can be **turned**: a 90° rotation (`Shift+R`) and a left-right mirror (`Shift+M`), with **Reset View** (`Ctrl+Shift+0`) putting it back the way it was found. The orientation is **view state**: it moves the canvas and nothing else, so it adds no history step, bumps no revision and never marks the file unsaved, and the status bar names the view while it is not upright. Panning has a third answer: the **space bar** held down turns any drag into a pan, so a user without a middle mouse button is not left out; the modifier only decides what a *new* press does, so a stroke in flight keeps drawing. **No project-format change.** |
 | `feat/agent28-workspace-layout` | **Persistent workspace layout and editor preferences** - Paka now remembers how the window was arranged. A **Workspace** menu offers two real **profiles** - *Painting* (every panel up, the full brush controls, the designed size) and *Compact Canvas* (the side panels and the tool rail hidden, the interface smaller, so the canvas fills the window) - plus **Restore Workspace Defaults**. A profile is an **arrangement, not a label**: applying it puts the shell into that state, the side panels included, and the settings file keeps it, so the window comes back the way the user left it. The workspace also holds the **interface scale** (a `--ui-scale` token on the root element, so the whole shell grows and shrinks together), the **colour scheme** (a dark and a light one, the same token names either way) and the **brush panel's density** (the full controls or just the size and the opacity, and the preset row on or off). The profile the menu offers is **computed**, never trusted: a workspace the user arranged by hand is honestly called *Custom*. It is a **section of the settings file** under `workspace`, beside the panel layout's `panels` key - one file, one writer - and it is **shell state**, so rearranging the window is not an edit (no history step, no dirty flag) and nothing of it reaches a `.paka` file. A missing, corrupt or future-versioned workspace starts the app with the defaults and no error, and an out-of-range scale is clamped rather than rejected. The **status bar is not hideable**: it carries the outcome of the last file operation, and a preference that could swallow a failed save would be a lost message. **Reference-image metadata is deliberately not persisted** - a reference is session state, its placement is in workspace pixels and its file path is not kept, so there is nothing meaningful to restore without the pixels. **No project-format change.** |
 | `feat/agent24-secondary-view` | **A second view of the canvas** - `View → New View of Canvas` opens a second canvas beside the main one, showing the **same** document through a transform of its own (its own zoom, pan, rotation and mirror, with **Fit** and **100 %** of its own). It is a second *window* on one document, never a second document: the engine keeps **one** document, **one** history and **one** dirty flag, and a view owns only its canvas, its transform and its size. A stroke drawn in either view is one stroke in one document and shows up in both at once; undo from either view undoes that one step; opening or closing the view changes no pixel, adds no history step and never marks the file unsaved; a PNG export is the document, not a view. The two views are two **display targets of one renderer**, so they share the rasterized layer surfaces and the in-progress stroke - the second view costs a projection of pixels that are already drawn, not a second copy of the artwork. Each view has its own input binding (a wheel over one moves that one), a press makes a view the **active** one, and the zoom, the fit and the rotation act on the active view. The selection is one thing and is drawn in both views. **No project-format change** - a view is display state, like the grid. |
@@ -371,6 +372,14 @@ visual-regression harness.
 - **Status bar**: document size, active tool, active layer, zoom (editable),
   history depth, selected count, cursor position, file name/messages,
   `● unsaved`.
+- **Canvas context menu**: a right-click opens the commands that make sense
+  there (history, selection, transforms, zoom, grid, layers). Every row is the
+  registry's own action, with the registry's name and chord; a command that
+  cannot run now is disabled with the reason. Arrow keys walk the rows,
+  `Enter` runs, `Escape` closes. A right-click never paints; a right-drag
+  still paints with the secondary colour.
+- **Command palette** (`Ctrl+K`): filters the same registry, shows each
+  command's chord and runs it with `Enter`. No second command list.
 - **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
 - **New document**: 8–8192 px per side and at most 16,777,216 px in total,
   validated. The total limit is a raster-memory budget (three 2× RGBA surfaces
@@ -385,6 +394,7 @@ src/
   components/   shell: menu bar, toolbars, panels, icons
   features/     canvas, brushes, colour, layers, history, document,
                 project (file commands/dialogs/title/close guard),
+                commands (the canvas menu and the command palette),
                 shapes, fill, gradient
   hooks/        React bindings, keyboard shortcuts, native environment
   state/        editorStore (snapshot + intents) and context,
@@ -402,7 +412,10 @@ src/
     gradient/   gradient geometry/stops/cloning
     tools/      registry, per-tool behaviour, shape geometry
     commands/   command stack, stroke/fill/gradient/document commands
-    input/      pointer normalization, DOM binder
+    actions/    the one command table (the registry), the commands without a
+                chord, the availability rules, the canvas menu's rows and the
+                palette's search
+    input/      pointer normalization, DOM binder, the click/drag distance
     rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke,
                 stampCoverage (dab placement + coverage union)
     engine/     DrawingEngine: integration, gestures, history, snapshot
@@ -698,6 +711,14 @@ Product:
 
 - No text tool; only brush, eraser, select, line, rectangle, ellipse, polygon,
   star, bucket, gradient, picker, guides, pan.
+- **No clipboard copy.** The canvas menu and the palette offer *Duplicate
+  Selection* (a copy inside the document), not a copy to the system
+  clipboard: nothing writes to or reads from the clipboard, so a selection
+  cannot be moved to another document or another program.
+- The **right button** is the canvas menu's button: a right-button *click*
+  opens the menu and never paints, while a right-button *drag* paints with the
+  secondary colour. A right-button gesture therefore starts at the first
+  movement, so a click cannot leave a dab, a fill or a selection behind.
 - Shapes: a committed shape stores its **points**, not its kind, so a polygon or
   a star cannot be re-edited as one - it is an ordinary stroke afterwards. There
   is no rotation *gesture* (the option covers the need), no irregular polygon,

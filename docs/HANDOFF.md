@@ -264,18 +264,28 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   per input event and skipped for jumps over `MAX_INTERPOLATION_DISTANCE`.
   Exposed as 2-200 % of diameter; default `0.12` (12 %) preserves the old
   behaviour. It changes stored samples, not brush width.
-- **Stabilizer is an exponential follow, not a rope.** `follow = 1 - 0.75 *
-  strength`; the first point is exact and each later captured point moves that
-  fraction from the previous captured point toward the raw sample. At `0` the
-  factor is exactly `1`, so the legacy path is unchanged. `finish()` appends the
-  last raw point when it differs from the captured tail, and the engine sends
-  that settle segment to the renderer before `endStroke`; the committed stroke
-  therefore ends on the release point instead of hiding a post-process. At high
-  strength the line visibly lags while moving. Shapes ignore it.
+- **The stabilizer filters the path, and only the path.** It lives in
+  `core/brushes/stabilizer.ts` and has a **mode** and a **strength**:
+  `off` stores the pointer's own path, `smooth` is an adaptive first-order lag
+  (heavy while the pointer is slow, almost transparent while it is fast) and
+  `pull` is the rubber band (the captured point trails the pointer by a fixed
+  *time*). The strength is a **time constant** (133 ms for `smooth`, 50 ms for
+  `pull` at full strength), so the same gesture is filtered the same way at
+  60 Hz and at 240 Hz. `smooth` shortens that time constant as the pointer
+  speeds up; the speed is the **median** of the recent steps over six raw
+  samples, and a step much larger than the recent travel opens the filter at
+  once so a flick is not rounded into a swoop. The first point is exact, the
+  **pressure and the times are the device's own** (the pressure curve is
+  applied later, at rasterization), and the release runs a catch-up of at most
+  four points whose last point is the release point **exactly**; the engine
+  sends that tail to the renderer before `endStroke`. Measured: a 100 px/s
+  drag trails the pointer by 4.43 px at every frame rate, and a 1 px tremor at
+  10 Hz keeps 37 % of its amplitude. Shapes ignore the stabilizer.
 - **Spacing and stabilizer are captured per stroke**, like the rest of the
   brush, so changing either never rewrites existing work, adds history or dirties
-  the document. `stabilizer` is additive within v6 because the stored samples
-  already describe the smoothed path; `spacing` was already in the format.
+  the document. `stabilizer` is additive within v6 and `stabilizerMode` within
+  v12, because the stored samples already describe the smoothed path;
+  `spacing` was already in the format.
 - **Texture is a single grain pass over the finished coverage, not stamps.** The
   scratch copy (feathered first when hardness < 1) is filled with a 128x128
   white grain tile under `destination-in`, so alpha is multiplied once and
@@ -306,8 +316,10 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - `src/core/gradient/gradientRecord.ts` — gradient creation, endpoint movement,
   length/degeneracy and cloning.
 - `src/core/brushes/strokeBuilder.ts` — `StrokeBuilder` sample capture,
-  spacing interpolation, `STABILIZER_MAX_LAG` exponential follow and
-  `finish()` settle point.
+  spacing interpolation and `finish()`.
+- `src/core/brushes/stabilizer.ts` — the pointer-path filter: the modes
+  (`off`, `smooth`, `pull`), the time constant, the speed estimate and the
+  release catch-up.
 - `src/core/document/strokeStore.ts` — ordered `LayerElement` list plus the
   filtered stroke view and in-place `replace` for gradient previews.
 - `src/core/commands/fillCommand.ts` — redo replays the committed patch.
@@ -426,11 +438,19 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
   `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
-  `u` guides, `h` pan (middle-drag also pans);
+  `u` guides, `h` pan (middle-drag also pans, and so does a drag while the
+  **space bar** is held);
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
   duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
   the guide drag and clears the guide selection, and `Delete` removes the
   selected guide.
+- **View shortcuts (verified 2026-10-22).** `Ctrl+=`/`Ctrl+-` zoom in and out,
+  `Ctrl+1` is 100 %, `Ctrl+0` fits the document; `Shift+R` turns the canvas
+  90° clockwise, `Shift+M` mirrors it left to right and `Ctrl+Shift+0` resets
+  the view (upright, unmirrored, the whole document). The status bar's zoom
+  field takes a typed zoom (`150`, `150%` or `1.5x`) and clamps it to 2 %-6400 %;
+  `Enter` commits and `Escape` throws the typing away. A view action is **not**
+  an edit: `history` does not move and `● unsaved` does not appear.
 - **Guides check (verified 2026-10-21).** Press `u`: the rail shows a **Guides**
   button and the status bar counts the guides. A drag on empty canvas creates one
   guide and raises `history` by one; the guide sits at the **press** coordinate
@@ -499,6 +519,24 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   per-stroke capture, editor-state/no-dirty behaviour, format round-trip
   (including a missing stabilizer defaulting to 0) and save/reopen are covered
   by Vitest; no stabilizer pixel-difference measurement was made.
+- **Stabilizer modes check (measured 2026-10-22, by the test suite).** The
+  filter lives in `src/core/brushes/stabilizer.ts` and is covered by
+  `src/test/stabilizer.test.ts` (31 tests) and by the capture comparison in
+  `src/test/strokeBuilder.test.ts`. The measured facts, at full strength:
+  a straight drag trails the pointer by **1.9 px at 20 px/s, 4.4 px at
+  100 px/s and 6.3 px at 1000 px/s** - the trail grows with the speed and
+  then saturates; the same gesture trails by **4.43 px at 60, 120 and 240 Hz
+  alike**, because the strength is a time constant and not a share of the
+  distance; a **1 px tremor at 10 Hz** on a 50 px/s line keeps **37 %** of its
+  amplitude; a fast corner is followed within one or two samples; and the
+  release catch-up is at most four points whose last point is the release
+  point **exactly**. The **pressure and the timestamps are the device's own**,
+  so the pressure curve is still applied once, at rasterization. The toolbar
+  control is wired through the options schema (a **Stabilizer** drop-down with
+  `off` / `smooth` / `pull`, and a **Smoothing** slider that only appears
+  while the mode is not `off`), and the mode round-trips through the settings
+  file, the presets and the project file. **Not yet checked by hand in the
+  running app**: the control's placement in the toolbar is still in flux.
 - **Texture check (verified 2026-10-20).** The brush panel shows **Texture**
   (default `0 %`). At size 80, spacing 12 %, stabilizer 0 %, a synthetic pen drag
   with texture 0 sampled 29 interior points and found exactly one colour
@@ -636,8 +674,9 @@ Optional polish, deliberately not done yet:
   not bound (use `File -> New Document...`); fills are binary/unselectable;
   gradients are two-stop, whole-layer, have no stop editor and are unselectable;
   hardness is a Gaussian feather of the stroke silhouette (not a stamp profile);
-  spacing controls sample density rather than stamp spacing; the stabilizer is an
-  exponential follow filter with visible lag and no look-ahead/rope catch-up;
+  spacing controls sample density rather than stamp spacing; the stabilizer is a
+  time-constant filter with three modes, so the trail is bounded and measured,
+  and the stroke ends exactly on the release point;
   texture is a single grain pass, not an image texture; the stamp engine's own
   per-dab texture is a procedural bristle pattern, not a picture, and there is
   no brush tip; blend modes are limited to `normal`, `multiply`

@@ -91,6 +91,9 @@ field, the growth and the soft edge), `fillOptions` (the bucket's options),
 `features/color/ContrastReadout.tsx` (198),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
+`core/actions/commandSearch.ts` (the palette's matching and its ranks),
+`features/commands/CanvasContextMenu.tsx` (the canvas menu),
+`features/commands/CommandPalette.tsx` (the palette),
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
@@ -138,6 +141,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
+| Change the canvas menu or the command palette | `core/actions/registry.ts` (the one command table), `core/actions/commands.ts` (the commands without a chord), `core/actions/availability.ts` (why a command cannot run), `core/actions/canvasMenu.ts` (the menu's rows), `core/actions/commandSearch.ts` (the palette's matching), `core/actions/commandRows.ts` (a command resolved against the state), `features/commands/CanvasContextMenu.tsx`, `features/commands/CommandPalette.tsx`, `core/input/clickGesture.ts` (the click/drag distance) |
 | Change the status bar or the view controls | `features/canvas/CanvasStatusBar.tsx` (the fields), `features/view/viewNavigation.ts` (the zoom format and the typed zoom), `features/view/ZoomField.tsx` (the editable zoom), `features/view/ViewControls.tsx` (the rotate/mirror/reset buttons), `core/rendering/viewport.ts` (the transform), `core/engine/DrawingEngine.ts` (`zoomIn`/`zoomOut`/`zoomTo`/`zoomToFit`/`rotateView`/`toggleViewMirror`/`resetView`/`setPanModifier`), `core/actions/registry.ts` (the chords) |
 | Change the second view of the canvas | `core/engine/canvasViews.ts` (the view registry: the identities, the active view, the summaries), `core/engine/DrawingEngine.ts` (`openSecondaryView`/`closeSecondaryView`/`attachSecondaryView`/`detachSecondaryView`/`setSecondaryViewSize`/`focusView`/`fitView`/`actualSizeView`), `core/rendering/types.ts` (`DisplayTargetOptions` and the optional display-target methods), `core/rendering/Canvas2DRenderer.ts` (`addDisplayTarget`/`removeDisplayTarget`/`renderTarget`), `features/view/SecondaryViewPanel.tsx` (the panel), `src/test/secondaryView.test.ts` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
@@ -271,6 +275,15 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 47, 66, 92 |
 | `createWheelState`, `reduceWheelState` | `features/color/wheelState.ts` | 41, 53 |
 | `ACTION_DEFINITIONS`, `findActionForEvent`, `dispatchKeyboardEvent`, `validateRegistry` | `core/actions/registry.ts` | grep the symbol |
+| `findActionById` | `core/actions/registry.ts` | grep the symbol |
+| `COMMAND_ACTIONS` | `core/actions/commands.ts` | grep the symbol |
+| `actionAvailability`, `selectionAvailable`, `undoAvailable`, `deleteAvailable` | `core/actions/availability.ts` | grep the symbol |
+| `CANVAS_MENU`, `buildCanvasMenu` | `core/actions/canvasMenu.ts` | grep the symbol |
+| `commandRow`, `shortcutLabel` | `core/actions/commandRows.ts` | grep the symbol |
+| `searchCommands`, `matchLabel`, `matchChord` | `core/actions/commandSearch.ts` | grep the symbol |
+| `isClickGesture`, `CLICK_SLOP_PX` | `core/input/clickGesture.ts` | grep the symbol |
+| `clampMenuPosition` | `utils/menuPosition.ts` | grep the symbol |
+| `CanvasContextMenu`, `CommandPalette` | `features/commands/CanvasContextMenu.tsx`, `features/commands/CommandPalette.tsx` | grep the symbol |
 | `matchesShortcut`, `logicalKey`, `isTextEntryTarget`, `formatShortcut` | `core/actions/keyboard.ts` | grep the symbol |
 | `ActionDefinition`, `ActionContext`, `ShortcutSpec`, `ActionId` | `core/actions/types.ts` | grep the symbol |
 | `normalizePressureCurve`, `evaluatePressureCurve`, `pressureCurvesEqual` | `core/brushes/pressureCurve.ts` | grep the symbol |
@@ -378,6 +391,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Navigator | `navigator.test.ts` (the layout and the mapping between navigator, canvas and document pixels, the grab and jump rules, the engine's centring intents and the overview cache) |
 | Reference images | `referenceImages.test.ts` (the workspace-space transform, the decode - a malformed file, a file that is too large, an enormous image downscaled while it decodes - the store and its one decoded copy, a failed import, the session budget, the sampled pixel through the placement, the picker's foreground and background sampling, the cursor feedback, and that a reference never reaches the export) |
 | Panel manager | `panelLayout.test.ts` (the registry, the layout rules, the store, the mounting policy, the settings section and the round trip through the settings file), `menuNavigation.test.ts` (the menu's keyboard rules) |
+| The canvas menu and the command palette | `canvasMenu.test.ts` (the rows, the ids, the availability with and without a selection, the command routing and the history), `commandSearch.test.ts` (the palette's matching, the chord query and the registry it reads), `menuPosition.test.ts` (the popup clamp) |
 
 ## 9. Keep this file useful
 

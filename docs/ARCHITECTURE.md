@@ -137,6 +137,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
 | `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
+| `src/core/actions` | The one table of editor intents (the registry), the commands without a chord, the availability rules, the canvas menu's rows and the palette's search | core/engine (types), state (types) |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
 | `src/core/engine` | Integration: stroke lifecycle, history, layers, viewport, cursor stream | all of `core` |
@@ -2246,7 +2247,44 @@ picker, the preview and the reset button cannot disagree about which preset is
 in effect, and the reset can restore a preset's defaults after the brush has
 been changed.
 
+### The canvas menu and the command palette
+
+There is **one** table of editor intents: the action registry
+(`core/actions/registry.ts`). The keyboard, the canvas menu and the command
+palette all read it, so a command's name, its chord and the state it may run
+in exist once.
+
+A command may have **no chord** - "rotate 15 degrees clockwise" has no
+natural key - and is then reached by name (`commandOnly`). Such a command claims
+no key, so it can never shadow another command's chord, and the registry's
+duplicate-chord check still holds.
+
+Three rules keep the surfaces honest:
+
+- **Availability is one answer.** `core/actions/availability.ts` says why a
+  command cannot run right now (`Nothing is selected.`, `There is nothing to
+  undo.`). A menu shows that reason next to the disabled row and the palette
+  shows it too, so a greyed-out command explains itself instead of being a
+  mystery.
+- **The menu owns no commands.** `core/actions/canvasMenu.ts` is a list of
+  registry ids; the rows are resolved against the editor's state. A row that
+  is not in the registry is dropped rather than shown dead.
+- **The palette filters, it does not list.** `core/actions/commandSearch.ts`
+  matches the registry's own labels and chords, so a command added to the
+  keyboard table is in the palette too, with its shortcut, and there is no
+  second list to keep in step.
+
+The canvas menu is opened by the platform's **context-menu request**, which
+the canvas already keeps away from the operating system's own menu. A
+right-button *click* must not paint, so the engine **defers the right-button
+gesture** until the pointer moves: a click opens the menu on an untouched
+canvas, and a right-drag still paints with the secondary colour from the
+position the button went down. The distance that tells the two apart is four
+**CSS pixels** (`core/input/clickGesture.ts`), so it means the same thing at
+every zoom and on every display.
+
 ## Native boundary (Rust)
+
 `src-tauri` holds the project file I/O: `read_text_file`,
 `write_text_file_atomic`, `write_binary_file_atomic` (all path-validating,
 extension-restricted and size-capped) plus `native_environment()`, which returns

@@ -308,6 +308,21 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   same menu, and the layout is remembered in the per-user settings file. The
   menu bar itself is keyboard driven: the arrow keys open a menu and walk its
   items, and `Escape` closes it.
+- **Canvas context menu**: a right-click on the canvas opens a menu of the
+  commands that make sense right there - undo and redo, select all and deselect,
+  duplicate and delete the selection, scale, rotate and flip it, the zoom
+  commands, the grid switches and the layer commands. Every row is the same
+  command the keyboard runs, with the same name and the same shortcut, and a
+  command that cannot run right now is shown greyed out with the reason
+  (*Nothing is selected.*). The arrow keys walk the menu, `Enter` runs the
+  command, `Escape` closes it, and the menu keeps itself inside the window.
+  A right-button **drag** still paints with the secondary colour; only the
+  right-button *click* opens the menu, and a click never leaves a dab behind.
+- **Command palette** (`Ctrl+K`): type a few letters to find any command - the
+  tools, the view commands, the file commands, the selection transforms - and
+  `Enter` runs it. The palette filters the same command table the keyboard
+  uses, so there is no second list to keep in step, and it shows each command's
+  shortcut. A query that names a chord finds that chord's command too.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the
