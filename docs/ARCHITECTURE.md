@@ -1603,6 +1603,32 @@ Every control in the shell reads the engine's snapshot, so there is one source
 of truth for the active tool, the document, the active layer, the foreground
 colour and the zoom. The shell holds no copy of any of them.
 
+### How a feature plugs into the shell
+
+The shell offers three slots, and a feature takes one of them without knowing
+anything about the others:
+
+- **The options row.** A feature renders its controls into the row as a
+  group: `<div className="toolbar__group">…</div>`, with a
+  `toolbar__divider` between groups. The row scrolls, so a group may be wider
+  than the window; nothing has to fit for the control to work. The
+  `ToolOptionsPanel` (the schema-driven options) and the brush group are two
+  such groups, and the tool's own options come first so they are never pushed
+  out of sight by the brush's parameters.
+- **The dock.** A feature renders a `Panel` (title, optional action row,
+  scrollable body, optional footer) into the panel area. The dock stacks the
+  panels, scrolls when they do not fit, and gives the last one the remaining
+  height. The colour panel and the layers panel are two such panels, and the
+  gradient's stop editor is a third, shown only while the gradient tool is
+  active.
+- **The rail.** A tool joins the rail by being registered in
+  `TOOL_DEFINITIONS` and having an icon in `TOOL_ICONS`; the rail groups the
+  tools into families with a hairline between them.
+
+A feature that needs an editor of its own - something taller than a row of
+controls - belongs in the dock rather than in the options row, because the
+row's height is fixed and a growing editor would resize the canvas.
+
 The snapshot is republished only when something with visual meaning changes
 (tool, brush, layer list, viewport, history, document). Field-identity checks
 keep it from churning. Two things deliberately bypass React:

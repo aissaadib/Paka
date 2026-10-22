@@ -61,6 +61,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 | `pnpm test:watch` | Vitest in watch mode. |
 | `pnpm typecheck` | `tsc -p tsconfig.json --noEmit`. |
 | `pnpm build` | Typecheck **and** `vite build` → `dist/`. |
+| `pnpm test:shell` | The workspace shell in a real browser (Playwright): the bands, the canvas's room, no layout jump when the tool changes, no sideways overflow. Its own port is 1437; override it with `PAKA_SHELL_PORT` when that port is taken. |
 | `pnpm tauri dev` | Desktop app against the dev server. Needs cargo on `PATH` (see §7). |
 | `pnpm tauri build --no-bundle` | Release executable only → `src-tauri/target/release/paka.exe`. |
 | `pnpm tauri build` | The above plus MSI/NSIS installers (needs WiX/NSIS downloads). |
