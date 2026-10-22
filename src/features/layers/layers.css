@@ -58,13 +58,19 @@
  * The insertion marker of a drag reorder.
  *
  * A two-pixel accent line between the rows, so the place the layer will land
- * is visible before the drop. It takes no space of its own: the rows keep
- * their density while the drag is in flight.
+ * is visible before the drop.
+ *
+ * The marker takes **no room**: its negative margins cancel both the extra
+ * gap the item adds to the list and its own height, so the rows stay exactly
+ * where they were. That matters more than it looks: if the marker moved the
+ * rows, the row under the pointer would move with it, the pointer would end
+ * up in the other half of it, and the drop would land one place away from the
+ * marker the artist was looking at.
  */
 .layer-marker {
-  height: 0;
-  margin: 0 2px;
-  border-top: 2px solid var(--accent);
+  height: 2px;
+  margin: -2px 0;
+  background: var(--accent);
   list-style: none;
 }
 
@@ -189,6 +195,22 @@
 
 .layer-row__visibility:hover {
   color: var(--text-strong);
+}
+
+/**
+ * The layer's preview.
+ *
+ * The slot is always there, so a row never changes width when a layer gains
+ * content; the picture is drawn into it when the renderer has one. The border
+ * keeps a blank preview from reading as a hole in the row.
+ */
+.layer-row__thumb {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-inset);
 }
 
 .layer-row__name {

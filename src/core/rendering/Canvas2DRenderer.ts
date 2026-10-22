@@ -144,6 +144,21 @@ interface StrokeRegion {
 }
 
 /**
+ * A cached preview of one layer.
+ *
+ * The canvas is kept so the panel can draw it again without the renderer
+ * downscaling the layer a second time; the background is remembered because
+ * the preview is drawn over the paper, and a new document has another paper.
+ */
+interface LayerThumbnail {
+  readonly canvas: HTMLCanvasElement;
+  readonly size: number;
+  readonly background: string;
+  /** The cropped rectangle the preview shows, as a key; `null` for the document. */
+  readonly crop: string | null;
+}
+
+/**
  * True when a layer contributes to the composite at all.
  *
  * Shared by the display/export painter and the colour probe so the two cannot
@@ -177,6 +192,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private readonly requestFrame: () => void;
   /** Grain tiles keyed by quantized strength; generated once and reused. */
   private readonly textureTiles = new Map<number, HTMLCanvasElement>();
+  /**
+   * The small previews of the layers, keyed by layer.
+   *
+   * A preview is a downscale of the layer's own surface, so it is only worth
+   * keeping while the surface still holds those pixels: every place that
+   * changes a layer's pixels drops its entry, and the next read rebuilds it.
+   */
+  private readonly thumbnails = new Map<LayerId, LayerThumbnail>();
 
   private doc: DrawingDocument | null = null;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
@@ -330,6 +353,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     // Surfaces for removed layers are dropped; new layers get a dirty surface
     // the first time they are composited.
     this.surfaces.retain(doc.layers.map((layer) => layer.id));
+    // The previews belong to the old document's layers and paper.
+    this.thumbnails.clear();
   }
 
   setViewport(viewport: Viewport): void {
@@ -356,12 +381,16 @@ export class Canvas2DRenderer implements DrawingRenderer {
       resizeCanvas(this.strokeBuffer, doc.width * scale, doc.height * scale);
       this.abandonStroke();
     }
+    // The surfaces were dropped, so every preview went with them.
+    this.thumbnails.clear();
     this.dropPreviewSurface();
     this.requestFrame();
   }
 
   invalidateLayer(layerId: LayerId): void {
     this.surfaces.markDirty(layerId);
+    // The layer's pixels are about to change, so its preview is stale.
+    this.thumbnails.delete(layerId);
     this.requestFrame();
   }
 
@@ -478,6 +507,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.activeStroke = null;
       this.dropStampCoverage();
       this.dropPreviewSurface();
+      // The layer's pixels changed: the erase was subtracted from the surface.
+      this.thumbnails.delete(stroke.layerId);
       this.requestFrame();
       return;
     }
@@ -490,6 +521,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     // The preview is over: the group scratch is released so it cannot sit
     // next to a later erase snapshot (see the raster budget).
     this.dropPreviewSurface();
+    // The layer's pixels changed: the stroke is now on the surface.
+    this.thumbnails.delete(stroke.layerId);
     this.requestFrame();
   }
 
@@ -499,6 +532,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
       // surface holds *snapshot minus stroke*, which is not what the stroke list
       // says, so it must be put back before the snapshot is dropped.
       this.restoreEraseBase();
+      if (this.eraseLayerId !== null) {
+        // The layer's pixels went back to what they were, so its preview is
+        // stale in the other direction: the one it had before the erase.
+        this.thumbnails.delete(this.eraseLayerId);
+      }
     }
     this.dropEraseBase();
     this.clearStrokeBuffer();
@@ -846,6 +884,83 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
+   * A small preview of one layer, drawn over the paper.
+   *
+   * The preview is a downscale of the layer's **own surface** - the pixels
+   * the renderer already has - so producing it costs one scaled draw and no
+   * rasterization at all. A layer whose surface is missing or stale has *no*
+   * preview: re-rasterizing it here would do the display's work in the middle
+   * of the panel's, and the display may be busy with something else.
+   *
+   * The result is cached, and every place that changes a layer's pixels drops
+   * the entry, so a read after a change rebuilds the preview exactly once.
+   */
+  readLayerThumbnail(
+    layerId: LayerId,
+    size: number,
+    crop: Bounds | null = null,
+  ): HTMLCanvasElement | null {
+    const doc = this.doc;
+    if (this.destroyed || !doc || size <= 0) {
+      return null;
+    }
+    const surface = this.surfaces.get(layerId);
+    if (!surface || surface.dirty) {
+      return null;
+    }
+
+    const pixels = Math.max(1, Math.round(size));
+    const key = crop === null ? null : `${crop.x},${crop.y},${crop.width},${crop.height}`;
+    const cached = this.thumbnails.get(layerId);
+    if (
+      cached &&
+      cached.size === pixels &&
+      cached.background === doc.background &&
+      cached.crop === key
+    ) {
+      return cached.canvas;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = pixels;
+    canvas.height = pixels;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = doc.background;
+    ctx.fillRect(0, 0, pixels, pixels);
+    // The smoothing is deliberately cheap: a preview is a thumbnail, and the
+    // source can be a surface twice the document's size.
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "low";
+
+    // The rectangle the preview shows: the layer's content, or the whole
+    // document when the layer is empty. It is scaled into the square and
+    // centred, so the proportions are kept.
+    const area = crop ?? { x: 0, y: 0, width: doc.width, height: doc.height };
+    const scale = Math.min(pixels / area.width, pixels / area.height);
+    const width = area.width * scale;
+    const height = area.height * scale;
+    ctx.drawImage(
+      surface.canvas,
+      area.x * this.rasterScale,
+      area.y * this.rasterScale,
+      area.width * this.rasterScale,
+      area.height * this.rasterScale,
+      (pixels - width) / 2,
+      (pixels - height) / 2,
+      width,
+      height,
+    );
+    this.thumbnails.set(layerId, { canvas, size: pixels, background: doc.background, crop: key });
+    return canvas;
+  }
+
+  /**
    * Reads the composite the user sees at a document point.
    *
    * A 1x1 scratch is filled with the paper, then every visible layer is drawn
@@ -918,6 +1033,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.destroyed = true;
     this.scheduler.cancel();
     this.surfaces.dispose();
+    this.thumbnails.clear();
     this.activeStroke = null;
     this.dropEraseBase();
     this.dropStampCoverage();
@@ -1668,6 +1784,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
       // and the committed stroke is applied by the next re-rasterization.
       return;
     }
+    // The layer's pixels are about to change.
+    this.thumbnails.delete(stroke.layerId);
     const surface = this.restoreEraseBase();
     if (!surface) {
       return;

@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DragEvent, FocusEvent } from "react";
 import { IconEye, IconEyeOff } from "../../components/icons";
 import type { Layer } from "../../core/document/types";
+import { useEditor } from "../../hooks/useEditor";
 
 export interface LayerRowProps {
   readonly layer: Layer;
@@ -29,6 +30,15 @@ export interface LayerRowProps {
   readonly draft: string;
   /** How many elements the layer holds. */
   readonly elementCount: number;
+  /** The edge of the preview in device pixels. */
+  readonly thumbnailSize: number;
+  /**
+   * Bumped by the panel when the previews should be looked at again.
+   *
+   * The panel owns the schedule - the renderer rasterizes a layer on its own
+   * frame - so the rows only need to know that it is time to look.
+   */
+  readonly previewTick: number;
   readonly onSelect: () => void;
   readonly onToggleVisibility: () => void;
   readonly onFocus: () => void;
@@ -54,6 +64,8 @@ export function LayerRow({
   renaming,
   draft,
   elementCount,
+  thumbnailSize,
+  previewTick,
   onSelect,
   onToggleVisibility,
   onFocus,
@@ -71,7 +83,43 @@ export function LayerRow({
 }: LayerRowProps) {
   const [opacityOpen, setOpacityOpen] = useState(false);
   const [opacityDraft, setOpacityDraft] = useState(Math.round(layer.opacity * 100));
+  const { engine } = useEditor();
   const rowRef = useRef<HTMLLIElement | null>(null);
+  const thumbRef = useRef<HTMLCanvasElement | null>(null);
+  /** The preview that is on the canvas, so an unchanged one is not redrawn. */
+  const drawnThumbnail = useRef<HTMLCanvasElement | null>(null);
+
+  // The preview is refreshed when the panel says it is time to look: the
+  // renderer owns the cache, so the same canvas comes back until the layer's
+  // pixels change, and a different one means they did.
+  useEffect(() => {
+    const canvas = thumbRef.current;
+    if (!canvas) {
+      return;
+    }
+    const source = engine.readLayerThumbnail(layer.id, thumbnailSize);
+    if (source === null) {
+      // The layer's pixels are not ready. The panel looks again in a frame,
+      // and the preview appears then; until then there is no preview, rather
+      // than a picture of what the layer used to hold.
+      if (drawnThumbnail.current !== null) {
+        drawnThumbnail.current = null;
+        const ctx = canvas.getContext("2d");
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
+    if (source === drawnThumbnail.current) {
+      return;
+    }
+    drawnThumbnail.current = source;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(source, 0, 0);
+  }, [engine, layer.id, previewTick, thumbnailSize]);
 
   // The draft follows the layer while the editor is closed, so an opacity
   // changed elsewhere - the panel's slider, an undo - is not overwritten by a
@@ -107,6 +155,7 @@ export function LayerRow({
     <li
       ref={rowRef}
       className={className}
+      data-layer-id={layer.id}
       onFocus={onFocus}
       onBlur={onBlur}
       onDragOver={onDragOver}
@@ -135,6 +184,13 @@ export function LayerRow({
       >
         {layer.visible ? <IconEye /> : <IconEyeOff />}
       </button>
+      <canvas
+        ref={thumbRef}
+        className="layer-row__thumb"
+        width={thumbnailSize}
+        height={thumbnailSize}
+        aria-hidden="true"
+      />
       {renaming ? (
         <input
           className="layer-row__input"

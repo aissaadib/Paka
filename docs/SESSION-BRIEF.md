@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent08-layer-panel` | **A safe, keyboard-drivable layers panel** - the **active**, **focused** and **hidden** layers each get their own mark, so the panel says which layer a stroke would land in, which row the keyboard is on and which layer is not composited. A row is **dragged** by its handle: a two-pixel **insertion marker** shows where it will land, the marker takes no room (so the rows under the pointer do not move), the drop reads the pointer's own position (the browser throttles `dragover`), and the whole drag is **one undo step**; a cancelled drag changes nothing. The keyboard reaches the same ground: `Up`/`Down` move the focus, `Home`/`End` jump to the ends, `F2` renames, `Ctrl+Up`/`Ctrl+Down` reorder and `Delete` removes, and the panel stops those keys from reaching the global registry so the arrow keys never nudge the selection at the same time. **Deleting a layer that holds content asks first** - the question is asked about the layer's real element count, and an empty layer goes without a question. Each row carries a small **preview** of the layer's own pixels, cropped to the layer's content, drawn from the renderer's cached surface and never re-rasterizing the layer. The panel shows **no group, clip, lock or alpha-lock** control: those need semantics the layer model does not have. No project-format change. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -235,12 +236,25 @@ visual-regression harness.
   size, so the pattern is the same in document pixels at every `rasterScale`.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
-- **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
-  opacity, blend mode (`Normal`, `Multiply`, `Screen`) and selection. A blend
+- **Layers**: add, duplicate, delete, rename (double-click or `F2`), reorder,
+  visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`) and selection.
+  A blend
   mode combines the finished layer with the paper and every lower layer. Layer
   edits are undoable (including the deleted layer's elements) and are **refused
   while a gesture is in flight**, so a release can never commit into a layer
   that was removed mid-drag.
+  The panel itself is safe to work quickly in: the **active** layer is filled
+  and carries an accent bar, the **focused** row has its own outline, and a
+  **hidden** layer's name steps back. A row is **dragged** by its handle, a
+  marker shows where it will land, the whole drag is one undo step, and a
+  cancelled drag changes nothing. The keyboard reaches the same ground:
+  `Up`/`Down` move the focus, `F2` renames, `Ctrl+Up`/`Ctrl+Down` reorder and
+  `Delete` removes. Deleting a layer that **holds content** asks first; an
+  empty layer goes without a question. Each row carries a small **preview** of
+  the layer's own pixels, cropped to the layer's content, read from the
+  renderer's cached surface and never re-rasterizing the layer. The panel
+  shows no group, clip, lock or alpha-lock control: those need semantics the
+  layer model does not have yet.
 - **History**: 200 commands; one step per gesture; a slider drag is one step.
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`), versioned `.paka` with ordered layer content (stroke samples,
@@ -596,6 +610,18 @@ Product:
 
 Verification gaps:
 
+- The layers panel was checked in a **real browser** through a Playwright
+  spec (`tests/visual/layers-panel.spec.ts`): the rows and the active mark, the
+  hidden mark, the visibility toggle's undo step, `F2` renaming, the arrow
+  keys moving the focus **without** changing the active layer, `Ctrl+Down`
+  reordering in one step, the quick opacity editor, the delete confirmation
+  for a layer that holds content (and its absence for an empty one), the drag
+  reorder with its insertion marker landing the layer where the marker was,
+  and a cancelled drag changing nothing. The panel's arithmetic and its
+  delete rule are pure modules and are covered by Vitest. The **packaged
+  Tauri window was not checked** for this slice, and the preview was read
+  from the panel's own canvas in the browser rather than in the packaged
+  build.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's

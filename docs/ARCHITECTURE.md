@@ -248,6 +248,62 @@ document-size PNG export and `readCompositeImage` (the bucket's source), and
 agree. There is no per-stroke blend mode, group/clipping blend context or alpha
 inheritance yet.
 
+### The layers panel
+
+The layers panel is a **view of the document**, not a second model of it. Layer
+metadata lives in the document and every change the panel makes is an engine
+command, so each one is undoable and none of them can lose a layer by accident.
+The panel owns three pieces of *view* state and nothing else: the row being
+dragged, the row being renamed and the row the keyboard is on.
+
+**Three states, three marks.** The *active* layer - the one the engine draws
+into - is filled and carries an accent bar. The *focused* row - the one the
+keyboard is on - has a dotted outline, and focus is deliberately **not** the
+same thing as selection: walking the list with the arrow keys moves the focus
+without changing the layer the next stroke would land on. A *hidden* layer's
+name steps back, and its visibility button shows the crossed-out eye.
+
+**The drag reorder is arithmetic, and the arithmetic is pure.** The document
+stores the stack bottom-first; the panel shows it top-first. A drop answers
+"which slot?" in the list *without* the dragged row, and the slot answers "how
+far does the row move?" in the document's own order
+(`core/document/layerOrdering.ts`). The panel then issues **one** engine
+command, so the whole drag is one undo step. Two details matter:
+
+- The **insertion marker takes no room**. It is a two-pixel line with negative
+  margins, so the rows do not move while it is there. If they did, the row
+  under the pointer would move with it, the pointer would end up in the other
+  half of that row, and the layer would land one place away from the marker
+  the artist was looking at.
+- The slot is read from the **drop**, not from the last `dragover`. The
+  browser throttles `dragover`, so the marker can be a move behind the
+  pointer; the drop's own coordinates are exact.
+
+A cancelled drag - `Escape`, or a drop outside the list - changes nothing: the
+drag never touched the document, so there is nothing to undo.
+
+**A deletion that holds content asks first.** The rule is narrow and it lives
+next to the wording that states it (`core/document/layerDeletion.ts`): a layer
+with elements is confirmed, an empty layer is removed without a question. The
+count is the layer's *real* element count, read from the engine's element
+list, so the question cannot drift away from what the layer holds.
+
+**The keyboard reaches the same ground as the mouse.** `Up`/`Down` move the
+focus, `Home`/`End` jump to the ends, `F2` renames, `Ctrl+Up`/`Ctrl+Down`
+reorder and `Delete` removes. The panel stops those keys from reaching the
+global action registry, so the arrow keys never nudge the selection while the
+panel has the focus.
+
+**The preview is the layer's own pixels, and it never re-rasterizes.** The
+renderer draws a small downscale of the layer's *surface* - the pixels it
+already has - and returns `null` when the surface is stale rather than
+rasterizing the layer behind the panel's back
+(`readLayerThumbnail` in `core/rendering/Canvas2DRenderer.ts`). The preview is
+cropped to the layer's **content** - the rectangle its elements can ink
+(`core/document/layerBounds.ts`) - so a small mark is legible instead of being
+one pixel of a whole document. The renderer caches the preview and drops it
+wherever a layer's pixels change, so a read after a change rebuilds it once.
+
 ### Live preview compositing
 
 An in-progress stroke is **part of its layer**, not a decoration drawn on top of

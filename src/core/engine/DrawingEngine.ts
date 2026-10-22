@@ -70,6 +70,7 @@ import {
 } from "../commands/strokeEditCommand";
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
+import { contentBounds, previewBounds } from "../document/layerBounds";
 import {
   DEFAULT_GRID_SETTINGS,
   normalizeGridSpacing,
@@ -829,6 +830,43 @@ export class DrawingEngine implements StrokeSource {
 
   listElements(layerId: LayerId): readonly LayerElement[] {
     return this.strokes.listElements(layerId);
+  }
+
+  /**
+   * A small preview of one layer's pixels, for the layers panel.
+   *
+   * The preview comes from the renderer, which draws it from the layer's own
+   * surface: no rasterization happens here, so the panel can ask for a
+   * preview without stalling the input it is supposed to stay out of the way
+   * of. A layer whose pixels are not ready has no preview, and the method
+   * returns `null`.
+   *
+   * The preview is cropped to the layer's **content** - the rectangle its
+   * elements can ink - so a small mark is legible instead of being one pixel
+   * of a whole document. A layer with no content has no crop, and its
+   * preview shows the whole document.
+   *
+   * A read: no document pixel changes, nothing enters history and the
+   * document is not marked dirty.
+   */
+  readLayerThumbnail(layerId: LayerId, size: number): HTMLCanvasElement | null {
+    const bounds = this.layerContentBounds(layerId);
+    const crop = bounds === null ? null : previewBounds(bounds);
+    return this.renderer?.readLayerThumbnail?.(layerId, size, crop) ?? null;
+  }
+
+  /**
+   * The painted bounds of a layer's content, or `null` when the layer is
+   * empty.
+   *
+   * The brush knowledge stays here: the radius of a stroke's brush is a
+   * rendering fact, and the rule that unions the elements' bounds is pure
+   * (`core/document/layerBounds.ts`).
+   */
+  layerContentBounds(layerId: LayerId): Bounds | null {
+    return contentBounds(this.strokes.listElements(layerId), (stroke) =>
+      strokeDiameter(stroke.brush, 1) / 2,
+    );
   }
 
   // ---------------------------------------------------------- document / view

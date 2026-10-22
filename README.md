@@ -208,7 +208,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
-- **Layers**: add, duplicate, delete, rename (double-click), reorder,
+- **Layers**: add, duplicate, delete, rename (double-click or `F2`), reorder,
   visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`, `Overlay`,
   `Soft light`, `Hard light`, `Color dodge`, `Darken`, `Lighten`, `Difference`,
   `Exclusion`) and selection. Layer pixels composite bottom-first over the paper
@@ -217,6 +217,15 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   A layer cannot be changed while a stroke, fill, gradient or selection drag is
   in flight, so a release can never commit into a layer that was removed
   mid-drag.
+  The panel is safe to use quickly: the **active** layer is filled and carries
+  an accent bar, the **focused** row has its own outline, and a **hidden**
+  layer's name steps back. A row can be **dragged** by its handle - a marker
+  shows where it will land, and the whole drag is one undo step - and the
+  keyboard reaches the same ground: `Up`/`Down` move the focus, `F2` renames,
+  `Ctrl+Up`/`Ctrl+Down` reorder and `Delete` removes. Deleting a layer that
+  **holds content** asks first; an empty layer goes without a question. Each
+  row carries a small **preview** of what the layer holds, cropped to the
+  layer's own content, and the row's opacity figure is a quick editor.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the

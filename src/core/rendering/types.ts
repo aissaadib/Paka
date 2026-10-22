@@ -115,6 +115,30 @@ export interface DrawingRenderer {
    */
   composeDocumentImage(): HTMLCanvasElement;
   /**
+   * A small preview of **one layer's** pixels, for the layers panel.
+   *
+   * The preview is a downscale of the layer's own surface, drawn over the
+   * paper, so it shows what the layer holds rather than what the document
+   * looks like. `crop` is the rectangle of the document the preview shows -
+   * the layer's content, so a small mark is legible - or `null` for the
+   * whole document.
+   *
+   * A read that never re-rasterizes: the surface is used exactly as it is,
+   * so a layer whose pixels are stale - it was just invalidated, or it has
+   * never been composited - has **no** preview and the method returns
+   * `null`. That is deliberate: re-rasterizing a layer is the display's job
+   * and may be expensive, and a panel that asked for it would stall the
+   * input it is supposed to stay out of the way of.
+   *
+   * Optional: a renderer that cannot produce a preview simply does not
+   * implement it, and the panel shows no preview.
+   */
+  readLayerThumbnail?(
+    layerId: LayerId,
+    size: number,
+    crop?: Bounds | null,
+  ): HTMLCanvasElement | null;
+  /**
    * Samples the composite the user sees - paper plus visible layers at their
    * opacity, bottom-first - at a document point, returning its 8-bit sRGB
    * colour or `null` when there is no document.

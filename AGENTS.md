@@ -126,6 +126,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
+| Change the layers panel | `features/layers/LayersPanel.tsx` (the rows, the drag reorder, the keyboard, the delete confirmation), `features/layers/LayerRow.tsx` (a row: the visibility, the preview, the name, the opacity), `features/layers/layers.css` (the marks, the insertion marker, the row density), `core/document/layerOrdering.ts` (the pure drop arithmetic), `core/document/layerDeletion.ts` (the pure delete rule), `core/document/layerBounds.ts` (the pure content bounds), `DrawingEngine.ts` (`readLayerThumbnail`/`layerContentBounds`), `core/rendering/Canvas2DRenderer.ts` (`readLayerThumbnail`) |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
@@ -172,6 +173,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
 | `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
+| `dropSlot`, `moveDeltaForSlot`, `markerIndex`, `nextRowIndex`, `isAboveRowMidpoint`, `topFirstLayers` | `core/document/layerOrdering.ts` | grep the symbol |
+| `layerDeletionPrompt` | `core/document/layerDeletion.ts` | grep the symbol |
+| `contentBounds`, `previewBounds`, `unionBounds` | `core/document/layerBounds.ts` | grep the symbol |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 108, 443, 520 |
@@ -274,6 +278,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
+| The layers panel | `layerOrdering.test.ts` (the drop slot, the move delta, the marker index, the focus walk), `layerDeletion.test.ts` (when a deletion asks and what it says), `layerBounds.test.ts` (the content bounds and the preview crop), `layerPanel.test.ts` (the panel's contract with the engine: the reorder, the undo steps, the content count the confirmation asks about), `tests/visual/layers-panel.spec.ts` (the panel in a real browser: the marks, the keyboard, the drag reorder, the delete confirmation and the preview) |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |

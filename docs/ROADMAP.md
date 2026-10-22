@@ -219,6 +219,16 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       sampling and the colour picker share that composite. Format v11, because a
       v10 reader rejects the new values instead of drawing them as `normal`; a
       v10 file still opens.
+- [x] **A safe, keyboard-drivable layers panel**: the active, focused and hidden
+      layers each have their own mark, a row can be **dragged** to a new place
+      with a visible insertion marker (one undo step, and a cancelled drag
+      changes nothing), the keyboard moves the focus, renames (`F2`),
+      reorders (`Ctrl+Up`/`Ctrl+Down`) and removes (`Delete`), and deleting a
+      layer that holds content **asks first**. Each row carries a small preview
+      of the layer's own pixels, cropped to its content, which is read from the
+      renderer's cached surface and never re-rasterizes the layer. The panel
+      shows no group, clip, lock or alpha-lock control: those need real
+      semantics, which the layer model does not have yet.
 - [ ] Layer masks and clipping.
 - [ ] Groups.
 

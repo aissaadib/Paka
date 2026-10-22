@@ -58,9 +58,48 @@ interface PendingDelete {
   readonly prompt: LayerDeletionPrompt;
 }
 
+/** The edge of a layer's preview, in CSS pixels. */
+const THUMBNAIL_SIZE = 22;
+
+/**
+ * How many frames the panel waits for a preview that is not ready.
+ *
+ * The renderer rasterizes a layer on its next frame, so a preview becomes
+ * ready a frame later. The wait is bounded: a layer that will never be
+ * rasterized - a hidden layer that was never composited - must not keep the
+ * panel awake.
+ */
+const THUMBNAIL_WAIT_FRAMES = 30;
+
+/**
+ * The slot a pointer position means, in the list without the dragged row.
+ *
+ * The row under the pointer is the event's own target, and the slot follows
+ * the midpoint rule: the upper half of a row inserts above it, the lower
+ * half below it.
+ */
+function slotForPointer(
+  event: DragEvent<HTMLElement>,
+  topFirst: readonly Layer[],
+  draggedId: LayerId,
+): number | null {
+  const layerId = event.currentTarget.dataset.layerId;
+  if (layerId === undefined) {
+    return null;
+  }
+  const rowIndex = topFirst.findIndex((layer) => layer.id === layerId);
+  const dragged = topFirst.findIndex((layer) => layer.id === draggedId);
+  if (rowIndex < 0 || dragged < 0) {
+    return null;
+  }
+  const rect = event.currentTarget.getBoundingClientRect();
+  const above = isAboveRowMidpoint(event.clientY, rect.top, rect.height);
+  return dropSlot(rowIndex, above, dragged);
+}
+
 export function LayersPanel() {
   const { actions, engine } = useEditor();
-  const { document: drawingDocument } = useEditorState();
+  const { document: drawingDocument, history } = useEditorState();
   const layers = drawingDocument.layers;
   const topFirst = useMemo(() => topFirstLayers(layers), [layers]);
 
@@ -74,6 +113,8 @@ export function LayersPanel() {
   const [focusedLayerId, setFocusedLayerId] = useState<LayerId | null>(null);
   /** A deletion waiting for the user's answer. */
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  /** Bumped to ask the rows to look at their previews again. */
+  const [previewTick, setPreviewTick] = useState(0);
 
   const nameButtons = useRef(new Map<LayerId, HTMLButtonElement>());
   const cancelDeleteButton = useRef<HTMLButtonElement | null>(null);
@@ -86,6 +127,39 @@ export function LayersPanel() {
   const canDelete = layers.length > 1;
   const canMoveUp = activeIndex >= 0 && activeIndex < layers.length - 1;
   const canMoveDown = activeIndex > 0;
+
+  // The preview is drawn in device pixels, so it is sharp on a HiDPI screen.
+  const thumbnailSize = useMemo(() => {
+    const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+    return Math.max(1, Math.round(THUMBNAIL_SIZE * Math.min(3, Math.max(1, ratio))));
+  }, []);
+
+  /**
+   * Looks again at the previews that are not ready yet.
+   *
+   * The renderer rasterizes a layer on its next frame, so a preview that is
+   * not ready becomes ready a frame later - and the panel has to look again
+   * to see it. The wait is bounded, and it stops as soon as every visible
+   * layer has a preview.
+   */
+  useEffect(() => {
+    let frame = 0;
+    let handle = 0;
+    const check = (): void => {
+      frame += 1;
+      const pending = layers.some(
+        (layer) => layer.visible && engine.readLayerThumbnail(layer.id, thumbnailSize) === null,
+      );
+      // Every check asks the rows to look again, so a preview that has just
+      // become ready is drawn.
+      setPreviewTick((tick) => tick + 1);
+      if (pending && frame < THUMBNAIL_WAIT_FRAMES) {
+        handle = requestAnimationFrame(check);
+      }
+    };
+    handle = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(handle);
+  }, [engine, history.depth, layers, thumbnailSize]);
 
   const draggedIndex = dragLayerId === null ? -1 : topFirst.findIndex((l) => l.id === dragLayerId);
   const markerAt =
@@ -192,7 +266,7 @@ export function LayersPanel() {
   );
 
   const handleDragOver = useCallback(
-    (rowLayerId: LayerId) => (event: DragEvent<HTMLElement>) => {
+    (event: DragEvent<HTMLElement>) => {
       if (dragLayerId === null) {
         return;
       }
@@ -201,15 +275,10 @@ export function LayersPanel() {
       // below it.
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      const row = event.currentTarget;
-      const rect = row.getBoundingClientRect();
-      const above = isAboveRowMidpoint(event.clientY, rect.top, rect.height);
-      const rowIndex = topFirst.findIndex((layer) => layer.id === rowLayerId);
-      const dragged = topFirst.findIndex((layer) => layer.id === dragLayerId);
-      if (rowIndex < 0 || dragged < 0) {
-        return;
+      const slot = slotForPointer(event, topFirst, dragLayerId);
+      if (slot !== null) {
+        setDropSlotIndex(slot);
       }
-      setDropSlotIndex(dropSlot(rowIndex, above, dragged));
     },
     [dragLayerId, topFirst],
   );
@@ -218,13 +287,19 @@ export function LayersPanel() {
     (event: DragEvent<HTMLElement>) => {
       event.preventDefault();
       const draggedId = dragLayerId;
-      const slot = dropSlotIndex;
       clearDrag();
-      if (draggedId === null || slot === null) {
+      if (draggedId === null) {
         return;
       }
       const dragged = topFirst.findIndex((layer) => layer.id === draggedId);
       if (dragged < 0) {
+        return;
+      }
+      // The slot is read from the **drop**, not from the last `dragover`: the
+      // browser throttles `dragover`, so the marker can be a move behind the
+      // pointer, and the layer must land where the pointer is.
+      const slot = slotForPointer(event, topFirst, draggedId);
+      if (slot === null) {
         return;
       }
       const delta = moveDeltaForSlot(dragged, slot);
@@ -235,7 +310,7 @@ export function LayersPanel() {
       // One engine command, so the whole drag is one undo step.
       actions.moveLayer(draggedId, delta);
     },
-    [actions, clearDrag, dragLayerId, dropSlotIndex, topFirst],
+    [actions, clearDrag, dragLayerId, topFirst],
   );
 
   // --------------------------------------------------------------- keyboard
@@ -416,11 +491,14 @@ export function LayersPanel() {
               <SliderField
                 label="Opacity"
                 min={0}
-                max={1}
-                step={0.01}
-                value={activeLayer.opacity}
-                format={(value) => `${Math.round(value * 100)}%`}
-                onChange={(opacity) => actions.setLayerOpacity(activeLayer.id, opacity)}
+                max={100}
+                step={1}
+                // The slider works in percent, so the number box beside it
+                // reads 100 and not 1: the artist sees the same number the
+                // row's own quick editor shows.
+                value={Math.round(activeLayer.opacity * 100)}
+                format={(value) => `${Math.round(value)}%`}
+                onChange={(percent) => actions.setLayerOpacity(activeLayer.id, percent / 100)}
               />
             </div>
           ) : (
@@ -451,6 +529,8 @@ export function LayersPanel() {
                 renaming={layer.id === renamingLayerId}
                 draft={renameDraft}
                 elementCount={engine.listElements(layer.id).length}
+                thumbnailSize={thumbnailSize}
+                previewTick={previewTick}
                 onSelect={() => actions.selectLayer(layer.id)}
                 onToggleVisibility={() => actions.toggleLayerVisibility(layer.id)}
                 onFocus={() => setFocusedLayerId(layer.id)}
@@ -468,7 +548,7 @@ export function LayersPanel() {
                 onOpacityChange={(opacity) => actions.setLayerOpacity(layer.id, opacity)}
                 onDragStart={handleDragStart(layer.id)}
                 onDragEnd={clearDrag}
-                onDragOver={handleDragOver(layer.id)}
+                onDragOver={handleDragOver}
                 onDrop={handleDrop}
                 registerNameButton={registerNameButton(layer.id)}
               />

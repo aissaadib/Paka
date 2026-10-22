@@ -399,6 +399,14 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 ## 8. Verification recipes
 
 - **Unit/behaviour**: `pnpm test` (Vitest, jsdom + a recording canvas fake).
+- **Browser spec of the real app**: `pnpm exec playwright test <name>` drives the
+  running app in the bundled Chromium (`tests/visual/*.spec.ts`). The harness
+  starts its own Vite server on port 1422; if another run holds that port, copy
+  `playwright.config.ts` with a different `PORT` and pass `--config`. The
+  layers panel's spec is `tests/visual/layers-panel.spec.ts` (the rows, the
+  active/focused/hidden marks, the visibility toggle, `F2`, the arrow keys,
+  `Ctrl+Down`, the quick opacity editor, the delete confirmation, the drag
+  reorder and its marker, and the layer preview).
 - **Browser check of the real app**: `pnpm dev` (port 1420). Inside the page, use
   `browser.evaluate` — Code Mode has no timers and cannot `fetch` localhost.
   - Chrome may report `document.hidden === true` even after focusing the tab, and
