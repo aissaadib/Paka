@@ -1,6 +1,6 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
+import type { BrushSettings, PressureCurvePoint, StabilizerMode } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
@@ -9,6 +9,7 @@ import {
   normalizePressureCurve,
   pressureCurvesEqual,
 } from "./pressureCurve";
+import { DEFAULT_STABILIZER_MODE, normalizeStabilizerMode } from "./stabilizer";
 
 /** The identity pressure response every pre-curve file behaves like. */
 export const DEFAULT_PRESSURE_CURVE = IDENTITY_PRESSURE_CURVE;
@@ -44,6 +45,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   minSizeRatio: 0.12,
   spacing: 0.12,
   stabilizer: 0,
+  stabilizerMode: DEFAULT_STABILIZER_MODE,
   texture: 0,
   stamp: false,
   stampSpacing: 0.1,
@@ -64,6 +66,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     minSizeRatio: clamp(brush.minSizeRatio, 0.02, 1),
     spacing: clamp(brush.spacing, MIN_SPACING, MAX_SPACING),
     stabilizer: clamp(brush.stabilizer, 0, 1),
+    stabilizerMode: normalizeStabilizerMode(brush.stabilizerMode),
     texture: clamp(brush.texture, 0, 1),
     stamp: brush.stamp === true,
     stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
@@ -93,10 +96,23 @@ type FlagBrushField = {
   [K in keyof BrushSettings]: BrushSettings[K] extends boolean ? K : never;
 }[keyof BrushSettings];
 
-/** The fields whose value is a colour. */
-type ColorBrushField = {
+/** The fields whose value is one of a closed set of strings. */
+type EnumBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends StabilizerMode ? K : never;
+}[keyof BrushSettings];
+
+/** The fields whose value is a string. */
+type StringBrushField = {
   [K in keyof BrushSettings]: BrushSettings[K] extends string ? K : never;
 }[keyof BrushSettings];
+
+/**
+ * The fields whose value is a colour.
+ *
+ * The closed sets of strings are excluded: a mode is a string, but it is not
+ * a colour, and a colour reader would reject every mode it was given.
+ */
+type ColorBrushField = Exclude<StringBrushField, EnumBrushField>;
 
 /** Every numeric field of a brush. */
 export const BRUSH_NUMBER_FIELDS = [
@@ -120,6 +136,11 @@ export const BRUSH_FLAG_FIELDS = ["stamp"] as const satisfies readonly FlagBrush
 /** Every colour field of a brush. */
 export const BRUSH_COLOR_FIELDS = ["color"] as const satisfies readonly ColorBrushField[];
 
+/** Every field of a brush whose value is one of a closed set of strings. */
+export const BRUSH_ENUM_FIELDS = [
+  "stabilizerMode",
+] as const satisfies readonly EnumBrushField[];
+
 /** The fields whose value is a pressure curve. */
 type CurveBrushField = {
   [K in keyof BrushSettings]: BrushSettings[K] extends readonly PressureCurvePoint[] ? K : never;
@@ -135,6 +156,7 @@ type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
   | (typeof BRUSH_COLOR_FIELDS)[number]
+  | (typeof BRUSH_ENUM_FIELDS)[number]
   | (typeof BRUSH_CURVE_FIELDS)[number];
 
 /** A brush field that no list above claims. */
@@ -176,6 +198,19 @@ function readColor(value: unknown, fallback: string): string {
 }
 
 /**
+ * The reader of each closed set of strings.
+ *
+ * A field whose value is one of a closed set has its own reader, because the
+ * generic readers cannot make sense of it: a number reader would reject
+ * `"smooth"` and a colour reader would reject it too. A value outside the
+ * set - a file that was edited by hand, or a version from the future - takes
+ * the default rather than being trusted.
+ */
+const ENUM_READERS = {
+  stabilizerMode: (value: unknown): StabilizerMode => normalizeStabilizerMode(value),
+} as const satisfies { [K in EnumBrushField]: (value: unknown) => BrushSettings[K] };
+
+/**
  * Reads a brush out of an untrusted record.
  *
  * This is the one place a brush is rebuilt field by field, so it is driven by
@@ -206,6 +241,10 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_COLOR_FIELDS) {
     assign(merged, field, readColor(record[field], DEFAULT_BRUSH[field]));
   }
+  for (const field of BRUSH_ENUM_FIELDS) {
+    const reader = ENUM_READERS[field] as (value: unknown) => BrushSettings[typeof field];
+    assign(merged, field, reader(record[field]));
+  }
   for (const field of BRUSH_CURVE_FIELDS) {
     assign(merged, field, normalizePressureCurve(record[field]));
   }
@@ -232,6 +271,7 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.minSizeRatio === b.minSizeRatio &&
     a.spacing === b.spacing &&
     a.stabilizer === b.stabilizer &&
+    a.stabilizerMode === b.stabilizerMode &&
     a.texture === b.texture &&
     a.stamp === b.stamp &&
     a.stampSpacing === b.stampSpacing &&

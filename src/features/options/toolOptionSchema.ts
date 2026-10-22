@@ -26,9 +26,8 @@ import {
   MIN_BRUSH_SIZE,
   MIN_SPACING,
   MIN_STAMP_SPACING,
-  brushSizeStep,
 } from "../../core/brushes/defaults";
-import type { StepMode } from "../../core/brushes/numericInput";
+import { brushSizeStep, type StepMode } from "../../core/brushes/numericInput";
 import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
 import type { BrushSettings, StabilizerMode } from "../../types/brush";
 import {
