@@ -121,6 +121,7 @@ const NON_DEFAULT_BRUSH_VALUES: Record<
   stampSpacing: 0.28,
   stampHardness: 0.61,
   stampTexture: 0.52,
+  tip: "chisel",
 };
 
 function nonDefaultBrush(): BrushSettings {

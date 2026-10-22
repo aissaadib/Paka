@@ -58,6 +58,7 @@ const BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  tip: "round",
   pressureCurve: DEFAULT_PRESSURE_CURVE,
 };
 
@@ -3262,6 +3263,46 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
 
   it("agrees with a directional texture", () => {
     checkEveryPathAgrees({ ...STAMP_BRUSH, stampTexture: 1 });
+  });
+
+  it("agrees with a tip", () => {
+    // The tip is a mask on the dab, and the dab is placed from the samples,
+    // so the live path, the rebuild and the export have to agree on it too.
+    checkEveryPathAgrees({ ...STAMP_BRUSH, tip: "chisel" });
+  });
+
+  it("shows the tip: a tipped stroke is not the plain stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const surface = harness.surfaces[0] as unknown as { pixels: Float32Array };
+
+        const plain = createStampStroke(layerId, STAMP_BRUSH, "plain");
+        harness.elements.set(layerId, [plain]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const plainPixels = Array.from(surface.pixels);
+
+        const tipped = createStampStroke(layerId, { ...STAMP_BRUSH, tip: "chisel" }, "tipped");
+        harness.elements.set(layerId, [tipped]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const tippedPixels = Array.from(surface.pixels);
+
+        // The tip takes ink out of the dabs, so the picture really changes...
+        expect(tippedPixels).not.toEqual(plainPixels);
+        // ... and it only ever removes ink.
+        let removed = 0;
+        for (let index = 0; index < plainPixels.length; index += 1) {
+          expect(tippedPixels[index]).toBeLessThanOrEqual(plainPixels[index]);
+          if (tippedPixels[index] < plainPixels[index]) {
+            removed += 1;
+          }
+        }
+        expect(removed).toBeGreaterThan(0);
+      },
+    );
   });
 
   it("shows the texture: a textured stroke is not the plain stroke", () => {

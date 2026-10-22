@@ -62,12 +62,19 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   stampSpacing: 0.15,
   stampHardness: 0.85,
   stampTexture: 0.65,
+  tip: "chisel",
 };
 
 /** A value for one field that is neither its default nor its default again. */
 function distinctiveValue(
   field: keyof BrushSettings,
 ): number | string | boolean | readonly PressureCurvePoint[] {
+  // The tip is a closed set of shapes, so its distinctive value is another
+  // shape rather than an arbitrary string: an unknown one would be repaired
+  // to the default and the round trip would prove nothing.
+  if (field === "tip") {
+    return "chisel";
+  }
   const fallback = DEFAULT_BRUSH[field];
   if (typeof fallback === "boolean") {
     return !fallback;

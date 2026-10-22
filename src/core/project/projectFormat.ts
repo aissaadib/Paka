@@ -52,7 +52,8 @@ import type {
 import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
-import type { BrushSettings } from "../../types/brush";
+import { isBrushTipShape } from "../rendering/brushTip";
+import type { BrushSettings, BrushTipShape } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -117,6 +118,13 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
+ * Version 13: a stroke's `brush` carries `tip`, the shape a stamped dab is
+ * masked with. It changes how a stamped stroke's samples are rasterized, so a
+ * version-12 reader ignores it and draws the same dabs as plain discs - a
+ * different picture - and the version was bumped. Version-1 to -12 files open
+ * unchanged with the `round` tip, which is exactly the coverage they were
+ * written by.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -125,7 +133,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 12;
+export const PROJECT_VERSION = 13;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -884,7 +892,32 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // curve, which is the linear response they were written by.
     pressureCurve:
       version >= 12 ? normalizePressureCurve(record.pressureCurve) : DEFAULT_PRESSURE_CURVE,
+    // The tip changes how a stamped stroke's samples are rasterized, so it
+    // became a field of version 13: a version-12 reader ignores it and draws
+    // the same dabs as plain discs, which is a different picture. Earlier
+    // files had no tip at all, and the round tip is exactly the coverage they
+    // were written by.
+    tip: version >= 13 ? readTip(record.tip, `${label} brush tip`) : DEFAULT_BRUSH.tip,
   });
+}
+
+/**
+ * The tip of a stroke's brush.
+ *
+ * The tip is a closed set of shapes, so a shape this build does not know is
+ * refused rather than drawn as the wrong thing - the same rule the layer
+ * blend modes follow. A *missing* tip falls back to the round tip, the
+ * coverage every earlier version was written by.
+ */
+function readTip(value: unknown, label: string): BrushTipShape {
+  if (value === undefined || value === null) {
+    return DEFAULT_BRUSH.tip;
+  }
+  const shape = readString(value, label);
+  if (!isBrushTipShape(shape)) {
+    fail(`${label} uses the unsupported brush tip "${shape}".`);
+  }
+  return shape;
 }
 
 function resolveActiveLayer(
