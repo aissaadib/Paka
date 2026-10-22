@@ -11,10 +11,23 @@
  * edit: it adds no history step, dirties nothing and never reaches a project
  * file. The same rule the brush and the grid follow.
  *
+ * Which panels are folded to their header travels with the rest of it: a
+ * panel can be shown and folded at the same time, and a fold the shell
+ * forgets is a fold the user has to make again after every restart.
+ *
  * The document is versioned on its own so a preferences file can be read
  * without knowing the rest of the settings format.
+ *
+ * The version moves only when the *shape* of the document changes in a way
+ * a reader cannot absorb. A new field is additive: a document written
+ * before the field existed still loads - the field takes its default - and
+ * a document with a field this build does not know still loads, because an
+ * unknown field is ignored. That is the rule the settings file itself
+ * follows: the brush presets and the grid settings were added there
+ * without moving `SETTINGS_VERSION`.
  */
 
+import { listPanels } from "./panelRegistry";
 import { isShellSlotId, type ShellSlotId } from "./slots";
 import {
   DEFAULT_VIEWPORT_STATE,
@@ -40,6 +53,18 @@ export interface ShellPreferences {
   readonly panelOrder: readonly string[];
   /** Panel id to the slot it is docked in. */
   readonly panelSlots: Readonly<Record<string, ShellSlotId>>;
+  /**
+   * The panels that are folded down to their header.
+   *
+   * A panel can be shown and folded at the same time: the fold hides the
+   * panel's body, not the panel. The list names the panels that are folded,
+   * so a panel that is not named is open.
+   *
+   * The field carries the same ids as `hiddenPanels` and `panelOrder` -
+   * the shell's own panel ids - and the same name as the persisted panel
+   * layout's `foldedPanels`, so the two documents say the same thing.
+   */
+  readonly foldedPanels: readonly string[];
   /** The theme the shell follows. */
   readonly theme: ThemePreference;
   /** Whether the status bar is shown. */
@@ -54,6 +79,7 @@ export const DEFAULT_SHELL_PREFERENCES: ShellPreferences = Object.freeze({
   hiddenPanels: [],
   panelOrder: [],
   panelSlots: {},
+  foldedPanels: [],
   theme: "system",
   showStatusBar: true,
   viewport: DEFAULT_VIEWPORT_STATE,
@@ -74,6 +100,7 @@ export function normalizeShellPreferences(value: unknown): ShellPreferences {
     hiddenPanels?: unknown;
     panelOrder?: unknown;
     panelSlots?: unknown;
+    foldedPanels?: unknown;
     theme?: unknown;
     showStatusBar?: unknown;
     viewport?: unknown;
@@ -82,6 +109,7 @@ export function normalizeShellPreferences(value: unknown): ShellPreferences {
   const hiddenPanels = readStringList(record.hiddenPanels);
   const panelOrder = readStringList(record.panelOrder);
   const panelSlots = readSlotMap(record.panelSlots);
+  const foldedPanels = readFoldedPanelIds(record.foldedPanels);
   const theme: ThemePreference =
     typeof record.theme === "string" && (THEMES as readonly string[]).includes(record.theme)
       ? (record.theme as ThemePreference)
@@ -96,6 +124,7 @@ export function normalizeShellPreferences(value: unknown): ShellPreferences {
     hiddenPanels,
     panelOrder,
     panelSlots,
+    foldedPanels,
     theme,
     showStatusBar,
     viewport: normalizeViewportState(record.viewport),
@@ -133,6 +162,34 @@ function readSlotMap(value: unknown): Readonly<Record<string, ShellSlotId>> {
 }
 
 /**
+ * The folded panels, read with the preferences' own list rules and with the
+ * shell's own panel list.
+ *
+ * A blank id and a duplicate are dropped, like in every other list here. A
+ * panel id this build does not know is dropped as well: a panel a later
+ * build removed must not leave a broken entry behind in the user's file.
+ *
+ * The shell's registry says which panels it knows. When nothing has
+ * registered itself yet the shell cannot tell, so the ids are kept as they
+ * are: throwing the user's layout away over a registration order would be
+ * worse than keeping an id the shell later ignores.
+ */
+function readFoldedPanelIds(value: unknown): readonly string[] {
+  const ids = readStringList(value);
+  const known = knownPanelIds();
+  return known === null ? ids : ids.filter((id) => known.has(id));
+}
+
+/** The ids the shell knows, or `null` when it cannot tell. */
+function knownPanelIds(): ReadonlySet<string> | null {
+  const registered = listPanels().map((panel) => panel.id);
+  if (registered.length === 0) {
+    return null;
+  }
+  return new Set(registered);
+}
+
+/**
  * Writes the preferences out.
  *
  * The version travels with the document so a future build can tell an old
@@ -144,6 +201,7 @@ export function serializeShellPreferences(preferences: ShellPreferences): string
     hiddenPanels: preferences.hiddenPanels,
     panelOrder: preferences.panelOrder,
     panelSlots: preferences.panelSlots,
+    foldedPanels: preferences.foldedPanels,
     theme: preferences.theme,
     showStatusBar: preferences.showStatusBar,
     viewport: preferences.viewport,
@@ -173,7 +231,8 @@ export function shellPreferencesEqual(
     a.theme !== b.theme ||
     a.showStatusBar !== b.showStatusBar ||
     a.hiddenPanels.length !== b.hiddenPanels.length ||
-    a.panelOrder.length !== b.panelOrder.length
+    a.panelOrder.length !== b.panelOrder.length ||
+    a.foldedPanels.length !== b.foldedPanels.length
   ) {
     return false;
   }
@@ -181,6 +240,9 @@ export function shellPreferencesEqual(
     return false;
   }
   if (!a.panelOrder.every((id, index) => b.panelOrder[index] === id)) {
+    return false;
+  }
+  if (!a.foldedPanels.every((id, index) => b.foldedPanels[index] === id)) {
     return false;
   }
   const slotIds = new Set([...Object.keys(a.panelSlots), ...Object.keys(b.panelSlots)]);

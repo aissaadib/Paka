@@ -15,6 +15,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createDocument } from "../core/document/document";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import {
+  panelDefinitions,
+  findPanelDefinition,
+} from "../core/panels/panelRegistry";
+import {
   findPanel,
   listPanels,
   panelsInSlot,
@@ -24,6 +28,8 @@ import {
 import {
   DEFAULT_SHELL_PREFERENCES,
   normalizeShellPreferences,
+  parseShellPreferences,
+  serializeShellPreferences,
 } from "../core/shell/preferences";
 import {
   COLOR_PANEL_COLLAPSIBLE,
@@ -45,6 +51,7 @@ import {
   foldColorPanel,
   isColorPanelFolded,
   isColorPanelVisible,
+  setColorPanelFolded,
   toggleColorPanelFold,
   unfoldColorPanel,
 } from "../features/color/colorPanelState";
@@ -198,35 +205,152 @@ describe("where the dock lives", () => {
 });
 
 describe("the dock's fold state", () => {
-  it("is folded when the shell's folded list names it", () => {
-    expect(isColorPanelFolded([])).toBe(false);
-    expect(isColorPanelFolded(["layers"])).toBe(false);
-    expect(isColorPanelFolded([COLOR_PANEL_ID])).toBe(true);
+  it("is folded when the saved preferences name it", () => {
+    expect(isColorPanelFolded(DEFAULT_SHELL_PREFERENCES)).toBe(false);
+
+    const folded = normalizeShellPreferences({ foldedPanels: [COLOR_PANEL_ID] });
+    expect(isColorPanelFolded(folded)).toBe(true);
+
+    const other = normalizeShellPreferences({ foldedPanels: ["layers"] });
+    expect(isColorPanelFolded(other)).toBe(false);
   });
 
   it("folds and unfolds without listing the dock twice", () => {
-    const folded = foldColorPanel([]);
+    const folded = setColorPanelFolded(DEFAULT_SHELL_PREFERENCES, true);
     expect(isColorPanelFolded(folded)).toBe(true);
-    expect(folded.filter((id) => id === COLOR_PANEL_ID)).toHaveLength(1);
+    expect(folded.foldedPanels.filter((id) => id === COLOR_PANEL_ID)).toHaveLength(1);
 
-    expect(isColorPanelFolded(foldColorPanel(folded))).toBe(true);
-    expect(foldColorPanel(folded)).toHaveLength(1);
+    // Folding again changes nothing, so the caller does not write a file.
+    expect(setColorPanelFolded(folded, true)).toBe(folded);
 
-    const unfolded = unfoldColorPanel(folded);
+    const unfolded = setColorPanelFolded(folded, false);
     expect(isColorPanelFolded(unfolded)).toBe(false);
-    expect(unfolded).toHaveLength(0);
+    expect(unfolded.foldedPanels).toHaveLength(0);
   });
 
-  it("toggles between the two states", () => {
+  it("leaves the rest of the preferences alone", () => {
+    const preferences = normalizeShellPreferences({
+      hiddenPanels: ["layers"],
+      panelSlots: { [COLOR_PANEL_ID]: "left" },
+      theme: "dark",
+    });
+
+    const folded = setColorPanelFolded(preferences, true);
+
+    expect(folded.hiddenPanels).toEqual(preferences.hiddenPanels);
+    expect(folded.panelSlots).toEqual(preferences.panelSlots);
+    expect(folded.theme).toBe(preferences.theme);
+    expect(folded.viewport).toEqual(preferences.viewport);
+  });
+
+  it("toggles the folded list between the two states", () => {
     const folded = toggleColorPanelFold([]);
-    expect(isColorPanelFolded(folded)).toBe(true);
-    expect(isColorPanelFolded(toggleColorPanelFold(folded))).toBe(false);
+    expect(isColorPanelFolded(normalizeShellPreferences({ foldedPanels: folded }))).toBe(true);
+    expect(
+      isColorPanelFolded(normalizeShellPreferences({ foldedPanels: toggleColorPanelFold(folded) })),
+    ).toBe(false);
   });
 
   it("leaves the other panels' fold state alone", () => {
     const folded = foldColorPanel(["layers"]);
     expect(folded).toEqual(["layers", COLOR_PANEL_ID]);
     expect(unfoldColorPanel(folded)).toEqual(["layers"]);
+  });
+});
+
+describe("the fold survives a restart", () => {
+  it("comes back from the settings file", () => {
+    // The shell's preferences are a section of the settings file: the fold is
+    // written with the rest of them and read back the same way.
+    const preferences = setColorPanelFolded(DEFAULT_SHELL_PREFERENCES, true);
+    const text = serializeShellPreferences(preferences);
+
+    const restored = parseShellPreferences(text);
+    expect(isColorPanelFolded(restored)).toBe(true);
+    expect(restored.foldedPanels).toEqual([COLOR_PANEL_ID]);
+  });
+
+  it("folds and unfolds through the settings file", () => {
+    const folded = parseShellPreferences(
+      serializeShellPreferences(setColorPanelFolded(DEFAULT_SHELL_PREFERENCES, true)),
+    );
+    const unfolded = parseShellPreferences(
+      serializeShellPreferences(setColorPanelFolded(folded, false)),
+    );
+
+    expect(isColorPanelFolded(unfolded)).toBe(false);
+    expect(unfolded.foldedPanels).toEqual([]);
+  });
+
+  it("opens a file written before the fold was remembered", () => {
+    // A preferences file from the previous build has no folded list. The
+    // field is additive: the file still opens and the dock is simply open.
+    const previous = JSON.stringify({
+      version: 1,
+      hiddenPanels: [],
+      panelOrder: [],
+      panelSlots: {},
+      theme: "system",
+      showStatusBar: true,
+    });
+
+    const preferences = parseShellPreferences(previous);
+    expect(preferences.foldedPanels).toEqual([]);
+    expect(isColorPanelFolded(preferences)).toBe(false);
+  });
+
+  it("opens a file that has a field this build does not know", () => {
+    const newer = JSON.stringify({
+      ...JSON.parse(serializeShellPreferences(DEFAULT_SHELL_PREFERENCES)),
+      somethingNewer: { folded: true },
+    });
+
+    const preferences = parseShellPreferences(newer);
+    expect(isColorPanelFolded(preferences)).toBe(false);
+    expect(preferences.hiddenPanels).toEqual([]);
+  });
+
+  it("drops a panel id this build does not know", () => {
+    // The shell's registry knows the dock, so an id it does not know is a
+    // panel a later build removed: it must not stay in the file.
+    registerColorPanel(() => null);
+
+    const preferences = normalizeShellPreferences({
+      foldedPanels: [COLOR_PANEL_ID, "legacy-panel"],
+    });
+    expect(preferences.foldedPanels).toEqual([COLOR_PANEL_ID]);
+  });
+
+  it("is editor state: it adds no history step and dirties nothing", () => {
+    const engine = createEngine();
+
+    // The fold lives in the shell's document and nowhere else: the engine
+    // is never asked to change, so there is nothing to undo and nothing to
+    // dirty.
+    const folded = setColorPanelFolded(DEFAULT_SHELL_PREFERENCES, true);
+    expect(isColorPanelFolded(folded)).toBe(true);
+
+    expect(engine.getState().history.depth).toBe(0);
+    expect(engine.getState().file.dirty).toBe(false);
+  });
+});
+
+describe("the one colour dock", () => {
+  it("is the id the panel manager's catalogue uses", () => {
+    // The id is written to disk, so there must be exactly one of it: the
+    // dock's, the shell's and the catalogue's. Two ids for one panel would
+    // put two docks in the side column.
+    expect(COLOR_PANEL_ID).toBe("color");
+    expect(findPanelDefinition(COLOR_PANEL_ID)).toBeDefined();
+
+    const colourDocks = panelDefinitions()
+      .map((definition): string => definition.id)
+      .filter((id) => id === "color" || id === "colour");
+    expect(colourDocks).toEqual(["color"]);
+  });
+
+  it("shows the heading the application uses", () => {
+    expect(COLOR_PANEL_TITLE).toBe("Color");
   });
 });
 
