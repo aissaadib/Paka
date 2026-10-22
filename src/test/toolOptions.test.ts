@@ -29,6 +29,7 @@ import {
   groupToolOptions,
   optionControl,
   optionStepValue,
+  OPTION_CONTROL_KINDS,
 } from "../core/options/optionControl";
 import { OptionControl } from "../features/options/OptionControl";
 import { ToolOptionsBar } from "../features/options/ToolOptionsBar";
@@ -286,6 +287,30 @@ describe("the option control", () => {
       const control = optionControl(optionByKind[kind], snapshotFor("brush"), actions);
       expect(control.kind).toBe(kind);
     }
+  });
+
+  it("has a drawing for every kind the contract lists", () => {
+    // The dispatch on the kind lives in one place, and it is exhaustive
+    // against the contract's list: a kind the contract gains without a
+    // builder is a compile error in the module that holds the dispatch, and
+    // in no other. The options bar draws the drawing, not the kind, so a
+    // new kind does not reach it.
+    const { actions } = recorder();
+    for (const kind of TOOL_OPTION_KINDS) {
+      const control = optionControl(optionByKind[kind], snapshotFor("brush"), actions);
+      expect(OPTION_CONTROL_KINDS).toContain(control.kind);
+    }
+  });
+
+  it("knows the drawings it can draw", () => {
+    expect([...OPTION_CONTROL_KINDS]).toEqual([
+      "slider",
+      "number",
+      "toggle",
+      "select",
+      "color",
+      "group",
+    ]);
   });
 
   it("draws a control for every kind", () => {

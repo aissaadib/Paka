@@ -11,6 +11,7 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import {
   appendToolOptions,
   findToolOption,
+  isToolOptionKind,
   registerToolOptions,
   resetToolOptions,
   toolOptionLabel,
@@ -82,6 +83,20 @@ describe("the tool option registry", () => {
     registerToolOptions("brush", [toggle]);
     expect(unregisterToolOptions("brush")).toBe(true);
     expect(unregisterToolOptions("brush")).toBe(false);
+  });
+});
+
+describe("the kinds of tool option", () => {
+  it("names the kinds the contract lists", () => {
+    expect(isToolOptionKind("slider")).toBe(true);
+    expect(isToolOptionKind("group")).toBe(true);
+  });
+
+  it("refuses a kind it does not know", () => {
+    expect(isToolOptionKind("hologram")).toBe(false);
+    expect(isToolOptionKind("")).toBe(false);
+    expect(isToolOptionKind(7)).toBe(false);
+    expect(isToolOptionKind(undefined)).toBe(false);
   });
 });
 

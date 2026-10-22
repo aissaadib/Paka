@@ -6,10 +6,16 @@
  * with a number box, a toggle is a checkbox, a colour is the native colour
  * well, a select is a native list, and a group is a row of other controls.
  *
- * The dispatch is exhaustive. Every kind the contract defines has a control
- * here, and the default branch of the switch is unreachable: `option` is
- * `never` in it, so a kind added to the contract without a control to draw it
- * fails the build instead of leaving a blank space in the bar.
+ * **The dispatch on the option's kind lives here and nowhere else.** The
+ * contract lists the kinds; the table below turns each of them into the
+ * control that draws it, and the table is exhaustive against that list: a
+ * kind the contract gains without a builder here is a compile error in this
+ * file, and in no other. The options bar draws the *control*, so it never
+ * has to learn a new kind - the React component's switch is over the
+ * drawings, which are a list of their own.
+ *
+ * A kind this build does not know is refused rather than drawn as a blank
+ * space: the lookup finds no builder and the option is an error.
  *
  * It is pure on purpose. The React layer is a thin shell over it, so the
  * whole table of controls can be checked without a browser.
@@ -25,6 +31,7 @@ import {
   type SliderToolOption,
   type ToggleToolOption,
   type ToolOption,
+  type ToolOptionKind,
 } from "../shell/toolOptions";
 import type { EditorActions } from "../../state/editorStore";
 import { parseHexColor, rgbToHex } from "../../utils/color";
@@ -96,8 +103,12 @@ export interface GroupControl extends OptionControlBase {
 /**
  * The control an option is drawn as.
  *
- * The kinds are the contract's kinds, so a control always knows which kind of
- * option it belongs to.
+ * The kinds are the *drawings*, not the contract's option kinds, and the two
+ * lists are separate on purpose: a new kind of option is drawn with one of
+ * these, so the options bar's own switch does not grow when the contract
+ * gains a kind. A drawing that does not exist yet is a change to this file
+ * and to the options bar, which is a deliberate change rather than a side
+ * effect of adding an option.
  */
 export type OptionControl =
   | SliderControl
@@ -107,34 +118,74 @@ export type OptionControl =
   | ColorControl
   | GroupControl;
 
+/** The name of a drawing. */
+export type OptionControlKind = OptionControl["kind"];
+
+/** Every drawing, in the order the contract lists its kinds. */
+export const OPTION_CONTROL_KINDS: readonly OptionControlKind[] = Object.freeze([
+  "slider",
+  "number",
+  "toggle",
+  "select",
+  "color",
+  "group",
+]);
+
+/** The builder for one kind of option. */
+type OptionBuilder<K extends ToolOptionKind> = (
+  option: Extract<ToolOption, { readonly kind: K }>,
+  snapshot: EditorSnapshot,
+  actions: EditorActions,
+) => OptionControl;
+
+/** A builder that takes any option: the table's entries, seen from outside. */
+type AnyOptionBuilder = (
+  option: ToolOption,
+  snapshot: EditorSnapshot,
+  actions: EditorActions,
+) => OptionControl;
+
+/**
+ * The dispatch from a kind of option to the control that draws it.
+ *
+ * The table is exhaustive against the contract's kinds, and the mapped type
+ * is what says so: a kind the contract gains without a builder here is a
+ * compile error in this file and in no other.
+ */
+const CONTROL_BUILDERS = {
+  slider: sliderControl,
+  number: numberControl,
+  toggle: toggleControl,
+  select: selectControl,
+  color: colorControl,
+  group: groupControl,
+} satisfies { [K in ToolOptionKind]: OptionBuilder<K> };
+
+/** The builder for a kind, or `undefined` for a kind this build does not know. */
+function builderFor(kind: string): AnyOptionBuilder | undefined {
+  return (
+    CONTROL_BUILDERS as unknown as Record<string, AnyOptionBuilder | undefined>
+  )[kind];
+}
+
 /**
  * The control for an option.
  *
- * The switch is exhaustive on purpose: `option` is `never` in the default
- * branch, so a kind the contract gains without a control here is a compile
- * error, not a blank space in the bar.
+ * The lookup is exhaustive over the kinds the contract lists: every one of
+ * them has a builder above. A kind this build does not know - an option that
+ * came from somewhere untyped, or a contract this build is older than - has
+ * no builder, and is refused rather than drawn as a blank space.
  */
 export function optionControl(
   option: ToolOption,
   snapshot: EditorSnapshot,
   actions: EditorActions,
 ): OptionControl {
-  switch (option.kind) {
-    case "slider":
-      return sliderControl(option, snapshot, actions);
-    case "number":
-      return numberControl(option, snapshot, actions);
-    case "toggle":
-      return toggleControl(option, snapshot, actions);
-    case "select":
-      return selectControl(option, snapshot, actions);
-    case "color":
-      return colorControl(option, snapshot, actions);
-    case "group":
-      return groupControl(option, snapshot, actions);
-    default:
-      return unknownControl(option);
+  const builder = builderFor(option.kind);
+  if (!builder) {
+    throw new Error(`Unknown tool option kind "${option.kind}".`);
   }
+  return builder(option, snapshot, actions);
 }
 
 /** The control for a continuous option. */
@@ -261,11 +312,6 @@ export function groupControl(
     title: option.title,
     children: option.children.map((child) => optionControl(child, snapshot, actions)),
   };
-}
-
-/** Reached only by a kind this build does not know. */
-function unknownControl(option: never): OptionControl {
-  throw new Error(`Unknown tool option kind "${(option as ToolOption).kind}".`);
 }
 
 /**

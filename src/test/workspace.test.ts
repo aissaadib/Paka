@@ -8,7 +8,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { PanelDefinition } from "../core/shell/panelRegistry";
+import {
+  registerPanel,
+  resetPanelRegistry,
+  type PanelDefinition,
+} from "../core/shell/panelRegistry";
 import {
   DEFAULT_SHELL_PREFERENCES,
   normalizeShellPreferences,
@@ -43,6 +47,11 @@ import {
 
 function panel(id: string, slot: PanelDefinition["slot"], order: number): PanelDefinition {
   return { id, title: id, slot, order, render: () => null };
+}
+
+/** Waits for the registry's batched notification to arrive. */
+function flushNotification(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 const PANELS: readonly PanelDefinition[] = [
@@ -405,6 +414,29 @@ describe("the workspace store", () => {
       "color",
       "layers",
     ]);
+  });
+
+  it("picks up a panel that registers after the first read", async () => {
+    // A panel registers itself when its module is evaluated, and that can
+    // happen after the shell has painted. The store watches the registry, so
+    // the composition is read again and the panel is in it.
+    resetPanelRegistry();
+    const store = createWorkspaceStore();
+    let told = 0;
+    const stop = store.subscribe(() => {
+      told += 1;
+    });
+
+    expect(store.getComposition().panels).toEqual([]);
+
+    registerPanel(panel("layers", "right", 0));
+    await flushNotification();
+
+    expect(told).toBe(1);
+    expect(store.getComposition().panels.map((entry) => entry.id)).toEqual(["layers"]);
+
+    stop();
+    resetPanelRegistry();
   });
 });
 
