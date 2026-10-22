@@ -13,7 +13,7 @@
  * see the whole document.
  */
 
-import { clampZoom, centerOn, fitToViewport } from "../rendering/viewport";
+import { clampZoom, fitToViewport } from "../rendering/viewport";
 import type { Size } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 
