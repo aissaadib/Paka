@@ -140,7 +140,7 @@ Run on the final commit of the branch:
 | `pnpm typecheck` | clean |
 | `pnpm exec vitest run` | **90 files, 2276 tests passed** (was 2270/89 at `b63fb74`; the six new tests are the tier partition) |
 | `pnpm exec playwright test` | **58 passed** — the 45 pixel scenes, the browser specs, and the new `shell-layout.spec.ts` (8 sizes + tabs + keyboard + tool switching + advanced panel + preset panel) |
-| `pnpm build` | built; `index-JuqfAQOI.js` 501.67 kB (gzip 152.07 kB), CSS 36.87 kB (gzip 6.42 kB) |
+| `pnpm build` | built; `index-vUgE1lJP.js` 501.70 kB (gzip 152.08 kB), CSS 37.14 kB (gzip 6.46 kB) |
 
 `shell-layout.spec.ts` is the guard for this work: at each of the eight sizes
 it asserts no page scroll, a status bar inside the window, a layers body over
@@ -192,9 +192,9 @@ Still missing, honestly:
 
 | Artifact | Size |
 | --- | --- |
-| `src-tauri/target/release/paka.exe` | the built application |
-| `bundle/msi/Paka_0.1.0_x64_en-US.msi` | 2.35 MiB |
-| `bundle/nsis/Paka_0.1.0_x64-setup.exe` | 1.64 MiB |
+| `src-tauri/target/release/paka.exe` | 3.41 MiB (3,575,296 bytes) |
+| `bundle/msi/Paka_0.1.0_x64_en-US.msi` | 1.93 MiB |
+| `bundle/nsis/Paka_0.1.0_x64-setup.exe` | 1.39 MiB |
 
 The packaged window was driven through WebView2's DevTools protocol with
 `scripts/smoke-packaged.mjs` (started with
@@ -222,4 +222,45 @@ Not exercised in the packaged run: the native open/save dialogs, PNG export
 and the deep fill/selection gestures. Those have no UI in this slice and are
 covered by the unit suites; driving GTK/Win32 file dialogs over CDP is not
 possible, so claiming them here would be dishonest.
+
+## 8. App weight
+
+The redesign's own cost was measured, then the weight was reduced where the
+change was safe:
+
+| Measurement | Before | After |
+| --- | --- | --- |
+| `paka.exe` | 4,847,616 bytes (4.62 MiB) | **3,575,296 bytes (3.41 MiB)** |
+| MSI installer | 2,465,792 bytes (2.35 MiB) | **2,027,520 bytes (1.93 MiB)** |
+| NSIS installer | 1,714,700 bytes (1.64 MiB) | **1,452,105 bytes (1.39 MiB)** |
+| Frontend JS | 501.70 kB (152.08 kB gzip) | unchanged: **501.70 kB** |
+
+The one change with a real effect is the Rust release profile. It already had
+`codegen-units = 1`, `lto = true`, `panic = "abort"` and `strip = true`; only
+`opt-level` was `3`. It is now `"s"`. The native code in this application is
+file I/O, settings parsing and window-fit arithmetic - none of it
+floating-point hot loops - so size optimisation costs nothing a user can
+measure, and the binary drops **26.3%**. The packaged smoke test was re-run on
+the rebuilt binary and passed with identical numbers (section 7).
+
+The frontend was measured and left alone, deliberately:
+
+- the whole application is one 501.70 kB chunk (React 19 + react-dom + the
+  app). It has four runtime dependencies in total (`react`, `react-dom`, the
+  Tauri API and the dialog plugin); there is no accidental library. The "chunk
+  larger than 500 kB" warning is Vite's threshold, not a payload problem: the
+  bundle is read from disk by WebView2, not downloaded;
+- no source maps are emitted, CSS is minified (37.14 kB, 6.46 kB gzip);
+- unmounting the unused `PanelProvider` (the older panel store the shell no
+  longer reads) was measured at **2.30 kB raw / 0.64 kB gzip**. That is not
+  worth deleting a seam another branch is working on; it is recorded here as
+  the one measured piece of dead weight, together with the duplication it
+  represents;
+- lazy-loading the brush browser or the gradient editor would not reduce the
+  total (both are in the same embedded bundle) and would add a render boundary
+  and a possible first-open flash. Not done.
+
+So: the installer a user downloads is **15–18% smaller** and the installed
+executable **26% smaller**, with no change to the frontend or to behaviour.
+
 
