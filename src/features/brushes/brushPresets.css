@@ -14,6 +14,25 @@
   min-height: 0;
 }
 
+/* In the tabbed dock the browser is the whole of its tab. The list takes the
+   height the browser has left and scrolls on its own, so the management form
+   below it stays visible instead of sitting past a second scrollbar. */
+.panel-dock__panel[data-panel-id="brushes"] .panel__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-dock__panel[data-panel-id="brushes"] .panel__body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.panel-dock__panel[data-panel-id="brushes"] .brush-browser__list {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 48px;
+}
+
 /* ------------------------------------------------------------- the filters */
 
 .brush-browser__filters {

@@ -105,7 +105,10 @@ as tabs, except the layers panel, which keeps its own share of the column:
 
 Panel bodies now show a thin scrollbar when their content is taller than the
 dock, and the colour disc shrinks (148 → 124 → 104 px) before its sliders and
-hex field are pushed out of the panel.
+hex field are pushed out of the panel. Inside the brushes tab the preset list
+takes the height the browser has left and scrolls on its own, so the
+management form below it stays on screen instead of sitting past a second
+scrollbar.
 
 ## 4. Result, measured with the same script on the final commit
 
@@ -185,5 +188,38 @@ Still missing, honestly:
 
 ## 7. Packaged build
 
-_(Filled in after the Windows package was built and driven; see the appendix
-below.)_
+`pnpm tauri build` on the final commit produced:
+
+| Artifact | Size |
+| --- | --- |
+| `src-tauri/target/release/paka.exe` | the built application |
+| `bundle/msi/Paka_0.1.0_x64_en-US.msi` | 2.35 MiB |
+| `bundle/nsis/Paka_0.1.0_x64-setup.exe` | 1.64 MiB |
+
+The packaged window was driven through WebView2's DevTools protocol with
+`scripts/smoke-packaged.mjs` (started with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`). The
+window's client area was 1440x779 (the configured 1440x900 outer size), and
+the real packaged shell reported:
+
+| Check | Result |
+| --- | --- |
+| Page overflow | 0 px |
+| Options bar / document bar | 38 px / 34 px at y=30 and y=68 |
+| Dock / layers | 360 px / 295 px, layers body 169 px |
+| Dock tabs | Color, Brushes, Navigator, Shortcuts; Color active |
+| Status bar | 22 px, bottom at 779 (inside the window) |
+| Stroke with the real pointer path | history entry created; **Undo** enabled |
+| Undo | consumed the entry; **Undo** disabled again |
+| Brushes tab | 6 preset rows, management form visible, no nested clipping |
+| Console/page errors | none |
+
+Screenshot: `packaged/paka-window.png`. This is the packaged application, not
+the browser: the status bar shows the native platform (`native windows/x86_64`)
+and the window size is the configured one.
+
+Not exercised in the packaged run: the native open/save dialogs, PNG export
+and the deep fill/selection gestures. Those have no UI in this slice and are
+covered by the unit suites; driving GTK/Win32 file dialogs over CDP is not
+possible, so claiming them here would be dishonest.
+

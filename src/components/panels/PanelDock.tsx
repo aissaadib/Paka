@@ -140,6 +140,7 @@ export function PanelDock({ panels }: { readonly panels: readonly DockPanel[] })
             key={panel.id}
             className="panel-dock__panel"
             id={`dock-panel-${panel.id}`}
+            data-panel-id={panel.id}
             role="tabpanel"
             aria-labelledby={`dock-tab-${panel.id}`}
             hidden={panel.id !== active.id}
