@@ -9,6 +9,8 @@
 import { Workspace } from "../components/layout/Workspace";
 import { EditorProvider } from "./EditorProvider";
 import { PanelProvider } from "./PanelProvider";
+// Registers the built-in panels before the shell reads the registry.
+import "./panelModules";
 
 export function App() {
   return (
