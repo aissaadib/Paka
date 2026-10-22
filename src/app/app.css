@@ -441,18 +441,8 @@
   flex: none;
 }
 
-.status-bar__label {
-  color: var(--text-faint);
-}
-
 .status-bar__value {
   color: var(--text);
-}
-
-.status-bar__dirty {
-  color: var(--accent);
-  font-size: 8px;
-  line-height: 1;
 }
 
 .status-bar__message {
