@@ -96,8 +96,6 @@ export function OptionControl({ option, snapshot, actions }: OptionControlProps)
           type="color"
           className="color-controls__picker"
           aria-label={label}
-          className="color-well"
-          aria-label={`${label} colour`}
           value={toColorInputValue(option.read(snapshot))}
           disabled={disabled}
           onChange={(event) => option.write(actions, event.target.value)}

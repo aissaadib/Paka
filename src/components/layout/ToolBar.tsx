@@ -11,10 +11,8 @@ import { UndoRedoControls } from "../../features/history/UndoRedoControls";
 import { RulerControls } from "../../features/rulers/RulerControls";
 import { ViewControls } from "../../features/view/ViewControls";
 import { MAX_ZOOM, MIN_ZOOM } from "../../core/rendering/viewport";
-import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { useEditor, useEditorState, useEditorToolId } from "../../hooks/useEditor";
 import { toolUsesBrushSize } from "../../core/brushes/brushSizeGesture";
-import { useEditor, useEditorToolId } from "../../hooks/useEditor";
-import { useEditor } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
 

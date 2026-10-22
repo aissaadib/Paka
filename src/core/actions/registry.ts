@@ -10,11 +10,10 @@
  * programming error, not a runtime tie-break.
  */
 
-import { stepBrushSize } from "../brushes/defaults";
-import type { DrawingEngine, EditorSnapshot } from "../engine/DrawingEngine";
-import { VIEW_ROTATION_DEGREES } from "../rendering/viewport";
 import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, stepBrushSize } from "../brushes/defaults";
+import type { DrawingEngine, EditorSnapshot } from "../engine/DrawingEngine";
 import { modalIsOpen } from "../input/ownership";
+import { VIEW_ROTATION_DEGREES } from "../rendering/viewport";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { EditorActions } from "../../state/editorStore";
 import type { ToolId } from "../../types/tool";
@@ -108,6 +107,8 @@ function nudge(
     return;
   }
   actions.nudgeSelection(dx, dy);
+}
+
 /** A brush size inside the brush's own range. */
 function clampBrushSize(size: number): number {
   return Math.min(Math.max(size, MIN_BRUSH_SIZE), MAX_BRUSH_SIZE);
@@ -300,6 +301,7 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
       // abandoned and the centre goes back where it was.
       if (engine.getState().symmetryDragging) {
         engine.cancelSymmetryCenterDrag();
+      }
       // The quick brush-size resize owns Escape while it runs: it cancels the
       // drag in flight and puts the brush size back.
       if (engine.cancelBrushSizeGesture()) {

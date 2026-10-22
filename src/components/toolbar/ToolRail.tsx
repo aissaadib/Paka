@@ -3,22 +3,6 @@
 import { TOOL_DEFINITIONS } from "../../core/tools/toolDefinitions";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { IconButton } from "./IconButton";
-
-export const TOOL_ICONS: Record<ToolId, ReactNode> = {
-  brush: <IconBrush />,
-  eraser: <IconEraser />,
-  select: <IconSelect />,
-  line: <IconLine />,
-  rectangle: <IconRectangle />,
-  ellipse: <IconEllipse />,
-  polygon: <IconPolygon />,
-  star: <IconStar />,
-  bucket: <IconBucket />,
-  gradient: <IconGradient />,
-  picker: <IconPicker />,
-  guides: <IconGuides />,
-  pan: <IconHand />,
-};
 import { TOOL_ICONS } from "./toolIcons";
 
 export function ToolRail() {

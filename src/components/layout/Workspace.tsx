@@ -21,7 +21,6 @@ import { CanvasStage } from "../../features/canvas/CanvasStage";
 import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
 import { CommandPalette } from "../../features/commands/CommandPalette";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
-import { LayersPanel } from "../../features/layers/LayersPanel";
 import { ToolOptionsBar } from "../../features/options/ToolOptionsBar";
 import {
   UnsavedChangesDialog,

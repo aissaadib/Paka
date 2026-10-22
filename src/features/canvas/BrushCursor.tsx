@@ -2,17 +2,6 @@
  * Brush cursor overlay.
  *
  * A DOM overlay positioned imperatively from the engine's cursor stream: no
- * React state is involved per pointer move. The outline is a visual hint of
- * the effective brush size in screen pixels, so it is clipped to a minimum
- * radius where a 1 px brush would be invisible.
- *
- * The cursor belongs to a *view*: the pointer is over one canvas at a time,
- * and every view's outline only answers the reports of its own view.
- */
-
-import { useEffect, useRef } from "react";
-import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { PRIMARY_VIEW_ID, type ViewId } from "../../types/viewport";
  * React state is involved per pointer move. The overlay draws two things:
  *
  *  - a **ring** whose diameter is the active brush's diameter in document
@@ -28,11 +17,15 @@ import { PRIMARY_VIEW_ID, type ViewId } from "../../types/viewport";
  *
  * The size, the zoom and the two states that change how the ring is drawn all
  * come from the engine, so the overlay has one source of truth.
+ *
+ * The cursor belongs to a *view*: the pointer is over one canvas at a time,
+ * and every view's ring only answers the reports of its own view.
  */
 
 import { useEffect, useRef } from "react";
 import { brushRingGeometry } from "../../core/brushes/brushCursor";
-import { useEditor, useEditorToolId } from "../../hooks/useEditor";
+import { useEditor, useEditorState, useEditorToolId } from "../../hooks/useEditor";
+import { PRIMARY_VIEW_ID, type ViewId } from "../../types/viewport";
 
 /** The device pixel ratio, or 1 where there is no window. */
 function readDevicePixelRatio(): number {
@@ -50,39 +43,17 @@ export interface BrushCursorProps {
 
 export function BrushCursor({ viewId = PRIMARY_VIEW_ID }: BrushCursorProps) {
   const { engine } = useEditor();
-  const { brush, viewport, toolId, views } = useEditorState();
-  const elementRef = useRef<HTMLDivElement | null>(null);
-
-  // The zoom of *this* view: the outline is a screen-space hint, so it follows
-  // the view it is drawn in, not the active one.
-  const zoom = views.find((view) => view.id === viewId)?.zoom ?? viewport.zoom;
-
-  // Outline size follows brush size and zoom.
-  useEffect(() => {
-    const element = elementRef.current;
-    if (!element) {
-      return;
-    }
-    const size = Math.max(MIN_OUTLINE_SIZE, brush.size * zoom);
-    element.style.width = `${size}px`;
-    element.style.height = `${size}px`;
-  }, [brush.size, zoom]);
-
-  // Visibility follows the active tool.
-  useEffect(() => {
-    const element = elementRef.current;
-    if (element) {
-      // The eraser has the same footprint as the brush, so the same outline
-      // tells the user how much paper one pass will remove.
-      element.style.display = toolId === "brush" || toolId === "eraser" ? "block" : "none";
-    }
-  }, [toolId]);
+  const { viewport, views } = useEditorState();
   const toolId = useEditorToolId();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
   const readoutRef = useRef<HTMLDivElement | null>(null);
   const announcementRef = useRef<HTMLSpanElement | null>(null);
   const resizingRef = useRef(false);
+
+  // The zoom of *this* view: the ring is a screen-space hint, so it follows
+  // the view it is drawn in, not the active one.
+  const zoom = views.find((view) => view.id === viewId)?.zoom ?? viewport.zoom;
 
   // Position follows the pointer, straight from the engine.
   useEffect(() => {
@@ -111,7 +82,7 @@ export function BrushCursor({ viewId = PRIMARY_VIEW_ID }: BrushCursorProps) {
       return;
     }
     return engine.subscribeBrushCursor((report) => {
-      const geometry = brushRingGeometry(report.size, report.zoom, readDevicePixelRatio());
+      const geometry = brushRingGeometry(report.size, zoom, readDevicePixelRatio());
       ring.style.width = `${geometry.cssDiameter}px`;
       ring.style.height = `${geometry.cssDiameter}px`;
       // One device pixel, so the ring stays a hairline on any display.
@@ -132,7 +103,7 @@ export function BrushCursor({ viewId = PRIMARY_VIEW_ID }: BrushCursorProps) {
       }
       resizingRef.current = report.resizing;
     });
-  }, [engine]);
+  }, [engine, zoom]);
 
   // Visibility follows the active tool.
   useEffect(() => {

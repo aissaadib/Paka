@@ -12,7 +12,6 @@
  * down.
  */
 
-import { TOOL_ICONS } from "../../components/toolbar/ToolRail";
 import { useEffect, useRef } from "react";
 import { TOOL_ICONS } from "../../components/toolbar/toolIcons";
 import { getToolDefinition } from "../../core/tools/toolDefinitions";
@@ -45,9 +44,6 @@ export function ToolOptionsBar() {
   const snapshot = useEditorState();
   const definition = getToolDefinition(snapshot.toolId);
   const groups = toolOptionGroups(snapshot.toolId, snapshot);
-
-  return (
-    <div className="tool-options-bar" role="toolbar" aria-label="Tool options">
   const stripRef = useRef<HTMLDivElement | null>(null);
 
   /**

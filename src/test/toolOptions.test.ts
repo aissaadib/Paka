@@ -125,6 +125,11 @@ function candidateValues(option: ToolOption, snapshot: EditorSnapshot): Array<nu
   if (option.kind === "color") {
     return ["#123456", "#654321", "#00ff00", "#000000"];
   }
+  if (option.kind === "select") {
+    // A drop-down writes one of the entries it offers, so those are the
+    // candidates worth trying.
+    return option.entries(snapshot).map((entry) => entry.value);
+  }
   const current = option.read(snapshot);
   const span = option.max - option.min;
   const values: number[] = [];

@@ -519,6 +519,7 @@ export interface DrawingEngineOptions {
    * content, so nothing about it reaches the document, the history or a file.
    */
   readonly referenceSource?: ReferenceSource | null;
+  /**
    * True when another surface owns the interaction.
    *
    * The quick-resize gesture must not be taken away from a field the user is
@@ -786,6 +787,9 @@ export interface SelectedGradientState {
   readonly y2: number;
   /** The handle the arrow keys would move, or `null` when none was grabbed. */
   readonly handle: GradientHandleId | null;
+}
+
+/**
  * A quick brush-size resize in flight.
  *
  * The gesture changes the size of the *next* stroke, so nothing it does is an
@@ -1068,7 +1072,6 @@ export class DrawingEngine implements StrokeSource {
   private secondaryCanvas: HTMLCanvasElement | null = null;
   /** The input binder of the second view, when it is attached. */
   private secondaryBinder: CanvasInputBinder | null = null;
-  private cursor: CursorReport | null = null;
   /**
    * The quick brush-size resize in flight, or `null`.
    *
@@ -1091,8 +1094,6 @@ export class DrawingEngine implements StrokeSource {
    * typing in keeps the keyboard and the pointer to itself.
    */
   private readonly interactionBlocked: () => boolean;
-  private viewportSize = { width: 0, height: 0 };
-  private laidOut = false;
   private devicePixelRatio = 1;
   private rasterScale = 1;
 
@@ -1438,6 +1439,8 @@ export class DrawingEngine implements StrokeSource {
     this.secondaryCanvas = canvas;
     this.ensureSecondaryAttached();
     this.requestRender();
+  }
+  /**
    * Reports for the brush cursor overlay.
    *
    * The overlay is a *view*: the ring it draws is never part of a layer
@@ -1721,10 +1724,6 @@ export class DrawingEngine implements StrokeSource {
     return () => {
       this.cursorListeners.delete(listener);
     };
-  }
-
-  getCursor(): string {
-    return this.activeTool().cursor;
   }
 
   listStrokes(layerId: LayerId): readonly StrokeRecord[] {
@@ -5718,7 +5717,6 @@ export class DrawingEngine implements StrokeSource {
     // The cursor reports where the pointer *is*; snapping only moves the
     // sample a drawing tool commits.
     this.reportCursor(sample, viewId);
-    this.reportCursor(sample);
 
     // The quick brush-size resize owns the pointer before any tool sees it, so
     // a resize can never leave a stroke behind.
@@ -5874,11 +5872,7 @@ export class DrawingEngine implements StrokeSource {
    * Public for the same reason `handlePointerSample` is: the input path can
    * be driven end to end without a DOM.
    */
-  handleWheel(input: WheelInput, viewId: ViewId = this.views.activeId): void {
-    const view = this.views.get(viewId);
-    if (!view) {
-      return;
-    }
+  /**
    * Starts the quick brush-size resize when a press asks for it.
    *
    * The press is consumed: it never reaches the brush, so a resize cannot
@@ -5937,7 +5931,11 @@ export class DrawingEngine implements StrokeSource {
     this.cancelBrushSizeGesture();
   }
 
-  private handleWheel(input: WheelInput): void {
+  handleWheel(input: WheelInput, viewId: ViewId = this.views.activeId): void {
+    const view = this.views.get(viewId);
+    if (!view) {
+      return;
+    }
     if (input.ctrlKey || input.altKey) {
       const factor = clamp(
         Math.exp(-input.deltaY * WHEEL_ZOOM_SENSITIVITY),
