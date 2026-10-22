@@ -26,6 +26,7 @@ import {
   type ToggleToolOption,
   type ToolOption,
 } from "../shell/toolOptions";
+import { optionPreviewFor, type OptionPreview } from "./optionPreviews";
 import type { EditorActions } from "../../state/editorStore";
 import { parseHexColor, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
@@ -77,6 +78,15 @@ export interface SelectControl extends OptionControlBase {
   readonly value: string;
   readonly choices: readonly { readonly value: string; readonly label: string }[];
   readonly write: (value: string) => void;
+  /**
+   * The picture the control shows beside itself, when it has one.
+   *
+   * It is resolved from the option's id rather than carried by the option,
+   * because the tool-option contract is shared and closed: a feature that
+   * wants a picture beside its control registers one in
+   * `core/options/optionPreviews.ts` instead of changing the contract.
+   */
+  readonly preview?: OptionPreview;
 }
 
 /** A colour. */
@@ -221,14 +231,18 @@ export function selectControl(
 ): SelectControl {
   const value = option.read(snapshot);
   const known = option.choices.some((choice) => choice.value === value);
+  const shown = known ? value : (option.choices[0]?.value ?? "");
   return {
     id: option.id,
     kind: "select",
     label: toolOptionLabel(option, snapshot),
     title: option.title,
-    value: known ? value : (option.choices[0]?.value ?? ""),
+    value: shown,
     choices: option.choices,
     write: (next) => option.write(actions, next),
+    // The picture beside the control shows the value the control shows, so it
+    // is resolved from the same value.
+    preview: optionPreviewFor(option.id, shown) ?? undefined,
   };
 }
 
