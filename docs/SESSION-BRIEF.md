@@ -651,6 +651,17 @@ Product:
 
 Verification gaps:
 
+- The colour dock was checked **in a real browser** through the Playwright
+  harness (`tests/visual/color-dock.spec.ts`): the two colours and their exact
+  values are on screen, `X` and `D` swap and reset them, a typed value is
+  applied and a wrong one is refused with its reason, the palette is added to,
+  renamed in place and removed from, and the recent colours remember what was
+  picked, newest first. The model, the engine seam and the **settings round
+  trip** are covered by Vitest (`colorPalette.test.ts`, `colorHistory.test.ts`,
+  `settings.test.ts`), including a swatch painting a real stroke, a shape and
+  a fill. The **packaged Tauri window is not verified** for this slice, and the
+  browser preview has no native settings file, so the persistence is proved by
+  the settings test rather than by a reload.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's

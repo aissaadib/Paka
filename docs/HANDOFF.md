@@ -431,6 +431,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
   the guide drag and clears the guide selection, and `Delete` removes the
   selected guide.
+- Colour shortcuts: `X` swaps the ink and the alt colour, `D` puts both back to
+  their defaults. In the palette, `F2` renames the focused swatch in place and
+  `Delete` removes it; the arrow keys step through the swatch grids.
 - **Guides check (verified 2026-10-21).** Press `u`: the rail shows a **Guides**
   button and the status bar counts the guides. A drag on empty canvas creates one
   guide and raises `history` by one; the guide sits at the **press** coordinate
