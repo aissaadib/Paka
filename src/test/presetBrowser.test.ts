@@ -76,14 +76,14 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   pressureSize: 0.77,
   pressureOpacity: 0.66,
   pressureCurve: BENT_CURVE,
-  minSizeRatio: 0.55,
-  spacing: 0.44,
+  minSizeRatio: 0.55,  spacing: 0.44,
   stabilizer: 0.33,
   texture: 0.22,
   stamp: true,
   stampSpacing: 0.15,
   stampHardness: 0.85,
   stampTexture: 0.65,
+  tip: "chisel",
 };
 
 /** A value for one field that is not its default. */

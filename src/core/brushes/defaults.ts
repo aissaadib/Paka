@@ -1,10 +1,11 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
+import type { BrushSettings, BrushTipShape, PressureCurvePoint } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
 import type { StepMode } from "./numericInput";
+import { normalizeBrushTip } from "../rendering/brushTip";
 import {
   IDENTITY_PRESSURE_CURVE,
   normalizePressureCurve,
@@ -50,6 +51,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  tip: "round",
 };
 
 /** Clamps and validates a brush configuration. */
@@ -70,6 +72,9 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
     stampHardness: clamp(brush.stampHardness, 0, 1),
     stampTexture: clamp(brush.stampTexture, 0, 1),
+    // The tip is a closed set of shapes: a value outside it is a file that was
+    // edited by hand, and the round tip is the honest answer.
+    tip: normalizeBrushTip(brush.tip),
   };
 }
 
@@ -94,9 +99,23 @@ type FlagBrushField = {
   [K in keyof BrushSettings]: BrushSettings[K] extends boolean ? K : never;
 }[keyof BrushSettings];
 
-/** The fields whose value is a colour. */
+/** The fields whose value is a brush tip. */
+type TipBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends BrushTipShape ? K : never;
+}[keyof BrushSettings];
+
+/**
+ * The fields whose value is a colour.
+ *
+ * The tip is a string, but it is not a colour: it is claimed by the tip list
+ * below, so it is excluded here rather than listed twice.
+ */
 type ColorBrushField = {
-  [K in keyof BrushSettings]: BrushSettings[K] extends string ? K : never;
+  [K in keyof BrushSettings]: K extends TipBrushField
+    ? never
+    : BrushSettings[K] extends string
+      ? K
+      : never;
 }[keyof BrushSettings];
 
 /** Every numeric field of a brush. */
@@ -131,12 +150,16 @@ export const BRUSH_CURVE_FIELDS = [
   "pressureCurve",
 ] as const satisfies readonly CurveBrushField[];
 
+/** Every tip field of a brush. */
+export const BRUSH_TIP_FIELDS = ["tip"] as const satisfies readonly TipBrushField[];
+
 /** Every field a brush has, according to the lists above. */
 type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
   | (typeof BRUSH_COLOR_FIELDS)[number]
-  | (typeof BRUSH_CURVE_FIELDS)[number];
+  | (typeof BRUSH_CURVE_FIELDS)[number]
+  | (typeof BRUSH_TIP_FIELDS)[number];
 
 /** A brush field that no list above claims. */
 type UnlistedBrushField = Exclude<keyof BrushSettings, ListedBrushField>;
@@ -210,6 +233,9 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_CURVE_FIELDS) {
     assign(merged, field, normalizePressureCurve(record[field]));
   }
+  for (const field of BRUSH_TIP_FIELDS) {
+    assign(merged, field, normalizeBrushTip(record[field]));
+  }
   return normalizeBrush(merged);
 }
 
@@ -237,7 +263,8 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.stamp === b.stamp &&
     a.stampSpacing === b.stampSpacing &&
     a.stampHardness === b.stampHardness &&
-    a.stampTexture === b.stampTexture
+    a.stampTexture === b.stampTexture &&
+    a.tip === b.tip
   );
 }
 

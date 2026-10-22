@@ -9,6 +9,17 @@
  */
 
 /**
+ * The closed set of shapes a stamped dab can be masked with.
+ *
+ * A tip is a **mask**, not a colour: it multiplies a dab's coverage before
+ * the dabs are unioned, so it can only ever take ink away, and the union
+ * stays a maximum. The shapes live in `core/rendering/brushTip.ts`, which
+ * owns the geometry and the validation; this is the type the configuration
+ * carries.
+ */
+export type BrushTipShape = "round" | "felt" | "chisel" | "blot" | "bristle";
+
+/**
  * One point of a pressure-response curve.
  *
  * `x` is the raw pressure the device reported and `y` is the pressure the
@@ -139,4 +150,17 @@ export interface BrushSettings {
    * and in a PNG export, at every zoom and `rasterScale`.
    */
   readonly stampTexture: number;
+  /**
+   * The shape a stamped dab is masked with.
+   *
+   * `round` is the plain disc the stamp engine has always used, byte for
+   * byte. The other shapes - a soft felt pad, a chisel nib held at an angle
+   * to the path, a ragged dry-ink blot, a bundle of bristles - mask a dab's
+   * coverage *before* the dabs are unioned, so the union is still a maximum
+   * and a stroke cannot darken where it crosses itself.
+   *
+   * A brush written before the tip existed reads as the round tip, which is
+   * the coverage it was drawn with.
+   */
+  readonly tip: BrushTipShape;
 }

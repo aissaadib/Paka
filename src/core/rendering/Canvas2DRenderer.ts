@@ -27,6 +27,7 @@ import type { SelectionHandles } from "../document/selectionHandles";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import type { Bounds } from "../../types/geometry";
+import type { BrushTipShape } from "../../types/brush";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
@@ -48,6 +49,7 @@ import {
   unionStampRect,
   type StampRect,
 } from "./stampCoverage";
+import { normalizeBrushTip, type BrushTipFrame } from "./brushTip";
 import type {
   DrawingRenderer,
   RendererKind,
@@ -162,6 +164,31 @@ function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number):
   if (canvas.height !== nextHeight) {
     canvas.height = nextHeight;
   }
+}
+
+/**
+ * The frame a dab is masked with, or `null` for the plain round dab.
+ *
+ * The tip belongs to the stroke's own brush, so the mask is the same in live
+ * drawing, in a layer rebuild, after undo/redo, in a reopened project and in
+ * a PNG export: the tip is read from the stroke, never from editor state.
+ * The round tip - and a brush written before tips existed - leave the dab
+ * exactly as it was, byte for byte.
+ */
+function tipFrame(
+  tip: BrushTipShape,
+  angle: number,
+  radius: number,
+): BrushTipFrame | null {
+  if (tip === "round") {
+    return null;
+  }
+  return {
+    shape: tip,
+    directionX: Math.cos(angle),
+    directionY: Math.sin(angle),
+    radius,
+  };
 }
 
 export class Canvas2DRenderer implements DrawingRenderer {
@@ -1234,6 +1261,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const scale = this.rasterScale;
     const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
     const strength = stroke.brush.stampTexture;
+    const tip = normalizeBrushTip(stroke.brush.tip);
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -1244,6 +1272,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The texture rides on the dab's own direction, so the live path and
         // the rebuild path lay the same lanes out over the same pixels.
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        // The tip rides on the same frame, for the same reason.
+        tipFrame(tip, dab.angle, dab.radius * scale),
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -1269,6 +1299,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const scale = this.rasterScale;
     const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
     const strength = stroke.brush.stampTexture;
+    const tip = normalizeBrushTip(stroke.brush.tip);
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -1277,6 +1308,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.radius * scale,
         stroke.brush.stampHardness,
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        tipFrame(tip, dab.angle, dab.radius * scale),
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);

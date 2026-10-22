@@ -730,6 +730,87 @@ describe("parseProject round trip", () => {
     ).toContain("brush stamp texture");
   });
 
+  it("round-trips the brush tip at version 13", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, stamp: true, tip: "chisel" },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.tip).toBe("chisel");
+
+    // The tip is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.tip).toBe("chisel");
+  });
+
+  it("opens version 12 files with the round tip, which is the path they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stamp: true } });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 12;
+    delete payload.layers[0].elements[0].brush.tip;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.tip).toBe("round");
+  });
+
+  it("refuses a version-13 stroke brush with an unknown tip", () => {
+    // The tip is a closed set of shapes: a shape this build does not know is
+    // refused rather than drawn as the wrong thing.
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            tip: "nib",
+          } as unknown as Record<string, unknown>;
+        }),
+      ),
+    ).toContain("brush tip");
+  });
+
+  it("a version-12 reader refuses a tip instead of drawing the dabs plain", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, stamp: true, tip: "chisel" },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    // The current build reads it...
+    expect(parseProject(text).ok).toBe(true);
+
+    // ... while a reader that accepts no higher than version 12 refuses it at
+    // the version gate: a version-12 reader ignores the tip and draws the
+    // same dabs as plain discs, which is a different picture.
+    const older = parseProject(text, { maxVersion: 12 });
+    expect(older.ok).toBe(false);
+    if (!older.ok) {
+      expect(older.error).toContain("newer version of Paka");
+      expect(older.error).toContain("reads up to 12");
+    }
+  });
+
   it("round-trips every layer blend mode at version 11", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -1489,10 +1570,10 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
-    // the extra blend modes and version 12 on the pressure curve; none of those
-    // bumps was for the guides, and a version-9 file that carries them still
-    // opens.
-    expect(PROJECT_VERSION).toBe(12);
+    // the extra blend modes, version 12 on the pressure curve and version 13
+    // on the brush tip; none of those bumps was for the guides, and a
+    // version-9 file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(13);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),

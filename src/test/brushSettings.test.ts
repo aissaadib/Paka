@@ -57,6 +57,7 @@ describe("brush configuration", () => {
       stampSpacing: 9,
       stampHardness: -2,
       stampTexture: 4,
+      tip: "nib" as never,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -71,6 +72,19 @@ describe("brush configuration", () => {
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
     expect(normalized.stampTexture).toBe(1);
+    // The tip is a closed set of shapes, so an unknown one is repaired to the
+    // round tip rather than kept.
+    expect(normalized.tip).toBe("round");
+  });
+
+  it("keeps a known tip and treats it as part of the brush identity", () => {
+    expect(DEFAULT_BRUSH.tip).toBe("round");
+    expect(normalizeBrush({ ...DEFAULT_BRUSH, tip: "chisel" }).tip).toBe("chisel");
+
+    const chisel = updateBrushSettings(DEFAULT_BRUSH, { tip: "chisel" });
+    expect(chisel.tip).toBe("chisel");
+    expect(brushSettingsEqual(DEFAULT_BRUSH, chisel)).toBe(false);
+    expect(brushSettingsEqual(chisel, { ...chisel })).toBe(true);
   });
 
   it("applies a patch without mutating the current settings", () => {

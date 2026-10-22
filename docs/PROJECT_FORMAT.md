@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 9,
+  "version": 13,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -100,6 +100,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -130,6 +131,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -160,6 +162,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -415,6 +418,7 @@ different ramp. A gradient is refused, not repaired, in both places.
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+| `tip` | `round`, `felt`, `chisel`, `blot` or `bristle` | The shape a stamped dab is masked with. The tip is a **mask**, not a colour: it multiplies a dab's coverage before the dabs are unioned, so the union stays a maximum and the stroke cannot darken where it crosses itself. `round` is the plain disc, byte for byte. Only a stamped stroke is affected. Required in version 13; version-1 to -12 files have no field and read as `round`, which is the coverage they were written by. |
 
 ## Validation policy
 
@@ -442,6 +446,9 @@ looks like:
   a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
   missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
   `stampSpacing`/`stampHardness` that is missing or outside its range;
+- a version-13 `tip` that is not one of the five shapes: the tip is a closed
+  set, so a shape this build does not know is refused rather than drawn as the
+  wrong thing;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -479,6 +486,8 @@ looks like:
 - a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
   texture did not exist before version 10, and the texture off is exactly the
   coverage those files were written by;
+- a missing `tip` → `round`. The tip did not exist before version 13, and the
+  round tip is exactly the coverage those files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -524,8 +533,8 @@ Two further guarantees:
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
-| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
+| 13 | Requires `tip` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the `round` tip (the plain disc they were written by). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -565,6 +574,13 @@ Two further guarantees:
   version-11 reader that ignored it would draw the linear profile instead, which
   is a different picture. Version-1 to -11 files read with the identity curve,
   which is exactly the linear response they were written by.
+- **`tip` required version 13.** It changes how a stamped stroke's samples are
+  rasterized - the dabs are masked with the tip's shape instead of being plain
+  discs - so a version-12 reader that ignored it would draw the same stroke as a
+  plain chain of dabs, which is a different picture. Version-1 to -12 files read
+  with the `round` tip, which is exactly the coverage they were written by. The
+  tip is a closed set of five shapes, so a shape a build does not know is
+  refused rather than drawn as something else.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
