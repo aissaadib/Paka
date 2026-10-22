@@ -1,26 +1,30 @@
 /**
- * Stroke colour controls: the primary and the secondary colour, and the
- * palette the artist keeps to hand.
+ * Stroke colour controls: the primary and the secondary colour.
  *
  * Left-button gestures paint with the primary colour; right-button gestures
  * paint with the secondary one. Both are editor state captured at press time,
  * so swapping them never repaints existing strokes. The secondary colour has
  * no project-format field of its own.
  *
- * The swatches come from the editor's palette, which is the same list the
- * colour panel edits and the settings file persists - so a swatch saved in
- * the panel is here too, and one added here is in the panel.
+ * This is the *quick* half of the colour dock: the two colours and the two
+ * actions that change them. The palette and the recent colours live in the
+ * colour panel, which is where they can be edited - a swatch list in a toolbar
+ * row would grow with every colour the artist saves, and a toolbar that grows
+ * is a toolbar that pushes the canvas off the screen.
  */
 
+import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { colorInputValue } from "../../utils/color";
 
 export function ColorControls() {
   const { actions } = useEditor();
-  const { brush, secondaryColor, palette } = useEditorState();
+  const { brush, secondaryColor } = useEditorState();
   const current = brush.color;
   const secondary = secondaryColor;
   const canSwap = current !== secondary;
+  const isDefault =
+    current === DEFAULT_BRUSH.color && secondary === DEFAULT_SECONDARY_COLOR;
 
   return (
     <div className="toolbar__group color-controls">
@@ -47,32 +51,20 @@ export function ColorControls() {
           onClick={() => actions.swapColors()}
           disabled={!canSwap}
           aria-label="Swap primary and secondary colors"
-          title="Swap primary and secondary colors"
+          title="Swap primary and secondary colors (X)"
         >
           ⇄
         </button>
-      </div>
-      <div className="color-controls__palette" role="group" aria-label="Color palette">
-        {palette.map((swatch) => (
-          <button
-            key={swatch.id}
-            type="button"
-            className={[
-              "color-controls__swatch",
-              swatch.color === current ? "is-active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={{ backgroundColor: swatch.color }}
-            title={`${swatch.name} ${swatch.color} (right-click: secondary)`}
-            aria-label={`Use color ${swatch.name} ${swatch.color}`}
-            onClick={() => actions.setBrush({ color: swatch.color })}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              actions.setSecondaryColor(swatch.color);
-            }}
-          />
-        ))}
+        <button
+          type="button"
+          className="color-controls__reset"
+          onClick={() => actions.resetColors()}
+          disabled={isDefault}
+          aria-label="Default colors"
+          title="Put both colors back to their defaults (D)"
+        >
+          Reset
+        </button>
       </div>
     </div>
   );
