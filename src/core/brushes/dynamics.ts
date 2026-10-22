@@ -16,6 +16,14 @@
  * and never writes to it.
  */
 
+import type { PressureCurvePoint } from "../../types/brush";
+import {
+  IDENTITY_PRESSURE_CURVE,
+  evaluatePressureCurve,
+  normalizePressureCurve,
+  pressureCurvesEqual,
+} from "./pressureCurve";
+
 /** The closed set of dynamics a stroke can use. */
 export type DynamicsModel = {
   /** Stable id, unique across the registry. */
@@ -249,3 +257,224 @@ export function resetDynamicsModels(): void {
 }
 
 registerDynamicsModel(DEFAULT_DYNAMICS_MODEL);
+
+/* --------------------------------------------------------------------------
+ * Pressure dynamics.
+ *
+ * The model above is the *speed and taper* layer. This section is the layer
+ * that puts the pressure next to it: a named model that combines a pressure
+ * curve with the speed and taper sources, so that a brush can be given one
+ * choice - "a pen that speeds up, tapers in and answers softly to a light
+ * touch" - instead of three unrelated knobs.
+ *
+ * The rule the whole wave follows holds here too: the default model is inert.
+ * Its pressure mapping is the identity, so the raw device pressure comes back
+ * unchanged, and its size factor is exactly `1`, so a stroke drawn with no
+ * dynamics is byte for byte the stroke that was drawn before this module
+ * existed.
+ *
+ * This section only *adds*. Every symbol above keeps its meaning.
+ * ----------------------------------------------------------------------- */
+
+/**
+ * A named dynamics model that combines a pressure response with the speed and
+ * taper sources.
+ *
+ * The pressure part is the curve the brush already has: the raw device
+ * pressure in, the pressure the brush reacts to out. The strength of the
+ * pressure - how much it moves the size and the opacity - stays on the brush
+ * (`pressureSize`, `pressureOpacity`), so this model never decides how a
+ * stroke looks on its own.
+ */
+export interface PressureDynamicsModel {
+  /** Stable id, unique across the registry. */
+  readonly id: string;
+  /** The name the controls show. */
+  readonly label: string;
+  /** The pressure mapping: raw device pressure in, brush pressure out. */
+  readonly pressureCurve: readonly PressureCurvePoint[];
+  /** The speed and taper sources. */
+  readonly sources: DynamicsModel;
+}
+
+/**
+ * The pressure dynamics a brush uses when nothing else is chosen: no change
+ * at all.
+ *
+ * The curve is the identity, so the pressure passes through untouched, and
+ * the sources are the default model, so every size factor is exactly `1`.
+ */
+export const DEFAULT_PRESSURE_DYNAMICS_MODEL: PressureDynamicsModel = Object.freeze({
+  id: "none",
+  label: "None",
+  pressureCurve: IDENTITY_PRESSURE_CURVE,
+  sources: DEFAULT_DYNAMICS_MODEL,
+});
+
+/**
+ * Reads a pressure dynamics model out of an untrusted value.
+ *
+ * Nothing here throws: a value that is not a model falls back to the default
+ * one, a malformed curve falls back to the identity curve and a malformed set
+ * of sources falls back to the default model.
+ */
+export function normalizePressureDynamicsModel(value: unknown): PressureDynamicsModel {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_PRESSURE_DYNAMICS_MODEL;
+  }
+  const record = value as {
+    readonly id?: unknown;
+    readonly label?: unknown;
+    readonly pressureCurve?: unknown;
+    readonly sources?: unknown;
+  };
+  const id =
+    typeof record.id === "string" && record.id.trim() !== ""
+      ? record.id
+      : DEFAULT_PRESSURE_DYNAMICS_MODEL.id;
+  const label = typeof record.label === "string" && record.label.trim() !== "" ? record.label : id;
+  return {
+    id,
+    label,
+    pressureCurve: normalizePressureCurve(record.pressureCurve),
+    sources: normalizeDynamicsModel(record.sources),
+  };
+}
+
+/**
+ * Whether a model changes anything at all.
+ *
+ * A model is inert when its pressure mapping is the identity *and* its speed
+ * and taper sources are inert. For an inert model the pressure comes back
+ * unchanged and every size factor is exactly `1`.
+ *
+ * The sources are judged by `dynamicsAreInert`, the module's own notion of
+ * inert, so a model and the sources it carries always agree about whether
+ * they do anything.
+ */
+export function pressureDynamicsAreInert(model: PressureDynamicsModel): boolean {
+  return (
+    pressureCurvesEqual(model.pressureCurve, IDENTITY_PRESSURE_CURVE) &&
+    dynamicsAreInert(model.sources)
+  );
+}
+
+/**
+ * The pressure the brush reacts to: the raw device pressure mapped through
+ * the model's curve, exactly once.
+ *
+ * This is the same mapping the pressure curve itself performs, so a stroke
+ * that uses this model and a stroke that uses the curve on its own agree
+ * sample for sample.
+ */
+export function pressureDynamicsPressure(
+  model: PressureDynamicsModel,
+  rawPressure: number,
+): number {
+  return evaluatePressureCurve(model.pressureCurve, rawPressure);
+}
+
+/**
+ * The factor the speed and taper sources apply to the size.
+ *
+ * The pressure is not part of it: how strongly the pressure moves the size is
+ * the brush's `pressureSize`, and the brush applies it to the pressure this
+ * model returns.
+ */
+export function pressureDynamicsSizeFactor(
+  model: PressureDynamicsModel,
+  context: DynamicsContext,
+): number {
+  return dynamicsSizeFactor(model.sources, context);
+}
+
+/** One sample's dynamics input: what the device reported and where it is. */
+export interface PressureDynamicsSample {
+  /**
+   * The raw device pressure, in `[0, 1]`.
+   *
+   * A value outside the range is clamped, so a broken reading is treated as a
+   * light touch rather than as an error.
+   */
+  readonly pressure: number;
+  /** The sample's speed, in document pixels per second. */
+  readonly speed: number;
+  /** How far along the stroke the sample is, in `[0, 1]`. */
+  readonly progress: number;
+}
+
+/** What a pressure dynamics model does to one sample. */
+export interface ResolvedPressureDynamics {
+  /**
+   * The pressure the brush reacts to: the raw pressure mapped once.
+   *
+   * For the default model this is the raw pressure itself, unchanged.
+   */
+  readonly pressure: number;
+  /**
+   * The factor the speed and taper sources apply to the size.
+   *
+   * For the default model this is exactly `1`.
+   */
+  readonly sizeFactor: number;
+}
+
+/**
+ * Resolves one sample against the model.
+ *
+ * The pressure is mapped exactly once, from the raw device pressure, and the
+ * size factor is the product of the speed and taper sources. Nothing here
+ * writes to the document, and the same sample always resolves to the same
+ * numbers, so live drawing, a layer rebuild, undo/redo, a reopened project
+ * and an export agree.
+ */
+export function resolvePressureDynamics(
+  model: PressureDynamicsModel,
+  sample: PressureDynamicsSample,
+): ResolvedPressureDynamics {
+  return {
+    pressure: pressureDynamicsPressure(model, sample.pressure),
+    sizeFactor: pressureDynamicsSizeFactor(model, { speed: sample.speed, progress: sample.progress }),
+  };
+}
+
+const pressureModels = new Map<string, PressureDynamicsModel>();
+
+/**
+ * Adds a pressure dynamics model, or replaces the one already registered
+ * under the same id.
+ */
+export function registerPressureDynamicsModel(model: PressureDynamicsModel): PressureDynamicsModel {
+  if (model.id.trim() === "") {
+    throw new Error("a pressure dynamics model needs a non-empty id");
+  }
+  pressureModels.set(model.id, model);
+  return model;
+}
+
+/** Removes a pressure dynamics model. Returns whether one was there. */
+export function unregisterPressureDynamicsModel(id: string): boolean {
+  return pressureModels.delete(id);
+}
+
+/** Every registered pressure dynamics model, in registration order. */
+export function listPressureDynamicsModels(): readonly PressureDynamicsModel[] {
+  return [...pressureModels.values()];
+}
+
+/** One pressure dynamics model by id, or `undefined`. */
+export function findPressureDynamicsModel(id: string): PressureDynamicsModel | undefined {
+  return pressureModels.get(id);
+}
+
+/**
+ * Empties the pressure dynamics registry.
+ *
+ * Only for tests: the default model registers itself when the module is
+ * evaluated.
+ */
+export function resetPressureDynamicsModels(): void {
+  pressureModels.clear();
+}
+
+registerPressureDynamicsModel(DEFAULT_PRESSURE_DYNAMICS_MODEL);
