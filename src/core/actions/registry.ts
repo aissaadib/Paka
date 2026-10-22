@@ -24,6 +24,7 @@ import type {
   ActionDefinition,
   ActionId,
   FileActionHandlers,
+  ShortcutOverrides,
   ShortcutSpec,
 } from "./types";
 
@@ -228,12 +229,34 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
 ];
 
 /**
+ * The chords an action claims.
+ *
+ * A user chord replaces the action's built-in ones: the user asked for this
+ * key, so the command stops answering to the key Paka shipped with, and that
+ * key is free for another command.
+ */
+export function effectiveShortcuts(
+  action: ActionDefinition,
+  overrides?: ShortcutOverrides,
+): readonly ShortcutSpec[] {
+  const override = overrides?.[action.id];
+  return override === undefined ? action.shortcuts : [override];
+}
+
+/**
  * Refuses duplicate action ids and chords.
+ *
+ * The chords that are checked are the ones the actions actually claim, so a
+ * user's chord is validated exactly like a built-in one: two commands may not
+ * claim the same chord, on either platform.
  *
  * Exported for tests: a synthetic registry with a clash must throw rather than
  * let one action shadow another.
  */
-export function validateRegistry(actions: readonly ActionDefinition[]): void {
+export function validateRegistry(
+  actions: readonly ActionDefinition[],
+  overrides?: ShortcutOverrides,
+): void {
   const ids = new Set<string>();
   const chords = new Map<string, string>();
   const platforms: readonly KeyboardPlatform[] = ["mac", "other"];
@@ -243,10 +266,11 @@ export function validateRegistry(actions: readonly ActionDefinition[]): void {
       throw new Error(`Duplicate action id "${action.id}".`);
     }
     ids.add(action.id);
-    if (action.shortcuts.length === 0) {
+    const shortcuts = effectiveShortcuts(action, overrides);
+    if (shortcuts.length === 0) {
       throw new Error(`Action "${action.id}" has no shortcut.`);
     }
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of shortcuts) {
       for (const platform of platforms) {
         const chord = chordId(shortcut, platform);
         const existing = chords.get(chord);
@@ -281,14 +305,18 @@ function baseContext(
  *
  * An action whose `when` guard is false claims nothing, so the key keeps its
  * default behaviour (arrows scroll, for example) instead of being swallowed.
+ *
+ * The user's chords are honoured: an action the user has given a chord of its
+ * own answers to that chord and no longer to the built-in one.
  */
 export function findActionForEvent(
   event: KeyboardEventLike,
   platform: KeyboardPlatform,
   context: ActionContext,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   for (const action of ACTION_DEFINITIONS) {
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of effectiveShortcuts(action, overrides)) {
       if (!matchesShortcut(event, shortcut, platform)) {
         continue;
       }
@@ -318,11 +346,13 @@ export function dispatchKeyboardEvent(
   event: KeyboardEventLike,
   context: DispatchContext,
   platform: KeyboardPlatform,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   const match = findActionForEvent(
     event,
     platform,
     baseContext(context.engine, context.actions, context.file),
+    overrides,
   );
   if (!match) {
     return null;
