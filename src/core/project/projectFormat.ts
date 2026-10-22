@@ -126,7 +126,6 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
 export const PROJECT_VERSION = 12;
-export const PROJECT_VERSION = 11;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
