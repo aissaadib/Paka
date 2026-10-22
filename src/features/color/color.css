@@ -209,6 +209,15 @@
   line-height: 1.3;
 }
 
+/* The message under the palette: a refused rename is said in words, so the
+   reason is not carried by a border colour alone. */
+.color-palette__message {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 /* A palette cell holds the swatch and its own remove control, so the control
    is always in the tab order and always reachable without a mouse. It is
    hidden until the cell is hovered or something inside it is focused. */

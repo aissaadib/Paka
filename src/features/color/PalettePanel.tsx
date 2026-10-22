@@ -20,7 +20,11 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import type { PaletteSwatch } from "../../core/color/palette";
-import { findSwatchByColor, MAX_PALETTE_SWATCHES } from "../../core/color/palette";
+import {
+  findSwatchByColor,
+  MAX_PALETTE_SWATCHES,
+  MAX_SWATCH_NAME_LENGTH,
+} from "../../core/color/palette";
 import { SwatchGrid } from "./SwatchGrid";
 
 /** How many swatches sit on a row. */
@@ -32,6 +36,7 @@ export function PalettePanel() {
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
   const renameInput = useRef<HTMLInputElement>(null);
   // `Escape` cancels; the input then unmounts, and a blur that arrives with
   // it must not commit the name the artist just rejected.
@@ -46,6 +51,7 @@ export function PalettePanel() {
 
   const startRename = (swatch: PaletteSwatch) => {
     cancelRename.current = false;
+    setMessage(null);
     setRenameDraft(swatch.name);
     setRenamingId(swatch.id);
   };
@@ -56,8 +62,11 @@ export function PalettePanel() {
       setRenamingId(null);
       return;
     }
-    actions.renamePaletteSwatch(renamingId, renameDraft);
+    const renamed = actions.renamePaletteSwatch(renamingId, renameDraft);
     setRenamingId(null);
+    // A refused rename - an empty name - is said out loud rather than
+    // leaving the artist wondering why nothing happened.
+    setMessage(renamed === null ? "A swatch needs a name." : null);
   };
 
   const onRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -117,6 +126,7 @@ export function PalettePanel() {
                     className="color-palette__rename text-input"
                     ref={renameInput}
                     value={renameDraft}
+                    maxLength={MAX_SWATCH_NAME_LENGTH}
                     aria-label={`Rename ${swatch.name}`}
                     spellCheck={false}
                     autoComplete="off"
@@ -151,11 +161,16 @@ export function PalettePanel() {
                   onKeyDown={(event) => {
                     if (event.key === "F2") {
                       event.preventDefault();
+                      event.stopPropagation();
                       startRename(swatch);
                       return;
                     }
                     if (event.key === "Delete") {
                       event.preventDefault();
+                      // The editor's own Delete removes the selected strokes;
+                      // here the key removes the swatch, so it must not also
+                      // reach the document.
+                      event.stopPropagation();
                       actions.removePaletteSwatch(swatch.id);
                     }
                   }}
@@ -173,6 +188,12 @@ export function PalettePanel() {
             );
           }}
         />
+      )}
+
+      {message === null ? null : (
+        <p className="color-palette__message" role="status">
+          {message}
+        </p>
       )}
     </section>
   );
