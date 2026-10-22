@@ -23,9 +23,16 @@
  *    a different path. The painted width is *not* scaled with it, so the
  *    frame of a scaled selection is the scaled frame of its samples plus the
  *    same padding - not the scaled frame.
+ *
+ * A **corner** handle scales the selection uniformly about the frame's
+ * centre. An **edge** handle stretches one axis, anchored at the opposite
+ * edge, and the proportional modifier locks the other axis to the same
+ * factor. Both are written as an anchor and a factor per axis
+ * (`HandleScale`), so one map covers them.
  */
 
 import type { Bounds, Point } from "../../types/geometry";
+import type { ScaleAxis, ScaleSide } from "./selectionHandles";
 import type { StrokeRecord } from "./types";
 
 /**
@@ -70,7 +77,44 @@ export const FIXED_SCALE_FACTOR = 1.5;
  */
 export const FIXED_ROTATION_DEGREES = ROTATION_SNAP_DEGREES;
 
+/**
+ * The smallest a stretched axis may become, in document pixels.
+ *
+ * A free (one-axis) stretch may squash a side almost to nothing, but not to
+ * nothing: a zero-width frame has no interior, and the handle that produced
+ * it would have nothing left to pull. One document pixel is the floor - small
+ * enough to be no obstacle, large enough to stay a frame.
+ *
+ * The **uniform** scale keeps the older, stricter floor of
+ * `MIN_SCALE_FACTOR` instead: a selection that is scaled down as a whole
+ * should stay recognisable, while a single side may be flattened on purpose.
+ */
+export const MIN_STRETCH_SIZE = 1;
+
 const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/**
+ * A scale, written as an anchor and a factor per axis.
+ *
+ * The map is `x' = anchorX + (x - anchorX) * factorX`, and the same for y.
+ * Two factors rather than one is what lets a side handle stretch one axis and
+ * leave the other alone, and what lets the proportional modifier grow the
+ * other axis by the same factor.
+ *
+ * The anchor is the point that does not move: the opposite edge for a free
+ * side stretch, the frame's centre for a corner handle, and the centre of an
+ * axis for the axis that is not being dragged.
+ */
+export interface HandleScale {
+  /** The point the x axis is measured from. */
+  readonly anchorX: number;
+  /** The point the y axis is measured from. */
+  readonly anchorY: number;
+  /** The factor along x. */
+  readonly factorX: number;
+  /** The factor along y. */
+  readonly factorY: number;
+}
 
 /**
  * A coordinate map: what a transform does to one point.
@@ -92,6 +136,22 @@ export function boundsCentre(bounds: Bounds): Point {
   return {
     x: bounds.x + bounds.width / 2,
     y: bounds.y + bounds.height / 2,
+  };
+}
+
+/**
+ * The corner of a frame opposite the given one.
+ *
+ * The opposite corner is the one on the other side **and** on the other row:
+ * anchoring a corner drag there leaves that corner where it is, which is the
+ * classic "the corner you did not drag stays put".
+ */
+export function oppositeCorner(frame: Bounds, corner: Point): Point {
+  const centreX = frame.x + frame.width / 2;
+  const centreY = frame.y + frame.height / 2;
+  return {
+    x: corner.x < centreX ? frame.x + frame.width : frame.x,
+    y: corner.y < centreY ? frame.y + frame.height : frame.y,
   };
 }
 
@@ -151,6 +211,127 @@ export function clampScaleFactor(factor: number): number {
     return 1;
   }
   return Math.max(MIN_SCALE_FACTOR, factor);
+}
+
+/**
+ * Clamps the factor of a free (one-axis) stretch.
+ *
+ * The floor is the one that keeps the stretched axis at least
+ * `MIN_STRETCH_SIZE` document pixels wide, so a drag can flatten a side but
+ * never erase it. The factor is never negative: a negative one would mirror
+ * the content, which is a **flip** and has its own command.
+ *
+ * A factor that is not a number at all (a NaN from a degenerate frame) is
+ * refused the same way the uniform scale refuses it: the selection stays
+ * where it is.
+ */
+export function clampStretchFactor(factor: number, size: number): number {
+  if (!Number.isFinite(factor) || !Number.isFinite(size) || size <= 0) {
+    return 1;
+  }
+  return Math.max(MIN_STRETCH_SIZE / size, factor);
+}
+
+/**
+ * The scale a **corner** handle asks for.
+ *
+ * The scale is uniform - the same factor on both axes - and it is measured
+ * about `anchor`, the point that does not move. The default anchor is the
+ * centre of the selection's frame; the user may ask for the opposite corner
+ * instead, which is the classic "the corner you did not drag stays put".
+ *
+ * The factor is measured **from where the press landed**, for the same reason
+ * the uniform scale is: a press that misses the handle by a little must not
+ * jump the content.
+ */
+export function cornerScale(
+  corner: Point,
+  anchor: Point,
+  press: Point,
+  pointer: Point,
+): HandleScale {
+  const factor = clampScaleFactor(scaleFactorFrom(anchor, corner, press, pointer));
+  return { anchorX: anchor.x, anchorY: anchor.y, factorX: factor, factorY: factor };
+}
+
+/**
+ * The scale an **edge** handle asks for.
+ *
+ * A side handle pulls one axis and leaves the other alone, so the frame gets
+ * wider or taller rather than bigger. The dragged edge tracks the pointer one
+ * for one, which is what makes the gesture feel attached to the cursor:
+ *
+ *  - anchored at the **opposite edge** (the default) the other edge stays
+ *    where it is and the frame grows away from it;
+ *  - anchored at the **centre** (`fromCentre`) the frame grows on both sides,
+ *    so the dragged edge still tracks the pointer but the opposite edge moves
+ *    too.
+ *
+ * `proportional` locks the aspect ratio: the axis that is not dragged grows by
+ * the same factor, about the centre of that axis, so the selection keeps its
+ * proportions. The factor is then clamped against *both* axes, so neither can
+ * be squashed to nothing by the other's size.
+ *
+ * The factor is measured **from where the press landed**, so a press that
+ * misses the handle by a little does not jump the content.
+ */
+export function edgeScale(
+  frame: Bounds,
+  axis: ScaleAxis,
+  side: ScaleSide,
+  press: Point,
+  pointer: Point,
+  options: { readonly proportional: boolean; readonly fromCentre: boolean },
+): HandleScale {
+  const size = axis === "x" ? frame.width : frame.height;
+  const otherSize = axis === "x" ? frame.height : frame.width;
+  const delta = axis === "x" ? pointer.x - press.x : pointer.y - press.y;
+  const centreX = frame.x + frame.width / 2;
+  const centreY = frame.y + frame.height / 2;
+
+  const low = axis === "x" ? frame.x : frame.y;
+  const high = axis === "x" ? frame.x + frame.width : frame.y + frame.height;
+  // The anchor is the point that does not move: the opposite edge by default,
+  // the centre of the axis when the frame is to grow on both sides.
+  const anchor = options.fromCentre
+    ? axis === "x"
+      ? centreX
+      : centreY
+    : side === "end"
+      ? low
+      : high;
+
+  // How far the dragged edge travelled **away from the anchor**: the east and
+  // south handles travel with the pointer, the west and north ones against
+  // it, because they are the low end of their axis. The frame's size along
+  // that axis changes by exactly that much.
+  const travel = side === "end" ? delta : -delta;
+  // The dragged edge tracks the pointer one for one, so the frame's size
+  // along that axis changes by the pointer's travel. From the centre the
+  // frame grows on both sides, so the size changes twice as fast.
+  const raw = size > 0 ? 1 + (options.fromCentre ? 2 : 1) * (travel / size) : 1;
+  const factor = clampStretchFactor(raw, size);
+  // The locked case keeps the aspect ratio, so neither axis may be squashed
+  // to nothing by the other's size: the factor is clamped against both.
+  const locked =
+    options.proportional && otherSize > 0
+      ? Math.max(factor, MIN_STRETCH_SIZE / otherSize)
+      : factor;
+
+  if (axis === "x") {
+    return {
+      anchorX: anchor,
+      anchorY: centreY,
+      factorX: locked,
+      factorY: options.proportional ? locked : 1,
+    };
+  }
+  return {
+    anchorX: centreX,
+    anchorY: anchor,
+    factorX: options.proportional ? locked : 1,
+    factorY: locked,
+  };
 }
 
 /** The point a point becomes under a uniform scale about a centre. */
@@ -284,6 +465,21 @@ export function snapRotationAngle(radians: number): number {
 }
 
 /**
+ * The map a scale applies to a sample.
+ *
+ * The scale is written as an anchor and a factor per axis, so the same map
+ * covers the uniform scale (the same factor twice, about the centre) and the
+ * free one-axis stretch (one factor, the other axis untouched).
+ */
+export function createStretchTransform(scale: HandleScale, label = "Scale"): SampleTransform {
+  return {
+    label,
+    mapX: (x, _y) => scale.anchorX + (x - scale.anchorX) * scale.factorX,
+    mapY: (_x, y) => scale.anchorY + (y - scale.anchorY) * scale.factorY,
+  };
+}
+
+/**
  * The map a uniform scale about a centre applies to a sample.
  *
  * The label is the history entry's name, which the undo button shows. It
@@ -297,11 +493,10 @@ export function createScaleTransform(
   label = "Scale",
 ): SampleTransform {
   const scale = clampScaleFactor(factor);
-  return {
+  return createStretchTransform(
+    { anchorX: centre.x, anchorY: centre.y, factorX: scale, factorY: scale },
     label,
-    mapX: (x, _y) => centre.x + (x - centre.x) * scale,
-    mapY: (_x, y) => centre.y + (y - centre.y) * scale,
-  };
+  );
 }
 
 /**

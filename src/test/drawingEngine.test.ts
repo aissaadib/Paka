@@ -18,6 +18,7 @@ import {
 import { createDocument } from "../core/document/document";
 import { DEFAULT_GRID_SPACING } from "../core/document/grid";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
+import { EDGE_HANDLE_OFFSET_PX } from "../core/document/selectionHandles";
 import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
@@ -1883,7 +1884,11 @@ describe("DrawingEngine selection", () => {
     to: Point,
     modifiers: PointerSample["modifiers"] = { shift: false, alt: false, ctrl: false, meta: false },
   ): void {
-    engine.handlePointerSample(createSample({ phase: "down", docX: from.x, docY: from.y }));
+    // The modifiers are held for the whole gesture, the press included: the
+    // anchor of a transform is chosen when the gesture starts.
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: from.x, docY: from.y, modifiers }),
+    );
     engine.handlePointerSample(
       createSample({ phase: "move", docX: to.x, docY: to.y, modifiers }),
     );
@@ -2240,6 +2245,255 @@ describe("DrawingEngine selection", () => {
     expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
     expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
     expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("stretches one side of the selection with a side handle", () => {
+    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    // The east side handle sits just outside the frame's right edge.
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+    dragHandle(engine, handle, { x: handle.x + 20, y: handle.y });
+
+    const after = engine.listStrokes(layerId)[0];
+    // The width grows by the pointer's travel; the opposite edge is the
+    // anchor, so the samples are measured from it.
+    const factor = 1 + 20 / frame.width;
+    after.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(frame.x + (xs[index] - frame.x) * factor, 6);
+    });
+    // The other axis is untouched: a side handle stretches one side only.
+    expect(after.ys).toEqual(ys);
+    // One step for the whole drag, and undo puts the samples back exactly.
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    engine.undo();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    // Redo puts the stretch back, and it is the same stretch.
+    engine.redo();
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(
+      frame.x + (xs[0] - frame.x) * factor,
+      6,
+    );
+  });
+
+  it("locks the aspect ratio when Shift is held on a side handle", () => {
+    const { engine, layerId } = createSelectingEngine();
+    // A diagonal stroke, so the height is visible in the samples.
+    paint(engine, [
+      [100, 100],
+      [200, 140],
+    ]);
+    engine.setTool("select");
+    handle(engine, [
+      [50, 50],
+      [250, 200],
+    ], "up");
+    const stroke = engine.listStrokes(layerId)[0];
+    const xs = [...stroke.xs];
+    const ys = [...stroke.ys];
+    const frame = paintedFrame(xs, ys);
+    const sideHandle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+
+    dragHandle(
+      engine,
+      sideHandle,
+      { x: sideHandle.x + 20, y: sideHandle.y },
+      { shift: true, alt: false, ctrl: false, meta: false },
+    );
+
+    const after = engine.listStrokes(layerId)[0];
+    const width = Math.max(...after.xs) - Math.min(...after.xs);
+    const height = Math.max(...after.ys) - Math.min(...after.ys);
+    const beforeWidth = Math.max(...xs) - Math.min(...xs);
+    const beforeHeight = Math.max(...ys) - Math.min(...ys);
+    // Both axes grew by the same factor, so the proportions are kept.
+    expect(width / height).toBeCloseTo(beforeWidth / beforeHeight, 6);
+    // And the width did grow: this is not the identity.
+    expect(width).toBeGreaterThan(beforeWidth);
+  });
+
+  it("anchors a corner drag at the opposite corner when Alt is held", () => {
+    const { engine, layerId, frame, centre, xs } = selectStroke();
+    const corner = { x: frame.x + frame.width, y: frame.y + frame.height };
+    dragHandle(
+      engine,
+      corner,
+      { x: corner.x + 20, y: corner.y + 20 },
+      { shift: false, alt: true, ctrl: false, meta: false },
+    );
+
+    const after = engine.listStrokes(layerId)[0];
+    // The factor the drag produced, read back from the samples.
+    const factor = (after.xs[1] - after.xs[0]) / (xs[1] - xs[0]);
+    // The anchor is the frame's opposite corner, and it does not move.
+    after.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(frame.x + (xs[index] - frame.x) * factor, 6);
+    });
+    // It is not the centre, which is where a plain corner drag is anchored.
+    expect(after.xs[0]).not.toBeCloseTo(centre.x + (xs[0] - centre.x) * factor, 6);
+  });
+
+  it("grows the frame on both sides when Alt is held on a side handle", () => {
+    const { engine, layerId, frame, centre, xs } = selectStroke();
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+    dragHandle(
+      engine,
+      handle,
+      { x: handle.x + 20, y: handle.y },
+      { shift: false, alt: true, ctrl: false, meta: false },
+    );
+
+    const after = engine.listStrokes(layerId)[0];
+    const factor = (after.xs[1] - after.xs[0]) / (xs[1] - xs[0]);
+    // The frame's centre is the anchor, so the frame grows on both sides.
+    after.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(centre.x + (xs[index] - centre.x) * factor, 6);
+    });
+  });
+
+  it("cancels a side stretch and restores the originals exactly", () => {
+    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+    engine.handlePointerSample(createSample({ phase: "down", docX: handle.x, docY: handle.y }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: handle.x + 30, docY: handle.y }),
+    );
+    // The preview moved.
+    expect(engine.listStrokes(layerId)[0].xs).not.toEqual(xs);
+
+    engine.handlePointerSample(createSample({ phase: "cancel", docX: 0, docY: 0 }));
+    // The originals are back and nothing was recorded.
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("restores the originals when Escape clears the selection mid-stretch", () => {
+    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+    engine.handlePointerSample(createSample({ phase: "down", docX: handle.x, docY: handle.y }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: handle.x + 30, docY: handle.y }),
+    );
+    expect(engine.listStrokes(layerId)[0].xs).not.toEqual(xs);
+
+    // Escape clears the selection, and clearing it cancels the gesture in
+    // flight: the content goes back to where it was.
+    engine.clearSelection();
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("cancels a side stretch when the tool changes", () => {    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+    engine.handlePointerSample(createSample({ phase: "down", docX: handle.x, docY: handle.y }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: handle.x + 30, docY: handle.y }),
+    );
+    expect(engine.listStrokes(layerId)[0].xs).not.toEqual(xs);
+
+    // Leaving the select tool finishes the gesture: the content goes back to
+    // where it was, and nothing was recorded.
+    engine.setTool("brush");
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("shows a move cursor over the frame and a resize cursor over a handle", () => {
+    const { engine, frame } = selectStroke();
+    const reports: CursorReport[] = [];
+    engine.subscribeCursor((report) => reports.push(report));
+
+    // Over the selection's own frame, away from every handle: a press there
+    // moves the content.
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: frame.x + 20,
+        docY: frame.y + frame.height / 2,
+      }),
+    );
+    expect(reports[reports.length - 1].cursor).toBe("move");
+
+    // A press just inside the frame's top edge is still a move: the side
+    // handles sit further out than the grab radius.
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: frame.x + 20,
+        docY: frame.y + 1,
+      }),
+    );
+    expect(reports[reports.length - 1].cursor).toBe("move");
+
+    // Over the east side handle: a press there stretches the selection.
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+        docY: frame.y + frame.height / 2,
+      }),
+    );
+    expect(reports[reports.length - 1].cursor).toBe("ew-resize");
+  });
+
+  it("highlights the handle under the pointer", () => {
+    const { engine, spy, frame } = selectStroke();
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+        docY: frame.y + frame.height / 2,
+      }),
+    );
+    const overlay = spy.selections[spy.selections.length - 1];
+    expect(overlay?.hoveredHandle).toBe("scale-e");
+    // The handles themselves are on the frame: the side handle just outside
+    // its right edge.
+    expect(overlay?.handles?.edges[1].x).toBeCloseTo(
+      (overlay?.bounds?.x ?? 0) + (overlay?.bounds?.width ?? 0) + EDGE_HANDLE_OFFSET_PX,
+      6,
+    );
+  });
+
+  it("snaps a dragged handle onto the grid", () => {
+    const { engine, layerId, frame, xs } = selectStroke();
+    engine.setGridSpacing(25);
+    engine.setGridSnapping(true);
+    const handle = {
+      x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+      y: frame.y + frame.height / 2,
+    };
+
+    // The pointer stops one pixel short of the grid line at 225, and the
+    // magnet pulls the handle onto it: the travel is the distance from the
+    // handle to that line, not the 9 pixels the pointer made.
+    dragHandle(engine, handle, { x: 224, y: handle.y });
+
+    const after = engine.listStrokes(layerId)[0];
+    const factor = 1 + (225 - handle.x) / frame.width;
+    after.xs.forEach((x, index) => {
+      expect(x).toBeCloseTo(frame.x + (xs[index] - frame.x) * factor, 6);
+    });
   });
 
   it("survives a save and reopen", () => {

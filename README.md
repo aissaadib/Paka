@@ -86,17 +86,30 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   strokes plus a blue trace over each of them. Dragging from inside the frame
   moves every selected stroke as one gesture; releasing records **one** undo
   step, and `Esc` cancels a drag mid-flight. The frame also carries **four
-  corner handles** and a **rotation handle** above its top edge: drag a corner
+  corner handles**, **four side handles** just outside its sides and a
+  **rotation handle** above its top edge: drag a corner
   handle to **scale** the selection uniformly about the centre of the frame (the
   corner keeps its direction from the centre, so dragging away from the centre
   grows the selection and towards it shrinks it, and the size is clamped so a
-  selection can never collapse or invert), and drag the rotation handle to
+  selection can never collapse or invert), drag a **side handle** to
+  **stretch** one side of it (the dragged edge follows the pointer and the
+  opposite edge stays put; hold `Shift` to lock the aspect ratio, so the other
+  side grows by the same amount and the proportions are kept), and drag the
+  rotation handle to
   **rotate** it about the same centre. The rotation **snaps to 15 degrees**
   while the pointer is held down; hold `Shift` to turn the snap **off** and
-  rotate freely. Both are measured **from where you pressed**, so grabbing a
-  handle slightly off its centre does not jump the content. The handles take
-  precedence over the move: a press on a corner is a scale, not a drag, and
-  they appear only for a real selection - never on a marquee's rubber band.
+  rotate freely. All of them are measured **from where you pressed**, so grabbing a
+  handle slightly off its centre does not jump the content. The **anchor** - the
+  point that does not move - is chosen when you press: hold `Alt` to anchor a
+  corner at the opposite corner, or a side at the centre of the frame. The
+  handles take
+  precedence over the move: a press on a handle is a transform, not a drag, and
+  they appear only for a real selection - never on a marquee's rubber band. The
+  side handles sit **outside** the frame so a press inside it always moves the
+  content, the pointer says what a press will do (a resize cursor over a
+  handle, the move arrow over the frame), the handle under the pointer is
+  highlighted, and a dragged handle snaps to the grid and the guides like every
+  other pointer.
   The arrow keys nudge the selection
   by 1 px (`Shift`: 10 px) and a continuous run of nudges is one step (reselecting
   starts a new one), `Ctrl+D` duplicates
@@ -365,12 +378,12 @@ paste-ready version of the same briefing is in
   drag can never drift from the committed result). That is fine at the sizes
   tested and is the first thing to cache if a heavy layer makes dragging lag.
   A scale and a rotation cost the same.
-- **A transform is baked on apply.** Scaling and rotating move the selected
-  strokes' samples and commit them, so there is no non-destructive transform to
-  edit later, and the **painted width is not scaled with the path**: a scaled
-  stroke is the same stroke drawn along a different path, not a stroke drawn
-  with a bigger brush. Perspective, shear, a non-uniform scale, per-stroke
-  nudging and copy/paste across layers are not implemented.
+- **A transform is baked on apply.** Scaling, stretching and rotating move the
+  selected strokes' samples and commit them, so there is no non-destructive
+  transform to edit later, and the **painted width is not scaled with the
+  path**: a scaled stroke is the same stroke drawn along a different path, not
+  a stroke drawn with a bigger brush. Perspective, shear, per-stroke nudging and
+  copy/paste across layers are not implemented.
 - Shape tools draw the **outline** of a line, rectangle, ellipse, polygon or
   star as a stroke
   of the current brush, and the rectangle, ellipse, polygon and star can fill it

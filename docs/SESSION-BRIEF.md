@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent17-transform-handles` | **Transform handles, preview and commit** - the selection's overlay grows four **side handles** next to the four corners, so the transform is a real bounding box: a corner scales the selection uniformly, a **side stretches one axis** (the dragged edge follows the pointer, the opposite edge stays put, `Shift` locks the aspect ratio) and the rotation handle still turns it. The **anchor** - the point that does not move - is chosen when the gesture starts (`Alt` anchors a corner at the opposite corner and a side at the frame's centre). The side handles sit just **outside** the frame, because a handle on the edge would take the press that moves a thin selection by its middle. The pointer now says what a press will do (a resize cursor over a handle, the **move arrow** over the frame) and the handle under the pointer is **highlighted**, and a dragged handle **snaps to the grid and the guides** with the same magnet the drawing tools use. The preview, the single undo step and the exact cancel (a lost capture, a tool switch, `Esc`) are unchanged: the transform is still baked into the samples on release, so there is **no project-format change**. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -151,7 +152,8 @@ visual-regression harness.
   whole layer in element order; no stop editor, no angle snapping.
 - **Selection/transform** (`M`): marquee or click selects whole strokes of the
   active layer; drag moves them; the four **corner handles** scale the
-  selection and the **rotation handle** above the frame turns it; arrow keys
+  selection, the four **side handles** stretch one side of it, and the
+  **rotation handle** above the frame turns it; arrow keys
   nudge (1 px, `Shift` 10 px, coalesced); `Ctrl+D` duplicates;
   `Ctrl+Shift+H`/`V` flips; `Delete` removes; `Esc` cancels; all one undo step
   each and mirrored in the **Selection** menu.
@@ -161,16 +163,27 @@ visual-regression harness.
   corner keeps its direction from the centre, so dragging away from the centre
   grows the selection and dragging towards it shrinks it, and the factor is
   clamped so a selection can never collapse or invert (5 % is the floor). A
+  **stretch** pulls one axis only: the dragged edge follows the pointer and the
+  **opposite edge stays put**, `Shift` locks the aspect ratio (the other axis
+  grows by the same factor), and a side is never squashed to nothing (one
+  document pixel is the floor) or mirrored. A
   **rotation** is about the same centre; the angle is the pointer's compass
   angle clockwise from "up", it **snaps to 15 degrees** while the pointer is
-  held down, and **`Shift` turns the snap off** for a free turn. Both are
+  held down, and **`Shift` turns the snap off** for a free turn. All three are
   measured **from where the press landed**, so a press that misses the handle
-  by a little does not jump the content. Both are
+  by a little does not jump the content. The **anchor** - the point that does
+  not move - is chosen when the gesture starts: `Alt` anchors a corner at the
+  opposite corner and a side at the frame's centre. All of them are
   **baked on apply**: the transform moves the strokes' samples and nothing else,
   so the brush, the colour, the opacity and the pressure are untouched, a
   scaled stroke is still the same stroke, and there is **no project-format
   change**. The handles belong to the **committed selection**: they appear on
-  its frame and never on a marquee's rubber band.
+  its frame and never on a marquee's rubber band. The side handles sit just
+  **outside** the frame, so a press inside it always moves the content - a
+  thin selection could not be moved by its middle otherwise. The cursor says
+  what a press will do (resize over a handle, move arrow over the frame) and
+  the handle under the pointer is highlighted. A dragged handle **snaps to
+  the grid and the guides** with the same magnet the drawing tools use.
 - **Colour picker** (`I`): samples the merged composite at the pointer, stays
   selected, is not an edit.
 - **Preferences survive a restart**: the brush, the tool, the shape options, the
@@ -562,8 +575,8 @@ Product:
   is not free: the dab painting costs about 1.5x a plain dab on the machine
   it was measured on.
 - Selection: stroke-level (whole strokes), active layer only, dropped on layer
-  switch/tool switch, not a painting mask, no perspective and no non-uniform
-  scale, no copy/paste across layers. A transform is **baked on apply**, so
+  switch/tool switch, not a painting mask, no perspective and no shear, no
+  copy/paste across layers. A transform is **baked on apply**, so
   there is no persistent transform to edit afterwards, and the painted width is
   not scaled with the path.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited

@@ -1471,6 +1471,12 @@ describe("Canvas2DRenderer selection overlay", () => {
           { x: 42, y: 23 },
           { x: 2, y: 23 },
         ],
+        edges: [
+          { x: 22, y: 3 },
+          { x: 42, y: 13 },
+          { x: 22, y: 23 },
+          { x: 2, y: 13 },
+        ],
         rotate: { x: 22, y: -21 },
       },
     });
@@ -1489,6 +1495,14 @@ describe("Canvas2DRenderer selection overlay", () => {
       .filter((call) => call.strokeStyle === "#2f7bff" && call.args[2] === 8);
     expect(outlines).toHaveLength(4);
 
+    // A smaller square on each side of the frame, for the one-axis stretch.
+    const edgeFills = harness.display
+      .named("fillRect")
+      .filter((call) => call.args[2] === 6);
+    expect(edgeFills).toHaveLength(4);
+    expect(edgeFills[0].args).toEqual([19, 0, 6, 6]);
+    expect(edgeFills[0].fillStyle).toBe("#ffffff");
+
     // The rotation handle is a circle above the frame's top edge.
     const arcs = harness.display.named("arc");
     expect(arcs).toHaveLength(1);
@@ -1500,6 +1514,44 @@ describe("Canvas2DRenderer selection overlay", () => {
     const composed = harness.composeDocument();
     expect(composed.named("fillRect").filter((call) => call.args[2] === 8)).toHaveLength(0);
     expect(composed.named("arc")).toHaveLength(0);
+  });
+
+  it("fills the handle under the pointer with the accent colour", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const harness = createHarness();
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection({
+      bounds: { x: 2, y: 3, width: 40, height: 20 },
+      strokes: [],
+      handles: {
+        corners: [
+          { x: 2, y: 3 },
+          { x: 42, y: 3 },
+          { x: 42, y: 23 },
+          { x: 2, y: 23 },
+        ],
+        edges: [
+          { x: 22, y: 3 },
+          { x: 42, y: 13 },
+          { x: 22, y: 23 },
+          { x: 2, y: 13 },
+        ],
+        rotate: { x: 22, y: -21 },
+      },
+      // The east handle is under the pointer.
+      hoveredHandle: "scale-e",
+    });
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    const fills = harness.display.named("fillRect");
+    // The east handle is at (42, 13); its square is drawn at (39, 10).
+    const hovered = fills.find((call) => call.args[2] === 6 && call.args[0] === 39);
+    expect(hovered?.fillStyle).toBe("#2f7bff");
+    // The others keep the handle's own fill, so one handle stands out.
+    const others = fills.filter((call) => call.args[2] === 6 && call.fillStyle !== "#2f7bff");
+    expect(others).toHaveLength(3);
   });
 });
 

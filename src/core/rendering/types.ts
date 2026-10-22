@@ -9,7 +9,7 @@
 
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
 import type { GridSettings } from "../document/grid";
-import type { SelectionHandles } from "../document/selectionHandles";
+import type { SelectionHandleId, SelectionHandles } from "../document/selectionHandles";
 import type { Viewport } from "../../types/viewport";
 import type { Bounds } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
@@ -40,6 +40,15 @@ export interface RendererSelection {
    * `composeDocumentImage`.
    */
   readonly handles?: SelectionHandles | null;
+  /**
+   * The handle the pointer is over, or `null`.
+   *
+   * The renderer paints that handle in the accent colour, so the user can
+   * see what a press would grab. It is display state like the handles
+   * themselves: it never reaches a layer surface, the document or
+   * `composeDocumentImage`.
+   */
+  readonly hoveredHandle?: SelectionHandleId | null;
 }
 
 /**

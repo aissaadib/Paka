@@ -16,10 +16,16 @@ import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import {
   boundsCentre,
   clampScaleFactor,
+  clampStretchFactor,
+  cornerScale,
   createRotateTransform,
   createScaleTransform,
+  createStretchTransform,
+  edgeScale,
   MIN_SCALE_FACTOR,
+  MIN_STRETCH_SIZE,
   normalizeAngle,
+  oppositeCorner,
   rotateAboutCentre,
   ROTATION_SNAP_DEGREES,
   rotationAngleFor,
@@ -275,9 +281,145 @@ describe("the angle wrap", () => {
   });
 });
 
+describe("the one-axis stretch of a side handle", () => {
+  const FRAME: Bounds = { x: 100, y: 200, width: 80, height: 40 };
+  const PRESS: Point = { x: 180, y: 220 };
+  const FREE = { proportional: false, fromCentre: false } as const;
+
+  it("moves the dragged edge with the pointer and leaves the other edge alone", () => {
+    const scale = edgeScale(FRAME, "x", "end", PRESS, { x: 200, y: 220 }, FREE);
+    // The left edge is the anchor: it does not move.
+    expect(scale.anchorX).toBe(100);
+    // Twenty pixels of travel on an eighty-pixel frame is a quarter more.
+    expect(scale.factorX).toBeCloseTo(1.25, 10);
+    // The other axis is untouched: a side handle stretches one side only.
+    expect(scale.factorY).toBe(1);
+
+    const transform = createStretchTransform(scale);
+    expect(transform.mapX(180, 220)).toBeCloseTo(200, 10);
+    expect(transform.mapX(100, 220)).toBeCloseTo(100, 10);
+    expect(transform.mapY(220, 200)).toBeCloseTo(200, 10);
+  });
+
+  it("grows on both sides when the anchor is the centre", () => {
+    const scale = edgeScale(FRAME, "x", "end", PRESS, { x: 200, y: 220 }, {
+      proportional: false,
+      fromCentre: true,
+    });
+    // The centre is the anchor, so the frame grows on both sides.
+    expect(scale.anchorX).toBe(140);
+    // The dragged edge still follows the pointer one for one.
+    const transform = createStretchTransform(scale);
+    expect(transform.mapX(180, 220)).toBeCloseTo(200, 10);
+    expect(transform.mapX(100, 220)).toBeCloseTo(80, 10);
+  });
+
+  it("locks the aspect ratio when the proportional modifier is held", () => {
+    const scale = edgeScale(FRAME, "x", "end", PRESS, { x: 200, y: 220 }, {
+      proportional: true,
+      fromCentre: false,
+    });
+    // Both axes grow by the same factor, so the proportions are kept: an
+    // eighty-by-forty frame becomes a hundred-by-fifty one.
+    expect(scale.factorX).toBeCloseTo(1.25, 10);
+    expect(scale.factorY).toBeCloseTo(1.25, 10);
+
+    const transform = createStretchTransform(scale);
+    expect(transform.mapX(180, 220)).toBeCloseTo(200, 10);
+    // The frame's vertical centre does not move, and the height follows: the
+    // top edge was 20 above the centre and is 25 above it now.
+    expect(transform.mapY(140, 220)).toBeCloseTo(220, 10);
+    expect(transform.mapY(140, 200)).toBeCloseTo(195, 10);
+  });
+
+  it("asks for no change where the press landed", () => {
+    const scale = edgeScale(FRAME, "x", "end", PRESS, PRESS, FREE);
+    expect(scale.factorX).toBe(1);
+    expect(scale.factorY).toBe(1);
+  });
+
+  it("never squashes a side to nothing", () => {
+    // A drag far past the opposite edge would invert the frame; the clamp
+    // stops the side at one document pixel instead.
+    const scale = edgeScale(FRAME, "x", "end", PRESS, { x: -500, y: 220 }, FREE);
+    expect(scale.factorX * FRAME.width).toBeCloseTo(MIN_STRETCH_SIZE, 10);
+    expect(scale.factorX).toBeGreaterThan(0);
+  });
+
+  it("stretches the other axis for a north or south handle", () => {
+    // The north handle is the low end of the y axis, so it travels against
+    // the pointer: dragging it **up** makes the frame taller.
+    const scale = edgeScale(FRAME, "y", "start", { x: 140, y: 200 }, { x: 140, y: 180 }, FREE);
+    // The bottom edge is the anchor, so it does not move.
+    expect(scale.anchorY).toBe(240);
+    expect(scale.factorY).toBeCloseTo(1.5, 10);
+    expect(scale.factorX).toBe(1);
+
+    const transform = createStretchTransform(scale);
+    // The top edge followed the pointer up to 180.
+    expect(transform.mapY(140, 200)).toBeCloseTo(180, 10);
+    expect(transform.mapY(140, 240)).toBeCloseTo(240, 10);
+  });
+});
+
+describe("the clamp of a free stretch", () => {
+  it("keeps the stretched side at least a pixel wide", () => {
+    expect(clampStretchFactor(0, 100)).toBeCloseTo(MIN_STRETCH_SIZE / 100, 10);
+    expect(clampStretchFactor(-3, 100)).toBeCloseTo(MIN_STRETCH_SIZE / 100, 10);
+  });
+
+  it("leaves a factor that is big enough alone", () => {
+    expect(clampStretchFactor(1, 100)).toBe(1);
+    expect(clampStretchFactor(2.5, 100)).toBe(2.5);
+  });
+
+  it("leaves a stretch that is not a number where it is", () => {
+    expect(clampStretchFactor(Number.NaN, 100)).toBe(1);
+    expect(clampStretchFactor(2, Number.NaN)).toBe(1);
+    expect(clampStretchFactor(2, 0)).toBe(1);
+  });
+});
+
+describe("the corner scale and its anchor", () => {
+  const FRAME: Bounds = { x: 100, y: 200, width: 80, height: 40 };
+  const CORNER: Point = { x: 180, y: 240 };
+
+  it("scales uniformly about the anchor", () => {
+    const scale = cornerScale(CORNER, boundsCentre(FRAME), CORNER, { x: 200, y: 260 });
+    // The corner is not on the diagonal, so the factor is the projection of
+    // the travel along the corner's own ray: 1.6, not 1.5.
+    expect(scale.factorX).toBeCloseTo(1.6, 10);
+    expect(scale.factorY).toBeCloseTo(1.6, 10);
+    expect(scale.anchorX).toBe(140);
+    expect(scale.anchorY).toBe(220);
+  });
+
+  it("leaves the anchor where it is", () => {
+    const scale = cornerScale(CORNER, boundsCentre(FRAME), CORNER, { x: 200, y: 260 });
+    const transform = createStretchTransform(scale);
+    expect(transform.mapX(140, 220)).toBeCloseTo(140, 10);
+    expect(transform.mapY(140, 220)).toBeCloseTo(220, 10);
+  });
+
+  it("asks for no change where the press landed", () => {
+    const scale = cornerScale(CORNER, boundsCentre(FRAME), CORNER, CORNER);
+    expect(scale.factorX).toBe(1);
+  });
+});
+
+describe("the opposite corner", () => {
+  const FRAME: Bounds = { x: 100, y: 200, width: 80, height: 40 };
+
+  it("is the corner on the other side and the other row", () => {
+    expect(oppositeCorner(FRAME, { x: 100, y: 200 })).toEqual({ x: 180, y: 240 });
+    expect(oppositeCorner(FRAME, { x: 180, y: 240 })).toEqual({ x: 100, y: 200 });
+    expect(oppositeCorner(FRAME, { x: 180, y: 200 })).toEqual({ x: 100, y: 240 });
+    expect(oppositeCorner(FRAME, { x: 100, y: 240 })).toEqual({ x: 180, y: 200 });
+  });
+});
+
 describe("the selection's frame", () => {
   const padding = 1;
-
   it("is the union of the samples, widened by the paint", () => {
     const frame = selectionFrame([stroke([[0, 0], [10, 0]])], () => padding);
     expect(frame).toEqual({ x: -1, y: -1, width: 12, height: 2 });

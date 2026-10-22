@@ -104,23 +104,33 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       (dashed frame plus blue trace) is
       renderer-only and never reaches a layer or an export. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
-- [x] Scale and rotate a selection: the selection's overlay grows four **corner
-      handles** and a **rotation handle** above the frame. A corner handle
-      **scales** the selection uniformly about the centre of its frame - the
-      corner keeps its direction from the centre, so a drag away from the centre
-      grows the selection and a drag towards it shrinks it - and the factor is
-      clamped so a selection can never collapse or invert. The rotation handle
-      **rotates** it about the same centre; the angle snaps to **15 degrees**
-      while the pointer is held down and `Shift` turns the snap **off** for a
-      free turn. Both are measured **from where the press landed**, so a press
-      that misses the handle by a little does not jump the content. Both are
+- [x] Scale, stretch and rotate a selection: the selection's overlay grows four
+      **corner handles**, four **side handles** and a **rotation handle** above
+      the frame. A corner handle **scales** the selection uniformly about the
+      centre of its frame - the corner keeps its direction from the centre, so
+      a drag away from the centre grows the selection and a drag towards it
+      shrinks it - and the factor is clamped so a selection can never collapse
+      or invert. A **side handle** stretches one axis only: the dragged edge
+      follows the pointer and the **opposite edge stays put**, `Shift` locks
+      the aspect ratio, and a side is never squashed to nothing or mirrored.
+      The rotation handle **rotates** it about the same centre; the angle snaps
+      to **15 degrees** while the pointer is held down and `Shift` turns the
+      snap **off** for a free turn. The **anchor** - the point that does not
+      move - is chosen when the gesture starts: `Alt` anchors a corner at the
+      opposite corner and a side at the frame's centre. All three are measured
+      **from where the press landed**, so a press that misses the handle by a
+      little does not jump the content. All are
       **baked on apply**: the transform moves the selected strokes' samples and
       nothing else, so the brush, the colour, the opacity and the pressure are
       untouched, a scaled stroke is still the same stroke, and the project format
-      did not move (version 9 when this shipped; the format is 10 now). Each
-      transform is one undo step, through the
+      did not move. Each transform is one undo step, through the
       same command as a move. The handles belong to the committed selection and
-      are display-only: they never reach a layer surface or a PNG export. See
+      are display-only: they never reach a layer surface or a PNG export. The
+      side handles sit just **outside** the frame so a press inside it always
+      moves the content, the cursor says what a press will do (resize over a
+      handle, move arrow over the frame), the handle under the pointer is
+      highlighted, and a dragged handle snaps to the grid and the guides with
+      the same magnet the drawing tools use. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
 - [x] Filled shapes: rectangle and ellipse commit with `fill: true` when the
       toolbar's **Fill shape** switch is on, so the rasterizer fills the polygon

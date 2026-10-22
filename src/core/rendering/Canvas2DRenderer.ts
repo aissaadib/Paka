@@ -23,7 +23,12 @@ import type {
   StrokeRecord,
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
-import type { SelectionHandles } from "../document/selectionHandles";
+import {
+  CORNER_HANDLE_IDS,
+  EDGE_HANDLE_IDS,
+  type SelectionHandleId,
+  type SelectionHandles,
+} from "../document/selectionHandles";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import type { Bounds } from "../../types/geometry";
@@ -74,6 +79,11 @@ const SELECTION_TRACE_WIDTH = 1.5;
 const SELECTION_MARQUEE_DASH: readonly [number, number] = [6, 4];
 /** Screen pixels; divided by the display scale so the handles never change size. */
 const HANDLE_SIZE_PX = 8;
+/**
+ * Screen pixels; the side handles are smaller than the corner ones, so the
+ * frame's corners stay the strongest thing on it.
+ */
+const EDGE_HANDLE_SIZE_PX = 6;
 const ROTATION_HANDLE_RADIUS_PX = 5;
 /** The handle's own fill, so a handle reads on top of dark ink as well. */
 const HANDLE_FILL_COLOR = "#ffffff";
@@ -759,30 +769,37 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     if (selection.handles) {
-      this.paintSelectionHandles(ctx, scale, selection.handles, bounds);
+      this.paintSelectionHandles(ctx, scale, selection.handles, bounds, selection.hoveredHandle ?? null);
     }
 
     ctx.globalAlpha = 1;
   }
 
   /**
-   * Draws the transform handles: a square on each corner of the frame and a
-   * circle above it that turns the selection.
+   * Draws the transform handles: a square on each corner of the frame, a
+   * smaller square on each side, and a circle above the frame that turns the
+   * selection.
    *
    * Overlay only, like the frame and the trace: the handles are painted on the
    * display canvas and never reach a layer surface, the document or a PNG
    * export. Their **positions** are in document space, so they sit on the
    * selection's corners exactly; their **size** is in screen pixels, so they
    * stay the same size on screen at any zoom.
+   *
+   * The handle under the pointer is filled with the accent colour instead of
+   * the handle fill, so the user can see what a press would grab.
    */
   private paintSelectionHandles(
     ctx: CanvasRenderingContext2D,
     scale: number,
     handles: SelectionHandles,
     bounds: Bounds | null,
+    hovered: SelectionHandleId | null,
   ): void {
     const size = HANDLE_SIZE_PX / scale;
     const half = size / 2;
+    const edgeSize = EDGE_HANDLE_SIZE_PX / scale;
+    const edgeHalf = edgeSize / 2;
     const radius = ROTATION_HANDLE_RADIUS_PX / scale;
 
     ctx.globalAlpha = 1;
@@ -790,23 +807,42 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = HANDLE_FILL_COLOR;
     ctx.lineWidth = 1 / scale;
 
-    for (const corner of handles.corners) {
-      ctx.fillRect(corner.x - half, corner.y - half, size, size);
-      ctx.strokeRect(corner.x - half, corner.y - half, size, size);
-    }
-
-    // The rotation handle: a circle above the frame's top edge, tied to it by
-    // a short stem so it reads as part of the frame.
+    // The rotation handle's stem, drawn first so the handles sit on top of it.
     if (bounds) {
       ctx.beginPath();
       ctx.moveTo(handles.rotate.x, handles.rotate.y + radius);
       ctx.lineTo(handles.rotate.x, bounds.y);
       ctx.stroke();
     }
+
+    const drawHandle = (x: number, y: number, halfSize: number, isHovered: boolean): void => {
+      if (isHovered) {
+        ctx.fillStyle = SELECTION_COLOR;
+      }
+      ctx.fillRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
+      ctx.strokeRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
+      ctx.fillStyle = HANDLE_FILL_COLOR;
+    };
+
+    for (let index = 0; index < handles.corners.length; index += 1) {
+      const corner = handles.corners[index];
+      drawHandle(corner.x, corner.y, half, hovered === CORNER_HANDLE_IDS[index]);
+    }
+    for (let index = 0; index < handles.edges.length; index += 1) {
+      const edge = handles.edges[index];
+      drawHandle(edge.x, edge.y, edgeHalf, hovered === EDGE_HANDLE_IDS[index]);
+    }
+
+    // The rotation handle: a circle above the frame's top edge, tied to it by
+    // a short stem so it reads as part of the frame.
     ctx.beginPath();
     ctx.arc(handles.rotate.x, handles.rotate.y, radius, 0, Math.PI * 2);
+    if (hovered === "rotate") {
+      ctx.fillStyle = SELECTION_COLOR;
+    }
     ctx.fill();
     ctx.stroke();
+    ctx.fillStyle = HANDLE_FILL_COLOR;
   }
 
   /**

@@ -1028,6 +1028,15 @@ Four gestures, chosen on press:
   is the rule a proportional corner handle follows in a vector editor, and it is
   what keeps the scale uniform. The factor is clamped to `MIN_SCALE_FACTOR`
   (5 %): a drag through the centre must not collapse the selection or mirror it.
+- **Stretch** - drag one of the four **side handles**, the smaller squares just
+  outside the frame's sides. A side handle pulls **one axis** and leaves the
+  other alone, so the frame gets wider or taller rather than bigger. The
+  dragged edge tracks the pointer one for one and the **opposite edge is the
+  anchor**, so the side the user did not drag stays where it is. `Shift` locks
+  the aspect ratio: the other axis grows by the same factor about its centre,
+  so the selection keeps its proportions. A stretched side is never squashed to
+  nothing - it stops at `MIN_STRETCH_SIZE` (one document pixel) - and it is
+  never mirrored, which is a flip and has its own command.
 - **Rotate** - drag the **rotation handle**, the circle above the frame's top
   edge. The rotation is about the same centre, and the angle is the pointer's
   compass angle measured clockwise from "up". The angle **snaps to 15 degrees**
@@ -1043,9 +1052,37 @@ factor)` and the rotation is the *change* of the compass angle since the press
 (wrapped to the shortest way round). The rates are unchanged: dragging the
 pointer one corner-distance further out still doubles the selection.
 
-The handles win over the move: they sit on the frame's corners, which are
-inside the frame, so a press on a corner would otherwise start a translation.
-Grabbing a handle is an explicit "transform this", and it is checked first.
+The **anchor** - the point that does not move - is chosen when the gesture
+starts, from the modifier the press was made with, and it is fixed for the
+whole gesture: an anchor that changed under the pointer would move the content.
+
+- A **corner** handle is anchored at the frame's centre by default; `Alt`
+  anchors it at the **opposite corner** instead, so the corner the user did
+  not drag stays put.
+- A **side** handle is anchored at the **opposite edge** by default; `Alt`
+  anchors it at the frame's **centre** instead, so the frame grows on both
+  sides and the dragged edge still follows the pointer.
+
+`Shift` is the other modifier and it is read **live**: holding it during a
+side drag locks the aspect ratio, and pressing it after the drag has begun
+locks it from that point on.
+
+The handles win over the move: the corner handles sit on the frame's corners,
+which are inside the frame, so a press on a corner would otherwise start a
+translation. Grabbing a handle is an explicit "transform this", and it is
+checked first. The **side handles are outside the frame** for the same reason
+in reverse: a handle on the edge would sit inside the frame, where a press
+moves the content, and a thin selection - a single horizontal stroke - could
+not be moved by its middle at all. Outside the frame the two gestures never
+compete, exactly as the rotation handle already does.
+
+The pointer says what a press will do: the cursor is the diagonal resize
+cursor over a corner, the horizontal or vertical resize cursor over a side,
+the grab cursor over the rotation handle and the **move arrow over the
+frame**, away from every handle. The handle under the pointer is also
+**highlighted** in the accent colour, so the affordance is visible as well as
+announced. Both are display-only: the hover is not document state and enters
+no history.
 
 A scale and a rotation are **baked on apply**, exactly like a move: the
 transform is a coordinate map over the selected strokes' *samples*, and the
@@ -1061,11 +1098,22 @@ The transform geometry is **pure and DOM-free**
 (`core/document/selectionTransform.ts`): the scale and rotation maps, the
 factor and the angle a pointer asks for, the two rules that measure a drag
 **from the press** (`scaleFactorFrom`, `rotationAngleFrom`), the clamps, the
-angle snap, and the rule that says where the selection's frame is.
+angle snap, and the rule that says where the selection's frame is. A scale is
+written as an **anchor and a factor per axis** (`HandleScale`), so one map
+covers the uniform scale (the same factor twice about the centre) and the
+one-axis stretch (one factor, the other axis untouched):
+`x' = anchorX + (x − anchorX) × factorX`.
 `core/document/selectionHandles.ts` owns the handles' layout and their hit
 test. The engine holds no transform state of its own: the frame it draws is
 **derived from the strokes**, so after a transform the overlay shows the new
 frame and the handles sit on its new corners.
+
+A transform **snaps** like every other pointer: the handle is pulled onto the
+nearest grid line or guide with the same screen-space magnet the drawing tools
+use (`snapDocumentPoint`, the same call and the same tolerance), so there is no
+second, transform-only snapping rule. A transform pointer is not refused
+outside the paper, though: a handle is often dragged past the edge of the
+document and the content follows it there.
 
 The snap's tie - exactly 7.5 degrees between two steps - breaks **away from
 zero**, so +7.5 degrees snaps to +15 and -7.5 to -15: a clockwise turn and its
@@ -1847,14 +1895,14 @@ These are real gaps, not footnotes:
   fill writes a region; a gradient is a two-stop linear/radial colour function,
   not an editable gradient with draggable stops.
 - **Selection is stroke-level, layer-scoped and limited to translation, scaling,
-  rotation, duplication and reflection.** A marquee
+  stretching, rotation, duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
   layer or the tool changes. **Fill patches and gradients are not selectable** -
   the stroke-only view deliberately filters them out - so they can only be
   undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
   feathering,
-  no clipping, no perspective and no non-uniform scale; duplicate stays on the
+  no clipping, no perspective and no shear; duplicate stays on the
   layer (there is no cross-layer copy/paste). The frame is the selected strokes'
   bounding box, not the region that was dragged.
 - **A transform is baked on apply.** A scaled or turned selection is committed
