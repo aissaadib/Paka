@@ -78,6 +78,34 @@ export interface EditorActions {
   setLayerOpacity(layerId: LayerId, opacity: number): void;
   setLayerBlendMode(layerId: LayerId, blendMode: LayerBlendMode): void;
   moveLayer(layerId: LayerId, delta: number): void;
+  /**
+   * Locks a layer, or takes the lock off.
+   *
+   * A locked layer keeps its pixels and its place in the stack: nothing may be
+   * painted on it, its strokes may not be moved, turned or deleted, and it
+   * cannot be reordered or deleted.
+   */
+  setLayerLocked(layerId: LayerId, locked: boolean): void;
+  /** Locks a layer that is unlocked, and unlocks one that is locked. */
+  toggleLayerLock(layerId: LayerId): void;
+  /**
+   * Creates a layer group and returns its id, or `null` when it could not be
+   * made.
+   *
+   * A group is a folder: it holds layers and other groups and has no pixels
+   * of its own, so the layers it holds are drawn exactly as they were.
+   */
+  createLayerGroup(parentId?: string | null, name?: string): string | null;
+  /** Renames a layer group. */
+  renameLayerGroup(groupId: string, name: string): void;
+  /** Folds a group away or opens it again. Display-only. */
+  setLayerGroupCollapsed(groupId: string, collapsed: boolean): void;
+  /** Moves a group among its siblings. */
+  moveLayerGroup(groupId: string, delta: number): void;
+  /** Removes a group and keeps the layers that were in it. */
+  removeLayerGroup(groupId: string): void;
+  /** Moves a layer into a group, or back out to the top level with `null`. */
+  moveLayerToGroup(layerId: LayerId, groupId: string | null): void;
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
   deleteSelection(): void;
@@ -169,6 +197,15 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setLayerOpacity: (layerId, opacity) => engine.setLayerOpacity(layerId, opacity),
     setLayerBlendMode: (layerId, blendMode) => engine.setLayerBlendMode(layerId, blendMode),
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
+    setLayerLocked: (layerId, locked) => engine.setLayerLocked(layerId, locked),
+    toggleLayerLock: (layerId) => engine.toggleLayerLock(layerId),
+    createLayerGroup: (parentId, name) => engine.createLayerGroup(parentId, name),
+    renameLayerGroup: (groupId, name) => engine.renameLayerGroup(groupId, name),
+    setLayerGroupCollapsed: (groupId, collapsed) =>
+      engine.setLayerGroupCollapsed(groupId, collapsed),
+    moveLayerGroup: (groupId, delta) => engine.moveLayerGroup(groupId, delta),
+    removeLayerGroup: (groupId) => engine.removeLayerGroup(groupId),
+    moveLayerToGroup: (layerId, groupId) => engine.moveLayerToGroup(layerId, groupId),
     selectLayer: (layerId) => engine.selectLayer(layerId),
     clearSelection: () => engine.clearSelection(),
     deleteSelection: () => {

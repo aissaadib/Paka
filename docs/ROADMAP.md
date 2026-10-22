@@ -220,7 +220,21 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       v10 reader rejects the new values instead of drawing them as `normal`; a
       v10 file still opens.
 - [ ] Layer masks and clipping.
-- [ ] Groups.
+- [x] Groups: folders in the layer panel that hold layers and other groups. A
+      group is **organization, not compositing**: it has no pixels, no opacity
+      and no blend mode, and the layers it holds are drawn exactly as they were
+      without it. The tree says where a layer sits in the panel, and the flat
+      layer list says where it sits in the stack - the two always agree, because
+      a group's members occupy one contiguous run of the stack. Create, rename,
+      fold, reorder and remove a group; move a layer into a group and back out;
+      every change is one undoable step. The project format change is
+      **additive** (no version bump): an older reader ignores the tree and
+      composites the same picture.
+- [x] Layer locks: a locked layer keeps its pixels and its place in the stack.
+      Nothing may be painted on it, its strokes may not be moved, turned, scaled
+      or deleted, and it is neither reordered nor deleted. The engine refuses
+      every path that could change it, so the lock is a promise rather than a
+      mark on a picture. Additive in the project format, like the groups.
 
 ## Phase 5 - Import/export and colour workflows
 

@@ -40,10 +40,77 @@ export interface Layer {
   /** Layer opacity in `[0, 1]`. */
   readonly opacity: number;
   readonly blendMode: LayerBlendMode;
+  /**
+   * True when the layer's pixels and its place in the stack are protected.
+   *
+   * A locked layer cannot be painted on, cannot have its strokes moved,
+   * turned or deleted, and cannot be reordered. The flag is **absent** on an
+   * unlocked layer, which keeps every layer that was never locked free of a
+   * redundant field - the same convention the stroke records use for `erase`
+   * and `fill`.
+   */
+  readonly locked?: boolean;
 }
 
 /** Mutable fields of a layer that user actions may change. */
-export type LayerPatch = Partial<Pick<Layer, "name" | "visible" | "opacity" | "blendMode">>;
+export type LayerPatch = Partial<
+  Pick<Layer, "name" | "visible" | "opacity" | "blendMode" | "locked">
+>;
+
+/**
+ * A layer group: a folder in the layer tree.
+ *
+ * A group holds layers and other groups. It is **organization, not
+ * compositing**: it has no pixels, no opacity and no blend mode, so it never
+ * changes what the drawing looks like. The layers it holds keep their own
+ * visibility, opacity and blend mode, and they are composited exactly as they
+ * would be without the group.
+ *
+ * The group only says *where a layer sits in the panel*. The painting order
+ * stays the document's flat layer list, and a group's members occupy one
+ * contiguous run of it, so the panel order and the compositing order always
+ * agree.
+ */
+export interface LayerGroup {
+  readonly id: string;
+  readonly name: string;
+  /**
+   * True when the panel folds the group's children away.
+   *
+   * Display-only: a collapsed group still holds its layers and still composites
+   * them, exactly like the guides are display-only overlays.
+   */
+  readonly collapsed: boolean;
+  /** The group's children, bottom-first: layers and nested groups. */
+  readonly children: readonly LayerTreeEntry[];
+}
+
+/**
+ * One entry in a group's child list.
+ *
+ * A layer entry names a layer by id; a group entry names a group by id, and the
+ * group itself lives in the tree's flat `groups` list. Keeping the groups flat
+ * means a group id is looked up in one place, and the file format stays a
+ * plain, non-recursive structure.
+ */
+export type LayerTreeEntry =
+  | { readonly kind: "layer"; readonly id: LayerId }
+  | { readonly kind: "group"; readonly id: string };
+
+/**
+ * The layer tree: the folders, and the order the panel shows them in.
+ *
+ * `root` holds the top-level entries, bottom-first, and `groups` holds every
+ * group in the document. The tree is the **organization** of the layers; the
+ * painting order is the document's flat `layers` list, and the two are kept in
+ * step: the layers of a group occupy one contiguous run of the flat list.
+ */
+export interface LayerTree {
+  /** Every group in the document, in creation order. */
+  readonly groups: readonly LayerGroup[];
+  /** The top-level entries, bottom-first. */
+  readonly root: readonly LayerTreeEntry[];
+}
 
 /**
  * The axis a composition guide runs along.
@@ -88,6 +155,16 @@ export interface DrawingDocument {
   readonly background: string;
   /** Bottom-first layer order: index 0 is the bottom-most layer. */
   readonly layers: readonly Layer[];
+  /**
+   * The layer tree: the folders the panel groups the layers into.
+   *
+   * The tree is organization only - it holds no pixels and never changes the
+   * composite - but it does carry the panel's order, and the flat `layers`
+   * list is kept in step with it: the layers of a group occupy one contiguous
+   * run of the list, so the panel shows the layers in the order they are
+   * composited.
+   */
+  readonly layerTree: LayerTree;
   readonly activeLayerId: LayerId | null;
   /**
    * The composition guides, in document space.

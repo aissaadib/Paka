@@ -70,6 +70,7 @@ import {
 } from "../commands/strokeEditCommand";
 import type { Command, CommandStackState } from "../commands/types";
 import * as documentOps from "../document/document";
+import * as layerTreeOps from "../document/layerTree";
 import {
   DEFAULT_GRID_SETTINGS,
   normalizeGridSpacing,
@@ -975,16 +976,28 @@ export class DrawingEngine implements StrokeSource {
     if (!copy) {
       return;
     }
+    // The copy is a fresh working layer, so it starts unlocked: the lock
+    // protects the layer it was set on, and a duplicate is a different layer.
+    const unlocked = {
+      ...after,
+      layers: after.layers.map((layer) =>
+        layer.id === copy.id ? { ...layer, locked: false } : layer,
+      ),
+    };
     const elements = this.strokes
       .listElements(layerId)
       .map((element) => cloneElement(element, copy.id));
-    this.commitDocumentChange("Duplicate Layer", before, after, {
+    this.commitDocumentChange("Duplicate Layer", before, unlocked, {
       addedElements: { layerId: copy.id, elements },
     });
   }
 
   removeLayer(layerId: LayerId): void {
     if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    // A locked layer keeps its pixels, and deleting it would take them away.
+    if (this.refuseLockedLayer(layerId)) {
       return;
     }
     const before = this.doc;
@@ -1070,11 +1083,178 @@ export class DrawingEngine implements StrokeSource {
     if (this.refuseLayerChangeDuringGesture()) {
       return;
     }
+    // A locked layer keeps its place in the stack: reordering it is exactly the
+    // thing the lock forbids.
+    if (this.refuseLockedLayer(layerId)) {
+      return;
+    }
     const before = this.doc;
     this.commitDocumentChange(
       "Reorder Layers",
       before,
       documentOps.moveLayer(before, layerId, delta),
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /**
+   * Locks a layer, or takes the lock off.
+   *
+   * A locked layer keeps its pixels and its place in the stack. The lock is
+   * not a label on a picture: the engine refuses to paint on a locked layer,
+   * refuses to move, turn, scale or delete its strokes, and refuses to
+   * reorder it. Everything that could change those pixels goes through the
+   * same check, so there is no way around it from the tools, the keyboard or
+   * the panel.
+   */
+  setLayerLocked(layerId: LayerId, locked: boolean): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    this.commitDocumentChange(
+      locked ? "Lock Layer" : "Unlock Layer",
+      before,
+      documentOps.updateLayer(before, layerId, { locked }),
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /** Locks a layer that is unlocked, and unlocks one that is locked. */
+  toggleLayerLock(layerId: LayerId): void {
+    const layer = this.doc.layers.find((candidate) => candidate.id === layerId);
+    if (layer) {
+      this.setLayerLocked(layerId, layer.locked !== true);
+    }
+  }
+
+  /**
+   * Creates a layer group and returns its id, or `null` when it could not be
+   * made.
+   *
+   * The group is a folder: it holds layers and other groups, it has no pixels
+   * and no opacity of its own, and putting a layer into it changes nothing
+   * about how that layer is drawn. What it does change is where the layer
+   * sits in the panel - and, because the panel's order and the painting order
+   * are the same order, where it sits in the stack.
+   */
+  createLayerGroup(parentId: string | null = null, name?: string): string | null {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return null;
+    }
+    const before = this.doc;
+    const created = layerTreeOps.createLayerGroup(before.layerTree, { name, parentId });
+    if (created.id === "") {
+      return null;
+    }
+    this.commitDocumentChange(
+      "Add Layer Group",
+      before,
+      { ...before, layerTree: created.tree },
+      { preserveActiveLayer: true },
+    );
+    return created.id;
+  }
+
+  /** Renames a layer group. An empty name is refused. */
+  renameLayerGroup(groupId: string, name: string): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const tree = layerTreeOps.renameLayerGroup(before.layerTree, groupId, name);
+    if (tree === before.layerTree) {
+      return;
+    }
+    this.commitDocumentChange(
+      "Rename Layer Group",
+      before,
+      { ...before, layerTree: tree },
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /**
+   * Folds a group away or opens it again.
+   *
+   * The fold is display-only: the group keeps its layers and they are still
+   * drawn exactly as before, so folding a group never changes the picture.
+   */
+  setLayerGroupCollapsed(groupId: string, collapsed: boolean): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const tree = layerTreeOps.setLayerGroupCollapsed(before.layerTree, groupId, collapsed);
+    if (tree === before.layerTree) {
+      return;
+    }
+    this.commitDocumentChange(
+      collapsed ? "Collapse Layer Group" : "Expand Layer Group",
+      before,
+      { ...before, layerTree: tree },
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /** Moves a group among its siblings. */
+  moveLayerGroup(groupId: string, delta: number): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const tree = layerTreeOps.moveLayerGroup(before.layerTree, groupId, delta);
+    if (tree === before.layerTree) {
+      return;
+    }
+    this.commitDocumentChange(
+      "Reorder Layer Groups",
+      before,
+      { ...before, layerTree: tree },
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /**
+   * Removes a group and keeps everything that was in it.
+   *
+   * The group's layers move up into the group that held it, so removing a
+   * folder never removes a layer - and never a pixel with it.
+   */
+  removeLayerGroup(groupId: string): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const tree = layerTreeOps.removeLayerGroup(before.layerTree, groupId);
+    if (tree === before.layerTree) {
+      return;
+    }
+    this.commitDocumentChange(
+      "Delete Layer Group",
+      before,
+      { ...before, layerTree: tree },
+      { preserveActiveLayer: true },
+    );
+  }
+
+  /**
+   * Moves a layer into a group, or back out to the top level.
+   *
+   * A `groupId` of `null` takes the layer out of every group. A layer that
+   * joins a group lands at the top of that group - the group's own slot in the
+   * stack - and a layer that leaves one keeps the place it had. Every other
+   * layer keeps its place, so one move never shuffles the rest of the stack.
+   */
+  moveLayerToGroup(layerId: LayerId, groupId: string | null): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    this.commitDocumentChange(
+      groupId === null ? "Move Layer Out of Group" : "Move Layer into Group",
+      before,
+      documentOps.moveLayerIntoGroup(before, layerId, groupId),
       { preserveActiveLayer: true },
     );
   }
@@ -1647,6 +1827,29 @@ export class DrawingEngine implements StrokeSource {
     return this.doc.layers.some((layer) => layer.id === layerId);
   }
 
+  /** True when the layer is locked against changes. */
+  private isLayerLocked(layerId: LayerId): boolean {
+    return this.doc.layers.find((candidate) => candidate.id === layerId)?.locked === true;
+  }
+
+  /**
+   * Refuses a change that would alter a locked layer, and says why.
+   *
+   * Every path that could change a locked layer's pixels or its place in the
+   * stack comes through here: painting, the shape, bucket and gradient
+   * gestures, the selection edits and the reorder. A lock that only some of
+   * the paths honour would be a decoration, not a lock.
+   */
+  private refuseLockedLayer(layerId: LayerId): boolean {
+    if (!this.isLayerLocked(layerId)) {
+      return false;
+    }
+    const name =
+      this.doc.layers.find((candidate) => candidate.id === layerId)?.name ?? "The layer";
+    this.raiseNotice(`"${name}" is locked. Unlock it before changing it.`);
+    return true;
+  }
+
   /**
    * Refuses a layer change while a gesture is in flight.
    *
@@ -1710,6 +1913,10 @@ export class DrawingEngine implements StrokeSource {
     if (!layerId) {
       return;
     }
+    // A locked layer keeps its pixels: nothing may be painted on it.
+    if (this.refuseLockedLayer(layerId)) {
+      return;
+    }
     // A press outside the paper is not a stroke. It is also how a non-finite
     // sample (NaN never satisfies `>= 0`) is rejected before it reaches history.
     if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
@@ -1758,6 +1965,11 @@ export class DrawingEngine implements StrokeSource {
     }
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
+      return;
+    }
+    // A shape is painted on the active layer, so a locked layer refuses it
+    // exactly as it refuses a brush stroke.
+    if (this.refuseLockedLayer(layerId)) {
       return;
     }
     // The same guard as `beginStroke`: a press outside the paper starts nothing,
@@ -1847,6 +2059,10 @@ export class DrawingEngine implements StrokeSource {
     }
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
+      return false;
+    }
+    // A bucket fill paints on the active layer, so a locked layer refuses it.
+    if (this.refuseLockedLayer(layerId)) {
       return false;
     }
     if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
@@ -1968,6 +2184,10 @@ export class DrawingEngine implements StrokeSource {
     }
     const layerId = this.doc.activeLayerId;
     if (!layerId || !isInsideDocument(this.doc, sample.docX, sample.docY)) {
+      return false;
+    }
+    // A gradient is painted on the active layer, so a locked layer refuses it.
+    if (this.refuseLockedLayer(layerId)) {
       return false;
     }
 
@@ -2169,6 +2389,10 @@ export class DrawingEngine implements StrokeSource {
     if (!selection) {
       return false;
     }
+    // Deleting strokes changes a locked layer's pixels.
+    if (this.refuseLockedLayer(selection.layerId)) {
+      return false;
+    }
     this.cancelSelectionGesture();
 
     const wanted = new Set(selection.strokeIds);
@@ -2253,6 +2477,10 @@ export class DrawingEngine implements StrokeSource {
     }
     const selection = this.selection;
     if (!selection) {
+      return false;
+    }
+    // The copies would be new strokes on a locked layer.
+    if (this.refuseLockedLayer(selection.layerId)) {
       return false;
     }
     const wanted = new Set(selection.strokeIds);
@@ -2460,6 +2688,10 @@ export class DrawingEngine implements StrokeSource {
     if (!selection || !this.usableSelectionPoint(sample)) {
       return;
     }
+    // A drag moves the layer's strokes, so a locked layer refuses the drag.
+    if (this.refuseLockedLayer(selection.layerId)) {
+      return;
+    }
     this.cancelSelectionGesture();
     const entries: MoveEntry[] = [];
     for (const stroke of this.selectedStrokes()) {
@@ -2496,6 +2728,11 @@ export class DrawingEngine implements StrokeSource {
   private beginSelectionTransform(sample: PointerSample, handle: SelectionHandleId): void {
     const selection = this.selection;
     if (!selection || !this.usableSelectionPoint(sample)) {
+      return;
+    }
+    // A scale or a turn rewrites the layer's strokes, so a locked layer
+    // refuses the drag.
+    if (this.refuseLockedLayer(selection.layerId)) {
       return;
     }
     this.cancelSelectionGesture();
@@ -2792,6 +3029,12 @@ export class DrawingEngine implements StrokeSource {
    */
   private beginSelectionEdit(): MoveEntry[] | null {
     if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
+      return null;
+    }
+    const selection = this.selection;
+    // Every selection edit - the nudge, the flip, the scale, the turn - moves
+    // the layer's own strokes, so a locked layer refuses all of them.
+    if (selection && this.refuseLockedLayer(selection.layerId)) {
       return null;
     }
     const entries: MoveEntry[] = this.selectedStrokes().map((stroke) => ({

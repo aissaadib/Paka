@@ -45,12 +45,16 @@ import type {
   GuideAxis,
   Layer,
   LayerElement,
+  LayerGroup,
   LayerId,
+  LayerTree,
+  LayerTreeEntry,
   StrokeRecord,
   StrokeSource,
 } from "../document/types";
 import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
+import { layerTreeFromLayers, layerTreeLayerIds } from "../document/layerTree";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import type { BrushSettings } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
@@ -123,6 +127,14 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * version 6. That is why the version was not bumped for them. A file without
  * the field opens with no guides at all.
  *
+ * Since version 12, `document.layerTree` and `layers[].locked` are **additive**
+ * as well. The layer groups are organization: they hold no pixels, they have
+ * no opacity and no blend mode, and the painting order stays in the flat
+ * `layers` list, so a reader that does not know the tree draws the very same
+ * picture. The lock is a protection flag that changes no pixel either. A file
+ * without the tree opens with the layers flat; a file without the lock opens
+ * with every layer unlocked. That is why the version was not bumped for them.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
 export const PROJECT_VERSION = 12;
@@ -140,6 +152,14 @@ export const MAX_PROJECT_GRADIENT_STOPS = 64;
  * ceiling is the same kind of guard the sample and fill-pixel ceilings are.
  */
 export const MAX_PROJECT_GUIDES = 10_000;
+/**
+ * Upper bound on the layer groups a file may carry.
+ *
+ * A group is metadata - a name and a list of children - but the list is
+ * unbounded input, so the ceiling is the same kind of guard the sample and
+ * fill-pixel ceilings are.
+ */
+export const MAX_PROJECT_LAYER_GROUPS = 10_000;
 
 export interface SerializedStroke {
   readonly kind: "stroke";
@@ -190,8 +210,35 @@ export interface SerializedLayer {
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: string;
+  /**
+   * The lock flag.
+   *
+   * Only a locked layer carries it: absent means the layer is not locked, so
+   * a document without locks is written exactly as it was before the flag
+   * existed.
+   */
+  readonly locked?: boolean;
   /** Painting order: strokes, fills and gradients interleave exactly as made. */
   readonly elements: readonly SerializedElement[];
+}
+
+/** One entry of a group's child list in the file. */
+export type SerializedLayerTreeEntry =
+  | { readonly kind: "layer"; readonly id: LayerId }
+  | { readonly kind: "group"; readonly id: string };
+
+/** A layer group in the file. */
+export interface SerializedLayerGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly collapsed: boolean;
+  readonly children: readonly SerializedLayerTreeEntry[];
+}
+
+/** The layer tree in the file: the folders and the order they hold. */
+export interface SerializedLayerTree {
+  readonly groups: readonly SerializedLayerGroup[];
+  readonly root: readonly SerializedLayerTreeEntry[];
 }
 
 export interface SerializedProject {
@@ -212,6 +259,18 @@ export interface SerializedProject {
      * why the version was not bumped.
      */
     readonly guides: readonly SerializedGuide[];
+    /**
+     * The layer tree: the folders the layers are grouped into.
+     *
+     * **Additive**: a reader that does not know the field ignores it and
+     * composites the very same picture, because the tree holds no pixels and
+     * the flat layer list still carries the painting order. That is why the
+     * version was not bumped for it.
+     *
+     * The field is written only when the document actually has groups, so a
+     * document without folders is written byte for byte as it was before.
+     */
+    readonly layerTree?: SerializedLayerTree;
   };
   /** Bottom-first, matching the in-memory document order. */
   readonly layers: readonly SerializedLayer[];
@@ -477,6 +536,11 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         axis: guide.axis,
         position: guide.position,
       })),
+      // Only a document that actually has folders carries the tree. A document
+      // without groups is written exactly as it was before the tree existed.
+      ...(document.layerTree.groups.length > 0
+        ? { layerTree: serializeLayerTree(document.layerTree) }
+        : {}),
     },
     layers: document.layers.map((layer) => ({
       id: layer.id,
@@ -484,11 +548,32 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
       visible: layer.visible,
       opacity: layer.opacity,
       blendMode: layer.blendMode,
+      // Only a locked layer carries the flag.
+      ...(layer.locked === true ? { locked: true as const } : {}),
       elements: strokes.listElements(layer.id).map(serializeElement),
     })),
   };
 
   return JSON.stringify(payload);
+}
+
+/** Serializes the layer tree: the groups, and the entries that hold them. */
+function serializeLayerTree(tree: LayerTree): SerializedLayerTree {
+  return {
+    groups: tree.groups.map((group) => ({
+      id: group.id,
+      name: group.name,
+      collapsed: group.collapsed,
+      children: group.children.map(serializeLayerTreeEntry),
+    })),
+    root: tree.root.map(serializeLayerTreeEntry),
+  };
+}
+
+function serializeLayerTreeEntry(entry: LayerTreeEntry): SerializedLayerTreeEntry {
+  return entry.kind === "layer"
+    ? { kind: "layer", id: entry.id }
+    : { kind: "group", id: entry.id };
 }
 
 function serializeElement(element: LayerElement): SerializedElement {
@@ -660,7 +745,27 @@ function readProject(
       fail(`${label} uses the unsupported blend mode "${blendMode}".`);
     }
 
-    layers.push({ id, name: layerName, visible, opacity, blendMode });
+    // The lock is a protection flag, not part of the picture: a file without
+    // it opens with every layer unlocked, and a broken value is ignored with a
+    // warning rather than making the whole drawing unopenable.
+    let locked = false;
+    if (record.locked !== undefined) {
+      if (typeof record.locked === "boolean") {
+        locked = record.locked;
+      } else {
+        warnings.push(`${label} had an invalid lock flag and was opened unlocked.`);
+      }
+    }
+
+    layers.push({
+      id,
+      name: layerName,
+      visible,
+      opacity,
+      blendMode,
+      // Absent means unlocked, exactly as in the file.
+      ...(locked ? { locked: true as const } : {}),
+    });
 
     // Version 4 uses one ordered `elements` list. Older files have a `strokes`
     // array only, which is exactly a list of stroke elements in the same order.
@@ -717,6 +822,7 @@ function readProject(
 
   const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, seenLayerIds, layers, warnings);
   const guides = readGuides(rawDocument.guides, warnings);
+  const layerTree = readLayerTree(rawDocument.layerTree, layers, warnings);
 
   const document: DrawingDocument = {
     id: documentId,
@@ -725,11 +831,193 @@ function readProject(
     height,
     background,
     layers,
+    layerTree,
     activeLayerId,
     guides,
   };
 
   return { document, elements, strokes, warnings };
+}
+
+/**
+ * Reads the layer tree.
+ *
+ * Reading is forgiving, in the same way the guides are: a file without the
+ * field - that is every file written before the tree existed - opens with the
+ * layers flat, in the order they were written, and the drawing is exactly the
+ * drawing it was. A tree that is broken in some way is dropped with a
+ * warning, and the layers open flat again: the folders are organization, so
+ * losing them costs the user their arrangement and nothing else. Their pixels
+ * are never at stake.
+ *
+ * A tree is only used when it agrees with the flat layer list: the same
+ * layers, in the same order. That is what keeps the panel's order and the
+ * painting order the same order after a reopen.
+ */
+function readLayerTree(
+  value: unknown,
+  layers: readonly Layer[],
+  warnings: string[],
+): LayerTree {
+  const flat = layerTreeFromLayers(layers);
+  if (value === undefined) {
+    return flat;
+  }
+  if (!isRecord(value)) {
+    warnings.push("The layer groups were not an object and were ignored.");
+    return flat;
+  }
+  const rawGroups = value.groups;
+  const rawRoot = value.root;
+  if (!Array.isArray(rawGroups) || !Array.isArray(rawRoot)) {
+    warnings.push("The layer groups were incomplete and were ignored.");
+    return flat;
+  }
+  if (rawGroups.length > MAX_PROJECT_LAYER_GROUPS) {
+    fail(
+      `This project contains more than ${MAX_PROJECT_LAYER_GROUPS} layer groups and cannot be opened.`,
+    );
+  }
+
+  const groups = new Map<string, LayerGroup>();
+  const rawChildren = new Map<string, unknown>();
+  // The groups are read in two passes: first their identity, then their
+  // children. A group may hold another group, and the nested one may be
+  // written after the group that holds it, so the ids have to be known before
+  // the child lists are read.
+  for (const [index, rawGroup] of rawGroups.entries()) {
+    const label = `Layer group ${index + 1}`;
+    if (!isRecord(rawGroup)) {
+      warnings.push(`${label} was not a group and was ignored.`);
+      continue;
+    }
+    const id = typeof rawGroup.id === "string" ? rawGroup.id.trim() : "";
+    if (id === "") {
+      warnings.push(`${label} had no identifier and was ignored.`);
+      continue;
+    }
+    if (groups.has(id)) {
+      warnings.push(`Two layer groups share the id "${id}"; the second was ignored.`);
+      continue;
+    }
+    const name =
+      typeof rawGroup.name === "string" && rawGroup.name.trim() !== ""
+        ? rawGroup.name
+        : `Group ${index + 1}`;
+    const collapsed = rawGroup.collapsed === true;
+    groups.set(id, { id, name, collapsed, children: [] });
+    rawChildren.set(id, rawGroup.children);
+  }
+
+  for (const [id, group] of groups) {
+    const children = readTreeEntries(
+      rawChildren.get(id),
+      groups,
+      layers,
+      `Layer group "${group.name}"`,
+      warnings,
+    );
+    if (children === null) {
+      return flat;
+    }
+    groups.set(id, { ...group, children });
+  }
+
+  const root = readTreeEntries(rawRoot, groups, layers, "The layer tree", warnings);
+  if (root === null) {
+    return flat;
+  }
+
+  const tree: LayerTree = { groups: [...groups.values()], root };
+  if (!isTreeAcyclic(tree)) {
+    warnings.push("The layer groups were nested in a loop and were ignored.");
+    return flat;
+  }
+  const ids = layerTreeLayerIds(tree);
+  const expected = layers.map((layer) => layer.id);
+  if (ids.length !== expected.length || ids.some((id, index) => id !== expected[index])) {
+    warnings.push("The layer groups did not match the layer order and were ignored.");
+    return flat;
+  }
+  return tree;
+}
+
+/**
+ * Reads a list of tree entries.
+ *
+ * A group may only name a group that was read before it, so a group cannot
+ * hold itself. Returns `null` when the list is not a list at all.
+ */
+function readTreeEntries(
+  value: unknown,
+  groups: Map<string, LayerGroup>,
+  layers: readonly Layer[],
+  label: string,
+  warnings: string[],
+): LayerTreeEntry[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    warnings.push(`${label} was not a list and was ignored.`);
+    return null;
+  }
+  const knownLayerIds = new Set(layers.map((layer) => layer.id));
+  const entries: LayerTreeEntry[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) {
+      warnings.push(`${label} held something that is not a layer or a group; it was ignored.`);
+      continue;
+    }
+    const id = typeof raw.id === "string" ? raw.id : "";
+    if (raw.kind === "layer") {
+      if (!knownLayerIds.has(id)) {
+        warnings.push(`${label} named a layer the file does not have; it was ignored.`);
+        continue;
+      }
+      entries.push({ kind: "layer", id });
+      continue;
+    }
+    if (raw.kind === "group") {
+      if (!groups.has(id)) {
+        warnings.push(`${label} named a group the file does not have; it was ignored.`);
+        continue;
+      }
+      entries.push({ kind: "group", id });
+      continue;
+    }
+    warnings.push(`${label} held an entry of an unknown kind; it was ignored.`);
+  }
+  return entries;
+}
+
+/**
+ * True when no group holds itself, directly or through another group.
+ *
+ * A loop in the tree is a tree that cannot be walked - the panel would never
+ * finish drawing it - so a file that carries one is read flat instead.
+ */
+function isTreeAcyclic(tree: LayerTree): boolean {
+  const groups = new Map(tree.groups.map((group) => [group.id, group]));
+  const visiting = new Set<string>();
+  const walk = (entries: readonly LayerTreeEntry[]): boolean => {
+    for (const entry of entries) {
+      if (entry.kind !== "group") {
+        continue;
+      }
+      if (visiting.has(entry.id)) {
+        return false;
+      }
+      visiting.add(entry.id);
+      const group = groups.get(entry.id);
+      if (group && !walk(group.children)) {
+        return false;
+      }
+      visiting.delete(entry.id);
+    }
+    return true;
+  };
+  return walk(tree.root);
 }
 
 /**

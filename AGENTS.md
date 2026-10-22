@@ -77,7 +77,9 @@ architecture by browsing.
 `core/autosave/autosaveService.ts`,
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
-**Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
+**Over 250 and under 400 - read targeted windows:** `core/document/layerTree.ts`
+(about 560: the layer tree, the groups, the panel rows and the consistency
+invariant), `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
 rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
 (~300: the work-area clamp, the physical-pixel arithmetic and the cases),
@@ -126,6 +128,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
+| Group the layers, or lock one | `core/document/layerTree.ts` (the tree, the groups, the panel rows), `core/document/document.ts` (`moveLayerIntoGroup`), `core/document/types.ts` (`Layer.locked`), `DrawingEngine.ts` (the group commands, `refuseLockedLayer`), `core/project/projectFormat.ts` (`readLayerTree`), `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
@@ -165,6 +168,11 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `TEXTURE_TILE_SIZE`, `textureCoverage` | `core/rendering/canvas2dStroke.ts` | 52, 65 |
 | `Canvas2DRenderer` (class) | `core/rendering/Canvas2DRenderer.ts` | 124 |
 | `StrokeRecord`, `FillPatchRecord`, `GradientRecord`, `LayerElement` | `core/document/types.ts` | 116, 166, 201, 216 |
+| `LayerGroup`, `LayerTree`, `LayerTreeEntry`, `DrawingDocument.layerTree` | `core/document/types.ts` | grep the symbol |
+| `Layer.locked` (the layer lock) | `core/document/types.ts` | grep the symbol |
+| `createLayerGroup`, `renameLayerGroup`, `setLayerGroupCollapsed`, `moveLayerGroup`, `removeLayerGroup`, `moveLayerToGroup` (the tree operations) | `core/document/layerTree.ts` | grep the symbol |
+| `layerTreeRows` (the panel's rows), `layerTreeLayerIds`, `syncLayersToTree`, `isLayerTreeConsistent` | `core/document/layerTree.ts` | grep the symbol |
+| `readLayerTree` (the file reader), `serializeLayerTree` | `core/project/projectFormat.ts` | grep the symbol |
 | `GuideAxis`, `Guide`, `DrawingDocument.guides` | `core/document/types.ts` | 40, 54, 85 |
 | `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
@@ -274,6 +282,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
+| Layer groups and layer locks | `layerTree.test.ts` (the tree, the groups, the nested and empty cases, the panel's rows), `layerGroups.test.ts` (the engine's group commands, the lock's refusals, the save and reopen, the old file) |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |

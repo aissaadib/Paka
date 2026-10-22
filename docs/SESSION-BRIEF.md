@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent26-layer-groups` | **Layer groups and layer locks** - the panel can group the layers into **folders**: create a group, rename it, fold it away, move it among its siblings, remove it, and move a layer into a group or back out to the top level. A group is **organization, not compositing**: it holds no pixels, no opacity and no blend mode, and the layers it holds are drawn exactly as they were without it. The tree says where a layer sits in the panel, the flat layer list says where it sits in the stack, and the two always agree - a group's members occupy one contiguous run of the stack, so the panel order and the painting order are the same order. Every group change is **one undoable step** and marks the document dirty. A **locked layer** keeps its pixels and its place in the stack: nothing may be painted on it, its strokes may not be moved, turned, scaled or deleted, and it is neither reordered nor deleted - the engine refuses every path, so the lock is a promise and not a mark on a picture. The project format change is **additive** (`document.layerTree`, `layers[].locked`): no version bump, an older reader ignores both fields and composites the same picture, and a file without the tree opens with the layers flat. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -241,6 +242,15 @@ visual-regression harness.
   edits are undoable (including the deleted layer's elements) and are **refused
   while a gesture is in flight**, so a release can never commit into a layer
   that was removed mid-drag.
+- **Layer groups**: folders in the panel that hold layers and other groups.
+  A group is organization, not compositing - it holds no pixels and the layers
+  it holds keep their own visibility, opacity and blend mode. A group's members
+  occupy one contiguous run of the stack, so the panel's order and the painting
+  order are the same order. Create, rename, fold, reorder and remove a group;
+  move a layer into a group and back out. Each change is one undoable step.
+- **Layer locks**: a locked layer keeps its pixels and its place in the stack.
+  It cannot be painted on, its strokes cannot be moved, turned, scaled or
+  deleted, and it cannot be reordered or deleted.
 - **History**: 200 commands; one step per gesture; a slider drag is one step.
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`), versioned `.paka` with ordered layer content (stroke samples,
@@ -568,7 +578,20 @@ Product:
   not scaled with the path.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
-  inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+  inheritance. No layer masks; no adjustment layers; `Ctrl+N` unbound.
+- **Layer groups are folders, not composite units.** A group has no opacity, no
+  blend mode and no pixels of its own: its layers are drawn exactly as they
+  would be without it, so there is no group-level blending and no clipping. A
+  group occupies one slot in the stack, and moving a layer into a group moves
+  it into that slot - so the layer's place in the stack changes with it. There
+  is no drag-and-drop in the panel yet (the actions exist), no group-level
+  visibility or lock, and no per-group undo granularity beyond one step per
+  change.
+- **The layer lock is one flag, and it is enforced.** A locked layer cannot be
+  painted on, transformed, deleted or reordered, and it cannot be deleted
+  either; unlocking it is one undoable step. There is no separate
+  "lock transparency" and no "lock position only": the one flag covers both,
+  because a lock that only some paths honour would be a decoration.
 - **There is no autosave and no crash recovery.** The recovery machinery and
   its policy seam exist (`src/core/autosave/`) and are covered by tests, but
   the decisions that govern autosaving - when it runs, how a never-saved

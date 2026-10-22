@@ -217,6 +217,14 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   A layer cannot be changed while a stroke, fill, gradient or selection drag is
   in flight, so a release can never commit into a layer that was removed
   mid-drag.
+- **Layer groups**: folders that hold layers and other groups. A group is
+  organization, not compositing - it holds no pixels, has no opacity and no
+  blend mode, and the layers inside it are drawn exactly as they were without
+  it. A group occupies one slot in the stack, so the order the panel shows is
+  the order the layers are composited in.
+- **Layer locks**: a locked layer keeps its pixels and its place in the stack.
+  It cannot be painted on, its strokes cannot be moved, turned, scaled or
+  deleted, and it cannot be reordered or deleted until it is unlocked.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the
@@ -385,6 +393,13 @@ paste-ready version of the same briefing is in
   star - it is an ordinary stroke afterwards.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
+- **A layer group is a folder, not a composite unit.** It has no opacity, no
+  blend mode and no pixels of its own, so there is no group-level blending, no
+  clipping and no alpha inheritance - the layers inside a group are drawn
+  exactly as they would be without it. A group takes one slot in the stack, so
+  moving a layer into a group moves it into that slot, and moving it out
+  brings it back to where it was. A group can be folded away, which is
+  display-only.
 - The **separable** blend modes are implemented: `normal`, `multiply`, `screen`,
   `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`,
   `difference` and `exclusion`. They are canvas compositing operations over the

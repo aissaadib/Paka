@@ -225,6 +225,7 @@ version described under [Versioning](#versioning).
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
 | `guides` | array | The composition guides. **Additive**: a file without the field opens with no guides. |
+| `layerTree` | object | The layer groups. **Additive**: a file without the field opens with the layers flat. Written only when the document has groups. |
 
 #### `guides[]`
 
@@ -249,6 +250,42 @@ unopenable - a decorative overlay must never cost the user their drawing. A
 file with more than 10,000 guides is **refused**, like the sample and
 fill-pixel ceilings.
 
+#### `layerTree`
+
+The folders the layers are grouped into.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `groups` | array | Every group in the document. Each entry has an `id`, a `name`, a `collapsed` flag and its `children`. |
+| `root` | array | The top-level entries, bottom-first. |
+
+An entry is either `{ "kind": "layer", "id": <layer id> }` or
+`{ "kind": "group", "id": <group id> }`. A group's `children` hold the same
+kind of entries, so groups nest.
+
+A group is **organization, not compositing**: it has no pixels, no opacity and
+no blend mode, and the layers it holds keep their own. The tree says where a
+layer sits in the panel; the flat `layers[]` array says where it sits in the
+stack, and the two always agree - the members of a group occupy one
+contiguous run of `layers[]`, in the order the tree gives them.
+
+That is why the field is **additive**: a reader that does not know the tree
+ignores it and composites the very same picture, because the painting order
+lives in `layers[]` and the tree only groups it. A file without the field
+opens with the layers flat, in the order they were written - that is every file
+written before the tree existed. The field is written only when the document
+actually has groups, so a document without folders is written byte for byte as
+it was before.
+
+Reading is forgiving, like the guides: a tree that is not an object, a tree
+whose groups or root are not lists, a group with a missing or duplicate id, an
+entry that names a layer or a group the file does not have, and a tree whose
+groups are nested in a loop are all ignored with a warning, and the layers open
+flat again. The folders are organization, so losing them costs the user their
+arrangement and nothing else - their pixels are never at stake. A tree is used
+only when it agrees with `layers[]`: the same layers, in the same order. A file
+with more than 10,000 groups is **refused**, like the other ceilings.
+
 ### `layers[]`
 
 Bottom-most layer first, matching both the in-memory document order and the
@@ -261,7 +298,16 @@ compositing order. A file must contain at least one layer.
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
 | `blendMode` | string | `"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` or `"exclusion"`; applied to the whole layer against the paper and the layers below it. |
+| `locked` | boolean? | `true` when the layer is locked. Absent means unlocked, so only a locked layer carries the field. |
 | `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
+
+A locked layer keeps its pixels and its place in the stack: it is not painted
+on, its strokes are not moved, turned or deleted, and it is neither reordered
+nor deleted. The flag is a protection flag and not part of the picture, so a
+reader that does not know it draws the identical picture - the same situation
+as `document.guides`, and the reason the field is additive. A file with a
+`locked` value that is not a boolean is opened with the layer unlocked and a
+warning, rather than refused.
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
 discriminator: `"stroke"`, `"fill"` or `"gradient"`. A reader rejects an unknown
@@ -533,6 +579,12 @@ Two further guarantees:
   identical picture, so the field needed no version bump - the same situation as
   `stabilizer` within version 6. A file without the field opens with no guides;
   a file with them round-trips exactly.
+- **`document.layerTree` and `layers[].locked` are additive within version 12
+  and later.** The layer groups are organization - they hold no pixels and the
+  painting order stays in `layers[]` - and the lock is a protection flag that
+  changes no pixel. A reader that skips either field draws the identical
+  picture, so neither needed a version bump. A file without the tree opens with
+  the layers flat; a file without the lock opens with every layer unlocked.
 - **`texture` required version 7.** It changes how stored samples are
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field

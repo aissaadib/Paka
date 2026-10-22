@@ -8,6 +8,14 @@
 
 import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
+import {
+  insertLayerAbove,
+  layerTreeFromLayers,
+  moveLayerInTree,
+  moveLayerToGroup,
+  removeLayerFromTree,
+  syncLayersToTree,
+} from "./layerTree";
 import type { DrawingDocument, Layer, LayerId, LayerPatch } from "./types";
 
 export const MIN_DOCUMENT_SIZE = 8;
@@ -198,6 +206,9 @@ export function createDocument(options: CreateDocumentOptions): DrawingDocument 
     height,
     background: options.background ?? DEFAULT_DOCUMENT_BACKGROUND,
     layers: [firstLayer],
+    // A new document has no folders: every layer sits at the root until the
+    // user makes a group for it.
+    layerTree: layerTreeFromLayers([firstLayer]),
     activeLayerId: firstLayer.id,
     guides: [],
   };
@@ -245,6 +256,12 @@ export function addLayer(document: DrawingDocument, name?: string): DrawingDocum
   return {
     ...document,
     layers: [...document.layers, layer],
+    // The new layer goes to the top of the root, so the flat list and the tree
+    // stay in the same order.
+    layerTree: {
+      ...document.layerTree,
+      root: [...document.layerTree.root, { kind: "layer", id: layer.id }],
+    },
     activeLayerId: layer.id,
   };
 }
@@ -268,7 +285,12 @@ export function removeLayer(document: DrawingDocument, layerId: LayerId): Drawin
     ? (layers[Math.min(index, layers.length - 1)]?.id ?? null)
     : document.activeLayerId;
 
-  return { ...document, layers, activeLayerId: nextActive };
+  return {
+    ...document,
+    layers,
+    layerTree: removeLayerFromTree(document.layerTree, layerId),
+    activeLayerId: nextActive,
+  };
 }
 
 export function updateLayer(
@@ -290,7 +312,8 @@ export function updateLayer(
       next.name !== layer.name ||
       next.visible !== layer.visible ||
       next.opacity !== layer.opacity ||
-      next.blendMode !== layer.blendMode;
+      next.blendMode !== layer.blendMode ||
+      (next.locked ?? false) !== (layer.locked ?? false);
     return next;
   });
 
@@ -298,30 +321,51 @@ export function updateLayer(
 }
 
 /**
- * Moves a layer by `delta` positions in the stack.
+ * Moves a layer by `delta` places among its siblings.
  * Positive `delta` moves it towards the top of the stack.
+ *
+ * The siblings are the layers and groups the layer shares a parent with, so a
+ * layer inside a group moves inside that group - it never jumps out of it by
+ * accident. For a document without groups this is exactly the old flat
+ * reorder.
  */
 export function moveLayer(
   document: DrawingDocument,
   layerId: LayerId,
   delta: number,
 ): DrawingDocument {
-  const index = document.layers.findIndex((layer) => layer.id === layerId);
-  if (index === -1) {
+  const tree = moveLayerInTree(document.layerTree, layerId, delta);
+  if (tree === document.layerTree) {
     return document;
   }
-  const target = clamp(index + delta, 0, document.layers.length - 1);
-  if (target === index) {
-    return document;
-  }
+  return {
+    ...document,
+    layers: syncLayersToTree(tree, document.layers),
+    layerTree: tree,
+  };
+}
 
-  const layers = [...document.layers];
-  const [moved] = layers.splice(index, 1);
-  if (!moved) {
+/**
+ * Moves a layer into a group, or back out to the top level.
+ *
+ * A `groupId` of `null` takes the layer out of every group. A layer that
+ * joins a group lands at the top of that group, and a layer that leaves one
+ * keeps the place it had. Every other layer keeps its place.
+ */
+export function moveLayerIntoGroup(
+  document: DrawingDocument,
+  layerId: LayerId,
+  groupId: string | null,
+): DrawingDocument {
+  const tree = moveLayerToGroup(document.layerTree, layerId, groupId);
+  if (tree === document.layerTree) {
     return document;
   }
-  layers.splice(target, 0, moved);
-  return { ...document, layers };
+  return {
+    ...document,
+    layers: syncLayersToTree(tree, document.layers),
+    layerTree: tree,
+  };
 }
 
 export function setActiveLayer(document: DrawingDocument, layerId: LayerId): DrawingDocument {
@@ -350,7 +394,14 @@ export function duplicateLayer(document: DrawingDocument, layerId: LayerId): Dra
     id: createId("layer"),
     name: uniqueLayerName(document, `${source.name} copy`),
   };
-  const layers = [...document.layers];
-  layers.splice(index + 1, 0, copy);
-  return { ...document, layers, activeLayerId: copy.id };
+  // The copy lands directly above the original, in the same group, so the
+  // panel and the painting order agree on where it is. The tree decides the
+  // order; the flat list follows it.
+  const layerTree = insertLayerAbove(document.layerTree, layerId, copy.id);
+  return {
+    ...document,
+    layers: syncLayersToTree(layerTree, [...document.layers, copy]),
+    layerTree,
+    activeLayerId: copy.id,
+  };
 }
