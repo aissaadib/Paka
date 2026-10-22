@@ -95,6 +95,8 @@ export type ActionId =
   | "rotateSelectionCounterClockwise"
   | "addLayer"
   | "commandPalette"
+  | "brushSizeFineDown"
+  | "brushSizeFineUp"
   | `tool:${ToolId}`;
 
 export interface ActionDefinition {

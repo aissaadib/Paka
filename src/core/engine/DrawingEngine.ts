@@ -28,6 +28,11 @@ import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import { type BrushCursorReport } from "../brushes/brushCursor";
+import {
+  brushSizeFromDrag,
+  shouldStartBrushSizeGesture,
+} from "../brushes/brushSizeGesture";
 import {
   brushPresetsEqual,
   createPresetId,
@@ -187,6 +192,7 @@ import {
 } from "../input/canvasInputBinder";
 import { CLICK_SLOP_PX } from "../input/clickGesture";
 import { toStrokeSample } from "../input/pointer";
+import { surfaceOwnsInteraction } from "../input/ownership";
 import { serializeProject, type ParsedProject } from "../project/projectFormat";
 import type {
   ReferenceImage,
@@ -513,6 +519,14 @@ export interface DrawingEngineOptions {
    * content, so nothing about it reaches the document, the history or a file.
    */
   readonly referenceSource?: ReferenceSource | null;
+   * True when another surface owns the interaction.
+   *
+   * The quick-resize gesture must not be taken away from a field the user is
+   * typing in, so the engine asks before it claims a press. The default reads
+   * the focused element; a caller that knows more (an open dialog, a panel
+   * being dragged) can say so here.
+   */
+  readonly interactionBlocked?: () => boolean;
 }
 
 const DEFAULT_DOCUMENT_WIDTH = 1600;
@@ -772,6 +786,20 @@ export interface SelectedGradientState {
   readonly y2: number;
   /** The handle the arrow keys would move, or `null` when none was grabbed. */
   readonly handle: GradientHandleId | null;
+ * A quick brush-size resize in flight.
+ *
+ * The gesture changes the size of the *next* stroke, so nothing it does is an
+ * edit: no stroke is painted, no command is pushed and the revision does not
+ * move. The size the gesture started from is kept so a cancel can put it
+ * back exactly.
+ */
+interface BrushSizeGesture {
+  /** The brush size when the gesture began, in document pixels. */
+  readonly startSize: number;
+  /** The press point, in canvas-local CSS pixels. */
+  readonly startScreenY: number;
+  /** The size the gesture proposes right now, in document pixels. */
+  readonly size: number;
 }
 
 /**
@@ -1040,6 +1068,31 @@ export class DrawingEngine implements StrokeSource {
   private secondaryCanvas: HTMLCanvasElement | null = null;
   /** The input binder of the second view, when it is attached. */
   private secondaryBinder: CanvasInputBinder | null = null;
+  private cursor: CursorReport | null = null;
+  /**
+   * The quick brush-size resize in flight, or `null`.
+   *
+   * The gesture owns the pointer while it runs: the press never reaches a
+   * painting tool, so a resize cannot leave a stroke behind.
+   */
+  private brushSizeGesture: BrushSizeGesture | null = null;
+  /**
+   * Listeners for the brush cursor overlay.
+   *
+   * A separate stream from the cursor reports: the overlay needs the brush
+   * size, the zoom and the two states that change how the ring is drawn, and
+   * none of them belong in a pointer report.
+   */
+  private readonly brushCursorListeners = new Set<(report: BrushCursorReport) => void>();
+  /**
+   * Whether another surface owns the interaction.
+   *
+   * Asked before the quick resize claims a press, so a field the user is
+   * typing in keeps the keyboard and the pointer to itself.
+   */
+  private readonly interactionBlocked: () => boolean;
+  private viewportSize = { width: 0, height: 0 };
+  private laidOut = false;
   private devicePixelRatio = 1;
   private rasterScale = 1;
 
@@ -1124,6 +1177,7 @@ export class DrawingEngine implements StrokeSource {
     this.views.add(createCanvasView(PRIMARY_VIEW_ID, { zoom: 1, offsetX: 0, offsetY: 0 }));
     this.brush = normalizeBrush(options.brush ?? DEFAULT_BRUSH);
     this.currentToolId = options.toolId ?? "brush";
+    this.interactionBlocked = options.interactionBlocked ?? surfaceOwnsInteraction;
     this.renderer = options.renderer ?? null;
     this.tools = createToolRegistry();
     this.middlePanTool = this.tools.pan;
@@ -1384,6 +1438,45 @@ export class DrawingEngine implements StrokeSource {
     this.secondaryCanvas = canvas;
     this.ensureSecondaryAttached();
     this.requestRender();
+   * Reports for the brush cursor overlay.
+   *
+   * The overlay is a *view*: the ring it draws is never part of a layer
+   * surface, an export, the history or the project file. The engine owns the
+   * answer so the overlay has one source of truth for the size, the zoom and
+   * the two states that change how the ring is drawn.
+   */
+  subscribeBrushCursor(listener: (report: BrushCursorReport) => void): () => void {
+    this.brushCursorListeners.add(listener);
+    // The overlay needs the current size and zoom before the first pointer
+    // move, so the first report is sent straight away.
+    listener(this.brushCursorReport());
+    return () => {
+      this.brushCursorListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Cancels the quick brush-size resize, if one is running.
+   *
+   * The size the gesture started from is put back, so cancelling a resize
+   * leaves the brush exactly as it was. Returns whether a resize was actually
+   * running, so the caller can tell "cancelled" from "nothing to cancel".
+   */
+  cancelBrushSizeGesture(): boolean {
+    const gesture = this.brushSizeGesture;
+    if (gesture === null) {
+      return false;
+    }
+    this.brushSizeGesture = null;
+    if (gesture.size !== gesture.startSize) {
+      this.setBrush({ size: gesture.startSize });
+    }
+    this.emitBrushCursor();
+    return true;
+  }
+
+  getCursor(): string {
+    return this.activeTool().cursor;
   }
 
   /**
@@ -1433,6 +1526,12 @@ export class DrawingEngine implements StrokeSource {
     if (sizeChanged) {
       this.publish();
     }
+    this.renderer?.setViewport(this.viewport);
+    this.renderer?.setDocument(this.doc);
+    this.invalidateLayers(this.doc);
+    this.republishCursor();
+    this.emitBrushCursor();
+    this.publish();
     this.requestRender();
   }
 
@@ -1712,6 +1811,7 @@ export class DrawingEngine implements StrokeSource {
     this.renderer?.setDocument(this.doc);
     this.invalidateLayers(this.doc);
     this.republishCursor();
+    this.emitBrushCursor();
     this.publish();
     this.requestRender();
   }
@@ -1972,8 +2072,14 @@ export class DrawingEngine implements StrokeSource {
     if (brushSettingsEqual(this.brush, next)) {
       return;
     }
+    const sizeChanged = next.size !== this.brush.size;
     this.brush = next;
     this.commands.breakMerge();
+    // The cursor ring shows the brush size, so it has to follow it. A colour
+    // or an opacity change does not move the ring.
+    if (sizeChanged) {
+      this.emitBrushCursor();
+    }
     this.publish();
   }
 
@@ -2899,8 +3005,16 @@ export class DrawingEngine implements StrokeSource {
     }
     view.viewport = viewport;
     this.renderer?.setDisplayTargetViewport?.(viewId, viewport);
+    const zoomChanged = viewport.zoom !== this.viewport.zoom;
+    this.viewport = viewport;
+    this.renderer?.setViewport(viewport);
     if (republishCursor) {
       this.republishCursor(viewId);
+    }
+    if (zoomChanged) {
+      // The cursor ring is a document measurement drawn through the zoom, so
+      // a zoom changes its size on screen.
+      this.emitBrushCursor();
     }
     this.commands.breakMerge();
     this.publish();
@@ -3190,6 +3304,9 @@ export class DrawingEngine implements StrokeSource {
     this.beginGesture();
     this.strokeBuilder = builder;
     this.activeStroke = stroke;
+    // The cursor ring fades while a stroke is in flight, so the artwork under
+    // the pointer stays readable.
+    this.emitBrushCursor();
 
     const renderer = this.renderer;
     if (renderer) {
@@ -3248,6 +3365,7 @@ export class DrawingEngine implements StrokeSource {
     this.beginGesture();
     this.strokeBuilder = null;
     this.activeStroke = stroke;
+    this.emitBrushCursor();
     this.renderer?.beginStroke(stroke);
   }
 
@@ -4146,6 +4264,7 @@ export class DrawingEngine implements StrokeSource {
     const stroke = this.activeStroke;
     this.strokeBuilder = null;
     this.activeStroke = null;
+    this.emitBrushCursor();
     if (!stroke) {
       return;
     }
@@ -4225,6 +4344,7 @@ export class DrawingEngine implements StrokeSource {
     }
     this.strokeBuilder = null;
     this.activeStroke = null;
+    this.emitBrushCursor();
     this.renderer?.cancelStroke();
   }
 
@@ -5598,6 +5718,25 @@ export class DrawingEngine implements StrokeSource {
     // The cursor reports where the pointer *is*; snapping only moves the
     // sample a drawing tool commits.
     this.reportCursor(sample, viewId);
+    this.reportCursor(sample);
+
+    // The quick brush-size resize owns the pointer before any tool sees it, so
+    // a resize can never leave a stroke behind.
+    if (this.brushSizeGesture !== null) {
+      if (sample.phase === "down") {
+        // A press while a resize is running means the previous one was
+        // orphaned: its pointer was released somewhere the canvas never saw.
+        // The size goes back and the new press is free to start a new gesture.
+        this.cancelBrushSizeGesture();
+      } else {
+        this.handleBrushSizeGestureSample(sample);
+        return;
+      }
+    }
+    if (this.startsBrushSizeGesture(sample)) {
+      return;
+    }
+
     const snapped = this.snapSample(sample);
 
     if (sample.phase === "down") {
@@ -5740,6 +5879,65 @@ export class DrawingEngine implements StrokeSource {
     if (!view) {
       return;
     }
+   * Starts the quick brush-size resize when a press asks for it.
+   *
+   * The press is consumed: it never reaches the brush, so a resize cannot
+   * paint. A press that another surface owns - a field the user is typing in -
+   * is left alone and reaches the tool as usual.
+   */
+  private startsBrushSizeGesture(sample: PointerSample): boolean {
+    if (
+      !shouldStartBrushSizeGesture(sample, {
+        toolId: this.currentToolId,
+        blocked: this.interactionBlocked(),
+      })
+    ) {
+      return false;
+    }
+    this.brushSizeGesture = {
+      startSize: this.brush.size,
+      startScreenY: sample.screenY,
+      size: this.brush.size,
+    };
+    this.emitBrushCursor();
+    return true;
+  }
+
+  /**
+   * Feeds one sample to the quick brush-size resize.
+   *
+   * The size follows the pointer's vertical travel and is applied to the
+   * brush as it changes, so the ring, the readout and the next stroke all
+   * agree. A release keeps the size; a cancel puts the original back.
+   */
+  private handleBrushSizeGestureSample(sample: PointerSample): void {
+    const gesture = this.brushSizeGesture;
+    if (gesture === null) {
+      return;
+    }
+    if (sample.phase === "move") {
+      const size = brushSizeFromDrag(gesture.startSize, sample.screenY - gesture.startScreenY);
+      if (size === gesture.size) {
+        return;
+      }
+      this.brushSizeGesture = { ...gesture, size };
+      // The brush is the one place the size lives, so the ring and the next
+      // stroke cannot disagree about it.
+      this.setBrush({ size });
+      this.emitBrushCursor();
+      return;
+    }
+    if (sample.phase === "up") {
+      this.brushSizeGesture = null;
+      this.emitBrushCursor();
+      return;
+    }
+    // A cancel - a lost pointer capture, a pointer cancel event - restores the
+    // size the gesture started from.
+    this.cancelBrushSizeGesture();
+  }
+
+  private handleWheel(input: WheelInput): void {
     if (input.ctrlKey || input.altKey) {
       const factor = clamp(
         Math.exp(-input.deltaY * WHEEL_ZOOM_SENSITIVITY),
@@ -5906,6 +6104,32 @@ export class DrawingEngine implements StrokeSource {
 
   private emitCursor(report: CursorReport): void {
     for (const listener of this.cursorListeners) {
+      listener(report);
+    }
+  }
+
+  /**
+   * The state the brush cursor overlay should show.
+   *
+   * The size is the brush's own size, so the ring cannot claim a footprint
+   * the brush does not have. The zoom is the viewport's, so the ring is drawn
+   * at the size the brush covers on screen.
+   */
+  private brushCursorReport(): BrushCursorReport {
+    return {
+      size: this.brush.size,
+      zoom: this.viewport.zoom,
+      resizing: this.brushSizeGesture !== null,
+      drawing: this.activeStroke !== null,
+    };
+  }
+
+  private emitBrushCursor(): void {
+    if (this.brushCursorListeners.size === 0) {
+      return;
+    }
+    const report = this.brushCursorReport();
+    for (const listener of this.brushCursorListeners) {
       listener(report);
     }
   }

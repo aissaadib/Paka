@@ -107,6 +107,8 @@ document, its readers and its per-field validation).
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
 shape geometry), `core/rendering/stampCoverage.ts` (533: the dab plan, the
 per-dab profile, the per-dab directional texture and the coverage union),
+`features/options/toolOptionSchema.ts` (~600: the option kinds, the groups,
+the per-tool brush fields and the read/write pairs),
 `src/utils/colorMetrics.ts` (607: WCAG luminance and contrast, sRGB to CIELAB,
 CIEDE2000, the nearest palette entry, and the total/never-throws rules),
 `src/test/stampCoverage.test.ts` (508: the dab plan, the texture, the union
@@ -122,6 +124,9 @@ fill/gradient commands, tool definitions, `editorStore.ts`,
 `features/view/ViewControls.tsx`, `hooks/usePanModifier.ts`,
 `core/brushes/brushProperties.ts`, `core/brushes/numericInput.ts`,
 `features/brushes/BrushPreview.tsx`,
+`core/brushes/brushCursor.ts` (the ring's geometry),
+`core/brushes/brushSizeGesture.ts` (the quick resize's rules),
+`core/input/ownership.ts` (who owns the keyboard and the pointer),
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
 `core/workspace/workspaceSettingsSection.ts`, `state/workspaceContext.ts`,
 `hooks/useWorkspace.ts`,
@@ -164,6 +169,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Edit a gradient's geometry | `core/gradient/gradientHandles.ts` (the pure handle geometry and the geometry hit test), `core/commands/gradientEditCommand.ts` (the record replacement), `core/tools/gradientTool.ts` (the press resolution), `DrawingEngine.ts` (`selectGradientAt`, `beginGradientHandleDrag`, `updateGradientHandleDrag`, `finishGradientHandleDrag`, `cancelGradientHandleDrag`, `nudgeGradientHandle`, `syncGradientOverlay`), `core/rendering/Canvas2DRenderer.ts` (`paintGradientOverlay`), `core/rendering/types.ts` (`RendererGradientOverlay`), `src/test/gradientEditing.test.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change the brush cursor or the quick resize | `core/brushes/brushCursor.ts` (the ring's geometry), `core/brushes/brushSizeGesture.ts` (the modifier, the drag model and the ownership rules), `core/input/ownership.ts` (who owns the interaction), `features/canvas/BrushCursor.tsx` (the overlay), the pointer block in `DrawingEngine.ts` (`handlePointerSample`, `startsBrushSizeGesture`, `handleBrushSizeGestureSample`, `cancelBrushSizeGesture`), `core/actions/registry.ts` (Escape and the size shortcuts) |
+| Change the tool-options strip | `features/options/toolOptionSchema.ts` (the groups, the fields and their read/write pairs), `features/options/OptionControl.tsx` (the four control kinds), `features/options/ToolOptionsBar.tsx` (the strip), `features/options/toolOptions.css` (the strip's metrics) |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the navigator | `features/navigator/navigatorGeometry.ts` (the pure mapping between navigator, canvas and document pixels), `features/navigator/NavigatorPanel.tsx` (the panel and its pointer/keyboard gestures), `core/rendering/types.ts` (`renderOverview`), `core/rendering/Canvas2DRenderer.ts` (`renderOverview`), `DrawingEngine.ts` (`getOverview`, `centerViewportOn`, `centerViewport`, `viewportSize` in the snapshot), `src/test/navigator.test.ts` |
 | Change the reference images | `core/reference/types.ts` (the model and the engine's seam), `core/reference/geometry.ts` (the pure workspace-space transform), `core/reference/decode.ts` (the safe decode, the pixel budget), `core/reference/store.ts` (the state, the one decoded copy, the sampling), `features/reference/ReferencePanel.tsx` (the panel), `core/rendering/Canvas2DRenderer.ts` (`paintReferences`), `DrawingEngine.ts` (`setReferenceSource`/`syncReferenceOverlay`/`pickColor`), `src/test/referenceImages.test.ts` |
@@ -195,6 +202,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `setBrush`, editor setters | `core/engine/DrawingEngine.ts` | 957-1052 |
 | `buildSnapshot` | `core/engine/DrawingEngine.ts` | 2653 |
 | `BrushSettings` | `types/brush.ts` | 11 |
+| `brushRingGeometry`, `BrushCursorReport` | `core/brushes/brushCursor.ts` | grep the symbol |
+| `brushSizeFromDrag`, `shouldStartBrushSizeGesture`, `isBrushSizeGestureModifier` | `core/brushes/brushSizeGesture.ts` | grep the symbol |
+| `takesTextInput`, `surfaceOwnsInteraction`, `modalIsOpen` | `core/input/ownership.ts` | grep the symbol |
 | `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 28, 50 |
 | `brushSizeStep` | `core/brushes/defaults.ts` | grep the symbol |
 | `brushFieldBounds`, `UNIMPLEMENTED_BRUSH_PROPERTIES` | `core/brushes/brushProperties.ts` | grep the symbol |
@@ -290,8 +300,12 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `DEFAULT_PRESSURE_CURVE`, `DEFAULT_SECONDARY_COLOR`, `BRUSH_CURVE_FIELDS` | `core/brushes/defaults.ts` | 14, 17, grep |
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
-| `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
+| `TOOL_OPTION_GROUP_IDS`, `toolOptionGroups`, `toolOptionFields`, `toolOptionLabel`, `toolShowsBrushControls`, `toolUsesWholeBrush` | `features/options/toolOptionSchema.ts` | grep the symbol |
+| `ToolOptionsBar`, `OptionGroup` | `features/options/ToolOptionsBar.tsx` | grep the symbol |
+| `OptionControl` | `features/options/OptionControl.tsx` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
+| `Popover` | `components/toolbar/Popover.tsx` | grep the symbol |
+| `TOOL_ICONS` | `components/toolbar/toolIcons.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
 | `ReferenceImage`, `ReferenceState`, `ReferenceOverlay`, `ReferenceSource` | `core/reference/types.ts` | grep the symbol |
 | `referenceRect`, `referenceContains`, `referenceSourcePoint`, `referenceScale`, `moveReference`, `scaleReference`, `setReferenceScale`, `fitReference`, `centerReference` | `core/reference/geometry.ts` | grep the symbol |
@@ -353,7 +367,10 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | The drawing aids (rulers, guides, symmetry) | `drawingAids.test.ts` (the symmetry geometry, the copies, the single undo step, the centre drag, the ruler geometry, the guide a ruler hands out, the renderer's overlays and the export exclusion) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
+
 | Brush controls and the live preview | `brushControls.test.ts` (the number box's rules, the keyboard steps, the bounds the engine honours, the properties it does not, and the preview's agreement with the rasterizer), `brushOrigin.test.ts` (the preset the brush came from, and the reset) |
+| Brush cursor and quick resize | `brushCursor.test.ts` (the ring's geometry, the drag model, the ownership rules, the engine seam and the "view, not content" contract), `tests/visual/brush-cursor.spec.ts` (the overlay in a real browser) |
+| The tool-options strip | `toolOptions.test.ts` (the groups each tool shows, the fields each group holds, and that every control changes the engine's real state), `tests/visual/tool-options-bar.spec.ts` (the strip in a real browser: the controls follow the tool, the height does not move, the popover works, a narrow window scrolls) |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
 | The brush browser | `presetBrowser.test.ts` (the built-in brushes and their protection, the search, the order, the favourites, the selection, the actions, the library file, the malformed file, the duplicate names, the import and the reload), `tests/visual/preset-browser.spec.ts` (the browser in a real browser: the built-in brushes, applying one, the search, the deletion confirmation, the protection of a built-in brush and the keyboard) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |

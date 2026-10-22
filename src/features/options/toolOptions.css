@@ -15,6 +15,9 @@
   gap: 10px;
   height: 32px;
   padding: 0 8px;
+  gap: 8px;
+  height: 32px;
+  padding: 0 6px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -26,6 +29,10 @@
   scrollbar-gutter: stable;
 }
 
+}
+
+/* A classic, always-visible scrollbar: the strip's own rules, not the
+   platform's overlay scrollbar, so the overflow is discoverable. */
 .tool-options-bar::-webkit-scrollbar {
   height: 6px;
 }
@@ -76,6 +83,7 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+  gap: 6px;
 }
 
 /* The popover's fields stack, so each slider gets the panel's full width. */
@@ -98,6 +106,27 @@
 
 .tool-options-bar .slider-field__display {
   min-width: 34px;
+   document toolbar, their labels take only the room they need, and the
+   formatted value is dropped because the number box already carries the
+   number. */
+.tool-options-bar .slider-field {
+  gap: 5px;
+}
+
+.tool-options-bar .slider-field__label {
+  min-width: 0;
+}
+
+.tool-options-bar .slider-field__range {
+  width: 62px;
+}
+
+.tool-options-bar .slider-field__value {
+  width: 44px;
+}
+
+.tool-options-bar .slider-field__display {
+  min-width: 30px;
 }
 
 .brush-options,

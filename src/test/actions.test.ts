@@ -18,6 +18,8 @@ interface FakeState {
   gridVisible: boolean;
   gridSnapping: boolean;
   brushSize: number;
+  /** True while a quick brush-size resize is running. */
+  brushSizeGestureActive: boolean;
 }
 
 let state: FakeState;
@@ -34,6 +36,7 @@ beforeEach(() => {
     gridVisible: false,
     gridSnapping: false,
     brushSize: 6,
+    brushSizeGestureActive: false,
   };
   actions = {
     setTool: vi.fn(),
@@ -126,6 +129,9 @@ beforeEach(() => {
         gridSnapping: state.gridSnapping,
         brush: { size: state.brushSize },
       }) as unknown as EditorSnapshot,
+    // The quick brush-size resize owns Escape while it runs. The stub reports
+    // none in flight unless a test asks for one.
+    cancelBrushSizeGesture: vi.fn(() => state.brushSizeGestureActive),
   } as unknown as DrawingEngine;
   file = { save: vi.fn(), saveAs: vi.fn(), open: vi.fn() } as unknown as FileActionHandlers;
 });
@@ -269,9 +275,42 @@ describe("document and view commands", () => {
     expect(actions.clearSelection).not.toHaveBeenCalled();
   });
 
+  it("cancels a quick brush-size resize with Escape before anything else", () => {
+    state.brushSizeGestureActive = true;
+    press("escape", { code: "Escape", ctrl: false, meta: false });
+    expect(engine.cancelBrushSizeGesture).toHaveBeenCalledOnce();
+    // The resize owns Escape, so the selection is left alone.
+    expect(actions.clearSelection).not.toHaveBeenCalled();
+    expect(actions.cancelGuideGesture).not.toHaveBeenCalled();
+  });
+
   it("clears the selection otherwise", () => {
     press("escape", { code: "Escape", ctrl: false, meta: false });
     expect(actions.clearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("steps the brush size with the brackets", () => {
+    press("[", { code: "BracketLeft", ctrl: false, meta: false });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 5 });
+    press("]", { code: "BracketRight", ctrl: false, meta: false });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 7 });
+  });
+
+  it("changes the brush size by one pixel with Alt and the brackets", () => {
+    state.brushSize = 40;
+    press("[", { code: "BracketLeft", ctrl: false, meta: false, alt: true });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 39 });
+    press("]", { code: "BracketRight", ctrl: false, meta: false, alt: true });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 41 });
+  });
+
+  it("keeps the fine brush size inside the brush's range", () => {
+    state.brushSize = 512;
+    press("]", { code: "BracketRight", ctrl: false, meta: false, alt: true });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 512 });
+    state.brushSize = 1;
+    press("[", { code: "BracketLeft", ctrl: false, meta: false, alt: true });
+    expect(actions.setBrush).toHaveBeenCalledWith({ size: 1 });
   });
 
   it("deletes a selected guide before touching strokes", () => {

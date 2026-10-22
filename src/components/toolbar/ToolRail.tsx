@@ -1,24 +1,7 @@
 /** Left tool rail: one button per registered tool. */
 
-import type { ReactNode } from "react";
 import { TOOL_DEFINITIONS } from "../../core/tools/toolDefinitions";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import type { ToolId } from "../../types/tool";
-import {
-  IconBrush,
-  IconBucket,
-  IconEllipse,
-  IconEraser,
-  IconGradient,
-  IconGuides,
-  IconHand,
-  IconLine,
-  IconPicker,
-  IconPolygon,
-  IconRectangle,
-  IconSelect,
-  IconStar,
-} from "../icons";
 import { IconButton } from "./IconButton";
 
 export const TOOL_ICONS: Record<ToolId, ReactNode> = {
@@ -36,6 +19,7 @@ export const TOOL_ICONS: Record<ToolId, ReactNode> = {
   guides: <IconGuides />,
   pan: <IconHand />,
 };
+import { TOOL_ICONS } from "./toolIcons";
 
 export function ToolRail() {
   const { actions } = useEditor();

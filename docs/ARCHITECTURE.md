@@ -2190,6 +2190,72 @@ samples and produces the same picture. They were therefore added additively -
 and a missing field reads as `0` and `smooth` (see
 [PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
 
+### The brush cursor and the quick resize
+
+The brush's size is visible on the canvas as a **ring**, and it can be changed
+without leaving the canvas. Both are *views*, never content.
+
+**The ring.** `features/canvas/BrushCursor.tsx` is a DOM overlay: a sibling of
+the canvas element, not a layer of it. It therefore cannot reach a layer
+surface, a PNG export, the document history or the project file, and because it
+is a separate compositing layer it cannot flicker with the artwork underneath
+it. The ring's diameter is the brush's diameter in **document** pixels mapped
+through the viewport zoom, so it is the brush's real footprint rather than a
+decoration:
+
+```
+cssDiameter = max(4, brush.size * zoom)
+```
+
+The four CSS pixels are the floor: a 1 px brush at 10 % zoom is a tenth of a
+pixel, and a ring that thin is invisible rather than honest. The device pixel
+ratio enters through the outline's width - one *device* pixel is `1 / dpr` CSS
+pixels, with a half-pixel floor - so the ring stays a hairline on a
+high-density display instead of thickening with the zoom.
+
+The engine owns the answer. `engine.subscribeBrushCursor` reports the size, the
+zoom and two states (a resize in flight, a stroke in flight); the overlay
+writes them straight to the DOM, like the cursor position, so pointer movement
+never re-renders React. The ring fades while a stroke is in flight so it does
+not sit on top of the artwork being drawn.
+
+**The quick resize.** `Ctrl`+`Alt` and drag on the canvas changes the brush
+size: up grows it, down shrinks it. The gesture is owned by the engine and
+runs *before* any tool sees the press, so a resize can never leave a stroke
+behind.
+
+- The drag is **relative**: `size = start * e^(-dy / 100)`, so the ring does
+  not jump when the drag begins and the gesture feels the same at every zoom.
+  One e-fold of travel (100 screen pixels) multiplies the size by `e`; the
+  result is clamped to the brush's own `1..512` range.
+- A travel of three pixels or less is a **click**, not a resize, and leaves
+  the size alone.
+- The size is written through the ordinary `setBrush`, so the ring, the
+  readout, the toolbar's slider and the next stroke all agree. It is editor
+  state: no command is pushed, the revision does not move and the file stays
+  clean.
+- **Escape cancels** the resize and puts the size back. It has to work while
+  `Ctrl`+`Alt` is still held, because the gesture only ends when the pointer
+  is released - so the cancel is handled in `useKeyboardShortcuts` before the
+  chord table, which claims an exact set of modifiers and would otherwise
+  ignore the key.
+- A **lost pointer capture** cancels the resize the same way. If the capture
+  could not be taken at all, the release never arrives, and the next press is
+  the only sign that the gesture was over: the orphaned gesture is put back
+  the way it was, so the size is never left half-changed.
+- The gesture is **not taken away from a surface that owns the interaction**:
+  a field the user is typing in keeps the keyboard, and a press there reaches
+  the tool as usual. A modal dialog covers the canvas, so the canvas never
+  receives the press at all, and the brush-size shortcuts stand down while a
+  dialog is open.
+
+The gesture is a shortcut, not the only way in: `[` and `]` step the size,
+`Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's
+**Size** slider is a labelled range input that a keyboard or a screen reader
+can drive. The ring's readout is a visual duplicate of what that slider
+already exposes, so it stays out of the accessibility tree; the final size is
+announced once, when the gesture ends.
+
 ## React integration
 
 There is exactly one engine instance per window, created by `EditorProvider`
@@ -2282,6 +2348,51 @@ canvas, and a right-drag still paints with the secondary colour from the
 position the button went down. The distance that tells the two apart is four
 **CSS pixels** (`core/input/clickGesture.ts`), so it means the same thing at
 every zoom and on every display.
+### The tool-options strip
+
+The strip under the menu bar shows the **active tool's** options, and nothing
+else. Its shape is fixed - one row, 32 px, always - so switching tools never
+moves the canvas; only the controls inside it change. The document toolbar
+below it holds the controls that belong to the *document* rather than to the
+tool: the history, the zoom, the grid and the colour.
+
+Everything on the strip is described by one declarative schema,
+`src/features/options/toolOptionSchema.ts`. An option says where its value is
+read from (the editor snapshot) and where it is written (an `EditorActions`
+method), so the strip holds no per-tool logic and no second copy of a brush
+value:
+
+| Kind | Reads | Writes |
+| --- | --- | --- |
+| `slider` | a number | a number, through the option's own setter |
+| `toggle` | a flag | a flag |
+| `color` | a hex string | a hex string |
+| `action` | - | runs an editor action |
+
+The options are grouped: the **brush**, the **shape**, the **selection**, the
+**fill** and the **gradient**. A tool names the groups it shows
+(`TOOL_OPTION_GROUP_IDS`), and a control is only in a group when the tool
+really uses it. A gradient has no brush size, and a shape has no stabilizer and
+no dab spacing, so those controls are absent rather than present and inert: a
+slider the user can move but that changes nothing is worse than no slider.
+
+Every option is editor state: it describes the *next* gesture, and the
+committed record keeps the value it was drawn with. Changing one is not an
+edit, so no option writes history or the file's dirty flag, and the values
+survive a tool change - the options are the engine's, not the strip's.
+
+The brush group is split in two: the size and the opacity stay in the strip,
+because they change with every stroke, and the rest - the edge, the sampling,
+the stabilizer, the grain, the dab engine and the pressure response - lives in
+a popover. The popover's panel is `position: fixed`, so the strip's own
+horizontal scroll cannot clip it, and it is placed from the trigger's
+rectangle. `Escape` closes it and puts the focus back on the trigger.
+
+The strip scrolls sideways when the window is too narrow instead of wrapping: a
+wrapped strip would change its height and push the canvas down. The wheel over
+the strip scrolls it, through a native, non-passive listener, so the browser's
+own horizontal-wheel behaviour is refused rather than doubled - and when the
+strip does not overflow, the wheel is left alone.
 
 ## Native boundary (Rust)
 

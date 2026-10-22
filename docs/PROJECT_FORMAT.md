@@ -516,7 +516,6 @@ Two further guarantees:
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
 | 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -542,6 +541,10 @@ Two further guarantees:
   identical picture, so the field needed no version bump - the same situation as
   `stabilizer` within version 6. A file without the field opens with no guides;
   a file with them round-trips exactly.
+- **The brush cursor and the quick resize are not in the file at all.** The ring
+  is a DOM overlay beside the canvas, and the resize changes the *next* stroke's
+  brush, which that stroke records for itself. Neither is document state, so
+  neither adds a field nor moves the version.
 - **`texture` required version 7.** It changes how stored samples are
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field

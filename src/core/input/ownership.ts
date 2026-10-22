@@ -68,3 +68,13 @@ export function modalIsOpen(): boolean {
   }
   return document.querySelector('[aria-modal="true"]') !== null;
 }
+
+/**
+ * True when another surface owns the interaction.
+ *
+ * A field the user is typing in owns the keyboard, and a modal dialog owns
+ * the window. Neither may lose a gesture to the canvas.
+ */
+export function surfaceOwnsInteraction(): boolean {
+  return focusTakesTextInput() || modalIsOpen();
+}

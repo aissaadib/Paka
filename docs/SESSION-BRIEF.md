@@ -31,6 +31,19 @@ visual-regression harness.
 
 ## 2. Current state (verified today)
 
+- Branch `feat/agent10-brush-cursor`, cut from the integration tip `74023e9`:
+  the **brush cursor, size ring and quick resize** on top of the brush preset
+  library, the contrast and colour-difference readout, the grid and pointer
+  snapping, the layer blend modes, the fixed-step transforms, settings
+  persistence, the per-dab directional texture, the stamp (dab) brush engine,
+  the HSV colour wheel, the composition guides, the polygon and star tools and
+  the scale/rotate slice.
+- Measured on this branch: `pnpm test` **1084 tests in 49 files, all pass**;
+  `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual` **37 tests,
+  all pass** (7 of them the new brush-cursor spec). The base commit carried a
+  broken merge - a duplicated `it(...)` opener in `projectFormat.test.ts` and a
+  duplicated `PROJECT_VERSION` in `projectFormat.ts` - which this branch
+  repairs; the two are the only edits outside the slice.
 - Branch `integration/next-build-wave`, cut from the phase-1 integration tip
   `38efc1f`: the **brush preset library**, the **contrast and colour-difference
   readout** with **wider colour input**, the **grid and pointer snapping**, and
@@ -40,9 +53,9 @@ visual-regression harness.
   brush engine**, **HSV colour wheel**, **composition guides**, **polygon and
   star** and **scale/rotate** slices. The feature branches remain; nothing was
   rewritten.
-- Measured on this branch: `pnpm test` **968 tests in 44 files, all pass**;
+- Measured on this branch: `pnpm test` **1069 tests in 48 files, all pass**;
   `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual`
-  **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
+  **37 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
   by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
   commands, the merge SHAs and the ownership of each branch.
 - Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
@@ -83,6 +96,8 @@ visual-regression harness.
 | `feat/agent06-preset-browser` | **Brush preset browser** - the preset picker becomes a **Brushes panel**: a searchable, sortable list of the user's brushes and the **built-in** ones, each row showing a **real tip** - the mark the preset paints, drawn by the renderer's own code from the preset's own brush settings, so a property that changes a stroke changes the swatch. The list can be ordered by **name**, by **recent use** or by **size**, and narrowed to the **starred** brushes; a star is the user's own note and works on a built-in brush too. Every operation is wired to the engine: **save**, **rename**, **update** (write the live brush back into the preset), **duplicate**, **delete**, **star**, **import** and **export**. A **built-in brush is code**, so it cannot be renamed, overwritten or deleted - duplicating it is how the user gets a version they can change - and a deletion of the user's own brush is **confirmed** before it happens. The **live brush and the stored preset stay apart**: applying a preset copies its values into the brush, so an edit of the brush is visibly *not* an edit of the preset until it is written back, and the panel says which preset is in effect and whether it has been changed. A **library file** (`.json`) exports the user's brushes and imports somebody else's: a file that is not a library, one from a newer version, one that is too large and one with more than 200 brushes are **refused with a message**, a malformed entry is skipped and the rest is imported, and an imported brush gets a **fresh id and a name that does not clash**. Everything is editor state: applying or managing a preset adds no history step and never marks the drawing unsaved. Settings stay **version 1** - the three new fields are additive and a file without them loads unchanged. |
 | `feat/agent18-gradient-editing` | **On-canvas gradient editing** - a committed gradient can now be **selected and its geometry edited** on the canvas. The gradient tool owns a selection of its own: a press on the gradient's **axis** (linear) or its **circle** (radial) selects it - the hit test is against the *geometry*, because a gradient paints its whole layer - and the **two handles** appear: the ends of the axis, or the centre and the radius handle. Dragging a handle replaces the record in place and re-rasterizes the layer, so the gradient follows **live**; the release records **one** undo step (`GradientEditCommand`, which carries the committed record and the one that replaced it), and a cancel - `pointercancel`, a tool switch or `Esc` - puts the committed record back **exactly**, with no history entry and no dirty flag. The handles are a **display overlay**: painted on the display canvas, never in a layer surface, a PNG export or the project file. The handle the user last grabbed is **focused**, and the arrow keys nudge it by one document pixel (`Shift`: ten), coalescing into one undo step. The status bar reads the selected gradient's geometry. **No project-format change** - the record already stored the two points the renderer draws from. The stops of a *committed* gradient are still not editable: the middle-stop editor describes the **next** drag, so an on-canvas stop marker would need a second, different data path. |
 | `feat/agent04-panel-manager` | **Panel manager** - the shell's **shared panel registry** (`core/shell/panelRegistry.ts`) makes a panel **register itself**, so adding one to the shell means editing the panel's own module and nothing else, and the shell renders whatever the registry says. A **Panels** menu shows and hides the panels, folds them to their header and resets the layout; *Show All*, *Hide All* and *Reset Layout* sit in the same menu, and the two that would change nothing are disabled. **Hiding a panel gives the space straight back to the canvas** - the column's width follows its content - and it never loses the panel's state: a panel that keeps React state of its own stays mounted while it is hidden, and a panel derived from the document is unmounted. The layout is **shell state**, so showing a panel is not an edit (no history step, no dirty flag), and it is persisted in the **settings file as a section** under `panels`, so there is one settings file and one writer. The menu bar is keyboard driven: the arrow keys open a menu and walk its items, the disabled items are skipped, and `Escape` closes it and puts the focus back. |
+| `feat/agent10-brush-cursor` | **Brush cursor, size ring and quick resize** - the brush's real footprint is drawn on the canvas as a **ring** that follows the pointer, sized in **document pixels through the zoom** (so it shrinks and grows with the canvas) and outlined one *device* pixel wide (so it stays a hairline at any density). A **quick resize** - `Ctrl`+`Alt` and drag, up to grow and down to shrink - changes the brush size with the current size in pixels shown beside the ring, and `Esc` cancels it and puts the size back. The gesture is owned by the engine and runs **before** any tool sees the press, so a resize can never leave a stroke behind; it is **relative** (`size = start * e^(-dy/100)`), so the ring does not jump when the drag begins, and it is clamped to the brush's own `1..512` range. The size is written through the ordinary `setBrush`, so the ring, the readout, the toolbar's slider and the next stroke agree - and it is **editor state**: no history step, no dirty flag, nothing in the file. Both the ring and the resize are **views**: the ring is a DOM overlay, a sibling of the canvas, so it never reaches a layer surface, a PNG export, the history or the project file. The gesture is a shortcut, not the only way in: `[` and `]` step the size, `Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's **Size** slider is a labelled range input. **No project-format change.** |
+| `feat/agent02-tool-options-bar` | **Contextual tool-options strip** - a **one-row strip under the menu bar** shows the **active tool's** options and nothing else: the brush for the brush and the eraser, the brush *and* the shape for the shape tools, the selection actions for the select tool, the tolerance for the bucket and the gradient's own controls for the gradient tool. The strip is **32 px tall whatever the tool**, so switching tools never moves the canvas, and a window too narrow for the controls scrolls the strip sideways instead of wrapping it. Every control is described by one **declarative schema** that says where its value is read from and which editor action it writes, so there is no second copy of a brush value, and a control is only offered when the tool **really uses it** - the gradient has no brush size, a shape has no stabilizer and no dab spacing - so nothing on the strip is a decoration. The size and the opacity stay in the strip and the rest of the brush sits behind a **popover**. Every option is editor state: changing one is not an edit, and the values survive a tool change. **No project-format change.** |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -128,6 +143,18 @@ visual-regression harness.
   mode, and releasing the stroke never changes the stacking.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
+- **Tool options** (the strip under the menu bar): a **one-row strip** that
+  shows the **active tool's** controls - the brush for the brush and the eraser,
+  the brush *and* the shape for the shape tools, the selection actions for the
+  select tool, the tolerance for the bucket, the gradient's own controls for
+  the gradient tool - and nothing else. The strip is **32 px tall whatever the
+  tool**, so switching tools never moves the canvas, and a narrow window scrolls
+  it sideways instead of wrapping it. A control is only offered when the tool
+  **really uses it** (the gradient has no brush size, a shape has no stabilizer
+  and no dab spacing), so nothing on it is a decoration; every control writes
+  through the same editor actions the menus use, so choosing one is not an edit.
+  The size and the opacity stay in the strip and the rest of the brush sits
+  behind a **popover**.
 - **Shapes** (`L` line, `R` rectangle, `O` ellipse, `P` polygon, `S` star): live
   preview, one stroke = one undo step; `Shift` constrains (45°, squares, circles,
   a regular polygon or star), `Alt` draws from the centre. Rectangle/ellipse/
@@ -301,6 +328,32 @@ visual-regression harness.
   changes and at no other time: it never touches the document, and no pointer
   sample reaches it. The swatch is zoomed so the brush fits it, so it shows
   the *shape* of the mark; the size is read from the number box beside it.
+- **Brush cursor and size ring**: the brush's real footprint is drawn on the
+  canvas as a **ring** that follows the pointer. The ring's diameter is the
+  brush's diameter in **document pixels** through the current zoom, so it is the
+  brush's real footprint rather than a fixed decoration, and its outline is one
+  **device** pixel wide, so it stays a hairline at any density. A brush too
+  small to see is drawn at a four-pixel floor. The ring **fades** while a
+  stroke is in flight, and it is a DOM overlay - a sibling of the canvas, not a
+  layer of it - so it never reaches a layer surface, a PNG export, the history
+  or the project file.
+- **Quick brush resize**: `Ctrl`+`Alt` and drag on the canvas changes the brush
+  size (up grows, down shrinks) with the current size in pixels shown beside
+  the ring. The drag is **relative** (`size = start · e^(-dy/100)`), so the ring
+  does not jump when the drag begins, and it is clamped to the brush's own
+  1–512 range. The gesture is owned by the engine and runs **before** any tool
+  sees the press, so a resize can never leave a stroke behind; the size is
+  written through the ordinary brush setter, so the ring, the readout, the
+  toolbar's slider and the next stroke all agree, and it is **editor state**
+  (no history step, no dirty flag, nothing in the file). `Esc` cancels a
+  resize in flight and puts the size back, and a lost pointer capture cancels
+  it the same way. The gesture is offered for the **brush and the eraser**
+  only. `[` and `]` step the size, `Alt`+`[` and `Alt`+`]` change it by exactly
+  one pixel, and the toolbar's **Size** slider is the accessible control.
+  opacity toggles. All settings are captured per stroke. The **size** and the
+  **opacity** sit in the tool-options strip; the rest sit in its **Brush
+  settings** popover, and a tool that uses only part of the brush sees only
+  that part.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
   unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
@@ -396,6 +449,8 @@ src/
                 project (file commands/dialogs/title/close guard),
                 commands (the canvas menu and the command palette),
                 shapes, fill, gradient
+                shapes, fill, gradient,
+                options (the contextual tool-options strip and its schema)
   hooks/        React bindings, keyboard shortcuts, native environment
   state/        editorStore (snapshot + intents) and context,
                 panelStore (the panel layout) and context
@@ -407,7 +462,9 @@ src/
                 guides (the guide model, geometry and document operations),
                 selectionTransform (the scale/rotate geometry) and
                 selectionHandles (the transform handles)
-    brushes/    defaults/normalization, strokeBuilder (sample capture)
+    brushes/    defaults/normalization, strokeBuilder (sample capture),
+                brushCursor (the ring's geometry) and brushSizeGesture (the
+                quick resize's rules)
     fill/       pure flood scan, fill-patch record
     gradient/   gradient geometry/stops/cloning
     tools/      registry, per-tool behaviour, shape geometry
@@ -416,6 +473,8 @@ src/
                 chord, the availability rules, the canvas menu's rows and the
                 palette's search
     input/      pointer normalization, DOM binder, the click/drag distance
+    input/      pointer normalization, DOM binder, ownership (who has the
+                keyboard and the pointer right now)
     rendering/  viewport, frame scheduler, Canvas2DRenderer, canvas2dStroke,
                 stampCoverage (dab placement + coverage union)
     engine/     DrawingEngine: integration, gestures, history, snapshot
@@ -684,6 +743,25 @@ Key files for the next slice (directional / per-dab stamp textures):
   hue is 220° - and any colour changed elsewhere replaces it with the stored
   colour. Choosing a colour is session state for the next gesture, not an
   edit.
+- **The brush cursor is a view, and the quick resize is editor state.** The ring
+  is a DOM overlay - a sibling of the canvas, not a layer of it - so it cannot
+  reach a layer surface, a PNG export, the history or the project file, and
+  because it is its own compositing layer it cannot flicker with the artwork
+  underneath it. Its diameter is the brush's diameter in **document pixels**
+  through the zoom, so it is the brush's real footprint; the outline is one
+  **device** pixel wide, and a brush too small to see is drawn at a four-pixel
+  floor. The resize is owned by the engine and runs **before** any tool sees
+  the press, so it can never leave a stroke behind, and it writes through the
+  ordinary `setBrush` - the same brush state the toolbar's slider and the next
+  stroke read - so there is no second copy of the size. The size is
+  **relative** to the size the gesture started from (`start · e^(-dy/100)`),
+  which keeps the ring from jumping when the drag begins, and it is clamped to
+  the brush's own range. `Esc` cancels a resize and puts the size back, and so
+  does a lost pointer capture; an orphaned gesture - one whose release never
+  arrived - is put back by the next press, so the size is never left
+  half-changed. A gesture is never taken away from a surface that owns the
+  interaction: a field the user is typing in keeps the keyboard, and a modal
+  dialog covers the canvas entirely.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
@@ -779,6 +857,13 @@ Product:
   scale, no copy/paste across layers. A transform is **baked on apply**, so
   there is no persistent transform to edit afterwards, and the painted width is
   not scaled with the path.
+- The brush cursor: the ring is a **circle**, so a brush whose nominal diameter
+  is a fraction of a pixel is drawn at a four-pixel floor and the ring then
+  says "at least this small" rather than "exactly this big". The quick resize
+  is **vertical only** - a horizontal drag does nothing - and it is offered for
+  the **brush and the eraser** only, because the shape tools already use `Alt`
+  to draw from the centre and the ring is a brush footprint. The resize has no
+  numeric entry of its own: the size is typed in the toolbar's **Size** box.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
@@ -832,6 +917,19 @@ Verification gaps:
   window has not been checked, and the React layer still has no automated
   test.
 
+- The **brush cursor and the quick resize** were checked in a real browser
+  (Chromium, the harness's own build) through a new Playwright spec: the ring's
+  measured diameter equals the brush size through the zoom and it sits on the
+  pointer, the ring grows when the zoom grows, `Ctrl`+`Alt` and drag changes the
+  size while the history depth stays `0`, the readout shows the size in pixels
+  while the gesture runs and is gone afterwards, `Esc` puts the size back, the
+  next stroke uses the resized brush, and the brackets (with and without `Alt`)
+  step the size by one pixel. The ring, the readout and the accent-coloured
+  resize state were also looked at on screen. The geometry, the drag model, the
+  ownership rules, the bounds and the "view, not content" contract are covered
+  by Vitest. **No packaged Tauri window and no high-DPI check** was done: the
+  ring is a DOM overlay whose outline is one device pixel wide, and that
+  arithmetic is covered by a unit test rather than by a screen.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's
@@ -931,8 +1029,10 @@ Verification gaps:
     `● unsaved`), toolbar controls, document title.
 - Shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
   `o` ellipse, `p` polygon, `s` star, `f` bucket, `g` gradient, `i` picker,
-  `h` pan (middle-drag also pans); `Esc` clears/cancels; arrows nudge
-  (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip.
+  `h` pan (middle-drag also pans); `[`/`]` step the brush size and
+  `Alt`+`[`/`Alt`+`]` change it by one pixel; `Ctrl`+`Alt` and drag on the
+  canvas resizes the brush and `Esc` cancels it; `Esc` clears/cancels; arrows
+  nudge (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip.
 - Windows toolchain (details in HANDOFF §7): cargo is at
   `%USERPROFILE%\.cargo\bin` and must be prepended to `PATH`; WinLibs
   `mingw64\bin` must also be on `PATH` (rustc calls `dlltool.exe` by name);

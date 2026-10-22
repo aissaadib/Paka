@@ -14,6 +14,21 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 
 ## What works
 
+- **A contextual tool-options strip** under the menu bar: it shows the
+  **active tool's** options and nothing else - the brush for the brush and the
+  eraser, the brush *and* the shape for the shape tools, the selection actions
+  for the select tool, the tolerance for the bucket and the gradient's own
+  controls for the gradient tool. The strip is **one row tall whatever the
+  tool**, so switching tools never moves the canvas, and a window too narrow
+  for the controls scrolls the strip sideways instead of wrapping it. A control
+  is only offered when the tool really uses it: the gradient has no brush size
+  and a shape has no stabilizer or dab spacing, so those controls are absent
+  rather than present and inert. The size and the opacity stay in the strip and
+  the rest of the brush - the edge, the sampling, the stabilizer, the grain,
+  the dab engine, the presets and the pressure response - sits behind a
+  **Brush settings** popover. Every control writes through the same editor
+  actions the menus use, so choosing one is not an edit: it adds no history
+  step and never marks the document dirty.
 - **Drawing** with a mouse, pen or touch. Pointer Events, pressure-sensitive
   width and opacity, round joins and caps. Each stroke is composited as one
   shape at its own opacity, so a semi-transparent stroke never darkens where its
@@ -32,7 +47,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws from
   the centre. Rectangle, ellipse, polygon and star offer a **Fill shape** switch
   in the
-  toolbar: with it on the interior takes the brush colour and the outline is
+  tool-options strip: with it on the interior takes the brush colour and the outline is
   still traced on top, so the edge lands exactly where an unfilled shape's edge
   would. The switch describes the *next* shape - each shape keeps the setting it
   was drawn with - and a line is never filled, since it bounds no interior.
@@ -78,10 +93,18 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   nothing, and a fill that would change nothing is dropped rather than
   recorded as an invisible undo step. A document over 16,777,216 pixels refuses
   the scan with a status-bar message instead of freezing.
+  to the **active layer**. The strip's **Tolerance** slider (0-255, max
+  per-channel difference) widens what counts as the same region; fully
+  transparent pixels always match each other. The result is a bounded,
+  pixel-exact patch with a binary coverage mask, not a traced contour, so it is
+  identical after undo/redo and save/reopen. One successful fill is one undo
+  step; cancelling the press (lost capture, tool switch, `pointercancel`)
+  removes the preview and records nothing. A document over 16,777,216 pixels
+  refuses the scan with a status-bar message instead of freezing.
 - **Gradient** (`G`): drag across the canvas to paint a **linear** gradient from
-  the current brush colour to the toolbar's **To** colour. The **Radial** switch
+  the current brush colour to the strip's **To** colour. The **Radial** switch
   makes the press point the centre and the drag length the outer radius. The
-  stop editor adds, moves, recolours and removes middle stops with a live
+  **Stops** popover adds, moves, recolours and removes middle stops with a live
   preview; the endpoints stay the two colours above. Brush opacity is applied
   once to the whole gradient. The preview is real layer
   content at its place in the painting order; releasing records one undo step,
@@ -258,6 +281,21 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the picture does not change when a stroke is drawn backwards, and against the
   brush's nominal size, so the pattern is the same in document pixels at every
   zoom.
+- **Brush cursor and size ring**: the brush's real footprint is drawn on the
+  canvas as a **ring** that follows the pointer - the brush's diameter in
+  document pixels, through the current zoom, so it shrinks and grows with the
+  canvas rather than pretending to be a fixed size. The ring fades while a
+  stroke is in flight so it does not sit on top of the artwork. It is an
+  overlay, not content: it never reaches a layer, an export, the history or a
+  saved file.
+- **Quick brush resize**: `Ctrl`+`Alt` and drag on the canvas to change the
+  brush size - up grows it, down shrinks it - with the current size in pixels
+  shown next to the ring while the gesture runs. The resize is relative, so
+  the ring does not jump when the drag begins, and it is clamped to the
+  brush's own `1..512` range. `Escape` cancels a resize in flight and puts the
+  size back. The gesture is a shortcut, not the only way in: `[` and `]` step
+  the size, `Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the
+  toolbar's **Size** slider is there for a keyboard or a screen reader.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window. The **space
@@ -406,7 +444,8 @@ src/
   app/          entry point, provider wiring, global styles
   components/   presentational shell (menu bar, toolbars, panels, icons)
   features/     feature UI (canvas, brushes, colour, layers, history, document,
-                project: file commands, dialogs, title and close guard)
+                options: the contextual tool-options strip, project: file
+                commands, dialogs, title and close guard)
   hooks/        React bindings for the engine
   state/        the editor store and context holding the engine instance
   core/
@@ -445,6 +484,13 @@ paste-ready version of the same briefing is in
   **ellipse**, **polygon**, **star**, **bucket**, **gradient**, **colour
   picker** and **guides** tools exist, plus
   pan. There is no text tool.
+- **The quick brush resize is vertical only.** `Ctrl`+`Alt` and drag changes the
+  size with the pointer's vertical travel; a horizontal drag does nothing. The
+  gesture is offered for the **brush and the eraser** only, because the shape
+  tools already use `Alt` to draw from the centre and the ring is a brush
+  footprint. The ring is a circle, so a brush whose nominal diameter is a
+  fraction of a pixel is drawn at a four-pixel floor: the ring then says "at
+  least this small", not "exactly this big".
 - **Guides are axis-only.** A guide is vertical or horizontal, a second guide on
   the same position is refused, the colour is fixed, and the label is the
   guide's position. The guides *do* take part in the snapping (the **Snap**

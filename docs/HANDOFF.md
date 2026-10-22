@@ -89,6 +89,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent02-tool-options-bar` | **Contextual tool-options strip** — a **one-row strip under the menu bar** shows the **active tool's** options and nothing else: the brush for the brush and the eraser, the brush *and* the shape for the shape tools, the selection actions for the select tool, the tolerance for the bucket, the gradient's own controls for the gradient tool. The strip is **32 px tall whatever the tool**, so switching tools never moves the canvas, and a narrow window scrolls it sideways instead of wrapping it. Every control comes from one declarative schema that names the editor action it writes, so there is no second copy of a brush value, and a control is only offered when the tool **really uses it** (the gradient has no brush size, a shape has no stabilizer or dab spacing). The size and the opacity stay in the strip and the rest of the brush sits behind a popover. Every option is editor state: changing one is not an edit, and the values survive a tool change. **No format change.** |
 | `feat/ff26-transform` | **Scale and rotate a selection** — the select tool's overlay grows four **corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame; the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off**. The transform is **baked on apply** (it moves the strokes' samples and nothing else), so there is **no format change**. One undo step per transform, through the same command as a move. The geometry is pure (`core/document/selectionTransform.ts`, `core/document/selectionHandles.ts`) and unit tested; the handles are display-only. |
 | `feat/t11-guides` | **Composition guides** — a **Guides** tool (`U`) places a vertical or horizontal guide by dragging on empty canvas and moves an existing guide by dragging it; a click selects it, `Delete` removes it, `Esc` cancels a drag. The guide model, the axis heuristic, the rounding, the screen-space grab radius, the hit-test and the duplicate rule live in a pure module (`core/document/guides.ts`). The guides are document state but **display-only**, so the format change is additive and the version stays 9. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
@@ -440,6 +441,9 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
   `u` guides, `h` pan (middle-drag also pans, and so does a drag while the
   **space bar** is held);
+  `u` guides, `h` pan (middle-drag also pans);
+  `[`/`]` step the brush size and `Alt`+`[`/`Alt`+`]` change it by one pixel;
+  `Ctrl`+`Alt` and drag on the canvas resizes the brush and `Esc` cancels it;
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
   duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
   the guide drag and clears the guide selection, and `Delete` removes the
@@ -547,13 +551,21 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   document anchoring rather than bbox anchoring. The real-renderer path is
   covered by Vitest for the pattern/`destination-in` pass and tile/capture rules;
   no automated pixel test of the grain itself exists.
-- **Brush-row layout check (verified 2026-10-20).** The six sliders plus the
-  pressure toggles no longer sit in a clipped single row: `.brush-controls`
-  wraps into a dedicated toolbar row and `.app-shell` sizes that row to its
-  content. At a 688 px viewport all controls were visible, the toolbar was about
-  179 px tall, and `document.scrollWidth` equalled the viewport (no horizontal
-  overflow). A 900 px screenshot confirmed Size/Opacity/Hardness/Spacing/
-  Stabilizer/Texture and both pressure toggles.
+- **Tool-options strip check (verified 2026-10-22, Chromium via Playwright).**
+  The brush controls no longer sit in a clipped single toolbar row: the
+  **tool-options strip** under the menu bar is one row, always 32 px tall, and
+  it shows the active tool's controls - the brush for the brush and the eraser,
+  the brush *and* the shape for the shape tools, the selection actions for the
+  select tool, the tolerance for the bucket, the gradient's own controls for
+  the gradient tool. At a 1280 px viewport every tool's strip fits without
+  scrolling (the widest, the star, needs the full 1280 px); at 560 px the strip
+  scrolls sideways, the canvas is not covered and the wheel over the strip
+  scrolls it. `tests/visual/tool-options-bar.spec.ts` proves the controls
+  follow the tool, that the strip's height does not move with the tool, that
+  the popover's controls reach the brush and close on `Escape`, that the
+  selection actions grey out until something is selected, and that a brush size
+  set on the strip really changes the width of the drawn stroke (the canvas is
+  read back and counted).
 - **Polygon/star check (verified 2026-10-21, Chromium via Playwright).** Press
   `p`: the rail's **Polygon** button is active and the toolbar shows a
   **Sides** slider (default `5`), a **Rotation** slider (default `0°`) and the
@@ -566,6 +578,19 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   rotation (a non-square box turns without changing the shape's side lengths)
   and the simple star outline are covered by Vitest, and the two pictures are
   pinned by the visual-regression scenes `polygon` and `star`.
+- **Brush cursor and quick resize check (verified 2026-10-22, Chromium via
+  Playwright).** `pnpm exec playwright test tests/visual/brush-cursor.spec.ts`
+  drives the running app: the ring's measured diameter is the brush size
+  through the zoom and it sits on the pointer, the ring grows with the zoom, a
+  `Ctrl`+`Alt` drag changes the size while `history` stays `0`, the readout
+  shows the size in pixels while the gesture runs, `Esc` puts the size back,
+  the next stroke uses the resized brush, and `[`/`]` (with and without `Alt`)
+  step the size by one pixel. Two things the harness found, and the code now
+  handles: `Esc` has to cancel a resize **while `Ctrl`+`Alt` is still held**
+  (the chord table claims an exact set of modifiers, so the cancel is handled
+  before the table), and a field that takes text keeps the keyboard to itself
+  (so a shortcut pressed right after typing in the **Size** box does nothing
+  until the field is given up).
 
 ## 9. Next move
 

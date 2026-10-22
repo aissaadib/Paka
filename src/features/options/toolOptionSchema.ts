@@ -42,6 +42,7 @@ import {
   MIN_FILL_EXPAND,
   type FillReferenceMode,
 } from "../../core/fill/fillOptions";
+import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
 import {
   MAX_SHAPE_INNER_RATIO,
   MAX_SHAPE_SIDES,
@@ -185,6 +186,10 @@ export type ToolOptionGroupId =
   | "gradient"
   | "guides"
   | "symmetry";
+  | ActionToolOption;
+
+/** The groups the options bar knows. */
+export type ToolOptionGroupId = "brush" | "shape" | "selection" | "fill" | "gradient";
 
 export interface ToolOptionGroup {
   readonly id: ToolOptionGroupId;
@@ -294,6 +299,37 @@ const brushHardnessOption: SliderToolOption = percentBrushOption({
   brushField: "hardness",
   placement: "popover",
 });
+  brushField: "size",
+};
+
+const brushOpacityOption: SliderToolOption = {
+  id: "brushOpacity",
+  kind: "slider",
+  label: "Opacity",
+  title: "Opacity of the whole stroke",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.opacity,
+  write: (actions, opacity) => actions.setBrush({ opacity }),
+  brushField: "opacity",
+};
+
+const brushHardnessOption: SliderToolOption = {
+  id: "brushHardness",
+  kind: "slider",
+  label: "Hardness",
+  title: "Edge falloff: 100% is a crisp edge, lower values soften it",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.hardness,
+  write: (actions, hardness) => actions.setBrush({ hardness }),
+  placement: "popover",
+  brushField: "hardness",
+};
 
 const brushSamplingOption: SliderToolOption = {
   id: "brushSampling",
@@ -357,6 +393,35 @@ const brushTextureOption: SliderToolOption = percentBrushOption({
   brushField: "texture",
   placement: "popover",
 });
+const brushStabilizerOption: SliderToolOption = {
+  id: "brushStabilizer",
+  kind: "slider",
+  label: "Stabilizer",
+  title: "Smooths the pointer path; 0% follows the pointer exactly and 100% lags the most",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.stabilizer,
+  write: (actions, stabilizer) => actions.setBrush({ stabilizer }),
+  placement: "popover",
+  brushField: "stabilizer",
+};
+
+const brushTextureOption: SliderToolOption = {
+  id: "brushTexture",
+  kind: "slider",
+  label: "Texture",
+  title: "Document-anchored grain over the finished stroke; 0% is the plain edge",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.texture,
+  write: (actions, texture) => actions.setBrush({ texture }),
+  placement: "popover",
+  brushField: "texture",
+};
 
 const brushStampOption: ToggleToolOption = {
   id: "brushStamp",
@@ -405,6 +470,37 @@ const brushStampTextureOption: SliderToolOption = percentBrushOption({
   placement: "popover",
   visible: (snapshot) => snapshot.brush.stamp,
 });
+const brushStampHardnessOption: SliderToolOption = {
+  id: "brushStampHardness",
+  kind: "slider",
+  label: "Stamp hardness",
+  title: "Falloff of a single dab; 100% is a crisp dab edge, lower values soften it towards the centre",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.stampHardness,
+  write: (actions, stampHardness) => actions.setBrush({ stampHardness }),
+  visible: (snapshot) => snapshot.brush.stamp,
+  placement: "popover",
+  brushField: "stampHardness",
+};
+
+const brushStampTextureOption: SliderToolOption = {
+  id: "brushStampTexture",
+  kind: "slider",
+  label: "Stamp texture",
+  title: "Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.brush.stampTexture,
+  write: (actions, stampTexture) => actions.setBrush({ stampTexture }),
+  visible: (snapshot) => snapshot.brush.stamp,
+  placement: "popover",
+  brushField: "stampTexture",
+};
 
 const brushPressureSizeOption: ToggleToolOption = {
   id: "brushPressureSize",
@@ -609,6 +705,8 @@ const fillReferenceLayerOption: SelectToolOption = {
   write: (actions, value) => actions.setFillReferenceLayer(value === "" ? null : value),
 };
 
+/* ------------------------------------------------------------------ the fill */
+
 const fillToleranceOption: SliderToolOption = {
   id: "fillTolerance",
   kind: "slider",
@@ -774,6 +872,8 @@ const GROUP_FIELDS: Record<ToolOptionGroupId, readonly ToolOption[]> = {
     symmetryCountOption,
     symmetryCentreOption,
   ],
+  fill: [fillToleranceOption],
+  gradient: [gradientRadialOption, gradientEndColorOption],
 };
 
 /** The group's name, used for the region's accessible label. */
@@ -846,11 +946,72 @@ export const TOOL_OPTION_GROUP_IDS: Partial<Record<ToolId, readonly ToolOptionGr
   ellipse: ["brush", "shape", "symmetry"],
   polygon: ["brush", "shape", "symmetry"],
   star: ["brush", "shape", "symmetry"],
+};
+
+/**
+ * The brush fields each tool consumes.
+ *
+ * A shape traces an outline: it has a width, an opacity, a soft edge and a
+ * grain, but no sample density, no stabilizer, no dabs and no pressure - the
+ * geometry comes from the drag, not from a sampled path. A gradient captures
+ * the brush's colour and opacity and nothing else, so it has no size.
+ */
+const FULL_BRUSH_FIELDS: readonly BrushOptionField[] = [
+  "size",
+  "opacity",
+  "hardness",
+  "sampling",
+  "stabilizer",
+  "texture",
+  "stamp",
+  "stampSpacing",
+  "stampHardness",
+  "stampTexture",
+  "pressureSize",
+  "pressureOpacity",
+];
+
+const SHAPE_BRUSH_FIELDS: readonly BrushOptionField[] = [
+  "size",
+  "opacity",
+  "hardness",
+  "texture",
+];
+
+const GRADIENT_BRUSH_FIELDS: readonly BrushOptionField[] = ["opacity"];
+
+const BRUSH_FIELDS_BY_TOOL: Partial<Record<ToolId, readonly BrushOptionField[]>> = {
+  brush: FULL_BRUSH_FIELDS,
+  eraser: FULL_BRUSH_FIELDS,
+  line: SHAPE_BRUSH_FIELDS,
+  rectangle: SHAPE_BRUSH_FIELDS,
+  ellipse: SHAPE_BRUSH_FIELDS,
+  polygon: SHAPE_BRUSH_FIELDS,
+  star: SHAPE_BRUSH_FIELDS,
+  gradient: GRADIENT_BRUSH_FIELDS,
+};
+
+/**
+ * The groups each tool shows, in order.
+ *
+ * A tool with no entry has no options of its own: the picker, the guides and
+ * pan have none, and the strip says what the tool does instead of showing a
+ * row of dead controls.
+ */
+export const TOOL_OPTION_GROUP_IDS: Partial<Record<ToolId, readonly ToolOptionGroupId[]>> = {
+  brush: ["brush"],
+  eraser: ["brush"],
+  line: ["brush"],
+  rectangle: ["brush", "shape"],
+  ellipse: ["brush", "shape"],
+  polygon: ["brush", "shape"],
+  star: ["brush", "shape"],
   select: ["selection"],
   bucket: ["fill"],
   gradient: ["brush", "gradient"],
   picker: [],
   guides: ["guides"],
+  guides: [],
   pan: [],
 };
 

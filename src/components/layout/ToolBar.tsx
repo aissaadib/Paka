@@ -12,12 +12,25 @@ import { RulerControls } from "../../features/rulers/RulerControls";
 import { ViewControls } from "../../features/view/ViewControls";
 import { MAX_ZOOM, MIN_ZOOM } from "../../core/rendering/viewport";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { toolUsesBrushSize } from "../../core/brushes/brushSizeGesture";
+import { useEditor, useEditorToolId } from "../../hooks/useEditor";
+import { useEditor } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
+
+/** The navigation shortcuts, the same for every tool. */
+const NAVIGATION_HINT = "Wheel: scroll · Ctrl+Wheel: zoom · Middle-drag: pan";
+
+/** The brush size shortcuts, added when the brush is the active tool. */
+const BRUSH_SIZE_HINT = "Ctrl+Alt+drag: brush size · [ / ]: size";
 
 export function ToolBar() {
   const { actions } = useEditor();
   const { viewport } = useEditorState();
+  const toolId = useEditorToolId();
+  const hint = toolUsesBrushSize(toolId)
+    ? `${BRUSH_SIZE_HINT} · ${NAVIGATION_HINT}`
+    : NAVIGATION_HINT;
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Document toolbar">
@@ -54,7 +67,12 @@ export function ToolBar() {
       <div className="toolbar__divider" />
       <ColorControls />
       <div className="toolbar__spacer" />
-      <p className="toolbar__hint">Wheel: scroll · Ctrl+Wheel: zoom · Middle-drag: pan</p>
+      <p
+        className="toolbar__hint"
+        title="Ctrl+Alt and drag on the canvas to change the brush size; [ and ] step it, Alt+[ and Alt+] change it by one pixel. Escape cancels a resize in progress."
+      >
+        {hint}
+      </p>
     </div>
   );
 }
