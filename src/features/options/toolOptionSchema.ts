@@ -22,9 +22,11 @@ import {
   FILL_MODES,
   FILL_SAMPLE_SCALES,
 } from "../../core/fill/fillOptions";
+import { MAX_DOCUMENT_SIZE } from "../../core/document/document";
 import { SELECTION_SHAPES } from "../../core/document/selectionModes";
 import {
   registerToolOptions,
+  type NumberToolOption,
   type SelectToolOption,
   type SliderToolOption,
   type ToggleToolOption,
@@ -149,6 +151,67 @@ const fillSampleScaleOption: SelectToolOption = {
   write: (actions, value) => actions.setFillSampleScale(Number(value)),
 };
 
+const symmetryModeOption: SelectToolOption = {
+  id: "symmetryMode",
+  kind: "select",
+  label: "Symmetry",
+  group: "Symmetry",
+  title:
+    "Mirror the next stroke across a vertical axis, a horizontal axis or both (four-way)",
+  choices: [
+    { value: "off", label: "Off" },
+    { value: "vertical", label: "Vertical" },
+    { value: "horizontal", label: "Horizontal" },
+    { value: "both", label: "Both" },
+  ],
+  read: (snapshot) => (snapshot.symmetryEnabled ? snapshot.symmetryMode : "off"),
+  write: (actions, value) => {
+    if (value === "off" || value === "vertical" || value === "horizontal" || value === "both") {
+      actions.setSymmetryMode(value);
+    }
+  },
+};
+
+const symmetryVerticalAxisOption: NumberToolOption = {
+  id: "symmetryVerticalAxis",
+  kind: "number",
+  label: "Axis X",
+  group: "Symmetry",
+  title: "Where the vertical mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "vertical" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryVerticalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("vertical", value),
+};
+
+const symmetryHorizontalAxisOption: NumberToolOption = {
+  id: "symmetryHorizontalAxis",
+  kind: "number",
+  label: "Axis Y",
+  group: "Symmetry",
+  title: "Where the horizontal mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "horizontal" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryHorizontalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("horizontal", value),
+};
+
+const symmetryOptions: readonly ToolOption[] = [
+  symmetryModeOption,
+  symmetryVerticalAxisOption,
+  symmetryHorizontalAxisOption,
+];
+
 const selectionShapeOption: SelectToolOption = {
   id: "selectionShape",
   kind: "select",
@@ -175,10 +238,19 @@ const selectionShapeOption: SelectToolOption = {
  */
 export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> = {
   select: [selectionShapeOption],
-  rectangle: [shapeFillOption],
-  ellipse: [shapeFillOption],
-  polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption],
-  star: [shapeSidesOption, shapeInnerRatioOption, shapeRotationOption, shapeFillOption],
+  brush: [...symmetryOptions],
+  eraser: [...symmetryOptions],
+  line: [...symmetryOptions],
+  rectangle: [shapeFillOption, ...symmetryOptions],
+  ellipse: [shapeFillOption, ...symmetryOptions],
+  polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption, ...symmetryOptions],
+  star: [
+    shapeSidesOption,
+    shapeInnerRatioOption,
+    shapeRotationOption,
+    shapeFillOption,
+    ...symmetryOptions,
+  ],
   bucket: [fillToleranceOption, fillModeOption, fillSampleScaleOption],
 };
 

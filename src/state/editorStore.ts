@@ -14,6 +14,7 @@ import {
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
 import type { SelectionShape } from "../core/document/selectionModes";
+import type { SymmetryAxisKind, SymmetryMode } from "../core/document/symmetry";
 import type { FillMode } from "../core/fill/fillOptions";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
@@ -55,6 +56,10 @@ export interface EditorActions {
   setFillMode(mode: FillMode): void;
   /** How coarsely the next fill samples the composite (1, 2, 4 or 8). */
   setFillSampleScale(scale: number): void;
+  /** Chooses the mirror axes, or `"off"`. */
+  setSymmetryMode(mode: SymmetryMode | "off"): void;
+  /** Moves one mirror axis to a whole document pixel. */
+  setSymmetryAxis(kind: SymmetryAxisKind, position: number): void;
   /** Chooses linear or radial for the next gradient drag. */
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
@@ -159,6 +164,8 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setFillMode: (mode) => engine.setFillMode(mode),
     setFillSampleScale: (scale) => engine.setFillSampleScale(scale),
+    setSymmetryMode: (mode) => engine.setSymmetryMode(mode),
+    setSymmetryAxis: (kind, position) => engine.setSymmetryAxis(kind, position),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
     setGradientMidStops: (stops) => engine.setGradientMidStops(stops),

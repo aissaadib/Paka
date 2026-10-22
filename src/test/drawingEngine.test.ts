@@ -21,7 +21,7 @@ import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
 import type { StrokeRecord } from "../core/document/types";
-import { isFillPatch, isGradient } from "../core/document/types";
+import { isFillPatch, isGradient, isStroke } from "../core/document/types";
 import type { Guide } from "../core/document/types";
 import type { CursorReport, PointerSample } from "../types/pointer";
 import type { Bounds, Point } from "../types/geometry";
@@ -3912,5 +3912,153 @@ describe("DrawingEngine secondary colour", () => {
     expect(engine.getState().secondaryColor).toBe("#ff0000");
     expect(engine.getState().file.dirty).toBe(false);
     expect(engine.getState().history.depth).toBe(0);
+  });
+});
+
+describe("DrawingEngine symmetry", () => {
+  function createSymmetryEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Draws one brush stroke through the pointer lifecycle. */
+  function draw(engine: DrawingEngine, points: ReadonlyArray<readonly [number, number]>): void {
+    engine.setTool("brush");
+    const first = points[0];
+    engine.handlePointerSample(createSample({ phase: "down", docX: first[0], docY: first[1] }));
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase: "up", docX: last[0], docY: last[1] }));
+  }
+
+  it("is off until asked for, then places its axes in the middle", () => {
+    const { engine } = createSymmetryEngine();
+    expect(engine.getState().symmetryEnabled).toBe(false);
+    expect(engine.getState().symmetryMode).toBe("vertical");
+
+    engine.setSymmetryMode("both");
+    const state = engine.getState();
+    expect(state.symmetryEnabled).toBe(true);
+    expect(state.symmetryMode).toBe("both");
+    // 400 x 300: the middle is 200, 150.
+    expect(state.symmetryVerticalAxis).toBe(200);
+    expect(state.symmetryHorizontalAxis).toBe(150);
+    // The switch is editor state: no history step and no dirty document.
+    expect(state.history.depth).toBe(0);
+    expect(state.file.dirty).toBe(false);
+
+    // Switching off keeps the mode and the placed axes for the next time.
+    engine.setSymmetryMode("off");
+    expect(engine.getState().symmetryEnabled).toBe(false);
+    expect(engine.getState().symmetryMode).toBe("both");
+    expect(engine.getState().symmetryVerticalAxis).toBe(200);
+  });
+
+  it("mirrors a stroke across a vertical axis as one undo step", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    draw(engine, [
+      [100, 100],
+      [120, 100],
+    ]);
+
+    const elements = engine.listElements(layerId);
+    expect(elements).toHaveLength(2);
+    const [original, copy] = elements;
+    if (!isStroke(original) || !isStroke(copy)) {
+      throw new Error("expected two strokes");
+    }
+    // The copy is the reflection about x = 200, sample for sample.
+    expect(copy.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(copy.ys).toEqual(original.ys);
+    expect(copy.id).not.toBe(original.id);
+    expect(copy.brush).toEqual(original.brush);
+    expect(copy.pressures).toEqual(original.pressures);
+
+    // One gesture, one history entry.
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(2);
+  });
+
+  it("makes four-way copies in the both mode", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("both");
+    draw(engine, [
+      [100, 100],
+      [120, 110],
+    ]);
+
+    const elements = engine.listElements(layerId);
+    expect(elements).toHaveLength(4);
+    const [original, vertical, horizontal, halfTurn] = elements;
+    if (
+      !isStroke(original) ||
+      !isStroke(vertical) ||
+      !isStroke(horizontal) ||
+      !isStroke(halfTurn)
+    ) {
+      throw new Error("expected four strokes");
+    }
+    // Original, left-right flip, top-bottom flip, half turn.
+    expect(vertical.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(vertical.ys).toEqual(original.ys);
+    expect(horizontal.xs).toEqual(original.xs);
+    expect(horizontal.ys).toEqual(original.ys.map((y) => 300 - y));
+    expect(halfTurn.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(halfTurn.ys).toEqual(original.ys.map((y) => 300 - y));
+    expect(engine.getState().history.depth).toBe(1);
+
+    // Undoing the gesture takes all four away, not one copy at a time.
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(0);
+  });
+
+  it("drops a copy that would land exactly on the original", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    // A stroke drawn along the axis is its own mirror.
+    draw(engine, [
+      [200, 100],
+      [200, 160],
+    ]);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("leaves the document alone while the symmetry is off", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    draw(engine, [
+      [100, 100],
+      [120, 100],
+    ]);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("clamps the axes to the document without a history step", () => {
+    const { engine } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    const depth = engine.getState().history.depth;
+
+    engine.setSymmetryAxis("vertical", 999);
+    expect(engine.getState().symmetryVerticalAxis).toBe(400);
+    engine.setSymmetryAxis("vertical", -5);
+    expect(engine.getState().symmetryVerticalAxis).toBe(0);
+    engine.setSymmetryAxis("vertical", Number.NaN);
+    expect(engine.getState().symmetryVerticalAxis).toBe(0);
+    engine.setSymmetryAxis("horizontal", 120.6);
+    expect(engine.getState().symmetryHorizontalAxis).toBe(121);
+
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(false);
   });
 });

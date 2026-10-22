@@ -49,6 +49,7 @@ import { createGradientCommand } from "../commands/gradientCommand";
 import {
   createStrokeCommand,
   createStrokeCommandHost,
+  createStrokesCommand,
   type StrokeCommandHost,
 } from "../commands/strokeCommand";
 import {
@@ -113,6 +114,18 @@ import {
   type SelectionCombine,
   type SelectionShape,
 } from "../document/selectionModes";
+import {
+  DEFAULT_SYMMETRY_SETTINGS,
+  centeredSymmetrySettings,
+  mirrorMovesAny,
+  mirrorPoint,
+  normalizeSymmetryMode,
+  symmetryMirrors,
+  symmetrySettingsEqual,
+  type SymmetryAxisKind,
+  type SymmetryMode,
+  type SymmetrySettings,
+} from "../document/symmetry";
 import { StrokeStore } from "../document/strokeStore";
 import {
   boundsContainPoint,
@@ -162,6 +175,7 @@ import { serializeProject, type ParsedProject } from "../project/projectFormat";
 import { Canvas2DRenderer } from "../rendering/Canvas2DRenderer";
 import { strokeDiameter } from "../rendering/canvas2dStroke";
 import { setRulerOverlayState } from "../rendering/rulerOverlay";
+import { setSymmetryOverlaySettings } from "../rendering/symmetryAxesOverlay";
 import type { DrawingRenderer, StrokeSource } from "../rendering/types";
 import {
   ZOOM_STEP,
@@ -322,6 +336,20 @@ export interface EditorSnapshot {
    * surface, a project file or an export. Off by default.
    */
   readonly rulersVisible: boolean;
+  /**
+   * Whether the next stroke is mirrored across one axis or both.
+   *
+   * Editor state, like the grid: it describes the next gesture and never
+   * reaches the document, an export or a project file. The copies it makes are
+   * ordinary strokes, so they do.
+   */
+  readonly symmetryEnabled: boolean;
+  /** The axes the symmetry mirrors across, when it is on. */
+  readonly symmetryMode: SymmetryMode;
+  /** Where the vertical mirror line stands (its x), in document pixels. */
+  readonly symmetryVerticalAxis: number;
+  /** Where the horizontal mirror line stands (its y), in document pixels. */
+  readonly symmetryHorizontalAxis: number;
   /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
@@ -663,6 +691,7 @@ export class DrawingEngine implements StrokeSource {
   private gridSpacing = DEFAULT_GRID_SETTINGS.spacing;
   private gridSnapping = DEFAULT_GRID_SETTINGS.snap;
   private rulersVisible = false;
+  private symmetry: SymmetrySettings = DEFAULT_SYMMETRY_SETTINGS;
   private notice: string | null = null;
   /**
    * Whether the gesture-refusal notice has already been raised for the
@@ -927,6 +956,7 @@ export class DrawingEngine implements StrokeSource {
     this.resetSelection();
     this.resetGuideGesture();
     this.doc = documentOps.createDocument(options);
+    this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
     this.notice = null;
@@ -959,6 +989,7 @@ export class DrawingEngine implements StrokeSource {
     this.resetSelection();
     this.resetGuideGesture();
     this.doc = project.document;
+    this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
     this.notice = null;
@@ -1608,6 +1639,105 @@ export class DrawingEngine implements StrokeSource {
     this.commands.breakMerge();
     this.renderer?.requestRender();
     this.publish();
+  }
+
+  /**
+   * Switches the stroke symmetry on or off.
+   *
+   * Enabling for the first time puts the axes in the middle of the document:
+   * an axis at the origin would mirror the whole drawing off the paper. Axes
+   * the user has already moved are left where they are.
+   *
+   * Editor state, like the grid: the axes are display-only and the switch adds
+   * no history step and dirties nothing. What does enter the document is the
+   * mirrored **copy**, which is an ordinary stroke.
+   */
+  setSymmetryEnabled(enabled: boolean): void {
+    if (enabled === this.symmetry.enabled) {
+      return;
+    }
+    const size = this.documentSize();
+    const placed = this.symmetry.verticalAxis !== 0 || this.symmetry.horizontalAxis !== 0;
+    const next =
+      enabled && !placed
+        ? {
+            ...centeredSymmetrySettings(size.width, size.height, this.symmetry.mode),
+            enabled: true,
+          }
+        : { ...this.symmetry, enabled };
+    this.applySymmetry(next);
+  }
+
+  /**
+   * Chooses the axes the symmetry mirrors across, or `"off"`.
+   *
+   * Choosing a mode switches the symmetry on, so the mode picker needs no
+   * second switch. It also places the axes at the document's middle when they
+   * have never been placed.
+   */
+  setSymmetryMode(mode: SymmetryMode | "off"): void {
+    if (mode === "off") {
+      this.setSymmetryEnabled(false);
+      return;
+    }
+    const nextMode = normalizeSymmetryMode(mode);
+    const size = this.documentSize();
+    const placed = this.symmetry.verticalAxis !== 0 || this.symmetry.horizontalAxis !== 0;
+    const next =
+      !this.symmetry.enabled && !placed
+        ? { ...centeredSymmetrySettings(size.width, size.height, nextMode), enabled: true }
+        : { ...this.symmetry, enabled: true, mode: nextMode };
+    this.applySymmetry(next);
+  }
+
+  /**
+   * Moves one mirror axis to a whole document pixel, clamped to the document.
+   *
+   * Editor state: the axis is a registration mark, and moving it rewrites no
+   * stroke that has already been drawn.
+   */
+  setSymmetryAxis(kind: SymmetryAxisKind, position: number): void {
+    if (!Number.isFinite(position)) {
+      return;
+    }
+    const size = this.documentSize();
+    const limit = kind === "vertical" ? size.width : size.height;
+    const next = Math.round(clamp(position, 0, limit));
+    this.applySymmetry(
+      kind === "vertical"
+        ? { ...this.symmetry, verticalAxis: next }
+        : { ...this.symmetry, horizontalAxis: next },
+    );
+  }
+
+  /** Commits a symmetry settings change and tells the overlay about it. */
+  private applySymmetry(next: SymmetrySettings): void {
+    if (symmetrySettingsEqual(next, this.symmetry)) {
+      return;
+    }
+    this.symmetry = next;
+    // The axes are painted by the shell's overlay registry; the settings live
+    // here because the engine is what decides the next stroke's copies.
+    setSymmetryOverlaySettings(next);
+    this.commands.breakMerge();
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Puts the mirror axes in the middle of the document that is now open.
+   *
+   * A document swap keeps the mode and the switch but not the old axis
+   * positions: an axis placed for a 400-pixel canvas is in the wrong place on a
+   * 2000-pixel one. Display state only - no history step, no dirty flag.
+   */
+  private resetSymmetryAxes(): void {
+    const size = this.documentSize();
+    this.symmetry = {
+      ...centeredSymmetrySettings(size.width, size.height, this.symmetry.mode),
+      enabled: this.symmetry.enabled,
+    };
+    setSymmetryOverlaySettings(this.symmetry);
   }
 
   /**
@@ -2372,12 +2502,64 @@ export class DrawingEngine implements StrokeSource {
 
     this.renderer?.endStroke(stroke);
     const index = this.strokes.elementCount(stroke.layerId);
+    const copies = this.symmetryCopies(stroke);
     this.strokes.insert(stroke);
+    copies.forEach((copy, position) => {
+      this.strokes.insert(copy, index + position + 1);
+    });
+    if (copies.length > 0) {
+      // `endStroke` composited the original's buffer into the layer surface.
+      // The copies are new elements, so the surface has to be rebuilt from the
+      // list to include them.
+      this.renderer?.invalidateLayer(stroke.layerId);
+    }
     // The revision is bumped before the command is recorded, so the single
     // snapshot the command stack publishes already carries the dirty flag.
     this.revision += 1;
-    this.commands.push(createStrokeCommand(stroke, index, this.commandHost));
+    // One gesture is one history step, mirrors included: undoing a symmetric
+    // stroke must take the whole gesture away, not one copy at a time.
+    this.commands.push(
+      createStrokesCommand(
+        [stroke, ...copies],
+        [index, ...copies.map((_, position) => index + position + 1)],
+        this.commandHost,
+      ),
+    );
     this.publish();
+  }
+
+  /**
+   * The symmetry copies of a just-finished stroke, in painting order.
+   *
+   * A copy is an ordinary stroke: the same brush, colour, pressure and timing,
+   * with every sample reflected. That is what keeps the document
+   * self-describing - a reopened project, an undo and an export reproduce the
+   * copies without knowing a symmetry was ever on.
+   *
+   * A copy whose samples all lie on its mirror is dropped: it would land
+   * exactly on the original and paint it twice, darkening the line.
+   */
+  private symmetryCopies(stroke: StrokeRecord): StrokeRecord[] {
+    const mirrors = symmetryMirrors(this.symmetry);
+    if (mirrors.length === 0 || stroke.xs.length === 0) {
+      return [];
+    }
+    const points: Point[] = stroke.xs.map((x, index) => ({ x, y: stroke.ys[index] }));
+    const copies: StrokeRecord[] = [];
+    for (const mirror of mirrors) {
+      if (!mirrorMovesAny(points, mirror)) {
+        continue;
+      }
+      const xs = new Array<number>(points.length);
+      const ys = new Array<number>(points.length);
+      for (let index = 0; index < points.length; index += 1) {
+        const mirrored = mirrorPoint(points[index], mirror);
+        xs[index] = mirrored.x;
+        ys[index] = mirrored.y;
+      }
+      copies.push({ ...stroke, id: createId("stroke"), xs, ys });
+    }
+    return copies;
   }
 
   cancelStroke(): void {
@@ -3933,6 +4115,10 @@ export class DrawingEngine implements StrokeSource {
       gridSpacing: this.gridSpacing,
       gridSnapping: this.gridSnapping,
       rulersVisible: this.rulersVisible,
+      symmetryEnabled: this.symmetry.enabled,
+      symmetryMode: this.symmetry.mode,
+      symmetryVerticalAxis: this.symmetry.verticalAxis,
+      symmetryHorizontalAxis: this.symmetry.horizontalAxis,
       notice: this.notice,
     };
   }
@@ -3968,6 +4154,10 @@ export class DrawingEngine implements StrokeSource {
       previous.gridSpacing === next.gridSpacing &&
       previous.gridSnapping === next.gridSnapping &&
       previous.rulersVisible === next.rulersVisible &&
+      previous.symmetryEnabled === next.symmetryEnabled &&
+      previous.symmetryMode === next.symmetryMode &&
+      previous.symmetryVerticalAxis === next.symmetryVerticalAxis &&
+      previous.symmetryHorizontalAxis === next.symmetryHorizontalAxis &&
       previous.notice === next.notice
     ) {
       return;

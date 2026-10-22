@@ -52,6 +52,8 @@ beforeEach(() => {
     setFillTolerance: vi.fn(),
     setFillMode: vi.fn(),
     setFillSampleScale: vi.fn(),
+    setSymmetryMode: vi.fn(),
+    setSymmetryAxis: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
     setGradientMidStops: vi.fn(),

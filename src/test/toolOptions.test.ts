@@ -74,6 +74,10 @@ function snapshotFor(toolId: ToolId): EditorSnapshot {
     fillMode: "contiguous",
     fillSampleScale: 1,
     selectionShape: "rect",
+    symmetryEnabled: false,
+    symmetryMode: "vertical",
+    symmetryVerticalAxis: 100,
+    symmetryHorizontalAxis: 100,
     // The bar draws the brush's primary controls for a brush-using tool, so
     // the snapshot carries the brush and the preset list the real one does.
     brush: DEFAULT_BRUSH,
@@ -83,7 +87,7 @@ function snapshotFor(toolId: ToolId): EditorSnapshot {
 }
 
 function recorder() {
-  const calls: Array<[string, unknown]> = [];
+  const calls: Array<[string, ...unknown[]]> = [];
   const actions = {
     setShapeFill: vi.fn((value: boolean) => calls.push(["setShapeFill", value])),
     setShapeSides: vi.fn((value: number) => calls.push(["setShapeSides", value])),
@@ -93,6 +97,10 @@ function recorder() {
     setFillMode: vi.fn((value: string) => calls.push(["setFillMode", value])),
     setFillSampleScale: vi.fn((value: number) => calls.push(["setFillSampleScale", value])),
     setSelectionShape: vi.fn((value: string) => calls.push(["setSelectionShape", value])),
+    setSymmetryMode: vi.fn((value: string) => calls.push(["setSymmetryMode", value])),
+    setSymmetryAxis: vi.fn((kind: string, value: number) =>
+      calls.push(["setSymmetryAxis", kind, value]),
+    ),
     setGridSnapping: vi.fn((value: boolean) => calls.push(["setGridSnapping", value])),
   } as unknown as EditorActions;
   return { actions, calls };
@@ -103,21 +111,41 @@ const ids = (toolId: ToolId) =>
 
 describe("tool option fields", () => {
   it("shows only the fields that belong to each tool", () => {
-    expect(ids("rectangle")).toEqual(["shapeFill"]);
-    expect(ids("ellipse")).toEqual(["shapeFill"]);
-    expect(ids("polygon")).toEqual(["shapeSides", "shapeRotation", "shapeFill"]);
+    expect(ids("rectangle")).toEqual(["shapeFill", "symmetryMode"]);
+    expect(ids("ellipse")).toEqual(["shapeFill", "symmetryMode"]);
+    expect(ids("polygon")).toEqual([
+      "shapeSides",
+      "shapeRotation",
+      "shapeFill",
+      "symmetryMode",
+    ]);
     expect(ids("star")).toEqual([
       "shapeSides",
       "shapeInnerRatio",
       "shapeRotation",
       "shapeFill",
+      "symmetryMode",
     ]);
     expect(ids("bucket")).toEqual(["fillTolerance", "fillMode", "fillSampleScale"]);
     expect(ids("select")).toEqual(["selectionShape"]);
   });
 
+  it("offers the symmetry switch on every tool that draws a stroke", () => {
+    for (const toolId of [
+      "brush",
+      "eraser",
+      "line",
+      "rectangle",
+      "ellipse",
+      "polygon",
+      "star",
+    ] as const) {
+      expect(ids(toolId)).toContain("symmetryMode");
+    }
+  });
+
   it("gives tools without options an empty list", () => {
-    for (const toolId of ["brush", "eraser", "line", "picker", "guides", "pan"] as const) {
+    for (const toolId of ["picker", "guides", "pan"] as const) {
       expect(ids(toolId)).toEqual([]);
     }
   });
@@ -154,6 +182,8 @@ describe("tool option reads and writes", () => {
     for (const option of visibleToolOptions("star", snapshot)) {
       if (option.kind === "toggle") {
         option.write(actions, false);
+      } else if (option.kind === "select") {
+        option.write(actions, "both");
       } else {
         asSlider(option).write(actions, option.id === "shapeSides" ? 5 : 0.25);
       }
@@ -163,7 +193,65 @@ describe("tool option reads and writes", () => {
       ["setShapeInnerRatio", 0.25],
       ["setShapeRotation", 0.25],
       ["setShapeFill", false],
+      ["setSymmetryMode", "both"],
     ]);
+  });
+
+  it("shows only the axis a symmetry mode uses", () => {
+    const snapshot = { ...snapshotFor("brush"), symmetryEnabled: true } as EditorSnapshot;
+    const visibleFor = (mode: string) =>
+      visibleToolOptions("brush", { ...snapshot, symmetryMode: mode } as EditorSnapshot).map(
+        (option) => option.id,
+      );
+    expect(visibleFor("vertical")).toEqual(["symmetryMode", "symmetryVerticalAxis"]);
+    expect(visibleFor("horizontal")).toEqual(["symmetryMode", "symmetryHorizontalAxis"]);
+    expect(visibleFor("both")).toEqual([
+      "symmetryMode",
+      "symmetryVerticalAxis",
+      "symmetryHorizontalAxis",
+    ]);
+    // Switching the symmetry off hides both axis fields but keeps the switch.
+    expect(
+      visibleToolOptions("brush", { ...snapshot, symmetryEnabled: false }).map(
+        (option) => option.id,
+      ),
+    ).toEqual(["symmetryMode"]);
+  });
+
+  it("reads and writes the symmetry controls", () => {
+    const { actions, calls } = recorder();
+    const snapshot = {
+      ...snapshotFor("brush"),
+      symmetryEnabled: true,
+      symmetryMode: "both",
+      symmetryVerticalAxis: 320,
+      symmetryHorizontalAxis: 180,
+    } as EditorSnapshot;
+    const options = visibleToolOptions("brush", snapshot);
+    const mode = options.find((option) => option.id === "symmetryMode") as SelectToolOption;
+    const axisX = options.find((option) => option.id === "symmetryVerticalAxis");
+    const axisY = options.find((option) => option.id === "symmetryHorizontalAxis");
+
+    expect(mode.read(snapshot)).toBe("both");
+    expect(mode.read({ ...snapshot, symmetryEnabled: false })).toBe("off");
+    mode.write(actions, "off");
+    if (axisX?.kind !== "number" || axisY?.kind !== "number") {
+      throw new Error("symmetry axis fields are missing");
+    }
+    expect(axisX.read(snapshot)).toBe(320);
+    expect(axisY.read(snapshot)).toBe(180);
+    axisX.write(actions, 275);
+    axisY.write(actions, 90);
+
+    expect(calls).toEqual([
+      ["setSymmetryMode", "off"],
+      ["setSymmetryAxis", "vertical", 275],
+      ["setSymmetryAxis", "horizontal", 90],
+    ]);
+
+    // An unknown mode is ignored rather than handed to the engine.
+    mode.write(actions, "diagonal");
+    expect(calls).toHaveLength(3);
   });
 
   it("writes the fill mode, the sample scale and the marquee shape", () => {
@@ -522,8 +610,10 @@ describe("a feature that adds an option to a tool it does not own", () => {
       },
     ]);
     const visible = visibleToolOptions("brush", snapshotFor("brush"));
-    expect(visible.map((option) => option.id)).toEqual(["featureToggle"]);
-    expect(markupOf(visible[0])).toContain("Feature");
+    // The built-in symmetry switch comes first; the feature's own option is
+    // appended after it.
+    expect(visible.map((option) => option.id)).toEqual(["symmetryMode", "featureToggle"]);
+    expect(markupOf(visible[1])).toContain("Feature");
   });
 
   it("reaches the action the feature named", () => {

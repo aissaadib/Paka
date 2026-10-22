@@ -753,16 +753,20 @@ describe("shape options: the controls", () => {
     // is already registered for that tool.
     registerShapeToolOptions();
     registerShapeToolOptions();
-    expect(new Set(optionIds("rectangle"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
-    expect(new Set(optionIds("ellipse"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
-    expect(new Set(optionIds("polygon"))).toEqual(
+    // The symmetry controls belong to every stroke tool, not to the shape
+    // model, so they are filtered out here.
+    const shapeIds = (toolId: ToolId) =>
+      optionIds(toolId).filter((id) => !id.startsWith("symmetry"));
+    expect(new Set(shapeIds("rectangle"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
+    expect(new Set(shapeIds("ellipse"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
+    expect(new Set(shapeIds("polygon"))).toEqual(
       new Set(["shapeSides", "shapeRotation", "shapeFill"]),
     );
-    expect(new Set(optionIds("star"))).toEqual(
+    expect(new Set(shapeIds("star"))).toEqual(
       new Set(["shapeSides", "shapeInnerRatio", "shapeRotation", "shapeFill"]),
     );
-    // The line's angle is the drag, so it has no options.
-    expect(optionIds("line")).toEqual([]);
+    // The line's angle is the drag, so it has no shape options of its own.
+    expect(shapeIds("line")).toEqual([]);
   });
 
   it("gives every control the range the model declares", () => {

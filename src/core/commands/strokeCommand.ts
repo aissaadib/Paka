@@ -58,3 +58,40 @@ export function createStrokeCommand(
     },
   };
 }
+
+/**
+ * Inserts several strokes as **one** history step.
+ *
+ * Symmetry commits the original and its mirrored copies together: undoing one
+ * gesture must take the whole thing away, not one copy at a time. The strokes
+ * share a layer (a mirror stays on the layer it was drawn on) and the indices
+ * are in painting order, so a redo restores exactly the order they were first
+ * inserted in.
+ */
+export function createStrokesCommand(
+  strokes: readonly StrokeRecord[],
+  indices: readonly number[],
+  host: StrokeCommandHost,
+): Command {
+  const layerId = strokes[0]?.layerId;
+  return {
+    id: createId("cmd"),
+    label: strokes.some((stroke) => stroke.erase === true) ? "Erase" : "Stroke",
+    apply(): void {
+      strokes.forEach((stroke, position) => {
+        host.insert(stroke, indices[position]);
+      });
+      if (layerId) {
+        host.refresh(layerId);
+      }
+    },
+    revert(): void {
+      for (let position = strokes.length - 1; position >= 0; position -= 1) {
+        host.remove(strokes[position]);
+      }
+      if (layerId) {
+        host.refresh(layerId);
+      }
+    },
+  };
+}
