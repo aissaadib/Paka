@@ -108,7 +108,7 @@ export const PANEL_SIDE_SLOT: ShellSlotId = "right";
 const PANEL_DEFINITIONS: readonly PanelDefinition[] = [
   {
     id: "color",
-    label: "Colour",
+    label: "Color",
     icon: "palette",
     slot: PANEL_SIDE_SLOT,
     order: 0,
