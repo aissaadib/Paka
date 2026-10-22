@@ -9,7 +9,22 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { layerDeletionPrompt } from "../core/document/layerDeletion";
+import { canDeleteLayer, layerDeletionPrompt } from "../core/document/layerDeletion";
+
+describe("canDeleteLayer", () => {
+  it("allows a layer to go while the document keeps one", () => {
+    expect(canDeleteLayer(2)).toBe(true);
+    expect(canDeleteLayer(9)).toBe(true);
+  });
+
+  it("keeps the last layer", () => {
+    // The drawing pipeline always needs a destination, so the document model
+    // refuses to remove the last layer. The panel has to know that before it
+    // asks the user to confirm a deletion.
+    expect(canDeleteLayer(1)).toBe(false);
+    expect(canDeleteLayer(0)).toBe(false);
+  });
+});
 
 describe("layerDeletionPrompt", () => {
   it("asks before a layer that holds content is deleted", () => {

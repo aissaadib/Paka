@@ -22,6 +22,21 @@ export interface LayerDeletionPrompt {
 }
 
 /**
+ * True when a layer may be deleted at all.
+ *
+ * The document always keeps one layer: the drawing pipeline needs somewhere
+ * to paint, so the last layer is never removed. The rule lives here so the
+ * panel can refuse *before* it asks the user to confirm a deletion that the
+ * document model would then refuse - a question with no answer behind it is
+ * worse than no question.
+ *
+ * @param layerCount how many layers the document holds
+ */
+export function canDeleteLayer(layerCount: number): boolean {
+  return layerCount > 1;
+}
+
+/**
  * The prompt for deleting the layer called `name`, or `null` when the layer
  * holds nothing and the deletion needs no confirmation.
  *

@@ -84,9 +84,20 @@ export function moveDeltaForSlot(draggedIndex: number, slot: number): number {
  * The marker is drawn in the list the user sees, but the slot is counted in
  * the reduced list, so the marker has to step back over the dragged row when
  * the drop is below it.
+ *
+ * The marker answers one question: *where does the dragged row land?* It
+ * lands at full-list position `slot` - that is what `moveDeltaForSlot` moves
+ * it to - so the marker is the gap just above that position. When the slot is
+ * behind the dragged row the gap is the one the slot already names; when the
+ * slot is past it, the dragged row is still in the list and takes one place,
+ * so the marker steps over it.
+ *
+ * A slot *equal* to the dragged row's own index is the drop that changes
+ * nothing: the row stays where it is, so the marker belongs to the gap above
+ * it. Marking the gap below it would promise a move that never happens.
  */
 export function markerIndex(draggedIndex: number, slot: number): number {
-  return slot < draggedIndex ? slot : slot + 1;
+  return slot <= draggedIndex ? slot : slot + 1;
 }
 
 /**

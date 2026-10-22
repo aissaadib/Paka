@@ -111,7 +111,14 @@ describe("markerIndex", () => {
 
   it("steps over the dragged row when the drop is below it", () => {
     expect(markerIndex(0, 1)).toBe(2);
-    expect(markerIndex(1, 1)).toBe(2);
+    expect(markerIndex(1, 2)).toBe(3);
+  });
+
+  it("sits at the dragged row when the drop changes nothing", () => {
+    // A drop on the dragged row leaves the layer where it is, so the marker
+    // has to say so: the gap above the row, not the one below it.
+    expect(markerIndex(1, 1)).toBe(1);
+    expect(markerIndex(0, 0)).toBe(0);
   });
 });
 
