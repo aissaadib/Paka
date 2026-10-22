@@ -26,6 +26,11 @@
  * and it exports like any other stroke. A path that is still open is *not* in
  * the document, so cancelling it costs nothing - unlike a brush stroke, whose
  * pixels are real once they have been rasterized.
+ *
+ * A path is **one colour**: the colour is resolved when the path *opens*, so
+ * the first press decides it (a right-button press opens the path in the
+ * secondary colour, exactly as it would for any other shape). The later
+ * corners are the same stroke, so they cannot change its colour.
  */
 
 import { isPaintButton, type PointerSample } from "../../types/pointer";
