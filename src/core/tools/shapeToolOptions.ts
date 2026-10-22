@@ -119,6 +119,33 @@ function sliderFor(field: ShapeNumberOption): SliderToolOption {
   };
 }
 
+/**
+ * Reads a flag from the snapshot.
+ *
+ * The id names the snapshot field, so the control and the engine cannot drift
+ * apart. The fallback is the option's default, for a flag that is not wired to
+ * the engine yet.
+ */
+function readToggle(field: ShapeToggleOption, snapshot: EditorSnapshot): boolean {
+  switch (field.id) {
+    case "shapeFill":
+      return snapshot.shapeFill;
+    default:
+      return field.defaultValue;
+  }
+}
+
+/** Writes a flag through the matching editor action. */
+function writeToggle(field: ShapeToggleOption, actions: EditorActions, value: boolean): void {
+  switch (field.id) {
+    case "shapeFill":
+      actions.setShapeFill(value);
+      return;
+    default:
+      return;
+  }
+}
+
 /** The control for a flag, built from the model. */
 function toggleFor(field: ShapeToggleOption): ToggleToolOption {
   return {
@@ -126,8 +153,8 @@ function toggleFor(field: ShapeToggleOption): ToggleToolOption {
     kind: "toggle",
     label: (snapshot) => shapeOptionLabel(field, shapeKindOf(snapshot)),
     title: field.title,
-    read: (snapshot) => snapshot.shapeFill,
-    write: (actions, value) => actions.setShapeFill(value),
+    read: (snapshot) => readToggle(field, snapshot),
+    write: (actions, value) => writeToggle(field, actions, value),
   };
 }
 
