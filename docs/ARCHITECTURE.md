@@ -1590,6 +1590,47 @@ keep it from churning. Two things deliberately bypass React:
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
 
+## The panel manager
+
+The shell's side column is rendered from a list, not hard-wired. Two lists
+answer two different questions, and they are joined by the panel id:
+
+- `src/core/shell/panelRegistry.ts` is the **mount registry**: the shared
+  contract by which a panel says "mount me, here, in this order", with a
+  render callback. It answers *where a panel goes* and *what it draws*.
+- `src/core/panels/panelRegistry.ts` is the **catalogue**: the closed, typed
+  list of the panels that exist, with the label, the icon, the stack order,
+  the default visibility, the fold and grow flags, the mount policy and a
+  one-line description. It answers *what a panel is*. `toShellPanelDefinition`
+  and `registerCataloguePanel` map a catalogue entry onto the mount
+  registry's contract, carrying the catalogue's slot and order across, so the
+  two lists cannot drift apart.
+
+The shell reads the **mount registry** to lay out its frame; the panel
+manager reads the **catalogue** to know which panels exist and how they
+behave. `PanelStack` renders the registry's entries for the side slot, so a
+panel that registers itself is mounted without the stack naming it.
+
+The layout - which panels are shown and which are folded - is
+`src/core/panels/panelLayout.ts`: pure functions over a small versioned
+document. It is **shell state, not document state**: showing or hiding a
+panel pushes no history entry, bumps no revision and never makes a document
+dirty. The rules are:
+
+- a **missing** or **malformed** field takes its default;
+- an **id the catalogue does not know** is dropped, so a panel a later build
+  removed cannot break an old file;
+- a document from a **newer version** is ignored wholesale, because its
+  meaning is unknown rather than merely wrong.
+
+`src/core/panels/panelLayoutSection.ts` carries the layout in the
+preferences document under the `panels` key, and `src/state/panelStore.ts`
+holds the live layout; React reads it through `useSyncExternalStore`. The
+mount policy is the one rule that decides whether a panel is mounted at all:
+a panel that keeps React state of its own (`mounting: "always"`) stays
+mounted while it is hidden, and a panel derived from the document
+(`mounting: "when-visible"`) is unmounted, because it has nothing to lose.
+
 ## Native boundary (Rust)
 
 `src-tauri` holds the project file I/O: `read_text_file`,

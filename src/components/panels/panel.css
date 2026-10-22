@@ -1,0 +1,62 @@
+/**
+ * The panel stack's chrome: the column, the slot each panel sits in, and the
+ * states the panel manager puts a panel in.
+ *
+ * The frame is owned by the panel manager, not by a feature, so the colour
+ * panel and the layers panel look the same without either of them styling
+ * the other's parts.
+ */
+
+.panel-stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The slot one panel sits in. */
+.panel-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* A hidden panel keeps its place in the stack but takes no space at all, so
+   the canvas gets the pixels back without the user resizing anything. */
+.panel-slot--hidden {
+  display: none;
+}
+
+/* The panel that takes the column's leftover height. */
+.panel-slot--grow {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* `min-width: 0` is load-bearing: the flex base size of a panel is its
+   max-content width (the layer rows), and the automatic minimum size would
+   keep it from shrinking, so the panel would grow past the fixed side column
+   and the shell would clip its header buttons off the window. */
+.panel-slot--grow > .panel {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A folded panel shows its header only. The body stays mounted, so folding a
+   panel cannot lose the state it holds. */
+.panel-slot--collapsed .panel__body,
+.panel-slot--collapsed .panel__footer {
+  display: none;
+}
+
+/* The same two rules for the chrome component itself, for a panel that
+   marks its own state rather than being marked by its slot. */
+.panel-stack .panel--hidden {
+  display: none;
+}
+
+.panel-stack .panel--collapsed .panel__body,
+.panel-stack .panel--collapsed .panel__footer {
+  display: none;
+}
