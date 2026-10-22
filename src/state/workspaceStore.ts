@@ -23,7 +23,11 @@
  * store its own preferences instead of the two of them each keeping a copy.
  */
 
-import { listPanels, type PanelDefinition } from "../core/shell/panelRegistry";
+import {
+  listPanels,
+  subscribeToPanelRegistry,
+  type PanelDefinition,
+} from "../core/shell/panelRegistry";
 import {
   DEFAULT_SHELL_PREFERENCES,
   shellPreferencesEqual,
@@ -211,6 +215,16 @@ export function createWorkspaceStore(
   // rebuilds the composition when they change.
   preferencesSource.subscribe(() => {
     composition = null;
+    notify();
+  });
+
+  // The panels are somebody else's state too: they register themselves when
+  // their module is evaluated, and one of them may register after the shell
+  // has painted. The store watches the registry so the composition is read
+  // again when the panel list changes - the notification is what tells
+  // React to look, and the composition's own signature decides whether the
+  // result is a new one.
+  subscribeToPanelRegistry(() => {
     notify();
   });
 

@@ -96,6 +96,12 @@ export type ToolOption =
  * The kinds are a closed list, so a consumer can enumerate them: the options
  * bar's renderer checks itself against this list, and a kind added here
  * without a control to draw it is a compile error rather than a blank space.
+ *
+ * This list is the *only* list of kinds. The dispatch that turns a kind into
+ * the control that draws it lives in `core/options/optionControl.ts`, and it
+ * is exhaustive against this list: a kind added here without a builder there
+ * is a compile error in that one file, and the options bar - which draws the
+ * control, not the kind - is not touched.
  */
 export type ToolOptionKind =
   | "slider"
@@ -114,6 +120,13 @@ export const TOOL_OPTION_KINDS: readonly ToolOptionKind[] = Object.freeze([
   "color",
   "group",
 ]);
+
+/** Whether an untrusted value names a kind of tool option. */
+export function isToolOptionKind(value: unknown): value is ToolOptionKind {
+  return (
+    typeof value === "string" && (TOOL_OPTION_KINDS as readonly string[]).includes(value)
+  );
+}
 
 /** Resolves a label against the current snapshot. */
 export function toolOptionLabel(option: ToolOption, snapshot: EditorSnapshot): string {
