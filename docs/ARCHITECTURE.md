@@ -967,6 +967,33 @@ gradient covers earlier elements on its layer, which is why painting one on its
 own layer is the normal workflow. The editor options (`setGradientType`,
 `setGradientEndColor`) describe the next drag only and are not serialized.
 
+A gradient is edited by moving points, and that geometry is **pure and DOM-free**
+(`core/gradient/gradientHandles.ts`): the two end points of the axis (the start
+and the end of a linear ramp, the centre and the radius handle of a radial one),
+the position of every middle stop along the axis, the grab radius in screen
+pixels and the hit test against the axis or the circle. The handle **positions**
+are in document space and the grab radius is in screen pixels, exactly as the
+selection's transform handles are.
+
+`moveGradientHandle` is the one place that decides what a drag means. It moves
+the geometry, and it slides a stop along the axis - the pointer's place on the
+axis decides the stop's new offset - while holding that stop **between its
+neighbours**. The ramp's offsets have to stay strictly ascending, because that is
+what the file format requires: a ramp that was not ascending would be a file the
+reader refuses, so the drawing would stop being saveable. A move with no valid
+answer (a stop with no room between its neighbours, a handle on a degenerate
+axis) is **refused** rather than repaired, and a record the file could not read
+is rejected by `gradientRecordProblem` rather than quietly fixed.
+
+The edit itself is **one history step**:
+`core/commands/gradientEditCommand.ts` carries the committed record and the
+record that replaced it, so undo puts the very same record back and redo applies
+the very same one. A run of edits that share a merge key collapses into one
+entry, which is what keeps a held arrow key to a single undo step. The handle
+geometry and the command are the model; the on-canvas gesture that drives them
+(selecting a gradient, dragging a handle, the overlay that shows them) is the
+engine's and the renderer's work.
+
 ### Selection and transform
 
 A selection holds **whole strokes of one layer**, never part of a stroke and
