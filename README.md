@@ -32,7 +32,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   `Shift` constrains (45-degree lines, squares, circles) and `Alt` draws from
   the centre. Rectangle, ellipse, polygon and star offer a **Fill shape** switch
   in the
-  toolbar: with it on the interior takes the brush colour and the outline is
+  options row: with it on the interior takes the brush colour and the outline is
   still traced on top, so the edge lands exactly where an unfilled shape's edge
   would. The switch describes the *next* shape - each shape keeps the setting it
   was drawn with - and a line is never filled, since it bounds no interior.
@@ -61,7 +61,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Bucket fill** (`F`): click a region to flood-fill it with the current colour.
   The scan reads the **merged visible composite** - paper plus all visible layers
   - so line art on another layer bounds the fill, while the committed pixels go
-  to the **active layer**. The toolbar's **Tolerance** slider (0-255, max
+  to the **active layer**. The **Tolerance** slider in the options row (0-255, max
   per-channel difference) widens what counts as the same region; fully
   transparent pixels always match each other. The result is a bounded,
   pixel-exact patch with a binary coverage mask, not a traced contour, so it is
@@ -70,7 +70,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   removes the preview and records nothing. A document over 16,777,216 pixels
   refuses the scan with a status-bar message instead of freezing.
 - **Gradient** (`G`): drag across the canvas to paint a **linear** gradient from
-  the current brush colour to the toolbar's **To** colour. The **Radial** switch
+  the current brush colour to the **To** colour in the options row. The **Radial** switch
   makes the press point the centre and the drag length the outer radius. The
   stop editor adds, moves, recolours and removes middle stops with a live
   preview; the endpoints stay the two colours above. Brush opacity is applied
@@ -148,10 +148,10 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   hue (the angle) and a saturation (the distance from the centre), the value
   slider picks the brightness, and the three sliders name the same numbers and
   are keyboard-operable. It writes the same brush colour the picker, the
-  toolbar's colour input and the swatches write, so the wheel follows a colour
+  options row's colour input and the swatches write, so the wheel follows a colour
   picked off the canvas - and choosing a colour is not an edit: it adds no
   history step and never marks the document dirty.
-- **Primary and secondary colours**: the toolbar keeps two colour chips. The
+- **Primary and secondary colours**: the options row keeps two colour chips. The
   left button paints with the primary and the right button with the secondary;
   the swap button exchanges them, and right-clicking a palette swatch assigns
   it to the secondary chip. The colour is resolved when the gesture starts and
@@ -164,7 +164,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   is a lightness comparison and the distance a perceptual one, so the readout
   shows both and promises neither for the other. It is a reading, not a
   control: no history step, no dirty flag, and it follows a colour chosen
-  anywhere - the wheel, the toolbar's colour input, a swatch or the canvas
+  anywhere - the wheel, the options row's colour input, a swatch or the canvas
   picker.
 - **Preferences survive a restart**: the brush, the active tool, the shape
   options, the fill tolerance and the gradient settings are stored in a
@@ -220,7 +220,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the
-  toolbar, the Edit
+  app bar, the Edit
   menu and `Ctrl+Z` / `Ctrl+Shift+Z` (`Ctrl+J` duplicates the active layer).
   Dragging a slider is one step, not one per tick. History is capped at 200
   commands.
@@ -233,15 +233,22 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   gradient geometry/stops - so reopening a file restores an editable drawing
   rather than a flattened picture, with fills landing on exactly the pixels that
   were committed. Native
-  open/save dialogs, an unsaved changes indicator in the title and status bar, a
+  open/save dialogs, an unsaved changes indicator in the window title and the
+  app bar, a
   discard warning before new, open or close, and atomic writes that never leave a
   half-written file.
 - **PNG export** (`File → Export PNG…`) of the full composite at document size,
   including layer visibility, opacity and blend mode, without touching the
   editable document.
-- **Status bar** reporting document size, zoom, history depth, how many strokes
-  are selected, the live cursor position in document coordinates, the current
-  file name and file messages.
+- **Workspace shell**: an app bar (the menus, the document title and its
+  unsaved marker, the history and the zoom), a contextual options row that
+  holds the active tool's own options, a tool rail, the canvas, a panel dock
+  and a status bar. The options row has a fixed height, so switching tools
+  never resizes the canvas, and the dock folds away on a narrow window
+  instead of squeezing the artwork.
+- **Status bar** reporting the grid and snapping switches, the active layer,
+  document size, history depth, how many strokes are selected, the live cursor
+  position in document coordinates and file messages.
 - **HiDPI** rendering: layer surfaces are rasterized at up to 2x and the display
   canvas follows the device pixel ratio, while document geometry stays fixed.
 
@@ -277,6 +284,8 @@ pnpm tauri dev      # the real desktop app
 | `pnpm typecheck` | `tsc --noEmit` over `src` |
 | `pnpm test` | Vitest run |
 | `pnpm test:watch` | Vitest in watch mode |
+| `pnpm test:shell` | Playwright checks of the workspace shell in a real browser |
+| `pnpm test:visual` | Playwright visual-regression scenes for the renderer |
 | `pnpm tauri build` | Production desktop bundle |
 
 ### Building on Windows without MSVC
@@ -295,7 +304,8 @@ MSVCRT-based and the UCRT flavour links but produces load-time failures.
 ```
 src/
   app/          entry point, provider wiring, global styles
-  components/   presentational shell (menu bar, toolbars, panels, icons)
+  components/   presentational shell (app bar, options bar, tool rail, dock,
+                panels, icons, tooltips)
   features/     feature UI (canvas, brushes, colour, layers, history, document,
                 project: file commands, dialogs, title and close guard)
   hooks/        React bindings for the engine

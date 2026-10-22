@@ -75,7 +75,8 @@ architecture by browsing.
 `features/color/ContrastReadout.tsx` (198),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
-feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
+feature controls in `features/`, `ProjectFiles`, `project_io.rs`,
+`components/toolbar/Tooltip.tsx` (212: the anchored tooltip).
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
@@ -128,6 +129,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change the workspace shell | `components/layout/Workspace.tsx` (the composition), `AppBar.tsx` (the menus, the title, the history, the zoom), `ToolOptionsBar.tsx` + `OptionsRegion.tsx` (the contextual options row), `ToolRail.tsx` (the left rail), `PanelArea.tsx` (the dock), `app/app.css` (the bands and the columns), `styles/theme.css` (the tokens) |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
@@ -211,6 +213,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
+| `AppBar`, `ToolOptionsBar`, `OptionsRegion`, `PanelArea`, `ToolBadge`, `DocumentTitle`, `ZoomControls` | `components/layout/` | grep the symbol |
+| `Tooltip`, `IconButton`, `SliderField`, `TOOL_ICONS` | `components/toolbar/` | grep the symbol |
 
 ## 6. Docs → section
 
@@ -278,6 +282,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
 | Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |
+| The workspace shell | `tests/shell/shell.spec.ts` (the bands, the canvas's room at 1366x768, no layout jump when the tool changes, no sideways overflow, the folded dock, the anchored tooltip, the arrow keys) - run with `pnpm test:shell` |
 
 ## 9. Keep this file useful
 

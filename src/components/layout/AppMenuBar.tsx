@@ -240,7 +240,6 @@ export function AppMenuBar({
 
   return (
     <div className="menu-bar" ref={containerRef}>
-      <span className="menu-bar__brand">Paka</span>
       {menus.map((menu) => {
         const isOpen = openMenu === menu.id;
         return (

@@ -1,42 +1,89 @@
 /**
  * Design tokens, reset and shared control primitives.
  *
- * Deliberately restrained: a dark neutral surface palette, one accent color for
- * selection, 1px borders, no gradients, shadows or decorative animation. The
- * workspace is the brightest, most important surface, so panels stay quieter
- * than the canvas.
+ * One neutral dark surface ramp, one accent, 1px borders, no gradients and no
+ * decorative shadows: the canvas is the brightest and the most important
+ * surface, so every bar and panel stays quieter than the artwork.
+ *
+ * The metrics below are the workspace's vocabulary. A component asks for
+ * `--control-height` or `--space-3`, never for a pixel value of its own, so
+ * the whole shell keeps one rhythm and one density.
  */
 
 :root {
   color-scheme: dark;
 
   /* Surfaces */
-  --bg-app: #17191c;
-  --bg-panel: #1c1f23;
-  --bg-raised: #23272c;
-  --bg-raised-hover: #2a2f35;
-  --bg-inset: #121417;
-  --bg-workspace: #0e1013;
+  --bg-app: #141619;
+  --bg-chrome: #1b1e23;
+  --bg-panel: #1b1e23;
+  --bg-raised: #24282e;
+  --bg-raised-hover: #2c3138;
+  --bg-inset: #0f1114;
+  --bg-workspace: #0b0d10;
+  --bg-active: rgba(76, 142, 247, 0.2);
 
-  /* Lines and text */
-  --border: #2a2e34;
-  --border-strong: #3a3f47;
-  --text: #d6d9df;
-  --text-strong: #f1f3f6;
-  --text-dim: #8a919b;
+  /* Lines */
+  --border: #262a30;
+  --border-strong: #363c45;
+
+  /* Text */
+  --text: #d5d9e0;
+  --text-strong: #f2f4f7;
+  --text-dim: #949aa4;
+  --text-faint: #6d737b;
 
   /* Accent */
   --accent: #4c8ef7;
+  --accent-strong: #6ba3ff;
   --accent-soft: rgba(76, 142, 247, 0.18);
   --danger: #e0554f;
+  --danger-soft: rgba(224, 85, 79, 0.16);
+  --focus-ring: #86b5ff;
 
-  /* Metrics */
+  /* Spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+
+  /* Radii */
+  --radius-sm: 2px;
   --radius: 3px;
-  --control-height: 24px;
-  --control-height-sm: 20px;
+  --radius-md: 5px;
 
+  /* Control metrics */
+  --control-height-sm: 20px;
+  --control-height: 22px;
+  --control-height-lg: 26px;
+
+  /* Shell metrics */
+  --bar-height: 26px;
+  --options-height: 30px;
+  --status-height: 22px;
+  --rail-width: 44px;
+  --dock-width: 216px;
+
+  /* Icons */
+  --icon-xs: 11px;
+  --icon-sm: 13px;
+  --icon-md: 16px;
+  --icon-lg: 18px;
+
+  /* Type */
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-md: 12px;
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* Stacking */
+  --z-dock: 20;
+  --z-menu: 30;
+  --z-popover: 40;
+  --z-dialog: 50;
 }
 
 * {
@@ -54,7 +101,7 @@ body,
 body {
   background: var(--bg-app);
   color: var(--text);
-  font: 12px/1.45 var(--font-ui);
+  font: var(--font-size-md)/1.45 var(--font-ui);
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }
@@ -75,22 +122,33 @@ button {
 
 button:disabled {
   cursor: default;
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
+/* One focus ring for the whole workspace: a 2px accent outline with a 1px
+   gap, so it reads on every surface without a per-component rule. */
 :focus-visible {
-  outline: 1px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+  border-radius: var(--radius-sm);
 }
 
 h1,
 h2 {
-  font-size: 12px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   margin: 0;
 }
 
-/* ------------------------------------------------------------------ buttons */
+/* ------------------------------------------------------------------ icons */
+
+.icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+}
+
+/* ---------------------------------------------------------------- buttons */
 
 .icon-button {
   display: inline-flex;
@@ -108,6 +166,11 @@ h2 {
   height: var(--control-height-sm);
 }
 
+.icon-button--lg {
+  width: var(--control-height-lg);
+  height: var(--control-height-lg);
+}
+
 .icon-button:hover:not(:disabled) {
   background: var(--bg-raised-hover);
 }
@@ -120,10 +183,12 @@ h2 {
 
 .button {
   height: var(--control-height);
-  padding: 0 12px;
+  padding: 0 var(--space-5);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--bg-raised);
+  color: var(--text);
+  white-space: nowrap;
 }
 
 .button:hover:not(:disabled) {
@@ -137,25 +202,26 @@ h2 {
 }
 
 .button--primary:hover:not(:disabled) {
-  background: #3f7fe6;
+  background: var(--accent-strong);
 }
 
-/* ------------------------------------------------------------------ inputs */
+/* ----------------------------------------------------------------- inputs */
 
 .slider-field {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   height: var(--control-height);
 }
 
 .slider-field__label {
   color: var(--text-dim);
-  min-width: 46px;
+  min-width: 34px;
+  white-space: nowrap;
 }
 
 .slider-field__range {
-  width: 92px;
+  width: 68px;
   height: 16px;
   margin: 0;
   appearance: none;
@@ -184,8 +250,8 @@ h2 {
 .slider-field__value,
 .text-input {
   height: var(--control-height);
-  width: 56px;
-  padding: 0 6px;
+  width: 42px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-inset);
@@ -194,24 +260,46 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
+.text-input {
+  width: 100%;
+}
+
 .slider-field__value:focus,
 .text-input:focus {
   border-color: var(--accent);
   outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .slider-field__display {
   color: var(--text-dim);
-  min-width: 42px;
+  min-width: 30px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.select {
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+.select:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .toggle {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--space-2);
   height: var(--control-height);
   color: var(--text-dim);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -224,4 +312,38 @@ h2 {
   width: 12px;
   height: 12px;
   margin: 0;
+}
+
+/* ------------------------------------------------------- shared fragments */
+
+/* A vertical hairline between two groups of controls. */
+.divider {
+  width: 1px;
+  height: 16px;
+  flex: none;
+  background: var(--border);
+}
+
+/* A small uppercase label that names a group of controls. */
+.group-label {
+  color: var(--text-faint);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A keyboard hint, shown next to a shortcut. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  line-height: 1;
 }

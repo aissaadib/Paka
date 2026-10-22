@@ -1,59 +1,117 @@
-/** Application shell: menu bar, toolbar, tool rail, canvas, panels, status bar. */
+/**
+ * The workspace shell.
+ *
+ * Four horizontal bands and three columns:
+ *
+ *   app bar      the menus, the document title, the history and the zoom
+ *   options bar  the active tool's own options, in one fixed-height row
+ *   body         the tool rail, the canvas and the panel dock
+ *   status bar   the document facts, the view toggles and the cursor readout
+ *
+ * Every metric comes from a token in `theme.css`; this file only says how the
+ * bands and columns are arranged. The canvas is the point of the application,
+ * so the chrome around it is as thin as the controls allow: the options bar
+ * never changes height (its contents scroll sideways instead), and the dock
+ * is the only column that takes width away from the canvas.
+ */
+
+/* ----------------------------------------------------------------- frame */
 
 .app-shell {
   display: grid;
-  grid-template-rows: 30px auto 1fr 22px;
+  grid-template-rows: var(--bar-height) var(--options-height) minmax(0, 1fr) var(--status-height);
   height: 100%;
   background: var(--bg-app);
+  /* The containing block for the floating editors, so an overlay anchored to
+     the shell escapes the options bar's scroll container. */
+  position: relative;
 }
 
 .workspace-body {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 216px;
+  grid-template-columns: var(--rail-width) minmax(0, 1fr) var(--dock-width);
   min-height: 0;
+  /* The containing block for the dock when it becomes an overlay. */
+  position: relative;
 }
 
-/* The right-hand column: the colour panel on top, the layers panel taking the
-   rest of the height and scrolling as it always has. */
-.side-panels {
+/* ---------------------------------------------------------------- app bar */
+
+.app-bar {
   display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.side-panels__layers {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.side-panels__layers > .panel {
-  flex: 1 1 auto;
-  /* `min-width: 0` is load-bearing: the flex base size of the panel is its
-     max-content width (the layer rows), and the automatic minimum size would
-     keep it from shrinking, so the panel grew past the fixed 216 px grid
-     column and the side panels clipped its header buttons off the window. */
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border);
   min-width: 0;
-  min-height: 0;
 }
 
-/* ---------------------------------------------------------------- menu bar */
+.app-bar__brand {
+  margin-right: var(--space-3);
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.app-bar__spacer {
+  flex: 1 1 auto;
+  min-width: var(--space-2);
+}
+
+.app-bar__cluster {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+}
+
+/* The document title and its unsaved marker: one chip, so the name is read
+   once and the dirty state travels with it. */
+.doc-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height);
+  max-width: 240px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  color: var(--text);
+}
+
+.doc-title__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-title__dirty {
+  color: var(--accent);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.zoom-group__value {
+  min-width: 46px;
+  color: var(--text);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------- menu */
 
 .menu-bar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 0 8px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-}
-
-.menu-bar__brand {
-  margin-right: 10px;
-  color: var(--text-dim);
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  gap: 1px;
 }
 
 .menu {
@@ -63,9 +121,9 @@
 .menu__trigger {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  height: var(--control-height-sm);
-  padding: 0 8px;
+  gap: var(--space-1);
+  height: var(--control-height);
+  padding: 0 var(--space-3);
   border-radius: var(--radius);
   color: var(--text);
 }
@@ -77,13 +135,13 @@
 
 .menu__popup {
   position: absolute;
-  top: calc(100% + 2px);
+  top: calc(100% + 3px);
   left: 0;
-  z-index: 30;
-  min-width: 184px;
-  padding: 3px;
+  z-index: var(--z-menu);
+  min-width: 190px;
+  padding: var(--space-1);
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
 }
 
@@ -91,12 +149,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-5);
   width: 100%;
-  height: var(--control-height-sm);
-  padding: 0 8px;
-  border-radius: 2px;
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
   text-align: left;
+  white-space: nowrap;
 }
 
 .menu__item:hover:not(:disabled) {
@@ -104,81 +163,391 @@
 }
 
 .menu__shortcut {
-  color: var(--text-dim);
-  font-size: 11px;
+  color: var(--text-faint);
+  font-size: var(--font-size-sm);
 }
 
 .menu__separator {
   height: 1px;
-  margin: 3px 6px;
+  margin: var(--space-1) var(--space-3);
   background: var(--border);
 }
 
-/* ----------------------------------------------------------------- toolbar */
+/* ------------------------------------------------------------- options bar */
 
-.toolbar {
+.options-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  padding: 4px 8px;
-  background: var(--bg-panel);
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  background: var(--bg-chrome);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
+  min-width: 0;
 }
 
+/* The active tool, named. The rail already shows the tool as an icon, but the
+   options that follow belong to that tool, so the bar says whose they are. */
+.tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-height-lg);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  flex: none;
+}
+
+.tool-badge__icon {
+  color: var(--accent-strong);
+  display: inline-flex;
+}
+
+.tool-badge__name {
+  color: var(--text-strong);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The options themselves. The row has a fixed height, so switching tools
+   never resizes the canvas; a tool with more options than fit scrolls
+   sideways instead of wrapping onto a second line. */
+.options-region {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.options-region__scroll {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--space-1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.options-region__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* While the row overflows, the controls fade out at the edge instead of
+   being cut in half, so the clipped control reads as "there is more" rather
+   than as a mistake. */
+.options-region.is-overflowing .options-region__scroll {
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+/* The controls themselves. They keep their width: a control that shrank to
+   fit would be unusable, so the row scrolls instead. */
+.options-region__content {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-3);
+  height: 100%;
+}
+
+/* The overflow chevrons. They appear only while the options do not fit, and
+   they are the only way to reach the far end of the row with a mouse. */
+.options-region__nav {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.options-region__nav-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: var(--control-height);
+  color: var(--text-dim);
+}
+
+.options-region__nav-button:hover:not(:disabled) {
+  color: var(--text-strong);
+}
+
+/* The foreground and background colours, pinned to the end of the row. */
+.options-bar__aside {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+}
+
+/* Groups of controls inside the options row. The names are kept from the old
+   toolbar so the feature components that render them do not change. */
 .toolbar__group {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .toolbar__divider {
   width: 1px;
-  height: 18px;
+  height: 16px;
+  flex: none;
   background: var(--border);
+}
+
+/* A separator at the very start of the row would hang in the air, so the
+   first one is dropped. */
+.options-region__content > .toolbar__divider:first-child {
+  display: none;
 }
 
 .toolbar__spacer {
   flex: 1;
 }
 
-.toolbar__hint {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 11px;
-  white-space: nowrap;
-}
+/* --------------------------------------------------------------- tool rail */
 
-.brush-controls {
-  /* A dedicated, wrapping row: five sliders plus the pressure toggles are wider
-     than a typical window, and clipping them made settings unreachable. */
-  flex-wrap: wrap;
-  width: 100%;
-  gap: 4px 12px;
-}
-
-.brush-presets {
+.tool-rail {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: center;
-  gap: 4px 6px;
-  width: 100%;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+  background: var(--bg-chrome);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
 }
 
-/* ------------------------------------------------------- pressure curve */
+.tool-rail::-webkit-scrollbar {
+  display: none;
+}
 
-.pressure-curve__toggle {
-  height: 22px;
-  padding: 0 8px;
+.tool-rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* A hairline between two families of tools, so the rail reads as groups
+   rather than as one long list. */
+.tool-rail__separator {
+  width: 18px;
+  height: 1px;
+  margin: var(--space-2) 0;
+  background: var(--border);
+}
+
+.tool-rail .icon-button {
+  width: 34px;
+  height: 30px;
+  border-radius: var(--radius);
+}
+
+.tool-rail .icon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+/* ------------------------------------------------------------ canvas stage */
+
+.canvas-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-workspace);
+  overflow: hidden;
+}
+
+.canvas-stage__surface {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  /* Replaced imperatively by the active tool's cursor (see CanvasStage). */
+  cursor: crosshair;
+}
+
+.brush-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: none;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* --------------------------------------------------------------- the dock */
+
+.panel-area {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+.panel-area > .panel {
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+/* A hairline between two panels, so the dock reads as a stack. */
+.panel-area > .panel + .panel {
+  border-top: 1px solid var(--border);
+}
+
+/* The last panel in the dock takes the remaining height; the ones above it
+   are as tall as their content. */
+.panel-area > .panel:last-child {
+  flex: 1 1 auto;
+  min-height: 132px;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: 0 var(--space-4);
+  background: var(--bg-chrome);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.status-bar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: none;
+}
+
+.status-bar__label {
+  color: var(--text-faint);
+}
+
+.status-bar__value {
+  color: var(--text);
+}
+
+.status-bar__dirty {
+  color: var(--accent);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.status-bar__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+}
+
+.status-bar__message.is-error {
+  color: var(--danger);
+}
+
+.status-bar__dismiss {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-1);
+  color: var(--text-dim);
+  font-size: var(--font-size-xs);
+}
+
+.status-bar__dismiss:hover {
+  color: var(--text-strong);
+}
+
+.status-bar__spacer {
+  flex: 1 1 auto;
+  min-width: var(--space-2);
+}
+
+.status-bar__readout {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------- floating bits */
+
+/* The tooltip. It is rendered in a portal, so it is positioned against the
+   window and no scroll container can clip it. */
+.tooltip-anchor {
+  display: inline-flex;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 1px var(--space-3);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text-strong);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.tooltip__key {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+}
+
+/* The pressure-curve editor is a transient overlay: it opens over the canvas
+   instead of pushing the options row taller, so the canvas never moves. */
+.pressure-curve {
+  position: absolute;
+  top: calc(var(--bar-height) + var(--options-height) + var(--space-2));
+  left: calc(var(--rail-width) + var(--space-4));
+  z-index: var(--z-popover);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4) var(--space-5);
+  width: max-content;
+  max-width: calc(100% - var(--rail-width) - var(--space-6));
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.pressure-curve__toggle {
+  height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -188,22 +557,12 @@
   border-color: var(--accent);
 }
 
-.pressure-curve {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 8px 12px;
-  width: 100%;
-  padding-top: 6px;
-  border-top: 1px solid var(--border);
-}
-
 .pressure-curve__plot {
   flex: 0 0 auto;
   width: 200px;
   height: 140px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg-inset);
   /* The pointer handlers own the gesture; do not scroll or zoom the page. */
   touch-action: none;
@@ -260,23 +619,24 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .pressure-curve__hint {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   white-space: nowrap;
 }
 
 .pressure-curve__button {
-  height: 22px;
-  padding: 0 8px;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text-strong);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -290,21 +650,35 @@
   cursor: default;
 }
 
+/* ------------------------------------------------------------ brush presets */
+
+.brush-presets {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  /* The preset library is a management surface, so it sits at the end of the
+     brush's controls rather than in front of the parameters a painter
+     changes while drawing. */
+  order: 1;
+}
+
 .brush-presets__field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .brush-presets__label {
   color: var(--text-dim);
-  min-width: 46px;
+  min-width: 38px;
+  white-space: nowrap;
 }
 
 .brush-presets__select {
-  width: 140px;
+  width: 128px;
   height: var(--control-height);
-  padding: 0 4px;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-inset);
@@ -318,36 +692,49 @@
 }
 
 .brush-presets__name {
-  width: 150px;
+  width: 118px;
 }
 
 .brush-presets__action {
-  padding: 0 8px;
+  padding: 0 var(--space-3);
 }
 
+/* ----------------------------------------------------------- colour chips */
+
 .color-controls {
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .color-controls__pickers {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
+.color-controls__picker {
+  width: 24px;
+  height: 24px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+/* A smaller chip makes the primary colour the obvious left-button choice. */
 .color-controls__picker--secondary {
-  /* A smaller chip makes the primary colour the obvious left-button choice. */
-  width: 22px;
-  height: calc(var(--control-height) - 4px);
+  width: 18px;
+  height: 18px;
 }
 
 .color-controls__swap {
-  width: 22px;
-  height: 22px;
-  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text-strong);
   line-height: 1;
@@ -359,33 +746,18 @@
   border-color: var(--accent);
 }
 
-.color-controls__swap:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.color-controls__picker {
-  width: 28px;
-  height: var(--control-height);
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-  cursor: pointer;
-}
-
 .color-controls__palette {
   display: grid;
-  grid-template-columns: repeat(4, 14px);
-  grid-auto-rows: 14px;
+  grid-template-columns: repeat(4, 13px);
+  grid-auto-rows: 13px;
   gap: 2px;
 }
 
 .color-controls__swatch {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .color-controls__swatch.is-active {
@@ -393,15 +765,16 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* --------------------------------------------------------- gradient chips */
+
 .gradient-controls {
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 .gradient-controls__color {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   height: var(--control-height);
   color: var(--text-dim);
   cursor: pointer;
@@ -411,44 +784,44 @@
   color: var(--text);
 }
 
+/* The gradient's stops live in the dock, not in the options row. */
 .gradient-stops {
   display: flex;
-  flex-basis: 100%;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .gradient-stops__preview {
   height: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius);
 }
 
 .gradient-stops__endpoints {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--space-2) var(--space-5);
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
 }
 
 .gradient-stops__endpoint {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
 }
 
 .gradient-stops__swatch {
   width: 10px;
   height: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
 }
 
 .gradient-stops__list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -456,17 +829,17 @@
 
 .gradient-stops__row {
   display: grid;
-  grid-template-columns: 26px minmax(80px, 200px) 36px 22px;
+  grid-template-columns: 24px minmax(60px, 1fr) 34px 22px;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .gradient-stops__color {
-  width: 26px;
+  width: 24px;
   height: 20px;
   padding: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: none;
   cursor: pointer;
 }
@@ -478,7 +851,7 @@
 
 .gradient-stops__value {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -488,7 +861,7 @@
   height: 20px;
   padding: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--bg-raised);
   color: var(--text-strong);
   line-height: 1;
@@ -501,17 +874,17 @@
 
 .gradient-stops__actions {
   display: flex;
-  gap: 6px;
+  gap: var(--space-3);
 }
 
 .gradient-stops__add {
-  height: 22px;
-  padding: 0 8px;
+  height: var(--control-height);
+  padding: 0 var(--space-4);
   border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text-strong);
-  font-size: 11px;
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
 
@@ -525,120 +898,12 @@
   cursor: default;
 }
 
-/* ---------------------------------------------------------------- tool rail */
-
-.tool-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  padding: 6px 0;
-  background: var(--bg-panel);
-  border-right: 1px solid var(--border);
-  overflow: hidden;
-}
-
-/* ------------------------------------------------------------ canvas stage */
-
-.canvas-stage {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg-workspace);
-  overflow: hidden;
-}
-
-.canvas-stage__surface {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-  /* Replaced imperatively by the active tool's cursor (see CanvasStage). */
-  cursor: crosshair;
-}
-
-.brush-cursor {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: none;
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
-  pointer-events: none;
-  will-change: transform;
-}
-
-/* -------------------------------------------------------------- status bar */
-
-.status-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 10px;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  color: var(--text-dim);
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.status-bar__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-}
-
-.status-bar__dirty {
-  color: var(--accent);
-  font-size: 9px;
-  line-height: 1;
-}
-
-.status-bar__unsaved {
-  color: var(--text-dim);
-}
-
-.status-bar__message {
-  overflow: hidden;
-  color: var(--text);
-  text-overflow: ellipsis;
-}
-
-.status-bar__message.is-error {
-  color: var(--danger);
-}
-
-.status-bar__dismiss {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 3px;
-  color: var(--text-dim);
-  font-size: 10px;
-}
-
-.status-bar__dismiss:hover {
-  color: var(--text-strong);
-}
-
-.status-bar__spacer {
-  flex: 1;
-}
-
-.status-bar__readout {
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ------------------------------------------------------------------ dialog */
+/* -------------------------------------------------------------- the dialog */
 
 .dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-dialog);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -647,13 +912,13 @@
 
 .dialog {
   width: 320px;
-  padding: 14px;
+  padding: var(--space-5);
   border: 1px solid var(--border-strong);
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   background: var(--bg-raised);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 .dialog__title {
@@ -662,13 +927,13 @@
 
 .dialog__row {
   display: flex;
-  gap: 10px;
+  gap: var(--space-4);
 }
 
 .dialog__field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-2);
   flex: 1;
   color: var(--text-dim);
 }
@@ -680,7 +945,7 @@
 .dialog__note,
 .dialog__error {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-size-sm);
 }
 
 .dialog__note {
@@ -694,5 +959,67 @@
 .dialog__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------- responsive */
+
+/* The dock toggle only exists on a narrow window, where the dock is an
+   overlay; on a wide window it is hidden rather than inert, so it never
+   takes a place in the focus order for nothing. */
+.app-bar__dock-toggle {
+  display: none;
+}
+
+/* The dock narrows before the canvas does: the canvas is the surface the
+   work happens on, so it keeps its width as long as it can. */
+@media (max-width: 1180px) {
+  :root {
+    --dock-width: 196px;
+  }
+}
+
+@media (max-width: 1024px) {
+  :root {
+    --dock-width: 180px;
+  }
+}
+
+/* Below this width the dock would take a third of the window, so it becomes
+   an overlay that the app bar opens and closes. The canvas takes the whole
+   width instead, and nothing overflows sideways. */
+@media (max-width: 900px) {
+  .workspace-body {
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  }
+
+  .panel-area {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 240px;
+    z-index: var(--z-dock);
+    display: none;
+  }
+
+  .app-shell.is-dock-open .panel-area {
+    display: flex;
+  }
+
+  .app-bar__dock-toggle {
+    display: inline-flex;
+  }
+}
+
+/* Very narrow windows: the title chip gives up its room first, and the
+   status bar keeps only what fits. */
+@media (max-width: 720px) {
+  .doc-title {
+    max-width: 120px;
+  }
+
+  .status-bar {
+    gap: var(--space-4);
+  }
 }

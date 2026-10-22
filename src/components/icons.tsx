@@ -9,7 +9,11 @@ import type { SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-function Icon({ children, ...props }: IconProps) {
+function Icon({ children, className, ...props }: IconProps) {
+  // The `icon` class carries the size, so a context can size every icon it
+  // owns (the tool rail's icons are larger than a button's) without each icon
+  // repeating its own width and height.
+  const classes = className ? `icon ${className}` : "icon";
   return (
     <svg
       viewBox="0 0 16 16"
@@ -22,6 +26,7 @@ function Icon({ children, ...props }: IconProps) {
       strokeLinejoin="round"
       aria-hidden="true"
       focusable="false"
+      className={classes}
       {...props}
     >
       {children}
@@ -264,6 +269,42 @@ export function IconChevronDown(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="M4 6.5 8 10l4-3.5" />
+    </Icon>
+  );
+}
+
+export function IconChevronLeft(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9.5 4 6 8l3.5 4" />
+    </Icon>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6.5 4 10 8l-3.5 4" />
+    </Icon>
+  );
+}
+
+/** The panels that slide over the canvas on a narrow window. */
+export function IconPanels(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="3" width="11" height="10" rx="1" />
+      <path d="M10 3v10" />
+    </Icon>
+  );
+}
+
+/** The brush presets: a stack of saved brushes. */
+export function IconBrushes(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 13.5h7.5" />
+      <path d="M9.6 2.9 3.4 9.1a1.4 1.4 0 0 0 0 2l1.5 1.5a1.4 1.4 0 0 0 2 0l6.2-6.2a1.4 1.4 0 0 0 0-2l-1.5-1.5a1.4 1.4 0 0 0-2 0z" />
     </Icon>
   );
 }

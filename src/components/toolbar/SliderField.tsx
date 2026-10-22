@@ -82,7 +82,10 @@ export function SliderField({
           }
         }}
       />
-      <span className="slider-field__display">{display}</span>
+      {/* The readout only earns its place when it says something the number
+          box does not: the unit. Without a format it would only repeat the
+          number next to itself. */}
+      {format ? <span className="slider-field__display">{display}</span> : null}
     </div>
   );
 }

@@ -116,7 +116,7 @@ memory; it never changes document size or stroke coordinates.
 | Path | Responsibility | Depends on |
 | --- | --- | --- |
 | `src/app` | Entry point, provider wiring, global styles | features, components, state |
-| `src/components` | Presentational shell: menu bar, toolbars, panels, icons | types only |
+| `src/components` | Presentational shell: app bar, options bar, tool rail, panel dock, panels, icons, tooltips | types only |
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
@@ -1573,6 +1573,35 @@ reopen and export replay exactly the previewed path.
 There is exactly one engine instance per window, created by `EditorProvider`
 and shared through a React context. `useEditor()` returns the stable
 `{ engine, actions }` handle; `useEditorState()` subscribes to the snapshot.
+
+### The workspace shell
+
+The shell is four bands and three columns, and it owns nothing but layout:
+
+```
+app bar      the menus, the document title and its unsaved marker, the
+             history, the zoom
+options bar  the active tool's own options, in one fixed-height row
+body         the tool rail, the canvas, the panel dock
+status bar   the view toggles, the document facts, the cursor readout
+```
+
+Three rules keep it a workspace rather than a dashboard:
+
+- **The options row has a fixed height.** A tool's options change when the
+  tool changes, so a row that grew with its contents would resize the canvas
+  under the user's pointer. The row scrolls sideways instead, and two chevrons
+  appear while it overflows.
+- **A fact is shown once.** The document's name and the zoom live in the app
+  bar, not in the status bar as well; the colours live in the options row,
+  and the panel dock holds the editors.
+- **The canvas is the largest thing on screen.** The dock narrows before the
+  canvas does, and below 900 px it folds away into an overlay that the app
+  bar opens, so a narrow window never squeezes the artwork.
+
+Every control in the shell reads the engine's snapshot, so there is one source
+of truth for the active tool, the document, the active layer, the foreground
+colour and the zoom. The shell holds no copy of any of them.
 
 The snapshot is republished only when something with visual meaning changes
 (tool, brush, layer list, viewport, history, document). Field-identity checks

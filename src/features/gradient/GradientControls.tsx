@@ -5,10 +5,13 @@
  * colour, so the two toolbar controls that matter are the type toggle and the
  * destination colour. Like the fill tolerance, these describe the *next* drag;
  * a committed gradient carries its own copy.
+ *
+ * The gradient's stops are edited in the panel dock, not here: the options row
+ * has a fixed height, and a stop list that grows with the gradient would
+ * resize the canvas every time the tool changed.
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { GradientStopEditor } from "./GradientStopEditor";
 
 export function GradientControls() {
   const { actions } = useEditor();
@@ -45,7 +48,6 @@ export function GradientControls() {
             onChange={(event) => actions.setGradientEndColor(event.target.value)}
           />
         </label>
-        <GradientStopEditor />
       </div>
     </>
   );

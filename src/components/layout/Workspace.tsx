@@ -1,18 +1,17 @@
 /**
- * Application shell: menu bar, toolbar, tool rail, canvas, layers panel and
- * status bar.
+ * Application shell: the app bar, the options bar, the tool rail, the canvas,
+ * the panel dock and the status bar.
  *
  * The state kept here is the workflow the engine deliberately knows nothing
- * about: which dialog is open, and which action is waiting for the user to
- * confirm that unsaved work may be discarded.
+ * about: which dialog is open, which action is waiting for the user to
+ * confirm that unsaved work may be discarded, and whether the panel dock is
+ * open on a narrow window.
  */
 
 import { useCallback, useState } from "react";
 import { CanvasStage } from "../../features/canvas/CanvasStage";
 import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
-import { ColorPanel } from "../../features/color/ColorPanel";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
-import { LayersPanel } from "../../features/layers/LayersPanel";
 import {
   UnsavedChangesDialog,
   type UnsavedAction,
@@ -25,14 +24,16 @@ import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { fileNameOf } from "../../utils/path";
 import { ToolRail } from "../toolbar/ToolRail";
-import { AppMenuBar } from "./AppMenuBar";
-import { ToolBar } from "./ToolBar";
+import { AppBar } from "./AppBar";
+import { PanelArea } from "./PanelArea";
+import { ToolOptionsBar } from "./ToolOptionsBar";
 
 export function Workspace() {
   const { actions, files } = useEditor();
   const { document: drawingDocument, file } = useEditorState();
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [pending, setPending] = useState<UnsavedAction | null>(null);
+  const [dockOpen, setDockOpen] = useState(false);
 
   const {
     open: openProject,
@@ -106,24 +107,24 @@ export function Workspace() {
   useKeyboardShortcuts(save, saveAs, requestOpen);
 
   return (
-    <div className="app-shell">
-      <AppMenuBar
+    <div className={dockOpen ? "app-shell is-dock-open" : "app-shell"}>
+      <AppBar
         onNewDocument={requestNewDocument}
         onOpenProject={requestOpen}
         onSaveProject={save}
         onSaveProjectAs={saveAs}
         onExportPng={exportPng}
+        documentLabel={documentLabel}
+        documentDirty={file.dirty}
+        documentPath={file.path}
+        dockOpen={dockOpen}
+        onToggleDock={() => setDockOpen((open) => !open)}
       />
-      <ToolBar />
+      <ToolOptionsBar />
       <div className="workspace-body">
         <ToolRail />
         <CanvasStage />
-        <div className="side-panels">
-          <ColorPanel />
-          <div className="side-panels__layers">
-            <LayersPanel />
-          </div>
-        </div>
+        <PanelArea />
       </div>
       <CanvasStatusBar
         fileMessage={fileMessage}

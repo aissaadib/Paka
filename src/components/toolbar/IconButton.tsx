@@ -1,11 +1,13 @@
 /**
  * Icon button.
  *
- * Square, compact control used by the tool rail, toolbars and panels. Always
- * labelled for accessibility; the label doubles as the tooltip.
+ * Square, compact control used by the tool rail, the app bar and the panels.
+ * Always labelled for accessibility; the label doubles as the tooltip, which
+ * is anchored to the button instead of following the pointer.
  */
 
 import type { ReactNode } from "react";
+import { Tooltip, type TooltipPlacement } from "./Tooltip";
 
 export interface IconButtonProps {
   readonly label: string;
@@ -15,7 +17,11 @@ export interface IconButtonProps {
   readonly active?: boolean;
   /** Shortcut hint appended to the tooltip. */
   readonly shortcut?: string;
-  readonly size?: "sm" | "md";
+  readonly size?: "sm" | "md" | "lg";
+  /** Which side of the button the tooltip sits on. */
+  readonly tooltipPlacement?: TooltipPlacement;
+  /** A class for the button, so a context can place or hide it. */
+  readonly className?: string;
 }
 
 export function IconButton({
@@ -26,22 +32,35 @@ export function IconButton({
   active = false,
   shortcut,
   size = "md",
+  tooltipPlacement = "bottom",
+  className,
 }: IconButtonProps) {
-  const className = ["icon-button", `icon-button--${size}`, active ? "is-active" : ""]
+  const classes = [
+    "icon-button",
+    `icon-button--${size}`,
+    active ? "is-active" : "",
+    className ?? "",
+  ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <button
-      type="button"
+    <Tooltip
+      label={label}
+      shortcut={shortcut}
+      placement={tooltipPlacement}
       className={className}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      aria-label={label}
-      aria-pressed={active || undefined}
-      disabled={disabled}
-      onClick={onClick}
     >
-      {children}
-    </button>
+      <button
+        type="button"
+        className={classes}
+        aria-label={label}
+        aria-pressed={active || undefined}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }

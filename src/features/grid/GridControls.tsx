@@ -1,7 +1,8 @@
 /**
  * Grid and snapping controls.
  *
- * Two switches and a spacing slider, in the toolbar beside the zoom controls:
+ * Two switches and a spacing slider, in the status bar beside the other view
+ * facts:
  *
  *  - **Grid** shows the document grid. It is off by default and is display-only,
  *    so it never appears in an export or a saved project.
@@ -31,42 +32,39 @@ export function GridControls() {
   const { gridVisible, gridSpacing, gridSnapping } = useEditorState();
 
   return (
-    <>
-      <div className="toolbar__divider" />
-      <div className="toolbar__group grid-controls">
-        <label className="toggle" title="Show the document grid (Ctrl+')">
-          <input
-            type="checkbox"
-            checked={gridVisible}
-            onChange={(event) => actions.setGridVisible(event.target.checked)}
-          />
-          Grid
-        </label>
-        <label
-          className="toggle"
-          title={`Snap drawing to guides and grid lines within ${SNAP_TOLERANCE_PX} screen pixels (Ctrl+Shift+')`}
-        >
-          <input
-            type="checkbox"
-            checked={gridSnapping}
-            onChange={(event) => actions.setGridSnapping(event.target.checked)}
-          />
-          Snap
-        </label>
-        {gridVisible || gridSnapping ? (
-          <SliderField
-            label="Spacing"
-            min={MIN_GRID_SPACING}
-            max={MAX_GRID_SPACING}
-            step={GRID_SPACING_STEP}
-            scale="log"
-            value={gridSpacing}
-            format={(value) => `${Math.round(value)} px`}
-            title="Distance between grid lines, in document pixels"
-            onChange={(value) => actions.setGridSpacing(value)}
-          />
-        ) : null}
-      </div>
-    </>
+    <div className="toolbar__group grid-controls">
+      <label className="toggle" title="Show the document grid (Ctrl+')">
+        <input
+          type="checkbox"
+          checked={gridVisible}
+          onChange={(event) => actions.setGridVisible(event.target.checked)}
+        />
+        Grid
+      </label>
+      <label
+        className="toggle"
+        title={`Snap drawing to guides and grid lines within ${SNAP_TOLERANCE_PX} screen pixels (Ctrl+Shift+')`}
+      >
+        <input
+          type="checkbox"
+          checked={gridSnapping}
+          onChange={(event) => actions.setGridSnapping(event.target.checked)}
+        />
+        Snap
+      </label>
+      {gridVisible || gridSnapping ? (
+        <SliderField
+          label="Spacing"
+          min={MIN_GRID_SPACING}
+          max={MAX_GRID_SPACING}
+          step={GRID_SPACING_STEP}
+          scale="log"
+          value={gridSpacing}
+          format={(value) => `${Math.round(value)} px`}
+          title="Distance between grid lines, in document pixels"
+          onChange={(value) => actions.setGridSpacing(value)}
+        />
+      ) : null}
+    </div>
   );
 }

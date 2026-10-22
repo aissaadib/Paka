@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
+    "test:shell": "playwright test --config playwright.shell.config.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent01-workspace-shell` | **The workspace shell** - the chrome around the canvas is now one deliberate desktop workspace instead of a wrapping toolbar: an **app bar** (the menus, the document title with its unsaved marker, undo/redo, the zoom), a **contextual options row** that holds the active tool's own options, a **tool rail**, the canvas, a **panel dock** and a **status bar**. The options row has a **fixed height** and scrolls sideways (with chevrons), so switching tools never resizes the canvas; the tool's own options come first and the colours are pinned to the end. The document's name and the zoom are shown **once**, in the app bar; the grid and snapping switches moved to the status bar with the rest of the view facts; the gradient's stop editor moved to the dock and the pressure-curve editor became an overlay over the canvas. The dock narrows before the canvas does and folds into an overlay below 900 px, and nothing overflows sideways at any width. One token vocabulary (`src/styles/theme.css`) replaces the per-component pixel values, and the tooltips are anchored to their buttons instead of following the pointer. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -248,8 +249,16 @@ visual-regression harness.
   `Ctrl+N` is **not** bound; use the menu/dialog.
 - **PNG export**: full composite at document size, honours layer visibility,
   opacity and blend mode, leaves the document untouched.
-- **Status bar**: document size, zoom, history depth, selected count, cursor
-  position, file name/messages, `● unsaved`.
+- **Workspace shell**: an app bar (menus, the document name and its `● unsaved`
+  marker, undo/redo, the zoom), a **contextual options row** with the active
+  tool's own options, a tool rail, the canvas, a panel dock and a status bar.
+  The options row has a **fixed height** and scrolls sideways, so switching
+  tools never resizes the canvas; the tool's own options come first, the
+  brush's parameters follow, and the colours are pinned to the end. The dock
+  narrows before the canvas does and folds into an overlay below 900 px. The
+  document's name and the zoom are shown **once**, in the app bar.
+- **Status bar**: the grid and snapping switches, the active layer, document
+  size, history depth, selected count, cursor position, file messages.
 - **HiDPI**: layer surfaces rasterized at up to 2×, display follows DPR.
 - **New document**: 8–8192 px per side and at most 16,777,216 px in total,
   validated. The total limit is a raster-memory budget (three 2× RGBA surfaces
@@ -261,7 +270,8 @@ visual-regression harness.
 ```
 src/
   app/          entry, provider wiring, global styles
-  components/   shell: menu bar, toolbars, panels, icons
+  components/   shell: app bar, options bar, tool rail, panel dock, panels,
+                icons, tooltips
   features/     canvas, brushes, colour, layers, history, document,
                 project (file commands/dialogs/title/close guard),
                 shapes, fill, gradient

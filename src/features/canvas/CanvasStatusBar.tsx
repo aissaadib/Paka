@@ -6,22 +6,17 @@
  * into the DOM from the cursor stream, so moving the pointer never re-renders
  * React.
  *
- * The unsaved-changes marker is part of the document name: a dot plus the word
- * in the tooltip, and the full project path as the title.
+ * The row holds the view toggles on the left, the facts about the document in
+ * the middle and the pointer readout on the right. The document's own name
+ * and the zoom live in the app bar, so neither is repeated here.
  */
 
 import { useEffect, useRef } from "react";
-import { SNAP_TOLERANCE_PX } from "../../core/document/grid";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useNativeEnvironment } from "../../hooks/useNativeEnvironment";
 import type { CursorReport } from "../../types/pointer";
-import { fileNameOf } from "../../utils/path";
 import type { FileMessage } from "../project/fileMessages";
-
-function formatZoom(zoom: number): string {
-  const percent = zoom * 100;
-  return `${percent >= 10 ? Math.round(percent) : percent.toFixed(1)}%`;
-}
+import { GridControls } from "../grid/GridControls";
 
 function describeInput(report: CursorReport): string {
   switch (report.kind) {
@@ -52,15 +47,10 @@ export function CanvasStatusBar({
   const { engine, actions } = useEditor();
   const {
     document,
-    viewport,
     history,
-    file,
     selectedStrokes,
     selectedGuideId,
     notice,
-    gridVisible,
-    gridSpacing,
-    gridSnapping,
   } = useEditorState();
   const native = useNativeEnvironment();
   const positionRef = useRef<HTMLSpanElement | null>(null);
@@ -104,26 +94,20 @@ export function CanvasStatusBar({
       ? undefined
       : document.guides.find((guide) => guide.id === selectedGuideId);
 
+  // The layer the next stroke lands on.
+  const activeLayer = document.layers.find(
+    (layer) => layer.id === document.activeLayerId,
+  );
+
   return (
-    <footer className="status-bar">
-      <span className="status-bar__item" title={file.path ?? "Not saved to a file yet"}>
-        {file.path === null ? document.name : fileNameOf(file.path)}
-        {file.dirty ? (
-          <span
-            className="status-bar__dirty"
-            role="img"
-            aria-label="Unsaved changes"
-            title="Unsaved changes"
-          >
-            ●
-          </span>
-        ) : null}
-        {file.dirty ? <span className="status-bar__unsaved">unsaved</span> : null}
+    <footer className="status-bar" aria-label="Document status">
+      <GridControls />
+      <span className="status-bar__item" title="The layer the next stroke is drawn on">
+        <span className="status-bar__value">{activeLayer?.name ?? "No layer"}</span>
       </span>
       <span className="status-bar__item">
         {document.width} × {document.height} px
       </span>
-      <span className="status-bar__item">zoom {formatZoom(viewport.zoom)}</span>
       <span className="status-bar__item">history {history.depth}</span>
       {selectedStrokes === 0 ? null : (
         <span
@@ -145,19 +129,6 @@ export function CanvasStatusBar({
           {guideCount} guide{guideCount === 1 ? "" : "s"}
         </span>
       )}
-      {gridVisible ? (
-        <span className="status-bar__item" title="The grid overlay is drawn over the paper">
-          grid {gridSpacing} px
-        </span>
-      ) : null}
-      {gridSnapping ? (
-        <span
-          className="status-bar__item"
-          title={`Snapping is on: a drawing point within ${SNAP_TOLERANCE_PX} screen pixels of a guide or a grid line lands on it`}
-        >
-          snap on
-        </span>
-      ) : null}
       {fileLabel === "" ? null : (
         <span
           className={[

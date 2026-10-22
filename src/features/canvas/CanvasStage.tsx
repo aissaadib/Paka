@@ -72,9 +72,9 @@ export function CanvasStage() {
   }, [engine]);
 
   return (
-    <div className="canvas-stage" ref={frameRef}>
+    <main className="canvas-stage" ref={frameRef} aria-label="Canvas">
       <canvas className="canvas-stage__surface" ref={canvasRef} />
       <BrushCursor />
-    </div>
+    </main>
   );
 }
