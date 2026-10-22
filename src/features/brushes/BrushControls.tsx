@@ -6,16 +6,18 @@ import {
   MAX_SPACING,
   MAX_STAMP_ASPECT,
   MAX_STAMP_SPACING,
+  MAX_STAMP_TEXTURE_SCALE,
   MIN_BRUSH_SIZE,
   MIN_SPACING,
   MIN_STAMP_ASPECT,
   MIN_STAMP_SPACING,
+  MIN_STAMP_TEXTURE_SCALE,
 } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
-import type { StampTipKind } from "../../types/brush";
+import type { StampTextureMode, StampTipKind } from "../../types/brush";
 
 /** Pressure strength applied by the on/off toggles. */
 const PRESSURE_STRENGTH = 0.6;
@@ -25,6 +27,15 @@ const TIP_CHOICES: readonly { readonly value: StampTipKind; readonly label: stri
   { value: "round", label: "Round" },
   { value: "ellipse", label: "Ellipse" },
   { value: "square", label: "Square" },
+];
+
+/** The texture profiles a stamped stroke can use. */
+const TEXTURE_CHOICES: readonly {
+  readonly value: StampTextureMode;
+  readonly label: string;
+}[] = [
+  { value: "bristles", label: "Bristles" },
+  { value: "ridges", label: "Ridges" },
 ];
 
 export function BrushControls() {
@@ -138,6 +149,56 @@ export function BrushControls() {
             format={(value) => `${Math.round(value * 100)}%`}
             onChange={(stampTexture) => actions.setBrush({ stampTexture })}
           />
+          {brush.stampTexture <= 0 ? null : (
+            <>
+              <label
+                className="brush-tip__field"
+                title="The texture's profile: a bundle of irregular bristles or a regular ribbed brush"
+              >
+                <span className="brush-tip__label">Texture</span>
+                <select
+                  className="brush-tip__select"
+                  aria-label="Stamp texture profile"
+                  value={brush.stampTextureMode}
+                  onChange={(event) =>
+                    actions.setBrush({
+                      stampTextureMode: event.target.value as StampTextureMode,
+                    })
+                  }
+                >
+                  {TEXTURE_CHOICES.map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SliderField
+                label="Texture density"
+                min={MIN_STAMP_TEXTURE_SCALE * 100}
+                max={MAX_STAMP_TEXTURE_SCALE * 100}
+                step={25}
+                value={brush.stampTextureScale * 100}
+                title="How many lanes there are across the brush; 100% is the four lanes every earlier stroke had"
+                format={(value) => `${Math.round(value)}%`}
+                onChange={(stampTextureScale) =>
+                  actions.setBrush({ stampTextureScale: stampTextureScale / 100 })
+                }
+              />
+              <SliderField
+                label="Texture contrast"
+                min={0}
+                max={100}
+                step={1}
+                value={brush.stampTextureContrast * 100}
+                title="How crisp the texture's edges are; 100% is the crisp bristle edge every earlier stroke had"
+                format={(value) => `${Math.round(value)}%`}
+                onChange={(stampTextureContrast) =>
+                  actions.setBrush({ stampTextureContrast: stampTextureContrast / 100 })
+                }
+              />
+            </>
+          )}
           <label
             className="brush-tip__field"
             title="The shape of the dab's tip: a round disc, an ellipse or a square"

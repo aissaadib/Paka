@@ -5,6 +5,7 @@ import {
   MAX_BRUSH_SIZE,
   MAX_STAMP_ASPECT,
   MAX_STAMP_SPACING,
+  MAX_STAMP_TEXTURE_SCALE,
   MIN_BRUSH_SIZE,
   DEFAULT_PRESSURE_CURVE,
   normalizeBrush,
@@ -58,6 +59,9 @@ describe("brush configuration", () => {
       stampSpacing: 9,
       stampHardness: -2,
       stampTexture: 4,
+      stampTextureMode: "ridges",
+      stampTextureScale: 9,
+      stampTextureContrast: 4,
       stampTip: "ellipse",
       stampAspect: 4,
       stampAngle: -30,
@@ -76,6 +80,9 @@ describe("brush configuration", () => {
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
     expect(normalized.stampTexture).toBe(1);
+    expect(normalized.stampTextureMode).toBe("ridges");
+    expect(normalized.stampTextureScale).toBe(MAX_STAMP_TEXTURE_SCALE);
+    expect(normalized.stampTextureContrast).toBe(1);
     expect(normalized.stampTip).toBe("ellipse");
     expect(normalized.stampAspect).toBe(MAX_STAMP_ASPECT);
     // The angle is a direction: it is wrapped, not clamped away.

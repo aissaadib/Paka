@@ -205,7 +205,11 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   it crosses itself. The lanes are laid out against the brush's centre line, so
   the picture does not change when a stroke is drawn backwards, and against the
   brush's nominal size, so the pattern is the same in document pixels at every
-  zoom.
+  zoom. The texture has a **profile** (a bundle of irregular **bristles** or a
+  regular ribbed brush of **ridges**), a **density** (how many lanes there are
+  across the brush) and a **contrast** (how crisp their edges are). All three
+  are procedural: no picture is involved, and the default profile is the one
+  every earlier stroke was drawn with.
 - **Brush tips**: a stamped stroke can be drawn with a **tipped** dab instead of
   a round disc - an **ellipse** or a **rectangle** - with a **roundness** (how
   wide the tip is across its length) and an **angle**. The tip either follows
@@ -443,12 +447,14 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `13`** (`version: 1` to `12` files still
-  open and are written back as 13; their strokes default to a hard edge, texture
+- **The current project version is `14`** (`version: 1` to `13` files still
+  open and are written back as 14; their strokes default to a hard edge, texture
   0, a missing stabilizer reads as 0 because it was added additively within
   version 6, the stamp is off because it did not exist before version 9, the
-  per-dab texture is off because it did not exist before version 10, and the tip
-  is the round disc because it did not exist before version 13).
+  per-dab texture is off because it did not exist before version 10, the tip is
+  the round disc because it did not exist before version 13, and the texture's
+  profile, density and contrast are the defaults because they did not exist
+  before version 14).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

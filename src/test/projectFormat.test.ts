@@ -882,6 +882,111 @@ describe("parseProject round trip", () => {
     }
   });
 
+  it("round-trips the texture's profile, density and crispness at version 14", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        stamp: true,
+        stampTexture: 0.8,
+        stampTextureMode: "ridges",
+        stampTextureScale: 2,
+        stampTextureContrast: 0.25,
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const brush = parsed.project.strokes[0].brush;
+    expect(brush.stampTextureMode).toBe("ridges");
+    expect(brush.stampTextureScale).toBe(2);
+    expect(brush.stampTextureContrast).toBe(0.25);
+
+    // The values are written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stampTextureMode).toBe("ridges");
+  });
+
+  it("opens version 13 files with the bristles every earlier file was written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stamp: true } });
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [stroke]]])),
+    ) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 13;
+    delete payload.layers[0].elements[0].brush.stampTextureMode;
+    delete payload.layers[0].elements[0].brush.stampTextureScale;
+    delete payload.layers[0].elements[0].brush.stampTextureContrast;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    const brush = legacy.project.strokes[0].brush;
+    expect(brush.stampTextureMode).toBe("bristles");
+    expect(brush.stampTextureScale).toBe(1);
+    expect(brush.stampTextureContrast).toBe(1);
+  });
+
+  it("refuses a version-14 stroke brush with an unknown texture profile", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            stampTextureMode: "felt",
+          } as unknown as Record<string, unknown>;
+        }),
+      ),
+    ).toContain("brush stamp texture mode");
+  });
+
+  it("refuses a version-14 stroke brush with an invalid texture density", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampTextureScale: 9 };
+        }),
+      ),
+    ).toContain("brush stamp texture scale");
+  });
+
+  it("refuses a version-14 file at a version-13 reader", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]])),
+    ) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
+
+    // The current build reads it...
+    expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
+
+    // ... while a reader that accepts no higher than version 13 refuses it at
+    // the version gate: a version-13 reader would draw the same bristles
+    // everywhere, which is a different picture.
+    const older = parseProject(JSON.stringify(payload), { maxVersion: 13 });
+    expect(older.ok).toBe(false);
+    if (!older.ok) {
+      expect(older.error).toContain("newer version of Paka");
+      expect(older.error).toContain("reads up to 13");
+    }
+  });
+
   it("round-trips every layer blend mode at version 11", () => {    const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const elements = storeOf([[layerId, [strokeFor(layerId)]]]);

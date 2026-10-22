@@ -54,10 +54,13 @@ import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import {
   MAX_STAMP_ASPECT,
+  MAX_STAMP_TEXTURE_SCALE,
   MIN_STAMP_ASPECT,
+  MIN_STAMP_TEXTURE_SCALE,
+  STAMP_TEXTURE_MODES,
   STAMP_TIP_KINDS,
 } from "../brushes/defaults";
-import type { BrushSettings, StampTipKind } from "../../types/brush";
+import type { BrushSettings, StampTextureMode, StampTipKind } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -132,6 +135,15 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * names a tip this build does not know is refused rather than drawn as
  * something else.
  *
+ * Version 14: a stroke's `brush` carries `stampTextureMode`,
+ * `stampTextureScale` and `stampTextureContrast`: the profile, the density
+ * and the crispness of the per-dab texture. They change how a textured
+ * stroke's samples are rasterized, so a version-13 reader would draw the same
+ * bristles everywhere - a different picture - and the version was bumped with
+ * the fields required. Version-1 to -13 files open unchanged with the bristles
+ * at the default density and crispness, which is exactly the texture they
+ * were written by.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -140,7 +152,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 13;
+export const PROJECT_VERSION = 14;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -920,6 +932,34 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
       version >= 13
         ? readBoolean(record.stampAngleFollow, `${label} brush stamp angle follow`)
         : true,
+    // The texture's profile, density and crispness change how a textured
+    // stroke's samples are rasterized, so they became required fields in
+    // version 14: a version-13 reader ignores them and draws the same
+    // bristles everywhere, which is a different picture. Earlier files had no
+    // texture at all, and the texture off is exactly the coverage they were
+    // written by.
+    stampTextureMode:
+      version >= 14
+        ? readStampTextureMode(record.stampTextureMode, `${label} brush stamp texture mode`)
+        : "bristles",
+    stampTextureScale:
+      version >= 14
+        ? readNumber(
+            record.stampTextureScale,
+            `${label} brush stamp texture scale`,
+            MIN_STAMP_TEXTURE_SCALE,
+            MAX_STAMP_TEXTURE_SCALE,
+          )
+        : 1,
+    stampTextureContrast:
+      version >= 14
+        ? readNumber(
+            record.stampTextureContrast,
+            `${label} brush stamp texture contrast`,
+            0,
+            1,
+          )
+        : 1,
   });
 }
 
@@ -936,6 +976,20 @@ function readStampTip(value: unknown, label: string): StampTipKind {
     fail(`${label} uses the unsupported tip "${tip}".`);
   }
   return tip as StampTipKind;
+}
+
+/**
+ * A texture profile out of an untrusted value.
+ *
+ * Closed list, like the tips: a file that names a profile this build does not
+ * know is refused rather than drawn as the bristles.
+ */
+function readStampTextureMode(value: unknown, label: string): StampTextureMode {
+  const mode = readString(value, label);
+  if (!STAMP_TEXTURE_MODES.includes(mode as StampTextureMode)) {
+    fail(`${label} uses the unsupported mode "${mode}".`);
+  }
+  return mode as StampTextureMode;
 }
 
 function resolveActiveLayer(

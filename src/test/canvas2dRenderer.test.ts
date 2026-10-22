@@ -58,6 +58,9 @@ const BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  stampTextureMode: "bristles",
+  stampTextureScale: 1,
+  stampTextureContrast: 1,
   stampTip: "round",
   stampAspect: 1,
   stampAngle: 0,
@@ -3376,6 +3379,36 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
 
   it("agrees with a directional texture", () => {
     checkEveryPathAgrees({ ...STAMP_BRUSH, stampTexture: 1 });
+  });
+
+  it("shows the texture's profile: the ridges are not the bristles", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const surface = harness.surfaces[0] as unknown as { pixels: Float32Array };
+
+        const picture = (brush: BrushSettings): number[] => {
+          const stroke = createStampStroke(layerId, brush, "textured");
+          harness.elements.set(layerId, [stroke]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+          return Array.from(surface.pixels);
+        };
+
+        const bristles = picture({ ...STAMP_BRUSH, stampTexture: 1 });
+        const ridges = picture({
+          ...STAMP_BRUSH,
+          stampTexture: 1,
+          stampTextureMode: "ridges",
+        });
+        expect(ridges).not.toEqual(bristles);
+
+        // And the density changes the picture too: more lanes across the brush.
+        const dense = picture({ ...STAMP_BRUSH, stampTexture: 1, stampTextureScale: 2 });
+        expect(dense).not.toEqual(bristles);
+      },
+    );
   });
 
   it("shows the texture: a textured stroke is not the plain stroke", () => {

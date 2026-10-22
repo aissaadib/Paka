@@ -212,6 +212,14 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       the round disc, so every earlier stroke is unchanged pixel for pixel, and
       the tip changes the mark's shape, never where the dabs are placed.
       Format v13.
+- [x] A tunable per-dab texture: the bristle lanes have a **profile**
+      (irregular **bristles** or a regular ribbed brush of **ridges**), a
+      **density** (how many lanes there are across the brush) and a
+      **contrast** (how crisp their edges are). All three are procedural and
+      change only how a lane is drawn, never where the lanes are, so the
+      per-pixel maximum union still keeps the texture. The defaults are the
+      picture every earlier stroke was drawn with, pinned by a checksum.
+      Format v14.
 - [ ] Image-based stamp textures: a tip loaded from a **user-owned image** (a
       felt tip or a dry ink blot) rather than from the procedural shapes above.
       The per-dab machinery FF-01 added is what a tip builds on.

@@ -1257,7 +1257,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
         stroke.brush.stampHardness,
         // The texture rides on the dab's own direction, so the live path and
         // the rebuild path lay the same lanes out over the same pixels.
-        strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        strength > 0
+          ? {
+              angle: dab.angle,
+              laneWidth,
+              strength,
+              mode: stroke.brush.stampTextureMode,
+              contrast: stroke.brush.stampTextureContrast,
+            }
+          : null,
         this.stampTip,
         dab.tipAngle,
       );
@@ -1293,7 +1301,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.y * scale,
         dab.radius * scale,
         stroke.brush.stampHardness,
-        strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        strength > 0
+          ? {
+              angle: dab.angle,
+              laneWidth,
+              strength,
+              mode: stroke.brush.stampTextureMode,
+              contrast: stroke.brush.stampTextureContrast,
+            }
+          : null,
         tip,
         dab.tipAngle,
       );

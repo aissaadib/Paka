@@ -20,7 +20,7 @@
  * strategy, not a new kind of content.
  */
 
-import type { BrushSettings, StampTipKind } from "../../types/brush";
+import type { BrushSettings, StampTextureMode, StampTipKind } from "../../types/brush";
 import type { Rgb } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { MAX_STAMP_SPACING, MIN_STAMP_SPACING } from "../brushes/defaults";
@@ -402,6 +402,21 @@ export interface StampTexture {
   readonly laneWidth: number;
   /** How strongly the lanes modulate the coverage, in `[0, 1]`. */
   readonly strength: number;
+  /**
+   * The profile of the lanes: irregular bristles or regular ridges.
+   *
+   * The profile only changes the shape of a lane, never where the lanes are,
+   * so both are laid out against the brush's centre line and the union keeps
+   * them.
+   */
+  readonly mode: StampTextureMode;
+  /**
+   * How crisp the profile's edges are, in `[0, 1]`.
+   *
+   * `1` is the one-device-pixel ramp every earlier file was written by;
+   * lower values widen the ramp into a soft edge.
+   */
+  readonly contrast: number;
 }
 
 /**
@@ -410,9 +425,15 @@ export interface StampTexture {
  * The lanes are measured against the brush's **nominal** size, so the
  * pattern is anchored to the document: at `rasterScale` 2 the lanes are twice
  * as wide in device pixels and the same distance apart in document pixels.
+ *
+ * The brush's `stampTextureScale` multiplies the density: a higher value packs
+ * more lanes into the same brush. A lane never gets thinner than one device
+ * pixel, so a small brush with a high scale keeps a texture that can still be
+ * seen rather than turning into grey noise.
  */
 export function stampTextureLaneWidth(brush: BrushSettings, rasterScale: number): number {
-  return Math.max(1, (brush.size * rasterScale) / STAMP_TEXTURE_LANES);
+  const lanes = STAMP_TEXTURE_LANES * clamp(brush.stampTextureScale, 0.25, 4);
+  return Math.max(1, (brush.size * rasterScale) / lanes);
 }
 
 /**
@@ -523,6 +544,16 @@ export class StampCoverage {
     const strength = textured ? texture.strength : 0;
     const directionX = textured ? Math.cos(texture.angle) : 0;
     const directionY = textured ? Math.sin(texture.angle) : 0;
+    // The profile: a bundle of irregular bristles or a regular ribbed brush.
+    const ridges = textured && texture.mode === "ridges";
+    // The half-width of the ramp on a bristle edge, in device pixels. A crisp
+    // edge is half a pixel wide - the profile every earlier file was written
+    // by - and a softer texture widens the ramp into a smooth variation.
+    const edgeRamp = textured ? 0.5 + 2 * (1 - clamp(texture.contrast, 0, 1)) : 0.5;
+    // The reciprocal of the ridge's squared half-width, in lane fractions. A
+    // crisp texture is a narrow ridge, a soft one a broad one.
+    const ridgeWidth = 1 - 0.75 * clamp(texture?.contrast ?? 1, 0, 1);
+    const inverseRidgeWidth = 1 / (ridgeWidth * ridgeWidth);
     // The lane the pixels are currently in, and the bristle inside it. The
     // lane only changes a few times along a row, so the hash is computed on a
     // change rather than per pixel.
@@ -610,20 +641,39 @@ export class StampCoverage {
               // change when a stroke is drawn backwards.
               const perpendicular = Math.abs(-dx * directionY + dy * directionX);
               const currentLane = (perpendicular * inverseLaneWidth) | 0;
-              if (currentLane !== lane) {
-                lane = currentLane;
-                const widthFraction = 0.45 + 0.55 * laneHash(currentLane, 0);
-                const width = laneWidth * widthFraction;
-                const start = laneWidth * laneHash(currentLane, 1) * (1 - widthFraction);
-                bristleStart = start;
-                bristleEnd = start + width;
-              }
               const phase = perpendicular - currentLane * laneWidth;
-              const inside = phase - bristleStart;
-              const depth = inside < bristleEnd - inside ? inside : bristleEnd - inside;
-              // A one-device-pixel ramp on each bristle edge.
-              const bristle = depth >= 0.5 ? 1 : depth <= -0.5 ? 0 : depth + 0.5;
-              value = Math.round(coverage * 255 * ((1 - strength) + strength * bristle));
+              if (ridges) {
+                // A rounded ridge in every lane: the same shape each time, so
+                // the texture reads as a regular ribbed brush rather than as
+                // separate streaks.
+                const centred = phase * inverseLaneWidth * 2 - 1;
+                const wave = clamp(1 - centred * centred * inverseRidgeWidth, 0, 1);
+                value = Math.round(coverage * 255 * ((1 - strength) + strength * wave));
+              } else {
+                if (currentLane !== lane) {
+                  lane = currentLane;
+                  // A bundle of bristles: every lane holds one bristle whose
+                  // width and place come from a fixed hash of the lane, so the
+                  // texture looks hand-made rather than machined.
+                  const widthFraction = 0.45 + 0.55 * laneHash(currentLane, 0);
+                  const width = laneWidth * widthFraction;
+                  const start = laneWidth * laneHash(currentLane, 1) * (1 - widthFraction);
+                  bristleStart = start;
+                  bristleEnd = start + width;
+                }
+                const inside = phase - bristleStart;
+                const depth = inside < bristleEnd - inside ? inside : bristleEnd - inside;
+                // A ramp on each bristle edge. Its half-width is the texture's
+                // contrast: a crisp edge is half a device pixel wide, a softer
+                // one is a wide ramp.
+                const bristle =
+                  depth >= edgeRamp
+                    ? 1
+                    : depth <= -edgeRamp
+                      ? 0
+                      : (depth + edgeRamp) / (2 * edgeRamp);
+                value = Math.round(coverage * 255 * ((1 - strength) + strength * bristle));
+              }
             } else {
               value = Math.round(coverage * 255);
             }

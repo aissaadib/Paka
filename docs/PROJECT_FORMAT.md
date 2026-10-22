@@ -403,6 +403,9 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+| `stampTextureMode` | `"bristles"` or `"ridges"` | The **profile** of the per-dab texture: a bundle of irregular bristles or a regular ribbed brush. The profile only changes the shape of a lane, never where the lanes are. Required in version 14; version-1 to -13 files have no field and read as `"bristles"`. A name outside the list is refused. |
+| `stampTextureScale` | 0.25-4 | How many lanes there are across the brush, as a multiple of the default four. `1` is the density every earlier file was written by. The lanes are measured against the brush's nominal size, so the pattern is the same in document pixels at every zoom. Required in version 14; version-1 to -13 files read as `1`. |
+| `stampTextureContrast` | 0-1 | How crisp the texture's edges are. `1` is the crisp one-device-pixel bristle edge every earlier file was written by; lower values soften it. Required in version 14; version-1 to -13 files read as `1`. |
 | `stampTip` | `"round"`, `"ellipse"` or `"square"` | The **mask a dab is painted with**. `round` is the plain disc every earlier version produced; `ellipse` and `square` are the tipped shapes, described by `stampAspect` and `stampAngle` rather than by pixels. Only a stamped stroke is affected. Required in version 13; version-1 to -12 files have no field and read as `"round"`. A name outside the list is refused. |
 | `stampAspect` | 0.05-1 | The tip's minor axis as a fraction of its major axis: `1` is a tip as wide as it is long, lower values make it long and narrow. The brush's `size` is the **major** axis. A round tip ignores it. Required in version 13; version-1 to -12 files read as `1`. |
 | `stampAngle` | 0-360 | The tip's angle in degrees. With `stampAngleFollow` off it is the tip's absolute angle; with it on it is the **offset** from the stroke's direction. Required in version 13; version-1 to -12 files read as `0`. |
@@ -435,7 +438,10 @@ looks like:
   missing or outside `0..1`, a version-9 `stamp` that is not a boolean or a
   `stampSpacing`/`stampHardness` that is missing or outside its range, and a
   version-13 `stampTip` that is missing or names a tip outside the closed list,
-  a `stampAspect` outside `0.05..1` or a `stampAngle` outside `0..360`;
+  a `stampAspect` outside `0.05..1` or a `stampAngle` outside `0..360`, a
+  version-14 `stampTextureMode` that is missing or names a profile outside the
+  closed list, a `stampTextureScale` outside `0.25..4` or a
+  `stampTextureContrast` outside `0..1`;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -477,6 +483,10 @@ looks like:
   `stampAspect`/`stampAngle`/`stampAngleFollow` → their defaults. The tip did
   not exist before version 13, and the round disc is exactly the coverage those
   files were written by;
+- a missing `stampTextureMode` in a version-1 to -13 file → `"bristles"`, and
+  missing `stampTextureScale`/`stampTextureContrast` → their defaults. The
+  profile, the density and the crispness did not exist before version 14, and
+  the default bristles are exactly the texture those files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -523,7 +533,8 @@ Two further guarantees:
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
 | 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
-| 13 | Requires `stampTip`, `stampAspect`, `stampAngle` and `stampAngleFollow` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the round tip (the disc they were written by). | The current version; what this build always writes. |
+| 13 | Requires `stampTip`, `stampAspect`, `stampAngle` and `stampAngleFollow` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the round tip (the disc they were written by). | - |
+| 14 | Requires `stampTextureMode`, `stampTextureScale` and `stampTextureContrast` on every stroke brush; reads version-1 to -13 files unchanged and defaults their strokes to the bristles at the default density and crispness (the texture they were written by). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -571,6 +582,15 @@ Two further guarantees:
   were written by. The tip is a **name out of a closed list**, not a blob of
   pixels: a file that names a tip this build does not know is refused rather
   than drawn as something else.
+- **`stampTextureMode`, `stampTextureScale` and `stampTextureContrast` required
+  version 14**, for the same reason. They change how a textured stroke's
+  samples are rasterized - the lanes get another profile, another density or
+  another edge - so a version-13 reader that ignored them would draw the same
+  bristles everywhere, which is a different picture. Version-1 to -13 files read
+  with the bristles at the default density and crispness, which is exactly the
+  texture they were written by. The profile is a **name out of a closed list**,
+  like the tip, so a file that names a profile this build does not know is
+  refused.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

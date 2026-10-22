@@ -14,6 +14,7 @@ import {
   stampTipCoverage,
   stampTipOf,
   unionStampRect,
+  type StampTexture,
 } from "../core/rendering/stampCoverage";
 import type { BrushSettings } from "../types/brush";
 
@@ -365,6 +366,23 @@ describe("stamp directional texture", () => {
   });
   const LANE_WIDTH = 5;
 
+  /**
+   * The per-dab texture a dab is painted with.
+   *
+   * The default is the profile every earlier file was written by: the
+   * irregular bristles at the default density and crispness.
+   */
+  function texture(overrides: Partial<StampTexture> = {}): StampTexture {
+    return {
+      angle: 0,
+      laneWidth: LANE_WIDTH,
+      strength: 1,
+      mode: "bristles",
+      contrast: 1,
+      ...overrides,
+    };
+  }
+
   /** The coverage of a whole map, one byte per pixel, in device pixels. */
   function coverageGrid(
     map: StampCoverage,
@@ -395,11 +413,97 @@ describe("stamp directional texture", () => {
     expect(stampTextureLaneWidth(TEXTURED, 2)).toBe(LANE_WIDTH * 2);
   });
 
+  it("packs more lanes when the density rises", () => {
+    // The density multiplies the number of lanes across the brush, so the
+    // lanes get narrower - and they never get thinner than a device pixel, so
+    // a small brush keeps a texture that can still be seen.
+    const dense = brush({ size: 20, stampTextureScale: 2 });
+    expect(stampTextureLaneWidth(dense, 1)).toBe(LANE_WIDTH / 2);
+    const sparse = brush({ size: 20, stampTextureScale: 0.5 });
+    expect(stampTextureLaneWidth(sparse, 1)).toBe(LANE_WIDTH * 2);
+    const tiny = brush({ size: 1, stampTextureScale: 4 });
+    expect(stampTextureLaneWidth(tiny, 1)).toBe(1);
+  });
+
+  it("keeps the default texture byte for byte", () => {
+    // The regression guard for the whole texture path: the default profile -
+    // irregular bristles at the default density and crispness - is the
+    // picture every earlier file was written by, so the sum and the checksum
+    // of its coverage are pinned here.
+    const map = new StampCoverage();
+    map.paintDab(20, 20, 10, 1, texture());
+    const grid = coverageGrid(map, 0, 0, 48);
+    let sum = 0;
+    let hash = 2166136261;
+    for (const alpha of grid) {
+      sum += alpha;
+      hash = (hash ^ alpha) >>> 0;
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    expect(sum).toBe(51804);
+    expect(hash).toBe(2549922865);
+  });
+
+  it("gives the ridges a regular profile and the bristles an irregular one", () => {
+    // A wide dab, so several lanes are crossed and the two profiles can be
+    // compared lane by lane.
+    const centre = 60;
+    const radius = 30;
+    const ridges = new StampCoverage();
+    ridges.paintDab(centre, centre, radius, 1, texture({ mode: "ridges" }));
+    const bristles = new StampCoverage();
+    bristles.paintDab(centre, centre, radius, 1, texture({ mode: "bristles" }));
+
+    // The two profiles are different pictures.
+    expect(Array.from(coverageGrid(ridges, 30, 30, 60))).not.toEqual(
+      Array.from(coverageGrid(bristles, 30, 30, 60)),
+    );
+
+    // The ridge is the same shape in every lane, so the picture repeats from
+    // lane to lane.
+    let ridgeRepeats = true;
+    for (let lane = 0; lane < 4; lane += 1) {
+      for (let phase = 0; phase < 5; phase += 1) {
+        const y = centre + lane * LANE_WIDTH + phase;
+        if (coverageAt(ridges, centre, y) !== coverageAt(ridges, centre, y + LANE_WIDTH)) {
+          ridgeRepeats = false;
+        }
+      }
+    }
+    expect(ridgeRepeats).toBe(true);
+
+    // And the two profiles are shaped differently: a bristle has a flat top -
+    // two neighbouring pixels carry the same value - while a ridge is a
+    // rounded bump.
+    expect(coverageAt(bristles, centre, 61)).toBe(coverageAt(bristles, centre, 62));
+    expect(coverageAt(ridges, centre, 61)).not.toBe(coverageAt(ridges, centre, 62));
+  });
+
+  it("softens the texture's edges when the contrast falls", () => {
+    const crisp = new StampCoverage();
+    crisp.paintDab(20, 20, 10, 1, texture({ contrast: 1 }));
+    const soft = new StampCoverage();
+    soft.paintDab(20, 20, 10, 1, texture({ contrast: 0 }));
+
+    // The picture changes: a softer edge is a wider ramp.
+    expect(Array.from(coverageGrid(soft, 0, 0, 48))).not.toEqual(
+      Array.from(coverageGrid(crisp, 0, 0, 48)),
+    );
+    // And it still only ever takes ink away.
+    const plain = new StampCoverage();
+    plain.paintDab(20, 20, 10, 1);
+    for (let y = 8; y < 33; y += 1) {
+      for (let x = 8; x < 33; x += 1) {
+        expect(coverageAt(soft, x, y)).toBeLessThanOrEqual(coverageAt(plain, x, y));
+      }
+    }
+  });
+
   it("leaves the coverage byte-identical when the texture is off", () => {
     const plain = new StampCoverage();
     plain.paintDab(20, 20, 10, 1);
     const off = new StampCoverage();
-    off.paintDab(20, 20, 10, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 0 });
+    off.paintDab(20, 20, 10, 1, texture({ angle: 0, strength: 0 }));
     expect(Array.from(coverageGrid(off, 0, 0, 48))).toEqual(
       Array.from(coverageGrid(plain, 0, 0, 48)),
     );
@@ -409,7 +513,7 @@ describe("stamp directional texture", () => {
     const plain = new StampCoverage();
     plain.paintDab(20, 20, 10, 1);
     const textured = new StampCoverage();
-    textured.paintDab(20, 20, 10, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    textured.paintDab(20, 20, 10, 1, texture({ angle: 0, strength: 1 }));
 
     // Across the dab the texture removes ink in bands, so the reduction is not
     // the same at every offset.
@@ -423,9 +527,9 @@ describe("stamp directional texture", () => {
 
   it("rotates the lanes with the dab's direction", () => {
     const along = new StampCoverage();
-    along.paintDab(20, 20, 10, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    along.paintDab(20, 20, 10, 1, texture({ angle: 0, strength: 1 }));
     const across = new StampCoverage();
-    across.paintDab(20, 20, 10, 1, { angle: Math.PI / 2, laneWidth: LANE_WIDTH, strength: 1 });
+    across.paintDab(20, 20, 10, 1, texture({ angle: Math.PI / 2, strength: 1 }));
 
     // A quarter turn of the dab turns the pattern a quarter turn with it, so
     // the two coverages are each other's transpose. A texture that ignored the
@@ -447,19 +551,11 @@ describe("stamp directional texture", () => {
     // the horizontal run across its width and leave the vertical run alone.
     const horizontal = new StampCoverage();
     for (let index = 0; index < 9; index += 1) {
-      horizontal.paintDab(20 + index * 5, 20, 10, 1, {
-        angle: 0,
-        laneWidth: LANE_WIDTH,
-        strength: 1,
-      });
+      horizontal.paintDab(20 + index * 5, 20, 10, 1, texture({ angle: 0, strength: 1 }));
     }
     const vertical = new StampCoverage();
     for (let index = 0; index < 9; index += 1) {
-      vertical.paintDab(20, 20 + index * 5, 10, 1, {
-        angle: Math.PI / 2,
-        laneWidth: LANE_WIDTH,
-        strength: 1,
-      });
+      vertical.paintDab(20, 20 + index * 5, 10, 1, texture({ angle: Math.PI / 2, strength: 1 }));
     }
 
     // Sampled well past the first dab, which carries no direction of its own.
@@ -478,9 +574,9 @@ describe("stamp directional texture", () => {
     // The lanes are laid out against the brush's centre line, so which way the
     // stroke was travelling does not change the picture.
     const forward = new StampCoverage();
-    forward.paintDab(20, 20, 10, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    forward.paintDab(20, 20, 10, 1, texture({ angle: 0, strength: 1 }));
     const backward = new StampCoverage();
-    backward.paintDab(20, 20, 10, 1, { angle: Math.PI, laneWidth: LANE_WIDTH, strength: 1 });
+    backward.paintDab(20, 20, 10, 1, texture({ angle: Math.PI, strength: 1 }));
     expect(Array.from(coverageGrid(backward, 0, 0, 48))).toEqual(
       Array.from(coverageGrid(forward, 0, 0, 48)),
     );
@@ -490,7 +586,7 @@ describe("stamp directional texture", () => {
     const plain = new StampCoverage();
     plain.paintDab(20, 20, 10, 1);
     const textured = new StampCoverage();
-    textured.paintDab(20, 20, 10, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    textured.paintDab(20, 20, 10, 1, texture({ angle: 0, strength: 1 }));
     for (let y = 8; y < 33; y += 1) {
       for (let x = 8; x < 33; x += 1) {
         expect(coverageAt(textured, x, y)).toBeLessThanOrEqual(coverageAt(plain, x, y));
@@ -500,10 +596,10 @@ describe("stamp directional texture", () => {
 
   it("still unions with a maximum, so a textured stroke cannot darken", () => {
     const once = new StampCoverage();
-    once.paintDab(20, 20, 10, 0.5, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    once.paintDab(20, 20, 10, 0.5, texture({ angle: 0, strength: 1 }));
     const twice = new StampCoverage();
-    twice.paintDab(20, 20, 10, 0.5, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
-    twice.paintDab(20, 20, 10, 0.5, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    twice.paintDab(20, 20, 10, 0.5, texture({ angle: 0, strength: 1 }));
+    twice.paintDab(20, 20, 10, 0.5, texture({ angle: 0, strength: 1 }));
     for (let y = 8; y < 33; y += 1) {
       for (let x = 8; x < 33; x += 1) {
         expect(coverageAt(twice, x, y)).toBe(coverageAt(once, x, y));
@@ -515,8 +611,8 @@ describe("stamp directional texture", () => {
     const first = new StampCoverage();
     const second = new StampCoverage();
     for (const map of [first, second]) {
-      map.paintDab(20, 20, 10, 1, { angle: 0.7, laneWidth: LANE_WIDTH, strength: 0.8 });
-      map.paintDab(26, 24, 8, 1, { angle: 0.7, laneWidth: LANE_WIDTH, strength: 0.8 });
+      map.paintDab(20, 20, 10, 1, texture({ angle: 0.7, strength: 0.8 }));
+      map.paintDab(26, 24, 8, 1, texture({ angle: 0.7, strength: 0.8 }));
     }
     expect(Array.from(coverageGrid(second, 0, 0, 48))).toEqual(
       Array.from(coverageGrid(first, 0, 0, 48)),
@@ -531,7 +627,7 @@ describe("stamp directional texture", () => {
     expect(dabs[0].angle).toBe(0);
 
     const map = new StampCoverage();
-    map.paintDab(12, 13, 10, 1, { angle: dabs[0].angle, laneWidth: LANE_WIDTH, strength: 1 });
+    map.paintDab(12, 13, 10, 1, texture({ angle: dabs[0].angle, strength: 1 }));
     const plain = new StampCoverage();
     plain.paintDab(12, 13, 10, 1);
     expect(coverageAt(map, 12, 18)).toBeLessThan(coverageAt(plain, 12, 18));
@@ -547,11 +643,7 @@ describe("stamp directional texture", () => {
 
     const map = new StampCoverage();
     for (const dab of dabs) {
-      map.paintDab(dab.x, dab.y, dab.radius, 1, {
-        angle: dab.angle,
-        laneWidth: LANE_WIDTH,
-        strength: 1,
-      });
+      map.paintDab(dab.x, dab.y, dab.radius, 1, texture({ angle: dab.angle, strength: 1 }));
     }
     expect(coverageAt(map, 10, 10)).toBeGreaterThan(0);
   });
@@ -571,11 +663,7 @@ describe("stamp directional texture", () => {
     const texturedRects: number[] = [];
     for (const dab of dabs) {
       const one = plain.paintDab(dab.x, dab.y, dab.radius, 1);
-      const two = textured.paintDab(dab.x, dab.y, dab.radius, 1, {
-        angle: dab.angle,
-        laneWidth: LANE_WIDTH,
-        strength: 1,
-      });
+      const two = textured.paintDab(dab.x, dab.y, dab.radius, 1, texture({ angle: dab.angle, strength: 1 }));
       if (one) {
         plainRects.push(one.left, one.top, one.width, one.height);
       }
@@ -618,9 +706,9 @@ describe("stamp directional texture", () => {
     // back by a quarter. A quarter turn maps the pixel grid onto itself, so
     // the law can be asserted exactly, pixel for pixel.
     const along = new StampCoverage();
-    along.paintDab(40, 40, 12, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    along.paintDab(40, 40, 12, 1, texture({ angle: 0, strength: 1 }));
     const turned = new StampCoverage();
-    turned.paintDab(40, 40, 12, 1, { angle: Math.PI / 2, laneWidth: LANE_WIDTH, strength: 1 });
+    turned.paintDab(40, 40, 12, 1, texture({ angle: Math.PI / 2, strength: 1 }));
 
     // The dab's centre is (40, 40), so the pixel (x, y) under the turned dab
     // corresponds to the pixel (y, 79 - x) under the unturned one.
@@ -644,13 +732,9 @@ describe("stamp directional texture", () => {
     }
 
     const diagonal = new StampCoverage();
-    diagonal.paintDab(40, 40, 12, 1, {
-      angle: Math.PI / 4,
-      laneWidth: LANE_WIDTH,
-      strength: 1,
-    });
+    diagonal.paintDab(40, 40, 12, 1, texture({ angle: Math.PI / 4, strength: 1 }));
     const flat = new StampCoverage();
-    flat.paintDab(40, 40, 12, 1, { angle: 0, laneWidth: LANE_WIDTH, strength: 1 });
+    flat.paintDab(40, 40, 12, 1, texture({ angle: 0, strength: 1 }));
     // The two pictures are not the same: the lanes point different ways.
     const diagonalGrid = coverageGrid(diagonal, 20, 20, 40);
     const flatGrid = coverageGrid(flat, 20, 20, 40);
@@ -665,11 +749,7 @@ describe("stamp directional texture", () => {
     const map = new StampCoverage();
     const plain = new StampCoverage();
     for (const dab of dabs) {
-      map.paintDab(dab.x, dab.y, dab.radius, 1, {
-        angle: dab.angle,
-        laneWidth: LANE_WIDTH,
-        strength: 1,
-      });
+      map.paintDab(dab.x, dab.y, dab.radius, 1, texture({ angle: dab.angle, strength: 1 }));
       plain.paintDab(dab.x, dab.y, dab.radius, 1);
     }
     // The coverage is a whole-pixel grid either way, and the texture only

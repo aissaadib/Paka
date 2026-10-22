@@ -508,6 +508,36 @@ The texture costs no extra allocation: it reuses the dab's own pixel loop and
 the coverage map's existing tiles, so the raster budget's 58 bytes per
 document pixel still holds.
 
+### The texture's profile, density and crispness
+
+Three settings shape the lanes, and all three are cheap because they only
+change how a lane is drawn, never **where** the lanes are. That matters: the
+lanes are laid out against the brush's centre line, so every dab on a path
+sees the same lane at the same pixel, and the per-pixel maximum union keeps
+the texture instead of filling it in.
+
+| Field | What it changes |
+| --- | --- |
+| `stampTextureMode` | The **profile**: `bristles` (a flat-topped streak with a hashed width and place) or `ridges` (a rounded bump, the same in every lane). |
+| `stampTextureScale` | The **density**: how many lanes there are across the brush, as a multiple of the default four. A lane never gets thinner than one device pixel. |
+| `stampTextureContrast` | The **crispness**: how sharp the texture's edges are. `1` is the one-device-pixel ramp every earlier file was written by; lower values widen it into a smooth variation. |
+
+The profile is the reason the texture can look like two different brushes
+without moving a lane: a `bristles` stroke reads as separate streaks, a
+`ridges` stroke as a regular ribbed surface. The density is measured against
+the brush's **nominal** size, so the pattern stays the same in document pixels
+at every zoom and `rasterScale`.
+
+The defaults are the picture every earlier file was written by - the
+`bristles` profile at the default density and crispness - so a stroke without
+these settings is byte for byte the stroke it was before. A test pins the
+default texture's coverage with a checksum, so a change to the lane profile
+that moves a single pixel fails it.
+
+The texture's fields are required from project format 14: they change how a
+textured stroke's samples are rasterized, so a version-13 reader would draw
+the same bristles everywhere, which is a different picture.
+
 ### Brush tips
 
 `BrushSettings.stampTip` replaces the dab's **disc** with a **mask**: the shape

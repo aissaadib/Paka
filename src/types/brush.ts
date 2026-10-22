@@ -37,6 +37,20 @@ export interface PressureCurvePoint {
  */
 export type StampTipKind = "round" | "ellipse" | "square";
 
+/**
+ * The profile of the per-dab texture.
+ *
+ * - `bristles` is a bundle of irregular bristles: every lane holds one bristle
+ *   whose width and place come from a fixed hash of the lane's index, so the
+ *   texture looks hand-made.
+ * - `ridges` is a regular ribbed brush: every lane holds one centred ridge of
+ *   the same width, so the texture looks machined.
+ *
+ * Both profiles are laid out against the brush's centre line, so the per-pixel
+ * maximum union keeps them instead of filling them in.
+ */
+export type StampTextureMode = "bristles" | "ridges";
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
   readonly size: number;
@@ -156,6 +170,35 @@ export interface BrushSettings {
    * and in a PNG export, at every zoom and `rasterScale`.
    */
   readonly stampTexture: number;
+  /**
+   * The profile of the per-dab texture.
+   *
+   * `bristles` is the bundle of irregular bristles every earlier file was
+   * written by; `ridges` is a regular ribbed brush. The profile only changes
+   * the shape of the lanes, never where they are: both are laid out against
+   * the brush's centre line, so the union still keeps them.
+   *
+   * Required from project format 14.
+   */
+  readonly stampTextureMode: StampTextureMode;
+  /**
+   * How many bristle lanes there are across the brush, as a multiple of the
+   * default four, in `[0.25, 4]`.
+   *
+   * `1` is the density every earlier file was written by. A higher value
+   * packs more lanes into the same brush, a lower one spreads them out. The
+   * lanes are measured against the brush's **nominal** size, so the pattern
+   * stays the same in document pixels at every zoom and `rasterScale`.
+   */
+  readonly stampTextureScale: number;
+  /**
+   * How crisp the texture's edges are, in `[0, 1]`.
+   *
+   * `1` is the crisp one-device-pixel bristle edge every earlier file was
+   * written by. Lower values widen the edge into a soft ramp, so the texture
+   * reads as a smooth variation rather than as separate bristles.
+   */
+  readonly stampTextureContrast: number;
   /**
    * The shape of a dab's tip.
    *
