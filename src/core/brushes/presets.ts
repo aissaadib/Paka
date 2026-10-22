@@ -14,6 +14,7 @@
 import type { BrushSettings } from "../../types/brush";
 import { createId, reserveId } from "../../utils/id";
 import { asRecord } from "../../utils/record";
+import { BUNDLED_PRESETS, isBundledPresetId } from "./bundledPresets";
 import { brushSettingsEqual, readBrushSettings } from "./defaults";
 
 export interface BrushPreset {
@@ -133,6 +134,48 @@ export function duplicatePreset(
     name: uniquePresetName(preset.name, existing),
     brush: { ...preset.brush },
   };
+}
+
+/**
+ * True when the preset is one of the brushes that ship with Paka.
+ *
+ * The identity is the id and nothing else: a flag in the settings file is not
+ * consulted, so a hand-edited file can neither turn one of the user's presets
+ * into a protected one nor make a shipped brush editable.
+ */
+export function isBundledPreset(preset: Pick<BrushPreset, "id">): boolean {
+  return isBundledPresetId(preset.id);
+}
+
+/**
+ * Joins the bundled presets with the ones the user has saved.
+ *
+ * The bundled brushes are code, so the file cannot change them: the file's
+ * copy of a bundled id contributes only what belongs to the user, and the id,
+ * the name and the brush come from here. Every other entry is the user's, and
+ * is kept as it is.
+ *
+ * A user preset always wins. When the user has saved a preset under the name
+ * of a shipped brush, that name stays theirs and the shipped brush takes the
+ * next free name, so the two entries can be told apart in the picker.
+ *
+ * The result is a pure function of the input: the same entries always give
+ * the same list, in the same order, with the same names.
+ */
+export function mergeBundledPresets(entries: readonly BrushPreset[]): readonly BrushPreset[] {
+  const user = entries.filter((entry) => !isBundledPresetId(entry.id));
+  const userNames = new Set(user.map((entry) => entry.name.toLowerCase()));
+  const bundled = BUNDLED_PRESETS.map((preset) => {
+    const stored = entries.find((entry) => entry.id === preset.id);
+    // The code owns the id, the name and the brush. Anything else the file
+    // stored against that id belongs to the user and rides along.
+    const merged: BrushPreset = stored === undefined ? preset : { ...stored, ...preset };
+    const name = userNames.has(merged.name.toLowerCase())
+      ? uniquePresetName(merged.name, user)
+      : merged.name;
+    return { ...merged, name, brush: { ...merged.brush } };
+  });
+  return [...bundled, ...user];
 }
 
 /** Field-wise comparison, used to skip redundant publishes and writes. */
