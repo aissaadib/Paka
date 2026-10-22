@@ -10,6 +10,12 @@
  * change to the drawing goes through an engine command, so it is undoable,
  * and the panel can never lose a layer by accident: a layer that holds content
  * is confirmed before it is deleted.
+ *
+ * The rules the panel follows live in three pure modules, because the React
+ * layer has no automated tests: `layerOrdering.ts` (where a drag lands),
+ * `layerDeletion.ts` (when a deletion has to be confirmed) and
+ * `layerKeyboard.ts` (what a key press means). This file is the shell over
+ * them.
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,7 +28,13 @@ import {
   nextRowIndex,
   topFirstLayers,
 } from "../../core/document/layerOrdering";
-import { layerDeletionPrompt, type LayerDeletionPrompt } from "../../core/document/layerDeletion";
+import {
+  canDeleteLayer,
+  layerDeletionPrompt,
+  type LayerDeletionPrompt,
+} from "../../core/document/layerDeletion";
+import { layerPanelAction } from "../../core/document/layerKeyboard";
+import { isTextEntryTarget, type TextEntryTargetLike } from "../../core/actions/keyboard";
 import type { Layer, LayerBlendMode, LayerId } from "../../core/document/types";
 import {
   IconArrowDown,
@@ -56,6 +68,11 @@ const BLEND_MODE_OPTIONS: readonly { readonly value: LayerBlendMode; readonly la
 interface PendingDelete {
   readonly layerId: LayerId;
   readonly prompt: LayerDeletionPrompt;
+  /**
+   * The row that keeps the keyboard when the deleted row takes the focus with
+   * it: the row below it, or the one above when it was the last.
+   */
+  readonly focusAfter: LayerId | null;
 }
 
 export function LayersPanel() {
@@ -77,13 +94,16 @@ export function LayersPanel() {
 
   const nameButtons = useRef(new Map<LayerId, HTMLButtonElement>());
   const cancelDeleteButton = useRef<HTMLButtonElement | null>(null);
+  const confirmDeleteButton = useRef<HTMLButtonElement | null>(null);
+  /** The element that had the focus before the question was asked. */
+  const focusBeforeDialog = useRef<HTMLElement | null>(null);
   /** Guards the rename against a second commit (Enter *and* the blur). */
   const renameCommitted = useRef(false);
 
   const activeIndex = layers.findIndex((layer) => layer.id === drawingDocument.activeLayerId);
   const activeLayer = activeIndex >= 0 ? layers[activeIndex] : undefined;
 
-  const canDelete = layers.length > 1;
+  const canDelete = canDeleteLayer(layers.length);
   const canMoveUp = activeIndex >= 0 && activeIndex < layers.length - 1;
   const canMoveDown = activeIndex > 0;
 
@@ -150,25 +170,59 @@ export function LayersPanel() {
    *
    * The count comes from the engine's element list, so the question is asked
    * about the layer's *actual* content and not about a flag that could drift.
+   *
+   * The last layer is never deleted - the document keeps one - so the panel
+   * refuses before it asks, rather than showing a question the document model
+   * would answer with silence.
    */
   const requestDelete = useCallback(
     (layer: Layer) => {
-      const prompt = layerDeletionPrompt(layer.name, engine.listElements(layer.id).length);
-      if (prompt === null) {
-        actions.removeLayer(layer.id);
+      if (!canDeleteLayer(layers.length)) {
         return;
       }
-      setPendingDelete({ layerId: layer.id, prompt });
+      // The row that keeps the keyboard when the deleted row goes: the one
+      // below it, or the one above when the deleted row was the last.
+      const index = topFirst.findIndex((candidate) => candidate.id === layer.id);
+      const focusAfter = topFirst[index + 1]?.id ?? topFirst[index - 1]?.id ?? null;
+      const prompt = layerDeletionPrompt(layer.name, engine.listElements(layer.id).length);
+      if (prompt === null) {
+        // An empty layer goes without a question, so the focus moves with it
+        // right away.
+        actions.removeLayer(layer.id);
+        if (focusAfter !== null) {
+          setFocusedLayerId(focusAfter);
+          focusRow(focusAfter);
+        }
+        return;
+      }
+      focusBeforeDialog.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setPendingDelete({ layerId: layer.id, prompt, focusAfter });
     },
-    [actions, engine],
+    [actions, engine, focusRow, layers.length, topFirst],
   );
+
+  /** Closes the question and gives the keyboard back where it was. */
+  const closeDelete = useCallback(() => {
+    setPendingDelete(null);
+    const previous = focusBeforeDialog.current;
+    focusBeforeDialog.current = null;
+    previous?.focus?.();
+  }, []);
 
   const confirmDelete = useCallback(() => {
     if (pendingDelete !== null) {
       actions.removeLayer(pendingDelete.layerId);
+      if (pendingDelete.focusAfter !== null) {
+        // The deleted row takes the focus with it, so the next row keeps it:
+        // the panel stays drivable without another click.
+        setFocusedLayerId(pendingDelete.focusAfter);
+        focusRow(pendingDelete.focusAfter);
+      }
     }
+    focusBeforeDialog.current = null;
     setPendingDelete(null);
-  }, [actions, pendingDelete]);
+  }, [actions, focusRow, pendingDelete]);
 
   // The dialog takes the focus when it opens, so the keyboard is in the
   // dialog rather than in the list behind it.
@@ -246,74 +300,66 @@ export function LayersPanel() {
       if (renamingLayerId !== null) {
         return;
       }
-      const mod = event.ctrlKey || event.metaKey;
+      // The rules live in a pure module, so they can be tested without a DOM.
+      const action = layerPanelAction({
+        key: event.key,
+        mod: event.ctrlKey || event.metaKey,
+        // A field owns its own keys: Backspace in the opacity field has to
+        // clear the number, not ask the engine to delete the layer.
+        textEntry: isTextEntryTarget(event.target as TextEntryTargetLike | null),
+        dragging: dragLayerId !== null,
+      });
+      if (action === null) {
+        return;
+      }
+      // The panel owns these keys while it has the focus: the global nudge
+      // must not fire at the same time.
+      event.preventDefault();
+      event.stopPropagation();
+
       const focusedIndex =
         focusedLayerId === null ? -1 : topFirst.findIndex((layer) => layer.id === focusedLayerId);
       const focusedLayer = focusedIndex >= 0 ? topFirst[focusedIndex] : undefined;
 
-      switch (event.key) {
-        case "ArrowDown":
-        case "ArrowUp": {
-          // The panel owns the arrow keys while it has the focus: the global
-          // nudge must not fire at the same time.
-          event.preventDefault();
-          event.stopPropagation();
-          if (mod) {
-            if (focusedLayer !== undefined) {
-              actions.moveLayer(focusedLayer.id, event.key === "ArrowUp" ? 1 : -1);
-            }
-            return;
-          }
-          const next = nextRowIndex(
-            focusedIndex,
-            event.key === "ArrowDown" ? 1 : -1,
-            topFirst.length,
-          );
+      switch (action.kind) {
+        case "focus": {
+          const next = nextRowIndex(focusedIndex, action.offset, topFirst.length);
           if (next !== null) {
             focusRow(topFirst[next].id);
           }
           return;
         }
-        case "Home":
-        case "End": {
-          event.preventDefault();
-          event.stopPropagation();
-          const index = event.key === "Home" ? 0 : topFirst.length - 1;
-          const layer = topFirst[index];
+        case "focusEdge": {
+          const layer = action.edge === "first" ? topFirst[0] : topFirst[topFirst.length - 1];
           if (layer !== undefined) {
             focusRow(layer.id);
           }
           return;
         }
-        case "F2": {
+        case "rename": {
           if (focusedLayer !== undefined) {
-            event.preventDefault();
-            event.stopPropagation();
             startRename(focusedLayer);
           }
           return;
         }
-        case "Delete":
-        case "Backspace": {
+        case "delete": {
           if (focusedLayer !== undefined) {
-            event.preventDefault();
-            event.stopPropagation();
             requestDelete(focusedLayer);
           }
           return;
         }
-        case "Escape": {
-          // Cancels a drag in flight. The browser cancels the drag itself, and
-          // the marker goes with it.
-          if (dragLayerId !== null) {
-            event.preventDefault();
-            event.stopPropagation();
-            clearDrag();
+        case "move": {
+          if (focusedLayer !== undefined) {
+            actions.moveLayer(focusedLayer.id, action.delta);
           }
           return;
         }
-        default:
+        case "cancelDrag": {
+          // Cancels a drag in flight. The browser cancels the drag itself, and
+          // the marker goes with it.
+          clearDrag();
           return;
+        }
       }
     },
     [
@@ -482,7 +528,7 @@ export function LayersPanel() {
           className="dialog-backdrop"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
-              setPendingDelete(null);
+              closeDelete();
             }
           }}
         >
@@ -496,7 +542,18 @@ export function LayersPanel() {
               if (event.key === "Escape") {
                 event.preventDefault();
                 event.stopPropagation();
-                setPendingDelete(null);
+                closeDelete();
+                return;
+              }
+              if (event.key === "Tab") {
+                // The question is modal: the focus stays inside it, so the
+                // keyboard cannot reach the panel behind the dialog.
+                event.preventDefault();
+                if (document.activeElement === cancelDeleteButton.current) {
+                  confirmDeleteButton.current?.focus();
+                } else {
+                  cancelDeleteButton.current?.focus();
+                }
               }
             }}
           >
@@ -511,11 +568,16 @@ export function LayersPanel() {
                 type="button"
                 className="button"
                 ref={cancelDeleteButton}
-                onClick={() => setPendingDelete(null)}
+                onClick={closeDelete}
               >
                 Cancel
               </button>
-              <button type="button" className="button button--primary" onClick={confirmDelete}>
+              <button
+                type="button"
+                className="button button--primary"
+                ref={confirmDeleteButton}
+                onClick={confirmDelete}
+              >
                 {pendingDelete.prompt.confirmLabel}
               </button>
             </div>

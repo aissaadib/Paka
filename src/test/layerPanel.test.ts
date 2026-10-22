@@ -9,8 +9,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { layerDeletionPrompt } from "../core/document/layerDeletion";
-import { dropSlot, moveDeltaForSlot } from "../core/document/layerOrdering";
+import { canDeleteLayer, layerDeletionPrompt } from "../core/document/layerDeletion";
+import { dropSlot, markerIndex, moveDeltaForSlot } from "../core/document/layerOrdering";
 import { createDocument } from "../core/document/document";
 import type { LayerId } from "../core/document/types";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
@@ -138,6 +138,37 @@ describe("the panel's drag reorder", () => {
     expect(engine.getState().document.activeLayerId).toBe(stack[1]);
     expect(engine.getState().history.depth).toBe(depth + 1);
   });
+
+  it("puts the layer where the marker said it would", () => {
+    // The marker is the gap the layer lands in. The two must agree, or the
+    // artist drops a layer where the marker never said.
+    const count = 3;
+    for (let dragged = 0; dragged < count; dragged += 1) {
+      for (let row = 0; row < count; row += 1) {
+        for (const above of [true, false]) {
+          const engine = createEngine();
+          const before = topFirst(engine);
+          const draggedId = before[dragged];
+          const slot = dropSlot(row, above, dragged);
+          const marker = markerIndex(dragged, slot);
+
+          const delta = moveDeltaForSlot(dragged, slot);
+          if (delta !== 0) {
+            engine.moveLayer(draggedId, delta);
+          }
+
+          // The dragged layer ends up at the slot the marker named.
+          const after = topFirst(engine);
+          expect(after.indexOf(draggedId)).toBe(slot);
+          // The marker is the gap right above the row that ends up above the
+          // dragged layer - the gap the layer is dropped into.
+          const aboveId: string | null = slot === 0 ? null : after[slot - 1];
+          const expectedMarker = aboveId === null ? 0 : before.indexOf(aboveId) + 1;
+          expect(marker).toBe(expectedMarker);
+        }
+      }
+    }
+  });
 });
 
 describe("the panel's other operations", () => {
@@ -221,5 +252,19 @@ describe("the panel's other operations", () => {
     expect(engine.undo()).toBe(true);
     expect(engine.getState().document.layers.map((l) => l.id)).toContain(layerId);
     expect(engine.listElements(layerId)).toHaveLength(1);
+  });
+
+  it("keeps the last layer, and the panel never asks about it", () => {
+    // One layer: the document model refuses to remove it, so the panel must
+    // not ask the user to confirm a deletion that cannot happen.
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+    });
+    const onlyLayer = engine.getState().document.layers[0]?.id as string;
+    expect(canDeleteLayer(engine.getState().document.layers.length)).toBe(false);
+
+    engine.removeLayer(onlyLayer);
+
+    expect(engine.getState().document.layers.map((l) => l.id)).toEqual([onlyLayer]);
   });
 });
