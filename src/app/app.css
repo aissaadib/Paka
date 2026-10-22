@@ -557,16 +557,83 @@
   cursor: crosshair;
 }
 
+/*
+ * The brush cursor overlay.
+ *
+ * A view, never content: it is a sibling of the canvas, so it cannot reach a
+ * layer surface, an export or the project file. The root is placed at the
+ * pointer; the ring is centred on it and the readout sits beside it.
+ */
 .brush-cursor {
   position: absolute;
   top: 0;
   left: 0;
   display: none;
+  visibility: hidden;
+  pointer-events: none;
+  will-change: transform;
+  z-index: 2;
+}
+
+.brush-cursor__ring {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-50%, -50%);
   border: 1px solid rgba(255, 255, 255, 0.75);
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
-  pointer-events: none;
-  will-change: transform;
+  transition: opacity 120ms ease-out;
+}
+
+/* While a stroke is in flight the ring steps back, so the artwork under the
+   pointer stays readable. It is a separate compositing layer, so it cannot
+   flicker with the canvas underneath it. */
+.brush-cursor__ring.is-drawing {
+  opacity: 0.35;
+}
+
+/* While the quick resize runs, the ring is the control being dragged, so it
+   is drawn in the accent colour. */
+.brush-cursor__ring.is-resizing {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.brush-cursor__readout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(14px, 10px);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(18, 20, 24, 0.88);
+  color: var(--text-strong);
+  font-size: 10px;
+  line-height: 14px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.brush-cursor__readout.is-visible {
+  opacity: 1;
+}
+
+/* Present for screen readers only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* -------------------------------------------------------------- status bar */

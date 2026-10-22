@@ -67,6 +67,8 @@ export type ActionId =
   | "delete"
   | "brushSizeDown"
   | "brushSizeUp"
+  | "brushSizeFineDown"
+  | "brushSizeFineUp"
   | `tool:${ToolId}`;
 
 export interface ActionDefinition {

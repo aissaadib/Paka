@@ -10,7 +10,8 @@
  * programming error, not a runtime tie-break.
  */
 
-import { stepBrushSize } from "../brushes/defaults";
+import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, stepBrushSize } from "../brushes/defaults";
+import { modalIsOpen } from "../input/ownership";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { ToolId } from "../../types/tool";
 import {
@@ -40,6 +41,20 @@ function mod(keyValue: string, code: string, shift = false): ShortcutSpec {
 /** Arrow-key nudge distances, in document pixels. */
 const NUDGE_STEP = 1;
 const NUDGE_LARGE_STEP = 10;
+
+/** A brush size inside the brush's own range. */
+function clampBrushSize(size: number): number {
+  return Math.min(Math.max(size, MIN_BRUSH_SIZE), MAX_BRUSH_SIZE);
+}
+
+/**
+ * True when no modal dialog is open.
+ *
+ * A dialog owns the window, so the brush size must not change behind it.
+ */
+function noModalOpen(): boolean {
+  return !modalIsOpen();
+}
 
 const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
   {
@@ -172,6 +187,11 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     label: "Escape",
     shortcuts: [key("escape", "Escape")],
     run: ({ actions, engine }) => {
+      // The quick brush-size resize owns Escape while it runs: it cancels the
+      // drag in flight and puts the brush size back.
+      if (engine.cancelBrushSizeGesture()) {
+        return;
+      }
       // The guides tool owns Escape while it is active: it cancels the drag in
       // flight and clears the guide selection.
       if (engine.getState().toolId === "guides") {
@@ -200,6 +220,7 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     id: "brushSizeDown",
     label: "Decrease Brush Size",
     shortcuts: [key("[", "BracketLeft")],
+    when: noModalOpen,
     run: ({ actions, engine }) => {
       actions.setBrush({ size: stepBrushSize(engine.getState().brush.size, -1) });
     },
@@ -208,8 +229,33 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     id: "brushSizeUp",
     label: "Increase Brush Size",
     shortcuts: [key("]", "BracketRight")],
+    when: noModalOpen,
     run: ({ actions, engine }) => {
       actions.setBrush({ size: stepBrushSize(engine.getState().brush.size, 1) });
+    },
+  },
+  {
+    id: "brushSizeFineDown",
+    label: "Decrease Brush Size by One Pixel",
+    // Alt is the fine modifier: the plain bracket steps by a tenth of the
+    // brush above 10 px, which is too coarse to trim a large brush.
+    shortcuts: [{ key: "[", code: "BracketLeft", alt: true }],
+    when: noModalOpen,
+    run: ({ actions, engine }) => {
+      actions.setBrush({
+        size: clampBrushSize(engine.getState().brush.size - 1),
+      });
+    },
+  },
+  {
+    id: "brushSizeFineUp",
+    label: "Increase Brush Size by One Pixel",
+    shortcuts: [{ key: "]", code: "BracketRight", alt: true }],
+    when: noModalOpen,
+    run: ({ actions, engine }) => {
+      actions.setBrush({
+        size: clampBrushSize(engine.getState().brush.size + 1),
+      });
     },
   },
 ];

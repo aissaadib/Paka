@@ -33,6 +33,7 @@ export function BrushControls() {
         max={MAX_BRUSH_SIZE}
         step={1}
         value={brush.size}
+        title="Brush size in document pixels. Ctrl+Alt and drag on the canvas to resize the brush; [ and ] step the size and Alt+[ and Alt+] change it by one pixel. Escape cancels a resize in progress"
         format={(value) => `${Math.round(value)} px`}
         onChange={(size) => actions.setBrush({ size })}
       />

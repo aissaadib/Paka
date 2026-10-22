@@ -427,6 +427,8 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
   `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
   `u` guides, `h` pan (middle-drag also pans);
+  `[`/`]` step the brush size and `Alt`+`[`/`Alt`+`]` change it by one pixel;
+  `Ctrl`+`Alt` and drag on the canvas resizes the brush and `Esc` cancels it;
   `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
   duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
   the guide drag and clears the guide selection, and `Delete` removes the
@@ -528,6 +530,19 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   rotation (a non-square box turns without changing the shape's side lengths)
   and the simple star outline are covered by Vitest, and the two pictures are
   pinned by the visual-regression scenes `polygon` and `star`.
+- **Brush cursor and quick resize check (verified 2026-10-22, Chromium via
+  Playwright).** `pnpm exec playwright test tests/visual/brush-cursor.spec.ts`
+  drives the running app: the ring's measured diameter is the brush size
+  through the zoom and it sits on the pointer, the ring grows with the zoom, a
+  `Ctrl`+`Alt` drag changes the size while `history` stays `0`, the readout
+  shows the size in pixels while the gesture runs, `Esc` puts the size back,
+  the next stroke uses the resized brush, and `[`/`]` (with and without `Alt`)
+  step the size by one pixel. Two things the harness found, and the code now
+  handles: `Esc` has to cancel a resize **while `Ctrl`+`Alt` is still held**
+  (the chord table claims an exact set of modifiers, so the cancel is handled
+  before the table), and a field that takes text keeps the keyboard to itself
+  (so a shortcut pressed right after typing in the **Size** box does nothing
+  until the field is given up).
 
 ## 9. Next move
 
