@@ -38,6 +38,22 @@ export type BrushNumberField = (typeof BRUSH_NUMBER_FIELDS)[number];
 /** The unit a property's value is shown in. */
 export type BrushPropertyUnit = "px" | "percent" | "ratio";
 
+/**
+ * How often a property is reached for.
+ *
+ * The toolbar shows one row of controls, and a row holding every brush field
+ * is a row nobody reads. The tier says where a control belongs:
+ *
+ *  - `primary`: the values a stroke is adjusted with while drawing - size,
+ *    opacity and hardness. They stay in the options bar.
+ *  - `advanced`: sampling, stabilizer, texture, the stamp and the pressure
+ *    switches. They live behind the bar's "Brush settings" panel.
+ *
+ * The tier is presentation only: every property in either tier is still the
+ * same engine field, written through the same `setBrush` path.
+ */
+export type BrushPropertyTier = "primary" | "advanced";
+
 /** A range of values, in one unit or another. */
 export interface BrushRange {
   readonly min: number;
@@ -74,6 +90,8 @@ export interface BrushSliderProperty {
   readonly unit: BrushPropertyUnit;
   /** The scale the slider uses. */
   readonly scale: "linear" | "log";
+  /** Where the control belongs: the options bar, or its advanced panel. */
+  readonly tier: BrushPropertyTier;
   /** Whether the engine honours the field. A false one may not be offered. */
   readonly honoured: boolean;
   /** Whether the property applies to the brush as it stands. */
@@ -109,6 +127,8 @@ export interface BrushToggleProperty {
   readonly label: string;
   /** What the property does, as a tooltip. */
   readonly title: string;
+  /** Where the control belongs: the options bar, or its advanced panel. */
+  readonly tier: BrushPropertyTier;
   /** Whether the engine honours the field. A false one may not be offered. */
   readonly honoured: boolean;
   /** Whether the property applies to the brush as it stands. */
@@ -136,6 +156,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "size",
+    tier: "primary",
     label: "Size",
     title: "Stroke diameter in document pixels at full pressure",
     step: 1,
@@ -149,6 +170,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "opacity",
+    tier: "primary",
     label: "Opacity",
     title: "Opacity of the whole stroke",
     step: 1,
@@ -160,6 +182,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "hardness",
+    tier: "primary",
     label: "Hardness",
     title: "Edge falloff: 100% is a crisp edge, lower values soften it",
     step: 1,
@@ -171,6 +194,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "spacing",
+    tier: "advanced",
     label: "Sampling",
     title:
       "Gap between interpolated samples as a percentage of brush size; lower values smooth fast strokes at a memory cost. This is the sample density, not the dab spacing of the stamp",
@@ -183,6 +207,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "stabilizer",
+    tier: "advanced",
     label: "Stabilizer",
     title:
       "Smooths the pointer path; 0% follows the pointer exactly and 100% lags the most",
@@ -195,6 +220,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "texture",
+    tier: "advanced",
     label: "Texture",
     title: "Document-anchored grain over the finished stroke; 0% is the plain edge",
     step: 1,
@@ -206,6 +232,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "toggle",
     id: "stamp",
+    tier: "advanced",
     label: "Stamp",
     title: "Draw the stroke as a chain of round dabs instead of continuous segments",
     honoured: true,
@@ -216,6 +243,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "stampSpacing",
+    tier: "advanced",
     label: "Stamp spacing",
     title:
       "Distance between dabs as a percentage of the brush size; this is not the sample density above",
@@ -228,6 +256,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "stampHardness",
+    tier: "advanced",
     label: "Stamp hardness",
     title:
       "Falloff of a single dab; 100% is a crisp dab edge, lower values soften it towards the centre",
@@ -240,6 +269,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "slider",
     id: "stampTexture",
+    tier: "advanced",
     label: "Stamp texture",
     title:
       "Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect",
@@ -252,6 +282,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "toggle",
     id: "pressureSize",
+    tier: "advanced",
     label: "Pressure size",
     title: "Pen pressure controls stroke width (ignored by mouse input)",
     honoured: true,
@@ -264,6 +295,7 @@ export const BRUSH_PROPERTIES = [
   {
     kind: "toggle",
     id: "pressureOpacity",
+    tier: "advanced",
     label: "Pressure opacity",
     title: "Pen pressure controls stroke opacity",
     honoured: true,
@@ -471,6 +503,44 @@ export function brushPropertyFormat(property: BrushSliderProperty, value: number
 /** The properties the brush shows for the brush as it stands, in order. */
 export function brushPropertiesFor(brush: BrushSettings): readonly BrushProperty[] {
   return BRUSH_PROPERTIES.filter((property) => property.visible(brush));
+}
+
+/**
+ * The properties of one tier the brush shows for the brush as it stands.
+ *
+ * `brushPropertiesFor` is the whole set, and the tiers partition it: a
+ * property is in exactly one tier, so drawing the two lists draws every
+ * control once. A property added to the table without a tier does not
+ * compile.
+ */
+export function brushPropertiesInTier(
+  brush: BrushSettings,
+  tier: BrushPropertyTier,
+): readonly BrushProperty[] {
+  return BRUSH_PROPERTIES.filter(
+    (property) => property.tier === tier && property.visible(brush),
+  );
+}
+
+/**
+ * The properties the options bar keeps in front of the user.
+ *
+ * These are the values a stroke is adjusted with while drawing, so they are
+ * always one click away.
+ */
+export function primaryBrushProperties(brush: BrushSettings): readonly BrushProperty[] {
+  return brushPropertiesInTier(brush, "primary");
+}
+
+/**
+ * The properties behind the bar's "Brush settings" panel.
+ *
+ * Sampling, stabilizer, texture, the stamp and the pressure switches are
+ * settings, not stroke controls: they are changed deliberately and then left
+ * alone, so they get a panel of their own instead of a permanent row.
+ */
+export function advancedBrushProperties(brush: BrushSettings): readonly BrushProperty[] {
+  return brushPropertiesInTier(brush, "advanced");
 }
 
 /** One property by id, or `undefined`. */

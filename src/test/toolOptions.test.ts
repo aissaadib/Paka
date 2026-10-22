@@ -14,6 +14,7 @@
 import { describe, expect, it, afterEach, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import type { EditorSnapshot } from "../core/engine/DrawingEngine";
 import type { EditorActions, Editor } from "../state/editorStore";
 import { EditorContext } from "../state/editorContext";
@@ -70,6 +71,11 @@ function snapshotFor(toolId: ToolId): EditorSnapshot {
     shapeInnerRatio: 0.42,
     shapeRotation: 33,
     fillTolerance: 19,
+    // The bar draws the brush's primary controls for a brush-using tool, so
+    // the snapshot carries the brush and the preset list the real one does.
+    brush: DEFAULT_BRUSH,
+    presets: [],
+    document: { background: "#ffffff" },
   } as unknown as EditorSnapshot;
 }
 

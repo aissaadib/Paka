@@ -1,75 +1,91 @@
 /**
- * The brush controls: the preset picker and the brush's properties.
+ * The brush controls, split by how often they are reached for.
  *
- * The properties are **not** written out here. They come from the property
- * model (`core/brushes/brushProperties.ts`), the one table of what a brush
- * can be asked to do, so the controls cannot offer a field the engine does
- * not honour and cannot show a range the engine would refuse. Every one of
- * them writes through `setBrush`, which is the path the colour picker and
- * the preset picker use too.
+ * The property model (`core/brushes/brushProperties.ts`) is the one table of
+ * what a brush can be asked to do, and it says which tier each field belongs
+ * to. This file only draws the two tiers:
  *
- * The two things that are not properties live here: the preset picker and the
- * pressure curve, which are widgets rather than fields.
+ *  - **primary** - size, opacity and hardness, beside the preset picker in
+ *    the options bar. These are the values a stroke is adjusted with while
+ *    drawing, so they never leave the screen.
+ *  - **advanced** - sampling, stabilizer, texture, the stamp and the pressure
+ *    switches, in the bar's "Brush settings" panel. They are set once and
+ *    then left alone; a permanent row of them made the toolbar three rows
+ *    tall and pushed the canvas down.
+ *
+ * Neither tier is a second registry: both read the same table and write
+ * through the same `setBrush` path, so a field cannot exist in one place and
+ * be missing from the other.
  */
 
 import { useState } from "react";
-import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 import {
+  advancedBrushProperties,
   brushPropertyControlValue,
   brushPropertyFormat,
   brushPropertyPatch,
   brushPropertyRange,
-  brushPropertiesFor,
+  primaryBrushProperties,
+  type BrushProperty,
   type BrushSliderProperty,
 } from "../../core/brushes/brushProperties";
+import { useEditor, useEditorState } from "../../hooks/useEditor";
+import type { BrushSettings } from "../../types/brush";
+import { BrushPresetControls } from "./BrushPresets";
 import { BrushPreview } from "./BrushPreview";
-import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
 
-export function BrushControls() {
+/** The stroke controls: always in the options bar. */
+export function BrushPrimaryControls() {
+  const { actions } = useEditor();
+  const { brush } = useEditorState();
+
+  return (
+    <div className="brush-primary">
+      <BrushPreview />
+      <BrushPresetControls />
+      {primaryBrushProperties(brush).map((property) => (
+        <BrushPropertyControl
+          key={property.id}
+          property={property}
+          brush={brush}
+          onChange={actions.setBrush}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** The settings, behind the options bar's "Brush settings" panel. */
+export function BrushAdvancedControls() {
   const { actions } = useEditor();
   const { brush } = useEditorState();
   const [curveOpen, setCurveOpen] = useState(false);
   const pressureEnabled = brush.pressureSize > 0 || brush.pressureOpacity > 0;
 
   return (
-    <div className="toolbar__group brush-controls">
-      {/* The live swatch: what this brush will paint, painted by the engine's
-          own rasterizer. The size is read from the slider below it. */}
-      <BrushPreview />
-      <BrushPresets />
-      {brushPropertiesFor(brush).map((property) => {
-        if (property.kind === "toggle") {
-          return (
-            <label key={property.id} className="toggle" title={property.title}>
-              <input
-                type="checkbox"
-                checked={property.read(brush)}
-                onChange={(event) => actions.setBrush(property.write(event.target.checked))}
-              />
-              {property.label}
-            </label>
-          );
-        }
-        return (
-          <BrushSlider
-            key={property.id}
-            property={property}
-            value={brushPropertyControlValue(property, brush[property.id])}
-            onChange={(value) => actions.setBrush(brushPropertyPatch(property, value))}
-          />
-        );
-      })}
+    <div className="brush-advanced">
+      <p className="brush-advanced__hint">
+        The shape of the stroke. Size, opacity and hardness stay in the options bar.
+      </p>
+      {advancedBrushProperties(brush).map((property) => (
+        <BrushPropertyControl
+          key={property.id}
+          property={property}
+          brush={brush}
+          onChange={actions.setBrush}
+        />
+      ))}
       {pressureEnabled ? (
         <button
           type="button"
-          className="pressure-curve__toggle"
+          className="brush-advanced__curve-toggle"
           aria-expanded={curveOpen}
           title="Shape how raw pen pressure maps to the size and opacity response"
           onClick={() => setCurveOpen((open) => !open)}
         >
-          Pressure curve
+          {curveOpen ? "Hide pressure curve" : "Pressure curve"}
         </button>
       ) : null}
       {pressureEnabled && curveOpen ? <PressureCurveEditor /> : null}
@@ -77,8 +93,39 @@ export function BrushControls() {
   );
 }
 
+/** One property, as the table describes it. */
+function BrushPropertyControl({
+  property,
+  brush,
+  onChange,
+}: {
+  readonly property: BrushProperty;
+  readonly brush: BrushSettings;
+  readonly onChange: (patch: Partial<BrushSettings>) => void;
+}) {
+  if (property.kind === "toggle") {
+    return (
+      <label className="toggle" title={property.title}>
+        <input
+          type="checkbox"
+          checked={property.read(brush)}
+          onChange={(event) => onChange(property.write(event.target.checked))}
+        />
+        {property.label}
+      </label>
+    );
+  }
+  return (
+    <BrushSliderField
+      property={property}
+      value={brushPropertyControlValue(property, brush[property.id])}
+      onChange={(value) => onChange(brushPropertyPatch(property, value))}
+    />
+  );
+}
+
 /** One slider, as the property model describes it. */
-function BrushSlider({
+function BrushSliderField({
   property,
   value,
   onChange,

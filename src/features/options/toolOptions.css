@@ -15,11 +15,23 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 10px;
-  height: 32px;
+  gap: 8px;
+  height: 38px;
   padding: 0 8px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* The controls that may not fit scroll here; the tool chip on the left and
+   the advanced-settings trigger on the right never scroll away. */
+.tool-options-bar__scroll {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 100%;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -27,19 +39,30 @@
   /* The gutter is reserved whether or not the bar overflows, so the controls
      never shift by a few pixels when a scrollbar appears. */
   scrollbar-gutter: stable;
+  padding-right: 2px;
 }
 
-.tool-options-bar::-webkit-scrollbar {
+.tool-options-bar__scroll::-webkit-scrollbar {
   height: 6px;
 }
 
-.tool-options-bar::-webkit-scrollbar-track {
+.tool-options-bar__scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.tool-options-bar::-webkit-scrollbar-thumb {
+.tool-options-bar__scroll::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 3px;
+}
+
+/* The right-hand end of the bar: settings that stay reachable at any width. */
+.tool-options-bar__end {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 100%;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
 }
 
 /* The active tool, so the bar says whose options it is showing. */
@@ -48,13 +71,33 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
   color: var(--text-strong);
   font-weight: 600;
   white-space: nowrap;
 }
 
+.tool-options-bar__tool-icon {
+  display: inline-flex;
+  color: var(--text-dim);
+}
+
 .tool-options-bar__tool-name {
   color: var(--text-strong);
+}
+
+.tool-options-bar__tool-key {
+  min-width: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font: 10px/1.4 var(--font-mono);
+  text-align: center;
 }
 
 /* What a tool with no options does, instead of a row of dead controls. */

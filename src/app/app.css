@@ -4,6 +4,8 @@
   display: grid;
   grid-template-rows: 30px auto 1fr 22px;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-app);
 }
 
@@ -11,21 +13,37 @@
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 216px;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* The right-hand column: the colour panel on top, the layers panel taking the
-   rest of the height and scrolling as it always has. */
+/* The two top rows: the contextual options bar and the document bar. They are
+   separate rows so the document controls never move when the tool changes. */
+.top-bars {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The right-hand column: a tabbed dock over the layers list. The dock takes a
+   little over half the height and the layers list the rest, both with a
+   minimum: at a short window the column scrolls rather than squeezing the
+   layers list to a header. */
 .side-panels {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .side-panels__layers {
   display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 1 45%;
+  min-height: 150px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
 }
 
 .side-panels__layers > .panel {
@@ -118,13 +136,17 @@
 
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 8px;
-  padding: 4px 8px;
+  height: 34px;
+  padding: 0 8px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .toolbar__group {
@@ -135,13 +157,14 @@
 }
 
 .toolbar__divider {
+  flex: 0 0 auto;
   width: 1px;
   height: 18px;
   background: var(--border);
 }
 
 .toolbar__spacer {
-  flex: 1;
+  flex: 1 0 8px;
 }
 
 .toolbar__hint {
@@ -151,22 +174,160 @@
   white-space: nowrap;
 }
 
-.brush-controls {
-  /* A dedicated, wrapping row: five sliders plus the pressure toggles are wider
-     than a typical window, and clipping them made settings unreachable. */
-  flex-wrap: wrap;
+/* The hint is guidance, not a control: at a narrow window it is the first
+   thing to go, so the controls that matter keep their room. */
+@media (max-width: 1180px) {
+  .toolbar__hint {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------ brush controls */
+
+/* The primary stroke controls, in the options bar: preview, preset, and the
+   three sliders a stroke is actually adjusted with. */
+.brush-primary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.brush-primary .slider-field {
+  gap: 5px;
+}
+
+.tool-options-bar .brush-primary .slider-field__range {
+  width: 60px;
+}
+
+.tool-options-bar .brush-primary .slider-field__value {
+  width: 42px;
+}
+
+.tool-options-bar .brush-primary .slider-field__display {
+  display: none;
+}
+
+/* The advanced settings panel: a column of labelled rows, wide enough for the
+   labels and the pressure curve. */
+.brush-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 320px;
+  padding: 10px;
+}
+
+.brush-advanced__hint {
+  margin: 0 0 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.brush-advanced .slider-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 48px;
+  gap: 6px;
+}
+
+.brush-advanced .slider-field__range {
   width: 100%;
-  gap: 4px 12px;
+}
+
+.brush-advanced .slider-field__display {
+  display: none;
+}
+
+.brush-advanced__curve-toggle {
+  align-self: flex-start;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.brush-advanced__curve-toggle:hover,
+.brush-advanced__curve-toggle[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.brush-advanced .pressure-curve {
+  width: 100%;
+  border-top: 1px solid var(--border);
+}
+
+.brush-advanced .pressure-curve__plot {
+  width: 100%;
+  height: 130px;
+}
+
+/* The preset manager: a small form under its trigger. */
+.brush-preset-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+}
+
+.brush-preset-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+.brush-preset-editor__field .text-input {
+  width: 100%;
+}
+
+.brush-preset-editor__current {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brush-preset-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gradient-stops-panel {
+  width: 300px;
+  padding: 10px;
+}
+
+@media (max-width: 1100px) {
+  /* The swatch shows a shape, not a value: at a narrow window the sliders and
+     the preset select are worth more than the picture. */
+  .brush-primary .brush-preview,
+  .brush-presets__label {
+    display: none;
+  }
 }
 
 .brush-presets {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 4px 6px;
-  width: 100%;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+}
+
+.brush-presets__state {
+  min-width: 0;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
 /* ------------------------------------------------------- pressure curve */
@@ -315,14 +476,6 @@
 .brush-presets__select:focus {
   border-color: var(--accent);
   outline: none;
-}
-
-.brush-presets__name {
-  width: 150px;
-}
-
-.brush-presets__action {
-  padding: 0 8px;
 }
 
 .color-controls {
@@ -725,6 +878,12 @@
   border-radius: var(--radius);
   background: var(--bg-raised);
   color: var(--text);
+}
+
+.popover {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
 }
 
 .popover__trigger {
