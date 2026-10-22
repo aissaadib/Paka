@@ -329,6 +329,9 @@ describe("reading the controls", () => {
     expect(expand?.kind === "slider" && expand.read(snapshot)).toBe(2);
     expect(antialias?.kind === "slider" && antialias.read(snapshot)).toBe(1);
     expect(closeGaps?.kind === "slider" && closeGaps.read(snapshot)).toBe(3);
+  });
+
+  it("reads back what the editor wrote", () => {
     const editor = editorFor("star");
     editor.actions.setShapeSides(7);
     editor.actions.setShapeInnerRatio(0.42);
@@ -421,6 +424,8 @@ describe("writing the controls", () => {
       ["setFillAntialias", 5],
       ["setFillCloseGaps", 5],
     ]);
+  });
+
   it("writes the brush through the brush setter", () => {
     const { actions, calls } = recorder();
     const snapshot = snapshotFor("brush");
@@ -431,8 +436,6 @@ describe("writing the controls", () => {
 
   it("snaps the star's inner radius to its step", () => {
     const { actions, calls } = recorder();
-    const inner = toolOptionFields("shape", "star", snapshotFor("star")).find(
-      (option) => option.id === "shapeInnerRatio",
     const inner = sliderWithId(
       toolOptionFields("shape", "star", snapshotFor("star")),
       "shapeInnerRatio",
