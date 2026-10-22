@@ -522,6 +522,30 @@ Key files for the next slice (directional / per-dab stamp textures):
   hue is 220° - and any colour changed elsewhere replaces it with the stored
   colour. Choosing a colour is session state for the next gesture, not an
   edit.
+- **The colour dock has one source of truth too.** The *ink* is the brush's
+  colour and the *alt* colour is the engine's secondary; both are editor
+  state resolved once at press time, so a stroke, a shape, a fill and a
+  gradient each keep the colour they started with. Every colour path in the
+  app ends in the same two setters - `setBrush` and `setSecondaryColor` - so
+  the wheel, the chips, the exact fields, the palette swatches, the recent
+  colours and the canvas picker cannot disagree about what the next gesture
+  will paint with. `setBrush` is also where a colour is **recorded** in the
+  recent-colours history, which is why the history cannot drift away from the
+  brush.
+- **The palette is a preference; the recent colours are session state.** The
+  palette is a list of named swatches and lives in the settings file, so it
+  survives a restart. The recent colours are bounded, newest first, and are
+  deliberately **not** written to the settings file: the palette is the thing
+  that is kept, the history is what happened in this sitting. Both are editor
+  state, so neither adds a history entry, bumps the revision or dirties the
+  drawing - and removing a swatch never touches a stroke.
+- **A translucent colour is refused, not approximated.** The app stores
+  `#rrggbb` everywhere - a brush, a fill, a gradient, a swatch - and paints
+  opaque colours only, so an alpha cannot be honoured. Storing it opaque would
+  paint something the artist did not ask for, and storing the alpha would
+  change the project format and the settings file. The exact field therefore
+  refuses it **with its own reason** and reverts to the colour in hand, the
+  same treatment as garbage but a true one. Nothing is silently dropped.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
@@ -593,6 +617,13 @@ Product:
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+- Colours: the app has **no alpha anywhere**, so there is no transparent
+  colour to pick and a translucent one is refused rather than approximated. The
+  palette holds one colour per swatch, with no gradients or patterns in it, and
+  a swatch cannot be dragged, resized or given a second colour. The palette is
+  a flat list - there is no reordering, no folders and no multiple palettes.
+  The recent colours are bounded and are not written to the settings file, so
+  they do not survive a restart.
 - **There is no autosave and no crash recovery.** The recovery machinery and
   its policy seam exist (`src/core/autosave/`) and are covered by tests, but
   the decisions that govern autosaving - when it runs, how a never-saved
