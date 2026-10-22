@@ -6,9 +6,19 @@ The deeper references are [HANDOFF.md](HANDOFF.md) (verification recipes,
 toolchain caveats), [ROADMAP.md](ROADMAP.md) (the authoritative plan) and
 [ARCHITECTURE.md](ARCHITECTURE.md) / [PROJECT_FORMAT.md](PROJECT_FORMAT.md).
 
-Last verified: **2026-10-21**, at `87593bc` - the **polygon and star** slice
-(T-14), on top of the HSV colour wheel, the stamp (dab) engine and the
-visual-regression harness.
+Last verified: **2026-10-22**, on `feat/agent14-brush-tips` - the **brush tips
+and a tunable texture** slice (Agent 14), on top of the pressure curve, the
+stamp (dab) engine, the per-dab directional texture and the visual-regression
+harness.
+
+The slice was verified in the browser as well as in the suite: the tip picker
+appears with the stamp on, an elliptical tip at 40 % roundness draws a stroke
+measurably narrower than the round tip's (6 device pixels against 14 at the
+same brush size, the ratio the aspect asks for), the texture's profile,
+density and contrast controls appear with the texture on and the lanes are
+visible in the drawn stroke, and one stroke is one undo step. The default
+strokes are unchanged: the round tip takes the plain round path, and the
+default texture's coverage is pinned by a checksum in the test suite.
 
 > **Before opening source files, read [`AGENTS.md`](../AGENTS.md).** It is the
 > token-efficient file/symbol map and reading protocol; this brief is the
