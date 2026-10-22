@@ -1,0 +1,142 @@
+/**
+ * The document tab strip.
+ *
+ * A row of its own above the workspace: the tabs scroll sideways inside it,
+ * so a long list of open documents never takes space away from the canvas,
+ * the tool rail or the panels.
+ *
+ * The strip and the workspace share one row of the application shell, so the
+ * shell's own grid does not have to know about the tabs: the strip takes the
+ * height it needs and the workspace takes the rest.
+ */
+
+.workspace-panel {
+  display: grid;
+  /* The strip and the workspace share the row: the strip takes the height it
+     needs and the workspace takes the rest.
+
+     The single `minmax(0, 1fr)` column is what keeps a long row of open
+     documents from making the window wider than it is: the strip scrolls
+     sideways inside it instead of pushing the shell out. */
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The workspace takes what the strip leaves, and may shrink below its
+   content's height so the canvas can be scrolled rather than pushed out. */
+.workspace-panel > .workspace-body {
+  min-height: 0;
+  min-width: 0;
+}
+
+.document-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: calc(4px * var(--ui-scale));
+  /* The strip keeps its own height and never grows: the workspace below it
+     takes the rest. */
+  flex: 0 0 auto;
+  height: calc(26px * var(--ui-scale));
+  min-width: 0;
+  padding: 0 calc(4px * var(--ui-scale));
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.document-tabs__list {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  gap: calc(2px * var(--ui-scale));
+  min-width: 0;
+  /* The tabs scroll rather than widen the row: the strip has a fixed height
+     and never pushes the workspace around. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.document-tab {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  /* A tab is compact: a long file name is cut off, not stretched. */
+  max-width: calc(168px * var(--ui-scale));
+  border: 1px solid transparent;
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--text-dim);
+}
+
+.document-tab:hover {
+  background: var(--bg-raised-hover);
+}
+
+.document-tab.is-active {
+  background: var(--bg-panel);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+
+.document-tab__label {
+  display: flex;
+  align-items: center;
+  gap: calc(5px * var(--ui-scale));
+  min-width: 0;
+  height: 100%;
+  padding: 0 calc(2px * var(--ui-scale)) 0 calc(8px * var(--ui-scale));
+  color: inherit;
+}
+
+.document-tab__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-tab__dirty {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: calc(8px * var(--ui-scale));
+  line-height: 1;
+}
+
+.document-tab__close {
+  flex: 0 0 auto;
+  width: calc(18px * var(--ui-scale));
+  height: 100%;
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1;
+  opacity: 0;
+}
+
+.document-tab:hover .document-tab__close,
+.document-tab.is-active .document-tab__close,
+.document-tab__close:focus-visible {
+  opacity: 1;
+}
+
+.document-tab__close:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text-strong);
+}
+
+.document-tabs__new {
+  flex: 0 0 auto;
+  align-self: center;
+  width: calc(22px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  border-radius: var(--radius);
+  color: var(--text-dim);
+}
+
+.document-tabs__new:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text-strong);
+}

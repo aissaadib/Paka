@@ -15,6 +15,13 @@ import { describeOutcome, type FileMessage } from "./fileMessages";
 
 export interface FileCommands {
   readonly open: () => void;
+  /**
+   * Opens a file that is already named.
+   *
+   * This is what the recent list calls. A file that has been moved or deleted
+   * fails, and the failure says which file it was.
+   */
+  readonly openPath: (path: string) => void;
   readonly save: () => void;
   readonly saveAs: () => void;
   readonly exportPng: () => void;
@@ -24,6 +31,20 @@ export interface FileCommands {
    * that discards the drawing.
    */
   readonly saveThen: (next: () => void) => void;
+  /**
+   * Saves one open document and then runs `next`.
+   *
+   * Closing a tab that is not the one on screen has to save *that*
+   * document, so the save cannot always mean "the active one".
+   */
+  readonly saveSessionThen: (sessionId: string, next: () => void) => void;
+  /**
+   * Saves every open document that has unsaved changes, then runs `next`.
+   *
+   * Closing the window has to write all of them, not just the one on screen.
+   * The follow-up runs only when every one of them reached the disk.
+   */
+  readonly saveAllThen: (next: () => void) => void;
   /** True while a dialog is open or a file is being written. */
   readonly busy: boolean;
   readonly message: FileMessage | null;
@@ -38,7 +59,7 @@ function describeError(error: unknown): string {
 }
 
 export function useFileCommands(): FileCommands {
-  const { files } = useEditor();
+  const { files, sessions } = useEditor();
   const [message, setMessage] = useState<FileMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
@@ -76,6 +97,13 @@ export function useFileCommands(): FileCommands {
     void run(() => files.open());
   }, [files, run]);
 
+  const openPath = useCallback(
+    (path: string) => {
+      void run(() => files.openPath(path));
+    },
+    [files, run],
+  );
+
   const save = useCallback(() => {
     void run(() => files.save());
   }, [files, run]);
@@ -109,9 +137,53 @@ export function useFileCommands(): FileCommands {
     [files, run],
   );
 
+  const saveSessionThen = useCallback(
+    (sessionId: string, next: () => void) => {
+      void (async () => {
+        const outcome = await run(() => files.saveSession(sessionId));
+        if (outcome !== null && outcome.status === "saved") {
+          next();
+        }
+      })();
+    },
+    [files, run],
+  );
+
+  const saveAllThen = useCallback(
+    (next: () => void) => {
+      void (async () => {
+        for (const session of sessions.list) {
+          if (!session.engine.getState().file.dirty) {
+            continue;
+          }
+          const outcome = await run(() => files.saveSession(session.id));
+          if (outcome === null || outcome.status !== "saved") {
+            // A cancelled dialog or a failed write stops the sequence: the
+            // window stays open and the document keeps its unsaved marker.
+            return;
+          }
+        }
+        next();
+      })();
+    },
+    [files, run, sessions],
+  );
+
   const dismissMessage = useCallback(() => {
     setMessage(null);
   }, []);
 
-  return { open, save, saveAs, exportPng, saveThen, busy, message, dismissMessage };
+  return {
+    open,
+    openPath,
+    save,
+    saveAs,
+    exportPng,
+    saveThen,
+    saveSessionThen,
+    saveAllThen,
+    busy,
+    message,
+    dismissMessage,
+  };
 }

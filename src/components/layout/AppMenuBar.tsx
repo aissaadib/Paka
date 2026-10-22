@@ -29,6 +29,7 @@ import { WORKSPACE_PROFILES } from "../../core/workspace/workspaceProfiles";
 import { UI_SCALE_STEPS, WORKSPACE_THEMES } from "../../core/workspace/workspaceSettings";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { usePanelActions, usePanelState } from "../../hooks/usePanels";
+import { useRecentFiles } from "../../hooks/useRecentFiles";
 import { useWorkspaceActions, useWorkspaceSettings } from "../../hooks/useWorkspace";
 import { VIEW_ROTATION_DEGREES } from "../../features/view/viewNavigation";
 import { IconCheck, IconChevronDown } from "../icons";
@@ -38,6 +39,10 @@ import {
   lastMenuIndex,
   nextMenuIndex,
 } from "../../utils/menuNavigation";
+import { fileNameOf } from "../../utils/path";
+
+/** How many recent files the File menu shows. */
+const RECENT_FILES_IN_MENU = 5;
 
 interface MenuItemSpec {
   readonly type: "item";
@@ -68,6 +73,10 @@ interface MenuSpec {
 export interface AppMenuBarProps {
   readonly onNewDocument: () => void;
   readonly onOpenProject: () => void;
+  /** Opens a file from the recent list. */
+  readonly onOpenRecent: (path: string) => void;
+  /** Forgets the recent list. */
+  readonly onClearRecentFiles: () => void;
   readonly onSaveProject: () => void;
   readonly onSaveProjectAs: () => void;
   readonly onExportPng: () => void;
@@ -84,6 +93,8 @@ function menuItems(popup: HTMLDivElement | null): HTMLButtonElement[] {
 export function AppMenuBar({
   onNewDocument,
   onOpenProject,
+  onOpenRecent,
+  onClearRecentFiles,
   onSaveProject,
   onSaveProjectAs,
   onExportPng,
@@ -91,6 +102,7 @@ export function AppMenuBar({
   const { actions } = useEditor();
   const { history, document: drawingDocument, selectedStrokes, secondaryViewOpen } =
     useEditorState();
+  const recentFiles = useRecentFiles();
   const layout = usePanelState();
   const panelActions = usePanelActions();
   const workspace = useWorkspaceSettings();
@@ -228,6 +240,27 @@ export function AppMenuBar({
     }
   };
 
+  // The recent files, as entries in the File menu.
+  //
+  // The path is the item's explanation, so the menu shows the file name and
+  // the full path is one hover away. A file that has been moved stays in the
+  // list: opening it then fails and says so, which is more use than an entry
+  // that quietly disappeared.
+  const recentFileEntries: readonly MenuEntry[] =
+    recentFiles.length === 0
+      ? []
+      : [
+          { type: "separator" },
+          ...recentFiles.slice(0, RECENT_FILES_IN_MENU).map((path) => ({
+            type: "item" as const,
+            label: fileNameOf(path),
+            description: path,
+            onSelect: () => onOpenRecent(path),
+          })),
+          { type: "separator" },
+          { type: "item" as const, label: "Clear Recent Files", onSelect: onClearRecentFiles },
+        ];
+
   const menus: readonly MenuSpec[] = [
     {
       id: "file",
@@ -235,6 +268,7 @@ export function AppMenuBar({
       entries: [
         { type: "item", label: "New Document…", onSelect: onNewDocument },
         { type: "item", label: "Open…", shortcut: "Ctrl+O", onSelect: onOpenProject },
+        ...recentFileEntries,
         { type: "separator" },
         { type: "item", label: "Save", shortcut: "Ctrl+S", onSelect: onSaveProject },
         { type: "item", label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveProjectAs },

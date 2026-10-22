@@ -44,6 +44,15 @@ export class ProjectFiles {
   constructor(
     private readonly engine: DrawingEngine,
     private readonly gateway: ProjectFileGateway,
+    /**
+     * Asked before a "save as" writes to a path.
+     *
+     * It returns the reason the write must not happen, or `null` when the
+     * path is fine. The editor uses it to refuse a path that another open
+     * document already holds: two documents on one file would each overwrite
+     * the other, and the user would have no way of telling which one won.
+     */
+    private readonly refusePath?: (path: string) => string | null,
   ) {}
 
   /** True when the document has changes that are not on disk. */
@@ -108,7 +117,12 @@ export class ProjectFiles {
     if (path === null) {
       return { status: "cancelled" };
     }
-    return this.writeTo(ensureExtension(path, PROJECT_FILE_EXTENSION));
+    const target = ensureExtension(path, PROJECT_FILE_EXTENSION);
+    const refusal = this.refusePath?.(target);
+    if (refusal !== undefined && refusal !== null) {
+      return { status: "error", message: refusal };
+    }
+    return this.writeTo(target);
   }
 
   /** Writes the composite as a PNG without touching the editable document. */
