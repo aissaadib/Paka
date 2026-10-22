@@ -83,7 +83,9 @@ rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
 (~300: the work-area clamp, the physical-pixel arithmetic and the cases),
 `core/document/grid.ts` (283: the grid lattice, the snap candidates and the
 document-space tolerance), `core/settings/appSettings.ts` (269: the settings
-document, its readers and its per-field validation).
+document, its readers and its per-field validation),
+`core/input/ownership.ts` (275: the ownership state, the take/release/cancel
+rules and the routing).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
 shape geometry), `core/rendering/stampCoverage.ts` (533: the dab plan, the
@@ -219,6 +221,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `DynamicsModel`, `normalizeDynamicsModel`, `dynamicsSizeFactor`, `registerDynamicsModel` | `core/brushes/dynamics.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
+| `PointerOwnership`, `transitionOwnership`, `reduceOwnership`, `routePointerEvent`, `isDragInFlight`, `gestureForButton` | `core/input/ownership.ts` | grep the symbol |
 
 ## 6. Docs → section
 
@@ -256,6 +259,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| Pointer ownership | `pointerOwnership.test.ts` (the take/release/cancel rules, the routing, the binder's pointer handling and the cancelled gesture) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
