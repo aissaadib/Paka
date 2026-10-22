@@ -279,7 +279,7 @@ describe("project persistence", () => {
     };
   }
 
-  it("round-trips a custom curve at version 12", () => {
+  it("round-trips a custom curve in the current project version", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const stroke = strokeWithCurve(BENT);
@@ -290,7 +290,11 @@ describe("project persistence", () => {
       layers: Array<{ elements: Array<{ brush: { pressureCurve: unknown } }> }>;
     };
     expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.version).toBe(12);
+    // The pressure curve arrived with version 12; later versions added other
+    // things. The version this build writes is pinned once, in
+    // `projectFormat.test.ts`; this test is about the curve surviving the
+    // round trip, not about which version number that is.
+    expect(payload.version).toBeGreaterThanOrEqual(12);
     expect(payload.layers[0].elements[0].brush.pressureCurve).toEqual(BENT);
 
     const parsed = parseProject(JSON.stringify(payload));

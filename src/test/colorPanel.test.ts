@@ -99,9 +99,11 @@ describe("the colour dock's registration", () => {
 
   it("keeps the facts the shell writes to the settings file", () => {
     // The id is written to disk, so it is pinned here: a renamed dock would
-    // leave its old id behind in every saved layout.
-    expect(COLOR_PANEL_ID).toBe("colour");
-    expect(COLOR_PANEL_TITLE).toBe("Colour");
+    // leave its old id behind in every saved layout. It is also the id the
+    // shell and the panel manager's catalogue use, so there is one dock and
+    // not two.
+    expect(COLOR_PANEL_ID).toBe("color");
+    expect(COLOR_PANEL_TITLE).toBe("Color");
     expect(COLOR_PANEL_SLOT).toBe("right");
     expect(COLOR_PANEL_ICON).toBe("palette");
     expect(COLOR_PANEL_ORDER).toBe(0);

@@ -54,26 +54,36 @@ import { ToolBar } from "./ToolBar";
  * The registry is the shell's list of panels, so the side column is built
  * from it rather than written out here: a panel is added by registering it,
  * and the composition decides where it sits and whether it is shown.
+ *
+ * These two registrations are *fallbacks*. A panel that knows how to
+ * register itself - the colour dock does - keeps its own registration, with
+ * its own icon, its own mount policy and its own description. The shell
+ * only speaks for the panels that have not spoken for themselves, so there
+ * is one entry per panel and one dock in the side column.
  */
-registerPanel({
-  id: "color",
-  title: "Color",
-  slot: "right",
-  order: 0,
-  render: () => <ColorPanel />,
-});
+if (!findPanel("color")) {
+  registerPanel({
+    id: "color",
+    title: "Color",
+    slot: "right",
+    order: 0,
+    render: () => <ColorPanel />,
+  });
+}
 
-registerPanel({
-  id: "layers",
-  title: "Layers",
-  slot: "right",
-  order: 1,
-  render: () => (
-    <div className="side-panels__layers">
-      <LayersPanel />
-    </div>
-  ),
-});
+if (!findPanel("layers")) {
+  registerPanel({
+    id: "layers",
+    title: "Layers",
+    slot: "right",
+    order: 1,
+    render: () => (
+      <div className="side-panels__layers">
+        <LayersPanel />
+      </div>
+    ),
+  });
+}
 
 export function Workspace() {
   return (

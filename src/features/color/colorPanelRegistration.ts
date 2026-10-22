@@ -31,11 +31,15 @@ import type { ShellSlotId } from "../../core/shell/slots";
  * Stable, because it is written to the settings file: a renamed panel keeps
  * its id, and a removed panel leaves its id behind in old files, where the
  * reader drops it.
+ *
+ * One id, one spelling: the shell, the panel manager's catalogue and the
+ * dock itself all name the same panel the same way. Two ids for one panel
+ * would put two docks in the side column.
  */
-export const COLOR_PANEL_ID = "colour";
+export const COLOR_PANEL_ID = "color";
 
 /** The heading the dock shows. */
-export const COLOR_PANEL_TITLE = "Colour";
+export const COLOR_PANEL_TITLE = "Color";
 
 /**
  * The slot the dock docks in: the shell's side column.
