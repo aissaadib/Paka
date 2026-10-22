@@ -688,7 +688,9 @@ Verification gaps:
   hidden, so `requestAnimationFrame` is suspended and the display canvas
   never repaints - the visual-regression harness is the tool for that. The
   scale/rotate **handle** gesture could not be driven reliably through
-  synthetic events; its cancel path is covered by Vitest.
+  synthetic events; its cancel path is covered by Vitest. The full report,
+  with the exact commands and the before/after numbers, is
+  [docs/qa/T29-POINTER-LIFECYCLE-REPORT.md](qa/T29-POINTER-LIFECYCLE-REPORT.md).
 - **None has been verified in the packaged Tauri window**; native save/reopen and
   high-DPI rendering of the packaged build are unverified.
 - `cargo test --lib` cannot run on this toolchain (`0xC0000139`); use
