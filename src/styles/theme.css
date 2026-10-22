@@ -215,6 +215,19 @@ h2 {
   cursor: pointer;
 }
 
+/* The colour well: the native colour input, sized to the other controls. It
+   is a shared primitive - the stroke colours and the gradient's end colour
+   are the same control in different places. */
+.color-well {
+  width: 28px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
 .toggle:hover {
   color: var(--text);
 }

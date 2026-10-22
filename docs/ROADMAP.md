@@ -74,6 +74,16 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Pressure-sensitive width; pressure-sensitive opacity (applied once per
       stroke, from the stroke's mean pressure).
 - [x] Stable, predictable compositing for repeated strokes on one layer.
+- [x] A **contextual tool-options strip** under the menu bar: one row, always
+      the same height, showing the **active tool's** controls - the brush, the
+      shape, the selection actions, the fill tolerance, the gradient's own
+      controls - and nothing else. A control is offered only when the tool
+      really uses it, so nothing on the strip is a decoration: the gradient has
+      no brush size and a shape has no stabilizer. The size and the opacity
+      stay in the strip and the rest of the brush sits behind a popover.
+      Switching tools never moves the canvas, and a window too narrow for the
+      controls scrolls the strip sideways instead of wrapping it.
+      See [ARCHITECTURE.md](ARCHITECTURE.md#the-tool-options-strip).
 
 ## Phase 2 - Illustration tools
 

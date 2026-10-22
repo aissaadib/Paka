@@ -2,7 +2,10 @@
 
 .app-shell {
   display: grid;
-  grid-template-rows: 30px auto 1fr 22px;
+  /* The menu bar, the contextual tool-options strip, the document toolbar, the
+     workspace and the status bar. The options strip has a fixed height, so
+     switching tools never moves the canvas. */
+  grid-template-rows: 30px 32px auto 1fr 22px;
   height: 100%;
   background: var(--bg-app);
 }
@@ -149,14 +152,6 @@
   color: var(--text-dim);
   font-size: 11px;
   white-space: nowrap;
-}
-
-.brush-controls {
-  /* A dedicated, wrapping row: five sliders plus the pressure toggles are wider
-     than a typical window, and clipping them made settings unreachable. */
-  flex-wrap: wrap;
-  width: 100%;
-  gap: 4px 12px;
 }
 
 .brush-presets {
@@ -364,16 +359,6 @@
   cursor: default;
 }
 
-.color-controls__picker {
-  width: 28px;
-  height: var(--control-height);
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-inset);
-  cursor: pointer;
-}
-
 .color-controls__palette {
   display: grid;
   grid-template-columns: repeat(4, 14px);
@@ -391,24 +376,6 @@
 .color-controls__swatch.is-active {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.gradient-controls {
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.gradient-controls__color {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: var(--control-height);
-  color: var(--text-dim);
-  cursor: pointer;
-}
-
-.gradient-controls__color:hover {
-  color: var(--text);
 }
 
 .gradient-stops {

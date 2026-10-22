@@ -1,19 +1,19 @@
-/** Document toolbar: history, zoom, brush and color controls. */
+/**
+ * Document toolbar: history, zoom, grid and colour.
+ *
+ * The tool's own options live in the strip above this bar, so nothing here
+ * changes when the tool changes and the toolbar keeps the same height.
+ */
 
-import { BrushControls } from "../../features/brushes/BrushControls";
 import { ColorControls } from "../../features/color/ColorControls";
-import { GradientControls } from "../../features/gradient/GradientControls";
 import { GridControls } from "../../features/grid/GridControls";
-import { ToolOptionsPanel } from "../../features/options/ToolOptionsPanel";
-import { toolShowsBrushControls } from "../../features/options/toolOptionSchema";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
-import { useEditor, useEditorToolId } from "../../hooks/useEditor";
+import { useEditor } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
 
 export function ToolBar() {
   const { actions } = useEditor();
-  const toolId = useEditorToolId();
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Document toolbar">
@@ -35,9 +35,6 @@ export function ToolBar() {
       </div>
       <div className="toolbar__divider" />
       <GridControls />
-      {toolShowsBrushControls(toolId) ? <BrushControls /> : null}
-      <ToolOptionsPanel />
-      <GradientControls />
       <div className="toolbar__divider" />
       <ColorControls />
       <div className="toolbar__spacer" />
