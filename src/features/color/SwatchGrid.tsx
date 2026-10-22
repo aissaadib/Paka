@@ -13,7 +13,7 @@
  */
 
 import { useRef } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 export interface SwatchGridProps<T> {
   /** The swatches, in the order they are shown. */
@@ -75,7 +75,7 @@ export function SwatchGrid<T>({
       aria-label={groupLabel}
       ref={container}
       onKeyDown={onKeyDown}
-      style={{ "--swatch-columns": columns } as React.CSSProperties}
+      style={{ "--swatch-columns": columns } as CSSProperties}
     >
       {items.map((item, index) => renderItem(item, index))}
     </div>

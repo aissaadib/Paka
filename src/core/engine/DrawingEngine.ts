@@ -1152,13 +1152,17 @@ export class DrawingEngine implements StrokeSource {
     if (brushSettingsEqual(this.brush, next)) {
       return;
     }
+    const previousColor = this.brush.color;
     this.brush = next;
     // A colour the artist picked is a colour they will want again, so it goes
     // to the front of the recent-colours history. Recording it here, in the
     // one setter every colour path shares, is what keeps the history and the
     // brush from drifting apart: the wheel, the swatches, the text field and
-    // the canvas picker all land here.
-    this.rememberColor(next.color);
+    // the canvas picker all land here. A brush change that leaves the colour
+    // alone is not a new colour and is not recorded.
+    if (next.color !== previousColor) {
+      this.rememberColor(next.color);
+    }
     this.commands.breakMerge();
     this.publish();
   }

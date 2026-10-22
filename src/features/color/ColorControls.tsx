@@ -1,27 +1,26 @@
 /**
- * Stroke colour controls: a primary and a secondary colour plus a small fixed
- * palette.
+ * Stroke colour controls: the primary and the secondary colour, and the
+ * palette the artist keeps to hand.
  *
  * Left-button gestures paint with the primary colour; right-button gestures
  * paint with the secondary one. Both are editor state captured at press time,
- * so swapping them never repaints existing strokes. The secondary colour has no
- * project-format field of its own.
+ * so swapping them never repaints existing strokes. The secondary colour has
+ * no project-format field of its own.
+ *
+ * The swatches come from the editor's palette, which is the same list the
+ * colour panel edits and the settings file persists - so a swatch saved in
+ * the panel is here too, and one added here is in the panel.
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { PALETTE } from "./palette";
-
-/** `input[type=color]` only accepts `#rrggbb`. */
-function toColorInputValue(color: string): string {
-  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#000000";
-}
+import { colorInputValue } from "../../utils/color";
 
 export function ColorControls() {
   const { actions } = useEditor();
-  const { brush, secondaryColor } = useEditorState();
-  const current = toColorInputValue(brush.color);
-  const secondary = toColorInputValue(secondaryColor);
-  const canSwap = current.toLowerCase() !== secondary.toLowerCase();
+  const { brush, secondaryColor, palette } = useEditorState();
+  const current = brush.color;
+  const secondary = secondaryColor;
+  const canSwap = current !== secondary;
 
   return (
     <div className="toolbar__group color-controls">
@@ -29,7 +28,7 @@ export function ColorControls() {
         <input
           className="color-controls__picker"
           type="color"
-          value={current}
+          value={colorInputValue(current)}
           onChange={(event) => actions.setBrush({ color: event.target.value })}
           aria-label="Primary stroke color"
           title="Primary stroke color (left button)"
@@ -37,7 +36,7 @@ export function ColorControls() {
         <input
           className="color-controls__picker color-controls__picker--secondary"
           type="color"
-          value={secondary}
+          value={colorInputValue(secondary)}
           onChange={(event) => actions.setSecondaryColor(event.target.value)}
           aria-label="Secondary stroke color"
           title="Secondary stroke color (right button)"
@@ -54,23 +53,23 @@ export function ColorControls() {
         </button>
       </div>
       <div className="color-controls__palette" role="group" aria-label="Color palette">
-        {PALETTE.map((color) => (
+        {palette.map((swatch) => (
           <button
-            key={color}
+            key={swatch.id}
             type="button"
             className={[
               "color-controls__swatch",
-              color.toLowerCase() === current.toLowerCase() ? "is-active" : "",
+              swatch.color === current ? "is-active" : "",
             ]
               .filter(Boolean)
               .join(" ")}
-            style={{ backgroundColor: color }}
-            title={`${color} (right-click: secondary)`}
-            aria-label={`Use color ${color}`}
-            onClick={() => actions.setBrush({ color })}
+            style={{ backgroundColor: swatch.color }}
+            title={`${swatch.name} ${swatch.color} (right-click: secondary)`}
+            aria-label={`Use color ${swatch.name} ${swatch.color}`}
+            onClick={() => actions.setBrush({ color: swatch.color })}
             onContextMenu={(event) => {
               event.preventDefault();
-              actions.setSecondaryColor(color);
+              actions.setSecondaryColor(swatch.color);
             }}
           />
         ))}
