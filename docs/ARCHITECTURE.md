@@ -1568,6 +1568,72 @@ and closes with one settle segment on release. There is no look-ahead, rope
 physics or time-based catch-up, and the stored smoothed samples mean undo,
 reopen and export replay exactly the previewed path.
 
+### The brush cursor and the quick resize
+
+The brush's size is visible on the canvas as a **ring**, and it can be changed
+without leaving the canvas. Both are *views*, never content.
+
+**The ring.** `features/canvas/BrushCursor.tsx` is a DOM overlay: a sibling of
+the canvas element, not a layer of it. It therefore cannot reach a layer
+surface, a PNG export, the document history or the project file, and because it
+is a separate compositing layer it cannot flicker with the artwork underneath
+it. The ring's diameter is the brush's diameter in **document** pixels mapped
+through the viewport zoom, so it is the brush's real footprint rather than a
+decoration:
+
+```
+cssDiameter = max(4, brush.size * zoom)
+```
+
+The four CSS pixels are the floor: a 1 px brush at 10 % zoom is a tenth of a
+pixel, and a ring that thin is invisible rather than honest. The device pixel
+ratio enters through the outline's width - one *device* pixel is `1 / dpr` CSS
+pixels, with a half-pixel floor - so the ring stays a hairline on a
+high-density display instead of thickening with the zoom.
+
+The engine owns the answer. `engine.subscribeBrushCursor` reports the size, the
+zoom and two states (a resize in flight, a stroke in flight); the overlay
+writes them straight to the DOM, like the cursor position, so pointer movement
+never re-renders React. The ring fades while a stroke is in flight so it does
+not sit on top of the artwork being drawn.
+
+**The quick resize.** `Ctrl`+`Alt` and drag on the canvas changes the brush
+size: up grows it, down shrinks it. The gesture is owned by the engine and
+runs *before* any tool sees the press, so a resize can never leave a stroke
+behind.
+
+- The drag is **relative**: `size = start * e^(-dy / 100)`, so the ring does
+  not jump when the drag begins and the gesture feels the same at every zoom.
+  One e-fold of travel (100 screen pixels) multiplies the size by `e`; the
+  result is clamped to the brush's own `1..512` range.
+- A travel of three pixels or less is a **click**, not a resize, and leaves
+  the size alone.
+- The size is written through the ordinary `setBrush`, so the ring, the
+  readout, the toolbar's slider and the next stroke all agree. It is editor
+  state: no command is pushed, the revision does not move and the file stays
+  clean.
+- **Escape cancels** the resize and puts the size back. It has to work while
+  `Ctrl`+`Alt` is still held, because the gesture only ends when the pointer
+  is released - so the cancel is handled in `useKeyboardShortcuts` before the
+  chord table, which claims an exact set of modifiers and would otherwise
+  ignore the key.
+- A **lost pointer capture** cancels the resize the same way. If the capture
+  could not be taken at all, the release never arrives, and the next press is
+  the only sign that the gesture was over: the orphaned gesture is put back
+  the way it was, so the size is never left half-changed.
+- The gesture is **not taken away from a surface that owns the interaction**:
+  a field the user is typing in keeps the keyboard, and a press there reaches
+  the tool as usual. A modal dialog covers the canvas, so the canvas never
+  receives the press at all, and the brush-size shortcuts stand down while a
+  dialog is open.
+
+The gesture is a shortcut, not the only way in: `[` and `]` step the size,
+`Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's
+**Size** slider is a labelled range input that a keyboard or a screen reader
+can drive. The ring's readout is a visual duplicate of what that slider
+already exposes, so it stays out of the accessibility tree; the final size is
+announced once, when the gesture ends.
+
 ## React integration
 
 There is exactly one engine instance per window, created by `EditorProvider`

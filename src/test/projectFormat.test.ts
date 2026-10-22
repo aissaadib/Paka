@@ -772,6 +772,7 @@ describe("parseProject round trip", () => {
       serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
     ) as { version: number };
     expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.version).toBe(12);
 
     // The current build reads it...
     expect(parseProject(JSON.stringify(payload)).ok).toBe(true);

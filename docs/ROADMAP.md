@@ -74,6 +74,13 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Pressure-sensitive width; pressure-sensitive opacity (applied once per
       stroke, from the stroke's mean pressure).
 - [x] Stable, predictable compositing for repeated strokes on one layer.
+- [x] A **brush cursor**: the brush's real footprint is drawn on the canvas as a
+      ring that follows the pointer, sized in document pixels through the zoom,
+      and a **quick resize** (`Ctrl+Alt` and drag) changes the brush size with
+      a numeric readout, `Esc` cancelling it. Both are **views**: the ring
+      never reaches a layer, an export, the history or a saved file, and the
+      resize is editor state that the next stroke uses. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#the-brush-cursor-and-the-quick-resize).
 - [x] A **contextual tool-options strip** under the menu bar: one row, always
       the same height, showing the **active tool's** controls - the brush, the
       shape, the selection actions, the fill tolerance, the gradient's own

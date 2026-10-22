@@ -220,6 +220,21 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the picture does not change when a stroke is drawn backwards, and against the
   brush's nominal size, so the pattern is the same in document pixels at every
   zoom.
+- **Brush cursor and size ring**: the brush's real footprint is drawn on the
+  canvas as a **ring** that follows the pointer - the brush's diameter in
+  document pixels, through the current zoom, so it shrinks and grows with the
+  canvas rather than pretending to be a fixed size. The ring fades while a
+  stroke is in flight so it does not sit on top of the artwork. It is an
+  overlay, not content: it never reaches a layer, an export, the history or a
+  saved file.
+- **Quick brush resize**: `Ctrl`+`Alt` and drag on the canvas to change the
+  brush size - up grows it, down shrinks it - with the current size in pixels
+  shown next to the ring while the gesture runs. The resize is relative, so
+  the ring does not jump when the drag begins, and it is clamped to the
+  brush's own `1..512` range. `Escape` cancels a resize in flight and puts the
+  size back. The gesture is a shortcut, not the only way in: `[` and `]` step
+  the size, `Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the
+  toolbar's **Size** slider is there for a keyboard or a screen reader.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -352,6 +367,13 @@ paste-ready version of the same briefing is in
   **ellipse**, **polygon**, **star**, **bucket**, **gradient**, **colour
   picker** and **guides** tools exist, plus
   pan. There is no text tool.
+- **The quick brush resize is vertical only.** `Ctrl`+`Alt` and drag changes the
+  size with the pointer's vertical travel; a horizontal drag does nothing. The
+  gesture is offered for the **brush and the eraser** only, because the shape
+  tools already use `Alt` to draw from the centre and the ring is a brush
+  footprint. The ring is a circle, so a brush whose nominal diameter is a
+  fraction of a pixel is drawn at a four-pixel floor: the ring then says "at
+  least this small", not "exactly this big".
 - **Guides are axis-only.** A guide is vertical or horizontal, a second guide on
   the same position is refused, the colour is fixed, and there is no position
   label. The guides *do* take part in the snapping (the **Snap** switch), but
