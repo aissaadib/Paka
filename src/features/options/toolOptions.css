@@ -15,9 +15,6 @@
   gap: 10px;
   height: 32px;
   padding: 0 8px;
-  gap: 8px;
-  height: 32px;
-  padding: 0 6px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
@@ -27,8 +24,6 @@
   /* The gutter is reserved whether or not the strip overflows, so the
      controls never shift by a few pixels when a scrollbar appears. */
   scrollbar-gutter: stable;
-}
-
 }
 
 /* A classic, always-visible scrollbar: the strip's own rules, not the
@@ -83,7 +78,6 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  gap: 6px;
 }
 
 /* The popover's fields stack, so each slider gets the panel's full width. */
@@ -94,18 +88,6 @@
 }
 
 /* The strip is compact: the sliders are narrower than the ones in the
-   document toolbar, and the formatted value is dropped because the number
-   box already carries the number. */
-.tool-options-bar .slider-field__range {
-  width: 72px;
-}
-
-.tool-options-bar .slider-field__value {
-  width: 46px;
-}
-
-.tool-options-bar .slider-field__display {
-  min-width: 34px;
    document toolbar, their labels take only the room they need, and the
    formatted value is dropped because the number box already carries the
    number. */
