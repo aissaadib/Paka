@@ -22,8 +22,14 @@ export interface SwatchGridProps<T> {
   readonly columns: number;
   /** The accessible name of the group. */
   readonly groupLabel: string;
-  /** Renders one cell. The focusable element inside it needs the attribute
-   * `data-swatch-focusable`, so the arrow keys can find it. */
+  /**
+   * Renders one cell.
+   *
+   * The returned element must carry a `key` of its own - the grid renders a
+   * list, and React needs a stable identity for every cell. The focusable
+   * element inside it needs the attribute `data-swatch-focusable`, so the
+   * arrow keys can find it.
+   */
   readonly renderItem: (item: T, index: number) => ReactNode;
 }
 
@@ -53,6 +59,10 @@ export function SwatchGrid<T>({
       return;
     }
     event.preventDefault();
+    // The grid has claimed the key: the editor's own arrow-key shortcuts must
+    // not also act on it, or stepping through the swatches would nudge the
+    // selection at the same time.
+    event.stopPropagation();
     const step =
       event.key === "ArrowRight"
         ? 1

@@ -41,7 +41,7 @@ function ColorDockRow(props: {
           type="color"
           value={shown}
           onChange={(event) => onCommit(event.target.value)}
-          aria-label={`${label} colour`}
+          aria-label={`${label} swatch`}
           title={`${label} colour`}
         />
       </span>

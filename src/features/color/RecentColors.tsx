@@ -49,6 +49,7 @@ export function RecentColors() {
           groupLabel="Recent colours"
           renderItem={(color) => (
             <button
+              key={color}
               type="button"
               className="swatch-grid__swatch"
               style={{ backgroundColor: color }}
