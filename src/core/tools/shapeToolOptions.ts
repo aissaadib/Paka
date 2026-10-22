@@ -18,10 +18,16 @@
  * The options are **editor state**: writing one calls an editor action, which
  * publishes a new snapshot. It is not an edit - no history step, no dirty
  * flag, nothing in the project file.
+ *
+ * One ordering caveat, because the contract has two ways to register: an
+ * *append* adds to a tool's list, but a later *registration* replaces it. The
+ * shape tools' options are appended here, so a schema that registers the
+ * shape options again afterwards would drop them. Call
+ * `registerShapeToolOptions()` after such a registration - it is idempotent -
+ * or import this module from the schema, and the order stops mattering.
  */
 
 import type { EditorActions } from "../../state/editorStore";
-import type { ToolId } from "../../types/tool";
 import type { EditorSnapshot } from "../engine/DrawingEngine";
 import {
   appendToolOptions,
@@ -146,7 +152,7 @@ export function registerShapeToolOptions(): void {
   for (const kind of SHAPE_KINDS) {
     const options = shapeOptionFieldsFor(kind).map(optionFor);
     if (options.length > 0) {
-      appendToolOptions(kind as ToolId, options);
+      appendToolOptions(kind, options);
     }
   }
 }

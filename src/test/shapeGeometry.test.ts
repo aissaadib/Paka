@@ -31,9 +31,11 @@ import {
   shapeOptionLabel,
   type ShapeNumberOption,
 } from "../core/tools/shapeOptions";
-// The built-in schema is evaluated first, the way the app loads it: the
-// options bar's schema registers the shape options, and the shape tools then
-// append the ones the model adds. The order matters, so it is written down.
+// The built-in schema is evaluated first, the way the app loads it: `App`
+// imports the workspace - and with it the options bar's schema - before the
+// editor provider, and the editor provider is what reaches the tool registry.
+// So the shape tools append their options to the ones the schema registered.
+// The order matters, so it is written down.
 import "../features/options/toolOptionSchema";
 import { registerShapeToolOptions } from "../core/tools/shapeToolOptions";
 import { TOOL_DEFINITIONS } from "../core/tools/toolDefinitions";
