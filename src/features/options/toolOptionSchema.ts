@@ -22,6 +22,7 @@ import {
   FILL_MODES,
   FILL_SAMPLE_SCALES,
 } from "../../core/fill/fillOptions";
+import { SELECTION_SHAPES } from "../../core/document/selectionModes";
 import {
   registerToolOptions,
   type SelectToolOption,
@@ -148,6 +149,24 @@ const fillSampleScaleOption: SelectToolOption = {
   write: (actions, value) => actions.setFillSampleScale(Number(value)),
 };
 
+const selectionShapeOption: SelectToolOption = {
+  id: "selectionShape",
+  kind: "select",
+  label: "Shape",
+  title:
+    "Rectangle selects the box you drag; Lasso selects the freehand region you trace",
+  choices: SELECTION_SHAPES.map((shape) => ({
+    value: shape,
+    label: shape === "lasso" ? "Lasso" : "Rectangle",
+  })),
+  read: (snapshot) => snapshot.selectionShape,
+  write: (actions, value) => {
+    if (value === "rect" || value === "lasso") {
+      actions.setSelectionShape(value);
+    }
+  },
+};
+
 /**
  * The option fields for each tool, in toolbar order.
  *
@@ -155,6 +174,7 @@ const fillSampleScaleOption: SelectToolOption = {
  * brush group, the colour panel or nothing at all.
  */
 export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> = {
+  select: [selectionShapeOption],
   rectangle: [shapeFillOption],
   ellipse: [shapeFillOption],
   polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption],

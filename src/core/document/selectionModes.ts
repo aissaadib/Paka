@@ -44,6 +44,11 @@
  *  - **One gesture, one history step.** A scale or a rotation is recorded
  *    exactly like a move - one entry on the undo stack for the whole drag -
  *    because a mode's geometry is *one* coordinate map, not a series of edits.
+ *
+ * Two more selection rules live here because they are decisions rather than
+ * gestures: the **shape** a marquee traces (a rectangle or a freehand lasso)
+ * and the **combine** the modifiers ask for (replace, add, subtract,
+ * intersect). Both are pure, so the engine and the tests read the same rule.
  */
 
 import type { Bounds, Point } from "../../types/geometry";
@@ -74,6 +79,96 @@ export const SELECTION_MODES: readonly SelectionMode[] = ["marquee", "move", "sc
 /** True when the value is one of the modes. */
 export function isSelectionMode(value: unknown): value is SelectionMode {
   return typeof value === "string" && (SELECTION_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * The shape a marquee traces.
+ *
+ * A **rectangle** is the drag's bounding box; a **lasso** is the freehand path
+ * the pointer drew. Both end in the same place - a set of strokes - so the
+ * shape is only how the region is described, never a second kind of selection.
+ */
+export type SelectionShape = "rect" | "lasso";
+
+/** The shapes, in picker order. */
+export const SELECTION_SHAPES: readonly SelectionShape[] = ["rect", "lasso"];
+
+/** True when the value names a marquee shape. */
+export function isSelectionShape(value: unknown): value is SelectionShape {
+  return typeof value === "string" && (SELECTION_SHAPES as readonly string[]).includes(value);
+}
+
+/** The marquee shape, falling back to the rectangle for an unknown value. */
+export function normalizeSelectionShape(value: unknown): SelectionShape {
+  return isSelectionShape(value) ? value : "rect";
+}
+
+/**
+ * How a new marquee combines with the selection that is already there.
+ *
+ * Modifiers decide it at press time, exactly as they do in the drawing apps
+ * this mirrors: Shift adds, Alt subtracts, both intersect, neither replaces.
+ * The combine is fixed when the gesture starts, so releasing a modifier
+ * mid-drag cannot change what the release means.
+ */
+export type SelectionCombine = "replace" | "add" | "subtract" | "intersect";
+
+/** The combine mode the modifiers ask for. */
+export function selectionCombineFor(modifiers: {
+  readonly shift: boolean;
+  readonly alt: boolean;
+}): SelectionCombine {
+  if (modifiers.shift && modifiers.alt) {
+    return "intersect";
+  }
+  if (modifiers.shift) {
+    return "add";
+  }
+  if (modifiers.alt) {
+    return "subtract";
+  }
+  return "replace";
+}
+
+/**
+ * Combines a gesture's stroke ids with the current selection.
+ *
+ * `null` means "no committed selection". A combine that leaves nothing
+ * selected returns `null` rather than an empty selection, so the UI has one
+ * representation of "nothing selected". Ids keep the order they were found in,
+ * which is the layer's painting order.
+ */
+export function combineSelectionIds(
+  current: readonly string[] | null,
+  next: readonly string[],
+  combine: SelectionCombine,
+): string[] | null {
+  if (combine === "replace" || current === null) {
+    // With nothing selected, adding builds the first selection; subtracting
+    // from or intersecting with nothing stays nothing.
+    if (combine === "add" && current === null) {
+      return next.length > 0 ? [...next] : null;
+    }
+    return combine === "replace" && next.length > 0 ? [...next] : null;
+  }
+  if (combine === "add") {
+    const merged = [...current];
+    const seen = new Set(current);
+    for (const id of next) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        merged.push(id);
+      }
+    }
+    return merged.length > 0 ? merged : null;
+  }
+  const wanted = new Set(next);
+  if (combine === "subtract") {
+    const kept = current.filter((id) => !wanted.has(id));
+    return kept.length > 0 ? kept : null;
+  }
+  const intersection = current.filter((id) => wanted.has(id));
+  return intersection.length > 0 ? intersection : null;
 }
 
 /**

@@ -77,6 +77,9 @@ beforeEach(() => {
     moveLayer: vi.fn(),
     selectLayer: vi.fn(),
     clearSelection: vi.fn(),
+    selectAll: vi.fn(),
+    invertSelection: vi.fn(),
+    setSelectionShape: vi.fn(),
     deleteSelection: vi.fn(),
     deleteSelectedGuide: vi.fn(),
     cancelGuideGesture: vi.fn(),
@@ -208,6 +211,18 @@ describe("document and view commands", () => {
     expect(actions.flipSelection).toHaveBeenCalledWith("horizontal");
     press("v", { shift: true });
     expect(actions.flipSelection).toHaveBeenCalledWith("vertical");
+  });
+
+  it("selects all, inverts and deselects", () => {
+    press("a");
+    expect(actions.selectAll).toHaveBeenCalledOnce();
+    press("i", { shift: true });
+    expect(actions.invertSelection).toHaveBeenCalledOnce();
+    press("d", { shift: true });
+    expect(actions.clearSelection).toHaveBeenCalledOnce();
+    // The unshifted chord still duplicates the selection.
+    press("d");
+    expect(actions.duplicateSelection).toHaveBeenCalledOnce();
   });
 
   it("zooms", () => {

@@ -2382,6 +2382,207 @@ describe("DrawingEngine selection", () => {
     expect(engine.flipSelection("horizontal")).toBe(false);
     expect(engine.getState().history.depth).toBe(depth);
   });
+
+  /** Drags a marquee with the given modifiers held at the press. */
+  function marqueeWith(
+    engine: DrawingEngine,
+    points: ReadonlyArray<readonly [number, number]>,
+    modifiers: { readonly shift?: boolean; readonly alt?: boolean } = {},
+  ): void {
+    const first = points[0];
+    engine.handlePointerSample(
+      createSample({
+        phase: "down",
+        docX: first[0],
+        docY: first[1],
+        modifiers: { shift: false, alt: false, ctrl: false, meta: false, ...modifiers },
+      }),
+    );
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase: "up", docX: last[0], docY: last[1] }));
+  }
+
+  function selectedIds(spy: ReturnType<typeof createSpyRenderer>): string[] {
+    const overlay = spy.selections[spy.selections.length - 1];
+    return (overlay?.strokes ?? []).map((stroke) => stroke.id).sort();
+  }
+
+  it("selects with a freehand lasso inside the traced region", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    expect(engine.getState().selectionShape).toBe("rect");
+    engine.setSelectionShape("lasso");
+    expect(engine.getState().selectionShape).toBe("lasso");
+    const [inside] = engine.listStrokes(layerId);
+
+    // While the lasso is in flight the overlay carries the path, not a box.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 140, docY: 20 }));
+    const dragging = spy.selections[spy.selections.length - 1];
+    expect(dragging?.bounds).toBeNull();
+    expect(dragging?.path?.length).toBe(2);
+
+    engine.handlePointerSample(createSample({ phase: "move", docX: 140, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 20, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 20, docY: 20 }));
+
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(selectedIds(spy)).toEqual([inside.id]);
+    // The committed overlay is the selection again: a frame, not the path.
+    const committed = spy.selections[spy.selections.length - 1];
+    expect(committed?.path ?? null).toBeNull();
+    expect(committed?.bounds?.width).toBeCloseTo(50 + DEFAULT_BRUSH.size, 6);
+  });
+
+  it("treats a lasso click as a click, not as an empty region", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+    engine.setSelectionShape("lasso");
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 50, docY: 50 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(spy.selections[spy.selections.length - 1]?.strokes).toHaveLength(1);
+  });
+
+  it("adds, subtracts and intersects the selection with modifier keys", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [50, 150],
+      [100, 150],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    const [a, b, c] = engine.listStrokes(layerId);
+
+    marqueeWith(engine, [
+      [10, 10],
+      [150, 80],
+    ]);
+    expect(selectedIds(spy)).toEqual([a.id]);
+
+    // Shift adds the second stroke.
+    marqueeWith(
+      engine,
+      [
+        [10, 110],
+        [150, 180],
+      ],
+      { shift: true },
+    );
+    expect(selectedIds(spy)).toEqual([a.id, b.id].sort());
+
+    // Alt removes the first stroke again.
+    marqueeWith(
+      engine,
+      [
+        [10, 10],
+        [150, 80],
+      ],
+      { alt: true },
+    );
+    expect(selectedIds(spy)).toEqual([b.id]);
+
+    // Shift+Alt keeps only what both regions meet: B is not inside A's box.
+    marqueeWith(
+      engine,
+      [
+        [10, 10],
+        [150, 80],
+      ],
+      { shift: true, alt: true },
+    );
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+
+    // A combine with nothing selected builds a new selection, not a no-op.
+    marqueeWith(
+      engine,
+      [
+        [290, 240],
+        [360, 260],
+      ],
+      { shift: true },
+    );
+    expect(selectedIds(spy)).toEqual([c.id]);
+  });
+
+  it("selects all and inverts without touching history", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    const [a, b] = engine.listStrokes(layerId);
+    const depth = engine.getState().history.depth;
+    const dirty = engine.getState().file.dirty;
+
+    expect(engine.selectAll()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+    expect(selectedIds(spy)).toEqual([a.id, b.id].sort());
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(dirty);
+
+    // Inverting everything selects nothing, and the overlay disappears.
+    expect(engine.invertSelection()).toBe(false);
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+
+    // Inverting nothing selects everything.
+    expect(engine.invertSelection()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+
+    // Inverting one selects the other.
+    marqueeWith(engine, [
+      [10, 10],
+      [150, 80],
+    ]);
+    expect(selectedIds(spy)).toEqual([a.id]);
+    expect(engine.invertSelection()).toBe(true);
+    expect(selectedIds(spy)).toEqual([b.id]);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("keeps the marquee shape as editor state, across tool switches", () => {
+    const { engine } = createSelectingEngine();
+    const depth = engine.getState().history.depth;
+    engine.setSelectionShape("lasso");
+    engine.setSelectionShape("lasso");
+    engine.setTool("brush");
+    expect(engine.getState().selectionShape).toBe("lasso");
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(false);
+    engine.setSelectionShape("rect");
+    expect(engine.getState().selectionShape).toBe("rect");
+  });
 });
 
 /** White RGBA image with a one-pixel black frame around the edge. */

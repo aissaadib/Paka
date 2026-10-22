@@ -71,6 +71,9 @@ function snapshotFor(toolId: ToolId): EditorSnapshot {
     shapeInnerRatio: 0.42,
     shapeRotation: 33,
     fillTolerance: 19,
+    fillMode: "contiguous",
+    fillSampleScale: 1,
+    selectionShape: "rect",
     // The bar draws the brush's primary controls for a brush-using tool, so
     // the snapshot carries the brush and the preset list the real one does.
     brush: DEFAULT_BRUSH,
@@ -87,6 +90,9 @@ function recorder() {
     setShapeInnerRatio: vi.fn((value: number) => calls.push(["setShapeInnerRatio", value])),
     setShapeRotation: vi.fn((value: number) => calls.push(["setShapeRotation", value])),
     setFillTolerance: vi.fn((value: number) => calls.push(["setFillTolerance", value])),
+    setFillMode: vi.fn((value: string) => calls.push(["setFillMode", value])),
+    setFillSampleScale: vi.fn((value: number) => calls.push(["setFillSampleScale", value])),
+    setSelectionShape: vi.fn((value: string) => calls.push(["setSelectionShape", value])),
     setGridSnapping: vi.fn((value: boolean) => calls.push(["setGridSnapping", value])),
   } as unknown as EditorActions;
   return { actions, calls };
@@ -106,11 +112,12 @@ describe("tool option fields", () => {
       "shapeRotation",
       "shapeFill",
     ]);
-    expect(ids("bucket")).toEqual(["fillTolerance"]);
+    expect(ids("bucket")).toEqual(["fillTolerance", "fillMode", "fillSampleScale"]);
+    expect(ids("select")).toEqual(["selectionShape"]);
   });
 
   it("gives tools without options an empty list", () => {
-    for (const toolId of ["brush", "eraser", "select", "line", "picker", "guides", "pan"] as const) {
+    for (const toolId of ["brush", "eraser", "line", "picker", "guides", "pan"] as const) {
       expect(ids(toolId)).toEqual([]);
     }
   });
@@ -157,6 +164,28 @@ describe("tool option reads and writes", () => {
       ["setShapeRotation", 0.25],
       ["setShapeFill", false],
     ]);
+  });
+
+  it("writes the fill mode, the sample scale and the marquee shape", () => {
+    const { actions, calls } = recorder();
+    const bucket = visibleToolOptions("bucket", snapshotFor("bucket"));
+    const mode = bucket.find((option) => option.id === "fillMode") as SelectToolOption;
+    const sample = bucket.find((option) => option.id === "fillSampleScale") as SelectToolOption;
+    const shape = visibleToolOptions("select", snapshotFor("select"))[0] as SelectToolOption;
+
+    mode.write(actions, "global");
+    sample.write(actions, "4");
+    shape.write(actions, "lasso");
+    expect(calls).toEqual([
+      ["setFillMode", "global"],
+      ["setFillSampleScale", 4],
+      ["setSelectionShape", "lasso"],
+    ]);
+
+    // An unknown value is ignored rather than sent to the engine.
+    mode.write(actions, "diagonal");
+    shape.write(actions, "polygon");
+    expect(calls).toHaveLength(3);
   });
 
   it("snaps the star's inner radius to its step", () => {

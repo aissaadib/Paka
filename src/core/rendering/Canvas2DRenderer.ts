@@ -817,6 +817,23 @@ export class Canvas2DRenderer implements DrawingRenderer {
       }
     }
 
+    const path = selection.path;
+    if (path && path.length >= 2) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
+      ctx.beginPath();
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let index = 1; index < path.length; index += 1) {
+        ctx.lineTo(path[index].x, path[index].y);
+      }
+      // The lasso closes implicitly: the region it selects is the closed path.
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     const bounds = selection.bounds;
     if (bounds) {
       ctx.globalAlpha = 1;

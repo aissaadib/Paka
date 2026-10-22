@@ -13,6 +13,7 @@ import {
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
+import type { SelectionShape } from "../core/document/selectionModes";
 import type { FillMode } from "../core/fill/fillOptions";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
@@ -87,6 +88,12 @@ export interface EditorActions {
   moveLayer(layerId: LayerId, delta: number): void;
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
+  /** Selects every stroke on the active layer; no history step. */
+  selectAll(): void;
+  /** Swaps the selection for the strokes that were not selected. */
+  invertSelection(): void;
+  /** Chooses the shape the next selection gesture traces. */
+  setSelectionShape(shape: SelectionShape): void;
   deleteSelection(): void;
   /** Removes the guide the guides tool has selected, as one undoable step. */
   deleteSelectedGuide(): void;
@@ -181,6 +188,13 @@ export function createEditor(options: EditorOptions = {}): Editor {
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
     selectLayer: (layerId) => engine.selectLayer(layerId),
     clearSelection: () => engine.clearSelection(),
+    selectAll: () => {
+      engine.selectAll();
+    },
+    invertSelection: () => {
+      engine.invertSelection();
+    },
+    setSelectionShape: (shape) => engine.setSelectionShape(shape),
     deleteSelection: () => {
       engine.deleteSelection();
     },

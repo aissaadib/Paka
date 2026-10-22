@@ -11,7 +11,7 @@ import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../do
 import type { GridSettings } from "../document/grid";
 import type { SelectionHandles } from "../document/selectionHandles";
 import type { Viewport } from "../../types/viewport";
-import type { Bounds } from "../../types/geometry";
+import type { Bounds, Point } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
 
 export type RendererKind = "canvas2d" | "webgl" | "webgpu";
@@ -29,6 +29,12 @@ export type RendererKind = "canvas2d" | "webgl" | "webgpu";
 export interface RendererSelection {
   /** Rubber-band rectangle in document space, or `null` when none is dragged. */
   readonly bounds: Bounds | null;
+  /**
+   * The freehand lasso path, in document space, or `null` when the marquee is a
+   * rectangle. It is painted as a closed dashed outline; like the band it is
+   * overlay only and never reaches an export.
+   */
+  readonly path?: readonly Point[] | null;
   /** Strokes to trace as an accent overlay. */
   readonly strokes: readonly StrokeRecord[];
   /**

@@ -106,11 +106,19 @@ import {
   snapRotationAngle,
   type SampleTransform,
 } from "../document/selectionTransform";
+import {
+  combineSelectionIds,
+  normalizeSelectionShape,
+  selectionCombineFor,
+  type SelectionCombine,
+  type SelectionShape,
+} from "../document/selectionModes";
 import { StrokeStore } from "../document/strokeStore";
 import {
   boundsContainPoint,
   boundsFromCorners,
   strokeIntersectsBounds,
+  strokeIntersectsPolygon,
 } from "../document/strokeSelection";
 import type {
   DrawingDocument,
@@ -218,6 +226,13 @@ export interface EditorSnapshot {
    * renderable from React (the overlay is drawn by the renderer).
    */
   readonly selectedStrokes: number;
+  /**
+   * The shape the next marquee traces: a rectangle or a freehand lasso.
+   *
+   * Editor state, like the tool itself: it describes how the next selection is
+   * drawn, not what the committed selection is.
+   */
+  readonly selectionShape: SelectionShape;
   /**
    * The id of the composition guide the guides tool has selected, or `null`.
    *
@@ -461,9 +476,20 @@ interface Selection {
 interface MarqueeGesture {
   readonly mode: "marquee";
   readonly anchor: Point;
-  /** The rubber band, replaced on every move. */
+  /** Whether the band is a rectangle or a freehand lasso. */
+  readonly shape: SelectionShape;
+  /** How the release combines with the selection that is already there. */
+  readonly combine: SelectionCombine;
+  /** The rubber band, replaced on every move (rectangle only). */
   bounds: Bounds | null;
+  /** The freehand path, in document order (lasso only). */
+  points: Point[];
 }
+
+/** The spacing between stored lasso points, in document pixels. */
+const LASSO_SAMPLE_DISTANCE = 2;
+/** A ceiling so a very long lasso stays cheap to hit-test. */
+const MAX_LASSO_POINTS = 2000;
 
 interface MoveGesture {
   readonly mode: "move";
@@ -646,6 +672,7 @@ export class DrawingEngine implements StrokeSource {
   private refusalNoticeShown = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
+  private selectionShape: SelectionShape = "rect";
   /** The guide the guides tool has selected, or `null`. */
   private selectedGuideId: string | null = null;
   /** The guide gesture in flight, or `null`. */
@@ -2393,6 +2420,23 @@ export class DrawingEngine implements StrokeSource {
     return findSelectionHandle(handles, docX, docY, this.handleGrabRadius());
   }
 
+  /**
+   * Chooses the shape the next marquee traces: a rectangle or a lasso.
+   *
+   * Editor state, like the fill mode: it changes how the next selection is
+   * drawn, never the committed selection, so it adds no history step and cannot
+   * dirty the document.
+   */
+  setSelectionShape(shape: SelectionShape): void {
+    const next = normalizeSelectionShape(shape);
+    if (next === this.selectionShape) {
+      return;
+    }
+    this.selectionShape = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
   /** Drops the selection and its overlay. Not an edit: nothing enters history. */
   clearSelection(): void {
     this.cancelSelectionGesture();
@@ -2405,6 +2449,59 @@ export class DrawingEngine implements StrokeSource {
     this.syncSelectionOverlay();
     this.publish();
     this.requestRender();
+  }
+
+  /**
+   * Selects every stroke on the active layer.
+   *
+   * Selection is editor state, so this records no history step and dirties
+   * nothing. Returns whether anything was selected; an empty layer clears the
+   * selection instead of leaving an empty one behind.
+   */
+  selectAll(): boolean {
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      this.clearSelection();
+      return false;
+    }
+    const strokeIds = this.strokes.list(layerId).map((stroke) => stroke.id);
+    if (strokeIds.length === 0) {
+      this.clearSelection();
+      return false;
+    }
+    this.setSelection({ layerId, strokeIds });
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * Selects the strokes of the active layer that are **not** selected.
+   *
+   * With nothing selected this is select-all; with everything selected it
+   * clears the selection. Selection is editor state: no history step, no dirty
+   * flag. Returns whether the result selects anything.
+   */
+  invertSelection(): boolean {
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      this.clearSelection();
+      return false;
+    }
+    const current =
+      this.selection && this.selection.layerId === layerId
+        ? new Set(this.selection.strokeIds)
+        : new Set<string>();
+    const strokeIds = this.strokes
+      .list(layerId)
+      .filter((stroke) => !current.has(stroke.id))
+      .map((stroke) => stroke.id);
+    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return strokeIds.length > 0;
   }
 
   /**
@@ -2694,10 +2791,16 @@ export class DrawingEngine implements StrokeSource {
     }
     this.cancelSelectionGesture();
     this.beginGesture();
+    const shape = this.selectionShape;
     this.selectionGesture = {
       mode: "marquee",
       anchor: { x: sample.docX, y: sample.docY },
+      shape,
+      // Fixed at press time: releasing a modifier mid-drag must not change
+      // what the release means.
+      combine: selectionCombineFor(sample.modifiers),
       bounds: { x: sample.docX, y: sample.docY, width: 0, height: 0 },
+      points: shape === "lasso" ? [{ x: sample.docX, y: sample.docY }] : [],
     };
     this.syncSelectionOverlay();
     this.requestRender();
@@ -2824,7 +2927,11 @@ export class DrawingEngine implements StrokeSource {
     }
 
     if (gesture.mode === "marquee") {
-      gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      if (gesture.shape === "lasso") {
+        this.extendLasso(gesture.points, { x: sample.docX, y: sample.docY });
+      } else {
+        gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      }
       this.syncSelectionOverlay();
       this.requestRender();
       return;
@@ -2919,9 +3026,22 @@ export class DrawingEngine implements StrokeSource {
     this.selectionGesture = null;
 
     if (gesture.mode === "marquee") {
-      this.selectInBounds(
-        gesture.bounds ?? { x: gesture.anchor.x, y: gesture.anchor.y, width: 0, height: 0 },
-      );
+      if (gesture.shape === "lasso" && gesture.points.length >= 3) {
+        this.selectInPolygon(gesture.points, gesture.combine);
+      } else {
+        // A lasso that never became a polygon is a click: hit-test the strokes
+        // under the press with the rectangle rule's zero-size box.
+        const bounds =
+          gesture.shape === "lasso"
+            ? { x: gesture.anchor.x, y: gesture.anchor.y, width: 0, height: 0 }
+            : (gesture.bounds ?? {
+                x: gesture.anchor.x,
+                y: gesture.anchor.y,
+                width: 0,
+                height: 0,
+              });
+        this.selectInBounds(bounds, gesture.combine);
+      }
       this.syncSelectionOverlay();
       this.publish();
       this.requestRender();
@@ -3019,8 +3139,51 @@ export class DrawingEngine implements StrokeSource {
     this.commands.breakMerge();
   }
 
-  /** Selects the strokes of the active layer that the marquee meets. */
-  private selectInBounds(bounds: Bounds): void {
+  /** Appends the pointer to a lasso path, spaced and capped. */
+  private extendLasso(points: Point[], point: Point): void {
+    if (points.length >= MAX_LASSO_POINTS) {
+      return;
+    }
+    const last = points[points.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) < LASSO_SAMPLE_DISTANCE) {
+      return;
+    }
+    points.push(point);
+  }
+
+  /**
+   * Selects the strokes of the active layer that the marquee meets.
+   *
+   * A stroke is widened by half its painted width, so a stroke whose pixels
+   * reach into the region selects even when its centreline stays outside.
+   */
+  private selectInBounds(bounds: Bounds, combine: SelectionCombine): void {
+    this.selectWhere(
+      (stroke) => strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2),
+      combine,
+    );
+  }
+
+  /** Selects the strokes of the active layer that the lasso polygon meets. */
+  private selectInPolygon(points: readonly Point[], combine: SelectionCombine): void {
+    this.selectWhere(
+      (stroke) => strokeIntersectsPolygon(stroke, points, strokeDiameter(stroke.brush, 1) / 2),
+      combine,
+    );
+  }
+
+  /**
+   * Commits a region test's result, combined with the selection already there.
+   *
+   * The caller decides the region and applies the stroke's padding; this method
+   * only turns the matched ids into the next selection. A combine builds on the
+   * current selection only when it belongs to the same layer, which is also the
+   * layer the region was tested against.
+   */
+  private selectWhere(
+    matches: (stroke: StrokeRecord) => boolean,
+    combine: SelectionCombine,
+  ): void {
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
       this.setSelection(null);
@@ -3028,13 +3191,14 @@ export class DrawingEngine implements StrokeSource {
     }
     const strokeIds: string[] = [];
     for (const stroke of this.strokes.list(layerId)) {
-      // Widened by half the stroke's painted width, so a stroke whose pixels
-      // reach into the marquee selects even when its centreline stays outside.
-      if (strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2)) {
+      if (matches(stroke)) {
         strokeIds.push(stroke.id);
       }
     }
-    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
+    const current =
+      this.selection && this.selection.layerId === layerId ? this.selection.strokeIds : null;
+    const next = combineSelectionIds(current, strokeIds, combine);
+    this.setSelection(next ? { layerId, strokeIds: next } : null);
   }
 
   /**
@@ -3122,9 +3286,13 @@ export class DrawingEngine implements StrokeSource {
     if (!renderer) {
       return;
     }
-    const marquee = this.selectionGesture?.mode === "marquee" ? this.selectionGesture.bounds : null;
+    const gesture = this.selectionGesture;
+    const marqueeBounds =
+      gesture?.mode === "marquee" && gesture.shape === "rect" ? gesture.bounds : null;
+    const marqueePath =
+      gesture?.mode === "marquee" && gesture.shape === "lasso" ? gesture.points : null;
     const strokes = this.selectedStrokes();
-    if (marquee === null && strokes.length === 0) {
+    if (marqueeBounds === null && marqueePath === null && strokes.length === 0) {
       renderer.setSelection(null);
       return;
     }
@@ -3132,9 +3300,14 @@ export class DrawingEngine implements StrokeSource {
     // to, and it is not the rubber band.
     const selectionFrame = boundsOfStrokes(strokes);
     renderer.setSelection({
-      bounds: marquee ?? selectionFrame,
+      // A lasso is drawn as its path, not as the box around it.
+      bounds: marqueePath === null ? (marqueeBounds ?? selectionFrame) : null,
+      path: marqueePath,
       strokes,
-      handles: marquee === null ? this.selectionHandleLayout(selectionFrame) : null,
+      handles:
+        marqueeBounds === null && marqueePath === null
+          ? this.selectionHandleLayout(selectionFrame)
+          : null,
     });
   }
 
@@ -3744,6 +3917,7 @@ export class DrawingEngine implements StrokeSource {
       // Counted from the store rather than from the selection's id list, so a
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
+      selectionShape: this.selectionShape,
       selectedGuideId: this.selectedGuideId,
       shapeFill: this.shapeFill,
       shapeSides: this.shapeSides,
@@ -3778,6 +3952,7 @@ export class DrawingEngine implements StrokeSource {
       previous.history === next.history &&
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
+      previous.selectionShape === next.selectionShape &&
       previous.selectedGuideId === next.selectedGuideId &&
       previous.shapeFill === next.shapeFill &&
       previous.shapeSides === next.shapeSides &&

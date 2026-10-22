@@ -85,6 +85,27 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     },
   },
   {
+    id: "selectAll",
+    label: "Select All",
+    shortcuts: [mod("a", "KeyA")],
+    // Selecting is only meaningful on the select tool's canvas; the action
+    // works from any tool and the overlay reports what it selected.
+    run: ({ actions }) => actions.selectAll(),
+  },
+  {
+    id: "invertSelection",
+    label: "Invert Selection",
+    shortcuts: [mod("i", "KeyI", true)],
+    run: ({ actions }) => actions.invertSelection(),
+  },
+  {
+    id: "deselect",
+    label: "Deselect",
+    // Ctrl+D already duplicates the selection, so deselect takes Shift.
+    shortcuts: [mod("d", "KeyD", true)],
+    run: ({ actions }) => actions.clearSelection(),
+  },
+  {
     id: "duplicateSelection",
     label: "Duplicate Selection",
     shortcuts: [mod("d", "KeyD")],
