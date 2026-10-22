@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { canDeleteLayer, layerDeletionPrompt } from "../core/document/layerDeletion";
 import { dropSlot, markerIndex, moveDeltaForSlot } from "../core/document/layerOrdering";
+import { findLayer } from "../core/document/layerGroups";
 import { createDocument } from "../core/document/document";
 import type { LayerId } from "../core/document/types";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
@@ -266,5 +267,209 @@ describe("the panel's other operations", () => {
     engine.removeLayer(onlyLayer);
 
     expect(engine.getState().document.layers.map((l) => l.id)).toEqual([onlyLayer]);
+  });
+});
+
+describe("the panel's layer-group operations", () => {
+  /** Paints one stroke on the active layer. */
+  function paint(engine: DrawingEngine): void {
+    engine.setTool("brush");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 40, docY: 40 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 120, docY: 40 }));
+  }
+
+  it("creates an empty group above the active layer, at its level, in one step", () => {
+    const engine = createEngine();
+    const [top, middle, bottom] = topFirst(engine);
+    engine.selectLayer(middle);
+    const depth = engine.getState().history.depth;
+
+    const groupId = engine.createGroup();
+    expect(groupId).not.toBeNull();
+    if (!groupId) {
+      return;
+    }
+
+    const document = engine.getState().document;
+    expect(document.layers.map((layer) => layer.id)).toEqual([bottom, middle, groupId, top]);
+    expect(findLayer(document.layers, groupId)?.kind).toBe("group");
+    expect(findLayer(document.layers, groupId)?.children).toEqual([]);
+    // A group owns no content, so the artist keeps the layer they were on.
+    expect(document.activeLayerId).toBe(middle);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    expect(engine.getState().history.undoLabel).toBe("New Group");
+
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers.map((layer) => layer.id)).toEqual([
+      bottom,
+      middle,
+      top,
+    ]);
+
+    expect(engine.redo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, groupId)).toBeDefined();
+  });
+
+  it("moves a layer into a group and back out, as one step each way", () => {
+    const engine = createEngine();
+    const [top, middle, bottom] = topFirst(engine);
+    const groupId = engine.createGroup();
+    expect(groupId).not.toBeNull();
+    if (!groupId) {
+      return;
+    }
+    const depth = engine.getState().history.depth;
+
+    engine.moveLayerToParent(top, groupId, 0);
+    expect(findLayer(engine.getState().document.layers, groupId)?.children.map((l) => l.id)).toEqual([
+      top,
+    ]);
+    expect(engine.getState().document.activeLayerId).toBe(top);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+    expect(engine.getState().history.undoLabel).toBe("Move Layer");
+
+    engine.moveLayerToParent(top, null, 0);
+    const document = engine.getState().document;
+    expect(document.layers[0]?.id).toBe(top);
+    expect(findLayer(document.layers, groupId)?.children).toEqual([]);
+    expect(engine.getState().document.activeLayerId).toBe(top);
+
+    expect(engine.undo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, groupId)?.children.map((l) => l.id)).toEqual([
+      top,
+    ]);
+    expect(engine.undo()).toBe(true);
+    expect(engine.getState().document.layers.map((layer) => layer.id)).toEqual([
+      bottom,
+      middle,
+      top,
+      groupId,
+    ]);
+  });
+
+  it("toggles a nested layer's visibility without changing its group", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    const depth = engine.getState().history.depth;
+
+    engine.toggleLayerVisibility(top);
+
+    const document = engine.getState().document;
+    expect(findLayer(document.layers, top)?.visible).toBe(false);
+    expect(findLayer(document.layers, groupId)?.visible).toBe(true);
+    expect(engine.getState().history.depth).toBe(depth + 1);
+
+    expect(engine.undo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, top)?.visible).toBe(true);
+  });
+
+  it("duplicates a nested layer beside itself, copying its content", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    engine.selectLayer(top);
+    paint(engine);
+    expect(engine.listElements(top)).toHaveLength(1);
+
+    engine.duplicateLayer(top);
+
+    const document = engine.getState().document;
+    const group = findLayer(document.layers, groupId);
+    expect(group?.children).toHaveLength(2);
+    const copy = group?.children.find((layer) => layer.id !== top);
+    expect(copy).toBeDefined();
+    if (!copy) {
+      return;
+    }
+    expect(engine.listElements(copy.id)).toHaveLength(1);
+    expect(document.activeLayerId).toBe(copy.id);
+
+    expect(engine.undo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, copy.id)).toBeUndefined();
+    expect(engine.listElements(copy.id)).toHaveLength(0);
+  });
+
+  it("deletes a group with its contents and restores every child on undo", () => {
+    const engine = createEngine();
+    const [top, middle] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    engine.moveLayerToParent(middle, groupId, 0);
+    engine.selectLayer(top);
+    paint(engine);
+    engine.selectLayer(middle);
+    paint(engine);
+    expect(engine.listElements(top)).toHaveLength(1);
+    expect(engine.listElements(middle)).toHaveLength(1);
+
+    engine.removeLayer(groupId);
+    expect(findLayer(engine.getState().document.layers, groupId)).toBeUndefined();
+    expect(engine.getState().document.activeLayerId).not.toBe(groupId);
+    expect(engine.getState().history.undoLabel).toBe("Delete Group");
+
+    expect(engine.undo()).toBe(true);
+    const restored = engine.getState().document;
+    expect(findLayer(restored.layers, groupId)?.children.map((layer) => layer.id)).toEqual([
+      middle,
+      top,
+    ]);
+    expect(engine.listElements(top)).toHaveLength(1);
+    expect(engine.listElements(middle)).toHaveLength(1);
+
+    expect(engine.redo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, groupId)).toBeUndefined();
+    expect(engine.listElements(top)).toHaveLength(0);
+    expect(engine.listElements(middle)).toHaveLength(0);
+  });
+
+  it("refuses to draw while a group is the active node", () => {
+    const engine = createEngine();
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.selectLayer(groupId);
+    const depth = engine.getState().history.depth;
+
+    paint(engine);
+
+    expect(engine.listElements(groupId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().notice).toContain("layer group");
+  });
+
+  it("dissolves a group into its place and leaves a paintable layer active", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    engine.selectLayer(groupId);
+
+    engine.dissolveGroup(groupId);
+
+    const dissolved = engine.getState().document;
+    expect(findLayer(dissolved.layers, groupId)).toBeUndefined();
+    expect(findLayer(dissolved.layers, top)?.kind).toBe("layer");
+    expect(dissolved.activeLayerId).toBe(top);
+
+    expect(engine.undo()).toBe(true);
+    expect(findLayer(engine.getState().document.layers, groupId)?.children.map((l) => l.id)).toEqual([
+      top,
+    ]);
   });
 });

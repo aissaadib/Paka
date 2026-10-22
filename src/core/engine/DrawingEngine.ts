@@ -40,7 +40,11 @@ import {
 import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
 import {
+  createAddGroupCommand,
+  createDissolveGroupCommand,
   createDocumentCommand,
+  createMoveLayerToParentCommand,
+  createRenameGroupCommand,
   type DocumentCommandHost,
   type ElementTransfer,
 } from "../commands/documentCommand";
@@ -86,6 +90,14 @@ import {
   roundGuidePosition,
   setGuidePosition,
 } from "../document/guides";
+import {
+  findLayer,
+  flattenLayers,
+  isGroup,
+  layerLocation,
+  newLayerIds,
+  paintableLayers,
+} from "../document/layerGroups";
 import {
   cornerOf,
   findSelectionHandle,
@@ -436,6 +448,16 @@ const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
  */
 const GESTURE_REFUSAL_NOTICE =
   "Finish the current stroke, selection or guide drag before changing layers.";
+
+/**
+ * Shown when a drawing gesture starts while a group is the active node.
+ *
+ * A group owns no content: it holds layers. The gesture is refused rather than
+ * recorded against a container that can never be displayed, and the user is
+ * told which choice fixes it.
+ */
+const GROUP_DRAW_NOTICE =
+  "This is a layer group. Select a layer inside it to draw.";
 
 /**
  * True when a document-space point lies on the document rectangle.
@@ -1089,17 +1111,16 @@ export class DrawingEngine implements StrokeSource {
     if (after === before) {
       return;
     }
-    const copy = after.layers.find(
-      (layer) => !before.layers.some((known) => known.id === layer.id),
-    );
-    if (!copy) {
+    // The copy may be inside a group, so a root-list diff would not find it.
+    const copyId = newLayerIds(before.layers, after.layers)[0];
+    if (!copyId) {
       return;
     }
     const elements = this.strokes
       .listElements(layerId)
-      .map((element) => cloneElement(element, copy.id));
+      .map((element) => cloneElement(element, copyId));
     this.commitDocumentChange("Duplicate Layer", before, after, {
-      addedElements: { layerId: copy.id, elements },
+      addedElements: [{ layerId: copyId, elements }],
     });
   }
 
@@ -1108,17 +1129,28 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     const before = this.doc;
+    const node = findLayer(before.layers, layerId);
+    if (!node) {
+      return;
+    }
     const after = documentOps.removeLayer(before, layerId);
     if (after === before) {
       return;
     }
     // `listElements` returns the live array, which the command clears when it
-    // applies, so the elements to restore are copied out first.
-    const removedElements: ElementTransfer = {
-      layerId,
-      elements: [...this.strokes.listElements(layerId)],
-    };
-    this.commitDocumentChange("Delete Layer", before, after, { removedElements });
+    // applies, so the elements to restore are copied out first. A group is
+    // removed with everything it holds: every paintable layer inside it needs
+    // its own transfer, or undo would bring the rows back with no content.
+    const removedElements: ElementTransfer[] = paintableLayers([node]).map((layer) => ({
+      layerId: layer.id,
+      elements: [...this.strokes.listElements(layer.id)],
+    }));
+    this.commitDocumentChange(
+      isGroup(node) ? "Delete Group" : "Delete Layer",
+      before,
+      after,
+      { removedElements },
+    );
   }
 
   renameLayer(layerId: LayerId, name: string): void {
@@ -1152,7 +1184,8 @@ export class DrawingEngine implements StrokeSource {
   }
 
   toggleLayerVisibility(layerId: LayerId): void {
-    const layer = this.doc.layers.find((candidate) => candidate.id === layerId);
+    // A nested layer is found through the tree, not just the root list.
+    const layer = findLayer(this.doc.layers, layerId);
     if (layer) {
       this.setLayerVisibility(layerId, !layer.visible);
     }
@@ -1197,6 +1230,89 @@ export class DrawingEngine implements StrokeSource {
       documentOps.moveLayer(before, layerId, delta),
       { preserveActiveLayer: true },
     );
+  }
+
+  /**
+   * Creates an empty group directly above the active node, at its level.
+   *
+   * The active layer is kept: a group owns no content, so making it active
+   * would take the brush away from the artist for no reason. The panel focuses
+   * the new row and starts renaming it, which is why the id is returned.
+   *
+   * Returns `null` when a gesture is in flight or the active node's level
+   * cannot hold a group.
+   */
+  createGroup(): LayerId | null {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return null;
+    }
+    const before = this.doc;
+    const activeId = before.activeLayerId;
+    const location = activeId === null ? undefined : layerLocation(before.layers, activeId);
+    const parentId = location?.parentId ?? null;
+    const destination =
+      parentId === null
+        ? before.layers
+        : (findLayer(before.layers, parentId)?.children ?? []);
+    const index = location ? location.index + 1 : destination.length;
+    const outcome = createAddGroupCommand(
+      before,
+      { parentId, index },
+      this.documentCommandHost,
+    );
+    if (!outcome.ok) {
+      return null;
+    }
+    this.executeDocumentCommand(outcome.command);
+    return outcome.groupId;
+  }
+
+  /** Renames a group in one undoable step. Empty names are refused. */
+  renameGroup(groupId: LayerId, name: string): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createRenameGroupCommand(before, groupId, name, this.documentCommandHost);
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
+  }
+
+  /**
+   * Moves a layer to an explicit parent and sibling index.
+   *
+   * This is the engine side of a tree drop: one command lands the node where
+   * the drop marker said, even across levels, and the tree rules are checked
+   * by the pure operation before any history entry exists.
+   */
+  moveLayerToParent(layerId: LayerId, parentId: LayerId | null, index: number): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createMoveLayerToParentCommand(
+      before,
+      layerId,
+      parentId,
+      index,
+      this.documentCommandHost,
+    );
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
+  }
+
+  /** Dissolves a group in one undoable step; its children keep their pixels. */
+  dissolveGroup(groupId: LayerId): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createDissolveGroupCommand(before, groupId, this.documentCommandHost);
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
   }
 
   /**
@@ -2032,7 +2148,7 @@ export class DrawingEngine implements StrokeSource {
 
   /** True when `layerId` is still part of the current document. */
   private layerExists(layerId: LayerId): boolean {
-    return this.doc.layers.some((layer) => layer.id === layerId);
+    return findLayer(this.doc.layers, layerId) !== undefined;
   }
 
   /**
@@ -2090,11 +2206,34 @@ export class DrawingEngine implements StrokeSource {
 
   // ----------------------------------------------------------- stroke capture
 
+  /**
+   * The layer a drawing or selection gesture may target.
+   *
+   * A group is selectable for metadata (rename, visibility, opacity, blend,
+   * moving), but it owns no content. Recording a stroke or a selection against
+   * it would create data no renderer can show, so the gesture is refused and
+   * the user is told what to select instead.
+   */
+  private activePaintableLayerId(): LayerId | null {
+    const activeId = this.doc.activeLayerId;
+    if (activeId === null) {
+      return null;
+    }
+    const layer = findLayer(this.doc.layers, activeId);
+    if (layer && !isGroup(layer)) {
+      return layer.id;
+    }
+    if (layer) {
+      this.raiseNotice(GROUP_DRAW_NOTICE);
+    }
+    return null;
+  }
+
   beginStroke(sample: PointerSample): void {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return;
     }
@@ -2144,7 +2283,7 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke) {
       return;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return;
     }
@@ -2233,7 +2372,7 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return false;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return false;
     }
@@ -2378,7 +2517,7 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return false;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId || !isInsideDocument(this.doc, sample.docX, sample.docY)) {
       return false;
     }
@@ -2641,7 +2780,7 @@ export class DrawingEngine implements StrokeSource {
    * selection instead of leaving an empty one behind.
    */
   selectAll(): boolean {
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       this.clearSelection();
       return false;
@@ -2666,7 +2805,7 @@ export class DrawingEngine implements StrokeSource {
    * flag. Returns whether the result selects anything.
    */
   invertSelection(): boolean {
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       this.clearSelection();
       return false;
@@ -3366,7 +3505,7 @@ export class DrawingEngine implements StrokeSource {
     matches: (stroke: StrokeRecord) => boolean,
     combine: SelectionCombine,
   ): void {
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       this.setSelection(null);
       return;
@@ -3818,8 +3957,8 @@ export class DrawingEngine implements StrokeSource {
     after: DrawingDocument,
     options: {
       readonly mergeKey?: string;
-      readonly removedElements?: ElementTransfer;
-      readonly addedElements?: ElementTransfer;
+      readonly removedElements?: readonly ElementTransfer[];
+      readonly addedElements?: readonly ElementTransfer[];
       readonly preserveActiveLayer?: boolean;
     } = {},
   ): void {
@@ -3866,7 +4005,8 @@ export class DrawingEngine implements StrokeSource {
     // highlight over strokes that are no longer the ones a transform would move.
     if (
       activeLayerChanged ||
-      (this.selection !== null && !next.layers.some((layer) => layer.id === this.selection?.layerId))
+      (this.selection !== null &&
+        !findLayer(next.layers, this.selection.layerId))
     ) {
       this.resetSelection();
     }
@@ -3887,7 +4027,7 @@ export class DrawingEngine implements StrokeSource {
     if (!this.renderer) {
       return;
     }
-    for (const layer of document.layers) {
+    for (const layer of flattenLayers(document.layers)) {
       this.renderer.invalidateLayer(layer.id);
     }
   }

@@ -17,12 +17,14 @@
 import { createId } from "../../utils/id";
 import { updateLayer } from "../document/document";
 import {
+  addGroup,
   dissolveGroup,
   findLayer,
   groupLayers,
   isGroup,
   moveLayerIntoGroup,
   moveLayerOutOfGroup,
+  moveLayerToParent,
 } from "../document/layerGroups";
 import type { DrawingDocument, LayerElement, LayerId } from "../document/types";
 import type { Command } from "./types";
@@ -54,10 +56,16 @@ export interface DocumentCommandSpec {
   readonly before: DrawingDocument;
   /** Document after the change; `apply()` restores exactly this. */
   readonly after: DrawingDocument;
-  /** Elements this command deletes; restored on revert (layer deletion). */
-  readonly removedElements?: ElementTransfer;
+  /**
+   * Elements this command deletes; restored on revert (layer deletion).
+   *
+   * A group deletion carries one transfer per paintable layer in the removed
+   * subtree, so undo restores every child's content - not only the container's,
+   * which never had any.
+   */
+  readonly removedElements?: readonly ElementTransfer[];
   /** Elements this command creates; removed on revert (layer duplication). */
-  readonly addedElements?: ElementTransfer;
+  readonly addedElements?: readonly ElementTransfer[];
   /**
    * Opt-in history coalescing key. Commands sharing a key collapse into one
    * entry, which is how a slider drag becomes a single undo step. Keys are only
@@ -121,31 +129,31 @@ export function createDocumentCommand(
   host: DocumentCommandHost,
 ): Command {
   const apply = (): void => {
-    if (spec.removedElements) {
-      host.clearLayerElements(spec.removedElements.layerId);
+    for (const transfer of spec.removedElements ?? []) {
+      host.clearLayerElements(transfer.layerId);
     }
-    if (spec.addedElements) {
-      host.restoreLayerElements(spec.addedElements.layerId, spec.addedElements.elements);
+    for (const transfer of spec.addedElements ?? []) {
+      host.restoreLayerElements(transfer.layerId, transfer.elements);
     }
     host.applyDocument(resolveActiveLayer(spec.after, host.getDocument(), spec));
   };
 
   const revert = (): void => {
-    if (spec.addedElements) {
-      host.clearLayerElements(spec.addedElements.layerId);
+    for (const transfer of spec.addedElements ?? []) {
+      host.clearLayerElements(transfer.layerId);
     }
-    if (spec.removedElements) {
-      host.restoreLayerElements(spec.removedElements.layerId, spec.removedElements.elements);
+    for (const transfer of spec.removedElements ?? []) {
+      host.restoreLayerElements(transfer.layerId, transfer.elements);
     }
     host.applyDocument(resolveActiveLayer(spec.before, host.getDocument(), spec));
   };
 
   // Metadata-only changes are safe to coalesce; anything that moves content is
   // never merged, because combining two element transfers is ambiguous.
+  const hasTransfer =
+    (spec.removedElements?.length ?? 0) > 0 || (spec.addedElements?.length ?? 0) > 0;
   const mergeKey =
-    spec.mergeKey !== undefined && !spec.removedElements && !spec.addedElements
-      ? spec.mergeKey
-      : undefined;
+    spec.mergeKey !== undefined && !hasTransfer ? spec.mergeKey : undefined;
 
   const command: Command =
     mergeKey === undefined
@@ -231,6 +239,57 @@ export type GroupMoveTarget =
   | { readonly kind: "into"; readonly groupId: LayerId }
   /** Out of the group that holds it, into the group above that one. */
   | { readonly kind: "out" };
+
+/**
+ * Creates an empty group at an explicit place in the tree.
+ *
+ * Unlike `createGroupLayersCommand`, this does not need two layers to group:
+ * it is the "new folder" action. The caller places it (the panel puts it
+ * directly above the active node, at the same level), and then moves layers
+ * into it. The group starts empty and owns no content.
+ */
+export type LayerGroupCreateOutcome =
+  | {
+      readonly ok: true;
+      readonly command: Command;
+      readonly after: DrawingDocument;
+      /** The new group, so the panel can focus it and start renaming. */
+      readonly groupId: LayerId;
+    }
+  | { readonly ok: false; readonly reason: LayerGroupRefusal };
+
+export function createAddGroupCommand(
+  document: DrawingDocument,
+  placement: {
+    readonly name?: string;
+    readonly parentId?: LayerId | null;
+    readonly index?: number;
+  },
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCreateOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const added = addGroup(document, placement);
+  if (!added) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after: added.document,
+    groupId: added.group.id,
+    command: createDocumentCommand(
+      {
+        label: "New Group",
+        before: document,
+        after: added.document,
+        preserveActiveLayer: true,
+      },
+      host,
+    ),
+  };
+}
 
 /**
  * Puts layers into a new group.
@@ -319,6 +378,40 @@ export function createMoveGroupMemberCommand(
     target.kind === "into"
       ? moveLayerIntoGroup(document, layerId, target.groupId)
       : moveLayerOutOfGroup(document, layerId);
+  if (after === document) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after,
+    command: createDocumentCommand(
+      { label: "Move Layer", before: document, after, preserveActiveLayer: true },
+      host,
+    ),
+  };
+}
+
+/**
+ * Moves a layer to an explicit parent and index.
+ *
+ * This is the drag-and-drop form of `createMoveGroupMemberCommand`: a single
+ * command lands the node exactly where the drop marker said, even when the
+ * destination is a different group. The tree rules (a destination must be a
+ * group, a group may not enter its own subtree) are enforced by the pure
+ * operation, so an invalid drop changes nothing and creates no history entry.
+ */
+export function createMoveLayerToParentCommand(
+  document: DrawingDocument,
+  layerId: LayerId,
+  parentId: LayerId | null,
+  index: number,
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCommandOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const after = moveLayerToParent(document, layerId, parentId, index);
   if (after === document) {
     return { ok: false, reason: "invalid" };
   }

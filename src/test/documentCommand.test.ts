@@ -20,7 +20,7 @@ import {
   setActiveLayer,
   updateLayer,
 } from "../core/document/document";
-import { groupLayers } from "../core/document/layerGroups";
+import { findLayer, groupLayers } from "../core/document/layerGroups";
 import type { DrawingDocument, LayerElement, LayerId, StrokeRecord } from "../core/document/types";
 
 function makeStroke(layerId: LayerId, x: number): StrokeRecord {
@@ -92,7 +92,7 @@ describe("createDocumentCommand", () => {
         label: "Delete Layer",
         before,
         after,
-        removedElements: { layerId: removedLayerId, elements: doomed },
+        removedElements: [{ layerId: removedLayerId, elements: doomed }],
       },
       harness.host,
     );
@@ -108,8 +108,52 @@ describe("createDocumentCommand", () => {
     expect(harness.list(removedLayerId).map((element) => ("xs" in element ? element.xs[0] : -1))).toEqual([10, 20]);
   });
 
-  it("removes a duplicated layer's copied strokes when reverted", () => {
+  it("restores every child of a deleted group", () => {
     let before = createDocument({ name: "Test", width: 100, height: 80 });
+    before = addLayer(before);
+    before = addLayer(before);
+    const [bottom, , top] = before.layers;
+    const grouped = groupLayers(before, [bottom?.id ?? "", top?.id ?? ""]);
+    const group = findLayer(
+      grouped.layers,
+      grouped.layers.find((node) => node.kind === "group")?.id ?? "",
+    );
+    expect(group).toBeDefined();
+    if (!group) {
+      return;
+    }
+    const bottomStroke = makeStroke(bottom?.id ?? "", 1);
+    const topStroke = makeStroke(top?.id ?? "", 2);
+    const harness = createHost(grouped);
+    harness.host.restoreLayerElements(bottom?.id ?? "", [bottomStroke]);
+    harness.host.restoreLayerElements(top?.id ?? "", [topStroke]);
+
+    const after = removeLayer(grouped, group.id);
+    const command = createDocumentCommand(
+      {
+        label: "Delete Group",
+        before: grouped,
+        after,
+        removedElements: [
+          { layerId: bottom?.id ?? "", elements: [bottomStroke] },
+          { layerId: top?.id ?? "", elements: [topStroke] },
+        ],
+      },
+      harness.host,
+    );
+
+    command.apply();
+    expect(findLayer(harness.getDocument().layers, group.id)).toBeUndefined();
+    expect(harness.list(bottom?.id ?? "")).toHaveLength(0);
+    expect(harness.list(top?.id ?? "")).toHaveLength(0);
+
+    command.revert();
+    expect(findLayer(harness.getDocument().layers, group.id)?.children).toHaveLength(2);
+    expect(harness.list(bottom?.id ?? "")).toEqual([bottomStroke]);
+    expect(harness.list(top?.id ?? "")).toEqual([topStroke]);
+  });
+
+  it("removes a duplicated layer's copied strokes when reverted", () => {    let before = createDocument({ name: "Test", width: 100, height: 80 });
     before = updateLayer(before, before.layers[0].id, { name: "Layer 1" });
 
     const harness = createHost(before);
@@ -126,7 +170,7 @@ describe("createDocumentCommand", () => {
         label: "Duplicate Layer",
         before,
         after,
-        addedElements: { layerId: copyId, elements: [copied] },
+        addedElements: [{ layerId: copyId, elements: [copied] }],
       },
       harness.host,
     );
@@ -158,7 +202,7 @@ describe("createDocumentCommand", () => {
         before,
         after,
         mergeKey: "layer-opacity:layer-1",
-        removedElements: { layerId: before.layers[0].id, elements: [] },
+        removedElements: [{ layerId: before.layers[0].id, elements: [] }],
       },
       harness.host,
     );

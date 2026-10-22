@@ -297,7 +297,9 @@ export function removeLayer(document: DrawingDocument, layerId: LayerId): Drawin
   const wasActive = document.activeLayerId === layerId;
   const neighbour = nextSiblings[Math.min(index, nextSiblings.length - 1)]?.id ?? null;
   const activeLayerId = wasActive
-    ? neighbour
+    ? isGroup(node)
+      ? (paintableLayers(layers)[0]?.id ?? null)
+      : neighbour
     : (findLayer(layers, document.activeLayerId ?? "")?.id ??
       paintableLayers(layers)[0]?.id ??
       null);

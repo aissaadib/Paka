@@ -27,6 +27,7 @@
  */
 
 import { createId } from "../../utils/id";
+import { clamp } from "../../utils/math";
 import type { DrawingDocument, Layer, LayerId } from "./types";
 
 /** The default name of a new group. */
@@ -366,6 +367,204 @@ export function uniqueGroupName(document: DrawingDocument): string {
   }
 }
 
+/** Where a node sits: its parent (`null` at the root) and its index there. */
+export interface LayerLocation {
+  readonly parentId: LayerId | null;
+  readonly index: number;
+}
+
+/**
+ * The place a node occupies in the tree.
+ *
+ * `undefined` when the id is not in the tree. The index is in the parent's
+ * children list, which is bottom-first like every other list in the model.
+ */
+export function layerLocation(
+  layers: readonly Layer[],
+  id: LayerId,
+): LayerLocation | undefined {
+  const path = findLayerPath(layers, id);
+  if (!path) {
+    return undefined;
+  }
+  const parent = path.length >= 2 ? path[path.length - 2] : undefined;
+  const siblings = parent ? parent.children : layers;
+  const index = siblings.findIndex((node) => node.id === id);
+  if (index === -1) {
+    return undefined;
+  }
+  return { parentId: parent ? parent.id : null, index };
+}
+
+/**
+ * Inserts `node` into the tree at `parentId` / `index`.
+ *
+ * `index` is clamped to the list, so a drop past the end means "top". Returns
+ * `undefined` when the parent cannot hold children (it does not exist or is a
+ * paintable layer).
+ */
+function insertNodeAt(
+  layers: readonly Layer[],
+  node: Layer,
+  parentId: LayerId | null,
+  index: number,
+): readonly Layer[] | undefined {
+  if (parentId === null) {
+    const next = [...layers];
+    next.splice(clamp(Math.trunc(index), 0, next.length), 0, node);
+    return next;
+  }
+  const parent = findLayer(layers, parentId);
+  if (!parent || !isGroup(parent)) {
+    return undefined;
+  }
+  return replaceNode(layers, parentId, (owner) => {
+    const children = [...owner.children];
+    children.splice(clamp(Math.trunc(index), 0, children.length), 0, node);
+    return { ...owner, children };
+  });
+}
+
+/**
+ * Creates an empty group and inserts it into the tree.
+ *
+ * A group owns no content, so it starts empty. The caller decides where it
+ * goes; `index` is in the destination's children list (bottom-first) and is
+ * clamped, so "above the active layer" is `location.index + 1`.
+ *
+ * Returns `null` when the destination cannot hold a group. The document is
+ * untouched in that case, which is what lets a command refuse without a
+ * partial mutation.
+ */
+export function addGroup(
+  document: DrawingDocument,
+  options: {
+    readonly name?: string;
+    readonly parentId?: LayerId | null;
+    readonly index?: number;
+  } = {},
+): { readonly document: DrawingDocument; readonly group: Layer } | null {
+  const parentId = options.parentId ?? null;
+  const destination =
+    parentId === null ? document.layers : findLayer(document.layers, parentId)?.children;
+  if (!destination) {
+    return null;
+  }
+  if (parentId !== null) {
+    const parent = findLayer(document.layers, parentId);
+    if (!parent || !isGroup(parent)) {
+      return null;
+    }
+  }
+  const group = createGroup(options.name ?? uniqueGroupName(document));
+  const layers = insertNodeAt(
+    document.layers,
+    group,
+    parentId,
+    options.index ?? destination.length,
+  );
+  if (!layers || layers === document.layers) {
+    return null;
+  }
+  return { document: { ...document, layers }, group };
+}
+
+/**
+ * Moves a node to an explicit parent and index.
+ *
+ * This is the general form of `moveLayerIntoGroup` / `moveLayerOutOfGroup`:
+ * the panel needs to say exactly where a drop lands, and a move between two
+ * levels must be one operation rather than a move plus a reorder.
+ *
+ * `index` is counted in the destination's **current** children list, before
+ * the node is taken out (the same convention as `splice`). It is clamped, and
+ * a node already in that list adjusts the index so "insert before the node
+ * that is now at position N" means what it says.
+ *
+ * The document is returned unchanged for an unknown node, a destination that
+ * is not a group, or a move that would make a group its own ancestor. A move
+ * that lands the node where it already is also changes nothing.
+ */
+export function moveLayerToParent(
+  document: DrawingDocument,
+  layerId: LayerId,
+  parentId: LayerId | null,
+  index: number,
+): DrawingDocument {
+  const node = findLayer(document.layers, layerId);
+  if (!node) {
+    return document;
+  }
+  if (parentId !== null) {
+    if (parentId === layerId) {
+      return document;
+    }
+    const parent = findLayer(document.layers, parentId);
+    if (!parent || !isGroup(parent)) {
+      return document;
+    }
+    // The rule that keeps the tree a tree.
+    if (isAncestor(document.layers, layerId, parentId)) {
+      return document;
+    }
+  }
+
+  const location = layerLocation(document.layers, layerId);
+  if (!location) {
+    return document;
+  }
+  const sameParent = location.parentId === parentId;
+
+  // Take the node out of its current parent first. The destination index is
+  // then counted in the destination's current list (the `splice` convention),
+  // with the node already gone from its old place.
+  const currentParent =
+    location.parentId === null ? undefined : findLayer(document.layers, location.parentId);
+  const currentSiblings = currentParent ? currentParent.children : document.layers;
+  const withoutNodeSiblings = currentSiblings.filter((candidate) => candidate.id !== layerId);
+  const withoutNode =
+    location.parentId === null
+      ? withoutNodeSiblings
+      : replaceNode(document.layers, location.parentId, (owner) => ({
+          ...owner,
+          children: withoutNodeSiblings,
+        }));
+  if (withoutNode === document.layers) {
+    return document;
+  }
+
+  const destinationParent =
+    parentId === null ? undefined : findLayer(withoutNode, parentId);
+  if (parentId !== null && !destinationParent) {
+    return document;
+  }
+  const destinationSiblings = destinationParent ? destinationParent.children : withoutNode;
+
+  let insertAt = Number.isFinite(index) ? Math.trunc(index) : destinationSiblings.length;
+  if (sameParent && location.index < insertAt) {
+    insertAt -= 1;
+  }
+  insertAt = clamp(insertAt, 0, destinationSiblings.length);
+  if (sameParent && location.index === insertAt) {
+    return document;
+  }
+
+  const nextSiblings = [...destinationSiblings];
+  nextSiblings.splice(insertAt, 0, node);
+
+  const layers =
+    parentId === null
+      ? nextSiblings
+      : replaceNode(withoutNode, parentId, (owner) => ({
+          ...owner,
+          children: nextSiblings,
+        }));
+  if (layers === document.layers) {
+    return document;
+  }
+  return { ...document, layers };
+}
+
 /**
  * Dissolves a group: its children take its place, in the same order.
  *
@@ -400,7 +599,13 @@ export function dissolveGroup(document: DrawingDocument, groupId: LayerId): Draw
   if (layers === document.layers) {
     return document;
   }
-  return { ...document, layers };
+  // A group that was the active node cannot stay active once it is gone.
+  // Prefer the first paintable layer it held, then any paintable layer.
+  const activeLayerId =
+    document.activeLayerId === groupId
+      ? (paintableLayers(group.children)[0]?.id ?? paintableLayers(layers)[0]?.id ?? null)
+      : document.activeLayerId;
+  return { ...document, layers, activeLayerId };
 }
 
 /**
@@ -536,6 +741,8 @@ export function replaceLayerNode(
 export interface LayerTreeRow {
   /** The node this row shows. */
   readonly layer: Layer;
+  /** The node that holds it, or `null` at the root. */
+  readonly parentId: LayerId | null;
   /** 0 for a node at the root, 1 inside a root group, and so on. */
   readonly depth: number;
   /** True when the node is a group: a container rather than a paintable layer. */
@@ -551,42 +758,56 @@ export interface LayerTreeRow {
  * is the order the model stores. The panel shows the top of the stack at the
  * top, so it asks for `topFirst`: the rows of every level are then reversed,
  * while the hierarchy - a child always follows its group - is kept.
+ *
+ * `collapsed` hides a group's children without touching the document: the
+ * group row is still returned, so it can be expanded again. This is view
+ * state; it is deliberately not part of the document or the project file.
  */
 export function layerTreeRows(
   layers: readonly Layer[],
   activeLayerId: LayerId | null,
-  options: { readonly topFirst?: boolean } = {},
+  options: {
+    readonly topFirst?: boolean;
+    readonly collapsed?: ReadonlySet<LayerId>;
+  } = {},
 ): readonly LayerTreeRow[] {
+  const collapsed = options.collapsed ?? new Set<LayerId>();
   const rows: LayerTreeRow[] = [];
-  const visit = (nodes: readonly Layer[], depth: number): void => {
+  const visit = (nodes: readonly Layer[], depth: number, parentId: LayerId | null): void => {
     for (const node of nodes) {
       rows.push({
         layer: node,
+        parentId,
         depth,
         isGroup: isGroup(node),
         active: node.id === activeLayerId,
       });
-      visit(node.children, depth + 1);
+      if (!collapsed.has(node.id)) {
+        visit(node.children, depth + 1, node.id);
+      }
     }
   };
-  visit(layers, 0);
+  visit(layers, 0, null);
   if (!options.topFirst) {
     return rows;
   }
 
   // Reverse each level, keeping every child under its own group.
   const topFirst: LayerTreeRow[] = [];
-  const visitTop = (nodes: readonly Layer[], depth: number): void => {
+  const visitTop = (nodes: readonly Layer[], depth: number, parentId: LayerId | null): void => {
     for (const node of [...nodes].reverse()) {
       topFirst.push({
         layer: node,
+        parentId,
         depth,
         isGroup: isGroup(node),
         active: node.id === activeLayerId,
       });
-      visitTop(node.children, depth + 1);
+      if (!collapsed.has(node.id)) {
+        visitTop(node.children, depth + 1, node.id);
+      }
     }
   };
-  visitTop(layers, 0);
+  visitTop(layers, 0, null);
   return topFirst;
 }

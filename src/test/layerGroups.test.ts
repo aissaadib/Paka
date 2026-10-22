@@ -14,14 +14,17 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { createStrokeRecord } from "../core/brushes/strokeBuilder";
 import {
+  createAddGroupCommand,
   createDissolveGroupCommand,
   createGroupLayersCommand,
   createMoveGroupMemberCommand,
+  createMoveLayerToParentCommand,
   createRenameGroupCommand,
   type DocumentCommandHost,
 } from "../core/commands/documentCommand";
 import { addLayer, createDocument, setActiveLayer } from "../core/document/document";
 import {
+  addGroup,
   allLayerNames,
   dissolveGroup,
   findLayer,
@@ -31,9 +34,11 @@ import {
   isAncestor,
   isGroup,
   layerDepth,
+  layerLocation,
   layerTreeRows,
   moveLayerIntoGroup,
   moveLayerOutOfGroup,
+  moveLayerToParent,
   newLayerIds,
   paintableLayers,
   subtreeIds,
@@ -333,6 +338,7 @@ describe("the rows of the layers tree", () => {
     expect(rows.map((row) => row.depth)).toEqual([0, 0, 1, 1]);
     expect(rows.find((row) => row.layer.id === group)?.isGroup).toBe(true);
     expect(rows.find((row) => row.active)?.layer.id).toBe(middle?.id);
+    expect(rows.find((row) => row.layer.id === bottom?.id)?.parentId).toBe(group);
 
     // The panel shows the top of the stack at the top.
     const topFirst = layerTreeRows(grouped.layers, middle?.id ?? "", { topFirst: true });
@@ -342,6 +348,136 @@ describe("the rows of the layers tree", () => {
       bottom?.id,
       middle?.id,
     ]);
+  });
+
+  it("hides a collapsed group's children without touching the document", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", top?.id ?? ""]);
+    const group = groupIdOf(grouped) ?? "";
+
+    const collapsed = layerTreeRows(grouped.layers, null, {
+      topFirst: true,
+      collapsed: new Set([group]),
+    });
+
+    expect(collapsed.map((row) => row.layer.id)).toEqual([group, middle?.id]);
+    // Collapsing is view state: the children are still in the document.
+    expect(grouped.layers).toHaveLength(2);
+    expect(findLayer(grouped.layers, bottom?.id ?? "")).toBeDefined();
+    expect(findLayer(grouped.layers, top?.id ?? "")).toBeDefined();
+  });
+});
+
+describe("placing a new, empty group", () => {
+  it("inserts it at an explicit parent and index", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle, top] = document.layers;
+
+    const placed = addGroup(document, { name: "Ink", index: 1 });
+    expect(placed).not.toBeNull();
+    if (!placed) {
+      return;
+    }
+
+    expect(placed.document.layers.map((node) => node.id)).toEqual([
+      bottom?.id,
+      placed.group.id,
+      middle?.id,
+      top?.id,
+    ]);
+    expect(placed.group.name).toBe("Ink");
+    expect(placed.group.kind).toBe("group");
+    expect(placed.group.children).toEqual([]);
+    expect(layerLocation(placed.document.layers, placed.group.id)).toEqual({
+      parentId: null,
+      index: 1,
+    });
+  });
+
+  it("places one group inside another, and names it uniquely", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", middle?.id ?? ""]);
+    const outer = groupIdOf(grouped) ?? "";
+
+    const placed = addGroup(grouped, { parentId: outer });
+    expect(placed).not.toBeNull();
+    if (!placed) {
+      return;
+    }
+
+    expect(placed.group.name).toBe("Group 2");
+    expect(findLayer(placed.document.layers, placed.group.id)?.kind).toBe("group");
+    expect(layerLocation(placed.document.layers, placed.group.id)).toEqual({
+      parentId: outer,
+      index: 2,
+    });
+    expect(allLayerNames(placed.document.layers).has(placed.group.name)).toBe(true);
+  });
+
+  it("refuses a parent that cannot hold children", () => {
+    const document = documentWithLayers(2);
+    const [bottom] = document.layers;
+
+    expect(addGroup(document, { parentId: bottom?.id ?? "" })).toBeNull();
+    expect(addGroup(document, { parentId: "missing" })).toBeNull();
+  });
+});
+
+describe("moving a node to a parent and index", () => {
+  it("moves a layer into a group, out again, and keeps every pixel's owner", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", middle?.id ?? ""]);
+    const group = groupIdOf(grouped) ?? "";
+
+    const into = moveLayerToParent(grouped, top?.id ?? "", group, 0);
+    expect(findLayer(into.layers, top?.id ?? "")?.id).toBe(top?.id);
+    expect(findLayer(into.layers, group)?.children.map((node) => node.id)).toEqual([
+      top?.id,
+      bottom?.id,
+      middle?.id,
+    ]);
+    // The content did not change owner: the node is the same object.
+    expect(findLayer(into.layers, top?.id ?? "")).toBe(top);
+
+    const out = moveLayerToParent(into, top?.id ?? "", null, 0);
+    expect(out.layers[0]?.id).toBe(top?.id);
+    expect(findLayer(out.layers, group)?.children).toHaveLength(2);
+  });
+
+  it("reorders siblings without leaving their parent", () => {
+    const document = documentWithLayers(4);
+    const [bottom, middle, , top] = document.layers;
+
+    const moved = moveLayerToParent(document, bottom?.id ?? "", null, 4);
+    expect(moved.layers.map((node) => node.id)).toEqual([
+      middle?.id,
+      document.layers[2]?.id,
+      top?.id,
+      bottom?.id,
+    ]);
+    expect(moveLayerToParent(moved, bottom?.id ?? "", null, 4)).toBe(moved);
+  });
+
+  it("refuses a move that would make a group its own ancestor", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", middle?.id ?? ""]);
+    const group = groupIdOf(grouped) ?? "";
+
+    expect(moveLayerToParent(grouped, group, group, 0)).toBe(grouped);
+    expect(moveLayerToParent(grouped, group, bottom?.id ?? "", 0)).toBe(grouped);
+  });
+
+  it("refuses a paintable destination and an unknown node", () => {
+    const document = documentWithLayers(2);
+    const [bottom, top] = document.layers;
+
+    expect(moveLayerToParent(document, top?.id ?? "", bottom?.id ?? "", 0)).toBe(document);
+    expect(moveLayerToParent(document, "missing", null, 0)).toBe(document);
+    expect(moveLayerToParent(document, top?.id ?? "", "missing", 0)).toBe(document);
   });
 });
 
@@ -544,5 +680,82 @@ describe("the layer group commands", () => {
 
     outcome.command.revert();
     expect(harness.getDocument().activeLayerId).toBe(top?.id);
+  });
+
+  it("creates an empty group in one undoable step and keeps the active layer", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle, top] = document.layers;
+    const active = setActiveLayer(document, middle?.id ?? "");
+    const harness = createHost(active);
+
+    const outcome = createAddGroupCommand(
+      active,
+      { index: 2 },
+      harness.host,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) {
+      return;
+    }
+
+    outcome.command.apply();
+    const withGroup = harness.getDocument();
+    expect(withGroup.layers.map((node) => node.id)).toEqual([
+      bottom?.id,
+      middle?.id,
+      outcome.groupId,
+      top?.id,
+    ]);
+    expect(findLayer(withGroup.layers, outcome.groupId)?.children).toEqual([]);
+    expect(withGroup.activeLayerId).toBe(middle?.id);
+
+    outcome.command.revert();
+    expect(harness.getDocument()).toBe(active);
+  });
+
+  it("moves a layer to an explicit parent and index in one undoable step", () => {
+    const document = documentWithLayers(3);
+    const [bottom, middle, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", middle?.id ?? ""]);
+    const group = groupIdOf(grouped) ?? "";
+    const active = setActiveLayer(grouped, bottom?.id ?? "");
+    const harness = createHost(active);
+
+    const outcome = createMoveLayerToParentCommand(
+      active,
+      top?.id ?? "",
+      group,
+      0,
+      harness.host,
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) {
+      return;
+    }
+
+    outcome.command.apply();
+    expect(findLayer(harness.getDocument().layers, group)?.children.map((node) => node.id)).toEqual([
+      top?.id,
+      bottom?.id,
+      middle?.id,
+    ]);
+    expect(harness.getDocument().activeLayerId).toBe(bottom?.id);
+
+    outcome.command.revert();
+    expect(harness.getDocument()).toBe(active);
+    expect(harness.getDocument().activeLayerId).toBe(bottom?.id);
+  });
+
+  it("creates no history step for a move that changes nothing", () => {
+    const document = documentWithLayers(2);
+    const [bottom, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", top?.id ?? ""]);
+    const group = groupIdOf(grouped) ?? "";
+    const harness = createHost(grouped);
+
+    expect(
+      createMoveLayerToParentCommand(grouped, group, group, 0, harness.host),
+    ).toEqual({ ok: false, reason: "invalid" });
+    expect(harness.getDocument()).toBe(grouped);
   });
 });

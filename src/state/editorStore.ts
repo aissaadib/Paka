@@ -84,6 +84,11 @@ export interface EditorActions {
   zoomToFit(): void;
   newDocument(options: NewDocumentOptions): void;
   addLayer(): void;
+  /** Creates an empty group above the active node; returns it, or `null` if refused. */
+  createGroup(): LayerId | null;
+  dissolveGroup(groupId: LayerId): void;
+  renameGroup(groupId: LayerId, name: string): void;
+  moveLayerToParent(layerId: LayerId, parentId: LayerId | null, index: number): void;
   duplicateLayer(layerId: LayerId): void;
   removeLayer(layerId: LayerId): void;
   renameLayer(layerId: LayerId, name: string): void;
@@ -186,6 +191,11 @@ export function createEditor(options: EditorOptions = {}): Editor {
     zoomToFit: () => engine.zoomToFit(),
     newDocument: (documentOptions) => engine.newDocument(documentOptions),
     addLayer: () => engine.addLayer(),
+    createGroup: () => engine.createGroup(),
+    dissolveGroup: (groupId) => engine.dissolveGroup(groupId),
+    renameGroup: (groupId, name) => engine.renameGroup(groupId, name),
+    moveLayerToParent: (layerId, parentId, index) =>
+      engine.moveLayerToParent(layerId, parentId, index),
     duplicateLayer: (layerId) => engine.duplicateLayer(layerId),
     removeLayer: (layerId) => engine.removeLayer(layerId),
     renameLayer: (layerId, name) => engine.renameLayer(layerId, name),
