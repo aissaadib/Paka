@@ -10,6 +10,7 @@
 | Branch | `feat/agent17-transform-handles` |
 | Base commit | `74023e9` - *"Merge pull request #9 from aissaadib/integration/swarm-wave-2"* |
 | Feature commit | `6906308` - *"feat(select): give the transform a real bounding box with side handles"* |
+| Review fixes | `d66bda1` - *"fix(select): let the highlighted handle follow the pointer, not the selection"*, `122ebc8` - *"fix(select): measure the side stretch against the content, not the paint"* |
 | Repair commit | `d7d68e6` - *"fix: resolve a conflicted merge that left two format versions and a doubled test"* |
 | Worktree | `C:\Users\aissa\AppData\Local\Temp\opencode\agent17-transform-handles` (isolated) |
 | Shared branch | **Not modified.** The shared checkout had another agent's uncommitted work in it, so the slice was done in its own worktree. |
@@ -129,7 +130,7 @@ Run in `C:\Users\aissa\AppData\Local\Temp\opencode\agent17-transform-handles`:
 
 | Command | Result |
 | --- | --- |
-| `pnpm test` | **1086 tests in 48 files, all pass** |
+| `pnpm test` | **1087 tests in 48 files, all pass** |
 | `pnpm typecheck` | clean |
 | `pnpm build` | succeeds |
 | `pnpm test:visual` | **30 tests, all pass** (including the `transformed-selection` golden and the Selection-menu spec) |
