@@ -1,0 +1,3050 @@
+{
+  "1440x900": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "documentHeight": 900,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900,
+      "bottom": 900,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 900,
+      "clientWidth": 1440,
+      "clientHeight": 900
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 1440,
+      "height": 182,
+      "bottom": 212,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 181,
+      "clientWidth": 1440,
+      "clientHeight": 181
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 212,
+      "width": 1440,
+      "height": 666,
+      "bottom": 878,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 666,
+      "clientWidth": 1440,
+      "clientHeight": 666
+    },
+    "sidePanels": {
+      "x": 1224,
+      "y": 212,
+      "width": 216,
+      "height": 666,
+      "bottom": 878,
+      "right": 1440,
+      "scrollWidth": 263,
+      "scrollHeight": 666,
+      "clientWidth": 216,
+      "clientHeight": 666
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 212,
+      "width": 40,
+      "height": 666,
+      "bottom": 878,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 666,
+      "clientWidth": 39,
+      "clientHeight": 666
+    },
+    "canvas": {
+      "x": 40,
+      "y": 212,
+      "width": 1184,
+      "height": 666,
+      "bottom": 878,
+      "right": 1224,
+      "scrollWidth": 1184,
+      "scrollHeight": 666,
+      "clientWidth": 1184,
+      "clientHeight": 666
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 878,
+      "width": 1440,
+      "height": 22,
+      "bottom": 900,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 21,
+      "clientWidth": 1440,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 167,
+        "bottom": 379,
+        "headerVisible": true,
+        "bodyHeight": 139
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 48,
+        "bottom": 427,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 104,
+        "bottom": 531,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 60,
+        "bottom": 591,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 287,
+        "bottom": 878,
+        "headerVisible": true,
+        "bodyHeight": 222
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1438,
+        "y": 647,
+        "right": 1486,
+        "bottom": 667
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 900,
+        "right": 1434,
+        "bottom": 920
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 923,
+        "right": 1434,
+        "bottom": 943
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 946,
+        "right": 1434,
+        "bottom": 966
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 969,
+        "right": 1434,
+        "bottom": 989
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 992,
+        "right": 1434,
+        "bottom": 1012
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1015,
+        "right": 1434,
+        "bottom": 1035
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1038,
+        "right": 1434,
+        "bottom": 1058
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1061,
+        "right": 1434,
+        "bottom": 1081
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1084,
+        "right": 1434,
+        "bottom": 1104
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1107,
+        "right": 1434,
+        "bottom": 1127
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1130,
+        "right": 1434,
+        "bottom": 1150
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1153,
+        "right": 1434,
+        "bottom": 1173
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1199,
+        "right": 1434,
+        "bottom": 1219
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1222,
+        "right": 1434,
+        "bottom": 1242
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1245,
+        "right": 1434,
+        "bottom": 1265
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1268,
+        "right": 1434,
+        "bottom": 1288
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1291,
+        "right": 1434,
+        "bottom": 1311
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1314,
+        "right": 1434,
+        "bottom": 1334
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1337,
+        "right": 1434,
+        "bottom": 1357
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1360,
+        "right": 1434,
+        "bottom": 1380
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1383,
+        "right": 1434,
+        "bottom": 1403
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1406,
+        "right": 1434,
+        "bottom": 1426
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1429,
+        "right": 1434,
+        "bottom": 1449
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1452,
+        "right": 1434,
+        "bottom": 1472
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1386,
+        "y": 1475,
+        "right": 1434,
+        "bottom": 1495
+      }
+    ],
+    "errors": []
+  },
+  "1366x768": {
+    "viewport": {
+      "width": 1366,
+      "height": 768
+    },
+    "documentHeight": 768,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1366,
+      "height": 768,
+      "bottom": 768,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 768,
+      "clientWidth": 1366,
+      "clientHeight": 768
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 1366,
+      "height": 182,
+      "bottom": 212,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 181,
+      "clientWidth": 1366,
+      "clientHeight": 181
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 212,
+      "width": 1366,
+      "height": 534,
+      "bottom": 746,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 534,
+      "clientWidth": 1366,
+      "clientHeight": 534
+    },
+    "sidePanels": {
+      "x": 1150,
+      "y": 212,
+      "width": 216,
+      "height": 534,
+      "bottom": 746,
+      "right": 1366,
+      "scrollWidth": 263,
+      "scrollHeight": 534,
+      "clientWidth": 216,
+      "clientHeight": 534
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 212,
+      "width": 40,
+      "height": 534,
+      "bottom": 746,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 534,
+      "clientWidth": 39,
+      "clientHeight": 534
+    },
+    "canvas": {
+      "x": 40,
+      "y": 212,
+      "width": 1110,
+      "height": 534,
+      "bottom": 746,
+      "right": 1150,
+      "scrollWidth": 1110,
+      "scrollHeight": 534,
+      "clientWidth": 1110,
+      "clientHeight": 534
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 746,
+      "width": 1366,
+      "height": 22,
+      "bottom": 768,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 21,
+      "clientWidth": 1366,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 134,
+        "bottom": 346,
+        "headerVisible": true,
+        "bodyHeight": 106
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 39,
+        "bottom": 385,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 83,
+        "bottom": 468,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 48,
+        "bottom": 516,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 230,
+        "bottom": 746,
+        "headerVisible": true,
+        "bodyHeight": 165
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1364,
+        "y": 572,
+        "right": 1412,
+        "bottom": 592
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 756,
+        "right": 1360,
+        "bottom": 776
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 779,
+        "right": 1360,
+        "bottom": 799
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 802,
+        "right": 1360,
+        "bottom": 822
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 825,
+        "right": 1360,
+        "bottom": 845
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 848,
+        "right": 1360,
+        "bottom": 868
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 871,
+        "right": 1360,
+        "bottom": 891
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 894,
+        "right": 1360,
+        "bottom": 914
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 917,
+        "right": 1360,
+        "bottom": 937
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 940,
+        "right": 1360,
+        "bottom": 960
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 963,
+        "right": 1360,
+        "bottom": 983
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 986,
+        "right": 1360,
+        "bottom": 1006
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1009,
+        "right": 1360,
+        "bottom": 1029
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1032,
+        "right": 1360,
+        "bottom": 1052
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1055,
+        "right": 1360,
+        "bottom": 1075
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1078,
+        "right": 1360,
+        "bottom": 1098
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1124,
+        "right": 1360,
+        "bottom": 1144
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1147,
+        "right": 1360,
+        "bottom": 1167
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1170,
+        "right": 1360,
+        "bottom": 1190
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1193,
+        "right": 1360,
+        "bottom": 1213
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1216,
+        "right": 1360,
+        "bottom": 1236
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1239,
+        "right": 1360,
+        "bottom": 1259
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1262,
+        "right": 1360,
+        "bottom": 1282
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1285,
+        "right": 1360,
+        "bottom": 1305
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1308,
+        "right": 1360,
+        "bottom": 1328
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1331,
+        "right": 1360,
+        "bottom": 1351
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1354,
+        "right": 1360,
+        "bottom": 1374
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1377,
+        "right": 1360,
+        "bottom": 1397
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1312,
+        "y": 1400,
+        "right": 1360,
+        "bottom": 1420
+      }
+    ],
+    "errors": []
+  },
+  "1180x800": {
+    "viewport": {
+      "width": 1180,
+      "height": 800
+    },
+    "documentHeight": 800,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1180,
+      "height": 800,
+      "bottom": 800,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 800,
+      "clientWidth": 1180,
+      "clientHeight": 800
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 1180,
+      "height": 182,
+      "bottom": 212,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 181,
+      "clientWidth": 1180,
+      "clientHeight": 181
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 212,
+      "width": 1180,
+      "height": 566,
+      "bottom": 778,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 566,
+      "clientWidth": 1180,
+      "clientHeight": 566
+    },
+    "sidePanels": {
+      "x": 964,
+      "y": 212,
+      "width": 216,
+      "height": 566,
+      "bottom": 778,
+      "right": 1180,
+      "scrollWidth": 263,
+      "scrollHeight": 566,
+      "clientWidth": 216,
+      "clientHeight": 566
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 212,
+      "width": 40,
+      "height": 566,
+      "bottom": 778,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 566,
+      "clientWidth": 39,
+      "clientHeight": 566
+    },
+    "canvas": {
+      "x": 40,
+      "y": 212,
+      "width": 924,
+      "height": 566,
+      "bottom": 778,
+      "right": 964,
+      "scrollWidth": 924,
+      "scrollHeight": 566,
+      "clientWidth": 924,
+      "clientHeight": 566
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 778,
+      "width": 1180,
+      "height": 22,
+      "bottom": 800,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 21,
+      "clientWidth": 1180,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 142,
+        "bottom": 354,
+        "headerVisible": true,
+        "bodyHeight": 114
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 41,
+        "bottom": 395,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 88,
+        "bottom": 483,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 51,
+        "bottom": 534,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 244,
+        "bottom": 778,
+        "headerVisible": true,
+        "bodyHeight": 179
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1178,
+        "y": 590,
+        "right": 1226,
+        "bottom": 610
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 797,
+        "right": 1174,
+        "bottom": 817
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 820,
+        "right": 1174,
+        "bottom": 840
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 843,
+        "right": 1174,
+        "bottom": 863
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 866,
+        "right": 1174,
+        "bottom": 886
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 889,
+        "right": 1174,
+        "bottom": 909
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 912,
+        "right": 1174,
+        "bottom": 932
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 935,
+        "right": 1174,
+        "bottom": 955
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 958,
+        "right": 1174,
+        "bottom": 978
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 981,
+        "right": 1174,
+        "bottom": 1001
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1004,
+        "right": 1174,
+        "bottom": 1024
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1027,
+        "right": 1174,
+        "bottom": 1047
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1050,
+        "right": 1174,
+        "bottom": 1070
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1073,
+        "right": 1174,
+        "bottom": 1093
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1096,
+        "right": 1174,
+        "bottom": 1116
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1143,
+        "right": 1174,
+        "bottom": 1163
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1166,
+        "right": 1174,
+        "bottom": 1186
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1189,
+        "right": 1174,
+        "bottom": 1209
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1212,
+        "right": 1174,
+        "bottom": 1232
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1235,
+        "right": 1174,
+        "bottom": 1255
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1258,
+        "right": 1174,
+        "bottom": 1278
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1281,
+        "right": 1174,
+        "bottom": 1301
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1304,
+        "right": 1174,
+        "bottom": 1324
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1327,
+        "right": 1174,
+        "bottom": 1347
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1350,
+        "right": 1174,
+        "bottom": 1370
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1373,
+        "right": 1174,
+        "bottom": 1393
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1396,
+        "right": 1174,
+        "bottom": 1416
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1126,
+        "y": 1419,
+        "right": 1174,
+        "bottom": 1439
+      }
+    ],
+    "errors": []
+  },
+  "1024x768": {
+    "viewport": {
+      "width": 1024,
+      "height": 768
+    },
+    "documentHeight": 768,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 768,
+      "bottom": 768,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 768,
+      "clientWidth": 1024,
+      "clientHeight": 768
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 1024,
+      "height": 210,
+      "bottom": 240,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 209,
+      "clientWidth": 1024,
+      "clientHeight": 209
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 240,
+      "width": 1024,
+      "height": 506,
+      "bottom": 746,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 506,
+      "clientWidth": 1024,
+      "clientHeight": 506
+    },
+    "sidePanels": {
+      "x": 808,
+      "y": 240,
+      "width": 216,
+      "height": 506,
+      "bottom": 746,
+      "right": 1024,
+      "scrollWidth": 263,
+      "scrollHeight": 506,
+      "clientWidth": 216,
+      "clientHeight": 506
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 240,
+      "width": 40,
+      "height": 506,
+      "bottom": 746,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 506,
+      "clientWidth": 39,
+      "clientHeight": 506
+    },
+    "canvas": {
+      "x": 40,
+      "y": 240,
+      "width": 768,
+      "height": 506,
+      "bottom": 746,
+      "right": 808,
+      "scrollWidth": 768,
+      "scrollHeight": 506,
+      "clientWidth": 768,
+      "clientHeight": 506
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 746,
+      "width": 1024,
+      "height": 22,
+      "bottom": 768,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 21,
+      "clientWidth": 1024,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 127,
+        "bottom": 367,
+        "headerVisible": true,
+        "bodyHeight": 99
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 37,
+        "bottom": 404,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 79,
+        "bottom": 482,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 45,
+        "bottom": 528,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 218,
+        "bottom": 746,
+        "headerVisible": true,
+        "bodyHeight": 153
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 1022,
+        "y": 584,
+        "right": 1070,
+        "bottom": 604
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 768,
+        "right": 1018,
+        "bottom": 788
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 791,
+        "right": 1018,
+        "bottom": 811
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 814,
+        "right": 1018,
+        "bottom": 834
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 837,
+        "right": 1018,
+        "bottom": 857
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 860,
+        "right": 1018,
+        "bottom": 880
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 883,
+        "right": 1018,
+        "bottom": 903
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 906,
+        "right": 1018,
+        "bottom": 926
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 929,
+        "right": 1018,
+        "bottom": 949
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 952,
+        "right": 1018,
+        "bottom": 972
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 975,
+        "right": 1018,
+        "bottom": 995
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 998,
+        "right": 1018,
+        "bottom": 1018
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1021,
+        "right": 1018,
+        "bottom": 1041
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1044,
+        "right": 1018,
+        "bottom": 1064
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1067,
+        "right": 1018,
+        "bottom": 1087
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1090,
+        "right": 1018,
+        "bottom": 1110
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1136,
+        "right": 1018,
+        "bottom": 1156
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1159,
+        "right": 1018,
+        "bottom": 1179
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1182,
+        "right": 1018,
+        "bottom": 1202
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1205,
+        "right": 1018,
+        "bottom": 1225
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1228,
+        "right": 1018,
+        "bottom": 1248
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1251,
+        "right": 1018,
+        "bottom": 1271
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1274,
+        "right": 1018,
+        "bottom": 1294
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1297,
+        "right": 1018,
+        "bottom": 1317
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1320,
+        "right": 1018,
+        "bottom": 1340
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1343,
+        "right": 1018,
+        "bottom": 1363
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1366,
+        "right": 1018,
+        "bottom": 1386
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1389,
+        "right": 1018,
+        "bottom": 1409
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 970,
+        "y": 1412,
+        "right": 1018,
+        "bottom": 1432
+      }
+    ],
+    "errors": []
+  },
+  "960x600": {
+    "viewport": {
+      "width": 960,
+      "height": 600
+    },
+    "documentHeight": 666,
+    "overflowY": 66,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 960,
+      "height": 600,
+      "bottom": 600,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 600,
+      "clientWidth": 960,
+      "clientHeight": 600
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 960,
+      "height": 210,
+      "bottom": 240,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 209,
+      "clientWidth": 960,
+      "clientHeight": 209
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 240,
+      "width": 960,
+      "height": 338,
+      "bottom": 578,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 338,
+      "clientWidth": 960,
+      "clientHeight": 338
+    },
+    "sidePanels": {
+      "x": 744,
+      "y": 240,
+      "width": 216,
+      "height": 338,
+      "bottom": 578,
+      "right": 960,
+      "scrollWidth": 263,
+      "scrollHeight": 338,
+      "clientWidth": 216,
+      "clientHeight": 338
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 240,
+      "width": 40,
+      "height": 338,
+      "bottom": 578,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 338,
+      "clientWidth": 39,
+      "clientHeight": 338
+    },
+    "canvas": {
+      "x": 40,
+      "y": 240,
+      "width": 704,
+      "height": 338,
+      "bottom": 578,
+      "right": 744,
+      "scrollWidth": 704,
+      "scrollHeight": 338,
+      "clientWidth": 704,
+      "clientHeight": 338
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 578,
+      "width": 960,
+      "height": 22,
+      "bottom": 600,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 21,
+      "clientWidth": 960,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 85,
+        "bottom": 325,
+        "headerVisible": true,
+        "bodyHeight": 57
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 24,
+        "bottom": 349,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 53,
+        "bottom": 402,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 30,
+        "bottom": 432,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 146,
+        "bottom": 578,
+        "headerVisible": true,
+        "bodyHeight": 81
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Paper",
+        "x": 915,
+        "y": 589,
+        "right": 952,
+        "bottom": 607
+      },
+      {
+        "tag": "input",
+        "label": "Ink colour",
+        "x": 806,
+        "y": 610,
+        "right": 826,
+        "bottom": 626
+      },
+      {
+        "tag": "input",
+        "label": "Comparison colour",
+        "x": 806,
+        "y": 630,
+        "right": 826,
+        "bottom": 646
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 958,
+        "y": 488,
+        "right": 1006,
+        "bottom": 508
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 603,
+        "right": 954,
+        "bottom": 623
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 626,
+        "right": 954,
+        "bottom": 646
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 649,
+        "right": 954,
+        "bottom": 669
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 672,
+        "right": 954,
+        "bottom": 692
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 695,
+        "right": 954,
+        "bottom": 715
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 718,
+        "right": 954,
+        "bottom": 738
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 741,
+        "right": 954,
+        "bottom": 761
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 764,
+        "right": 954,
+        "bottom": 784
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 787,
+        "right": 954,
+        "bottom": 807
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 810,
+        "right": 954,
+        "bottom": 830
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 833,
+        "right": 954,
+        "bottom": 853
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 856,
+        "right": 954,
+        "bottom": 876
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 879,
+        "right": 954,
+        "bottom": 899
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 902,
+        "right": 954,
+        "bottom": 922
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 925,
+        "right": 954,
+        "bottom": 945
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 948,
+        "right": 954,
+        "bottom": 968
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 971,
+        "right": 954,
+        "bottom": 991
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 994,
+        "right": 954,
+        "bottom": 1014
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1041,
+        "right": 954,
+        "bottom": 1061
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1064,
+        "right": 954,
+        "bottom": 1084
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1087,
+        "right": 954,
+        "bottom": 1107
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1110,
+        "right": 954,
+        "bottom": 1130
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1133,
+        "right": 954,
+        "bottom": 1153
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1156,
+        "right": 954,
+        "bottom": 1176
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1179,
+        "right": 954,
+        "bottom": 1199
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1202,
+        "right": 954,
+        "bottom": 1222
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1225,
+        "right": 954,
+        "bottom": 1245
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1248,
+        "right": 954,
+        "bottom": 1268
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1271,
+        "right": 954,
+        "bottom": 1291
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1294,
+        "right": 954,
+        "bottom": 1314
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 906,
+        "y": 1317,
+        "right": 954,
+        "bottom": 1337
+      }
+    ],
+    "errors": []
+  },
+  "900x700": {
+    "viewport": {
+      "width": 900,
+      "height": 700
+    },
+    "documentHeight": 700,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 900,
+      "height": 700,
+      "bottom": 700,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 700,
+      "clientWidth": 900,
+      "clientHeight": 700
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 900,
+      "height": 210,
+      "bottom": 240,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 209,
+      "clientWidth": 900,
+      "clientHeight": 209
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 240,
+      "width": 900,
+      "height": 438,
+      "bottom": 678,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 438,
+      "clientWidth": 900,
+      "clientHeight": 438
+    },
+    "sidePanels": {
+      "x": 684,
+      "y": 240,
+      "width": 216,
+      "height": 438,
+      "bottom": 678,
+      "right": 900,
+      "scrollWidth": 263,
+      "scrollHeight": 438,
+      "clientWidth": 216,
+      "clientHeight": 438
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 240,
+      "width": 40,
+      "height": 438,
+      "bottom": 678,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 438,
+      "clientWidth": 39,
+      "clientHeight": 438
+    },
+    "canvas": {
+      "x": 40,
+      "y": 240,
+      "width": 644,
+      "height": 438,
+      "bottom": 678,
+      "right": 684,
+      "scrollWidth": 644,
+      "scrollHeight": 438,
+      "clientWidth": 644,
+      "clientHeight": 438
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 678,
+      "width": 900,
+      "height": 22,
+      "bottom": 700,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 21,
+      "clientWidth": 900,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 110,
+        "bottom": 350,
+        "headerVisible": true,
+        "bodyHeight": 82
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 32,
+        "bottom": 382,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 68,
+        "bottom": 450,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 39,
+        "bottom": 489,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 189,
+        "bottom": 678,
+        "headerVisible": true,
+        "bodyHeight": 124
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 898,
+        "y": 545,
+        "right": 946,
+        "bottom": 565
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 683,
+        "right": 894,
+        "bottom": 703
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 706,
+        "right": 894,
+        "bottom": 726
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 729,
+        "right": 894,
+        "bottom": 749
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 752,
+        "right": 894,
+        "bottom": 772
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 775,
+        "right": 894,
+        "bottom": 795
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 798,
+        "right": 894,
+        "bottom": 818
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 821,
+        "right": 894,
+        "bottom": 841
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 844,
+        "right": 894,
+        "bottom": 864
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 867,
+        "right": 894,
+        "bottom": 887
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 890,
+        "right": 894,
+        "bottom": 910
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 913,
+        "right": 894,
+        "bottom": 933
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 936,
+        "right": 894,
+        "bottom": 956
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 959,
+        "right": 894,
+        "bottom": 979
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 982,
+        "right": 894,
+        "bottom": 1002
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1005,
+        "right": 894,
+        "bottom": 1025
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1028,
+        "right": 894,
+        "bottom": 1048
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1051,
+        "right": 894,
+        "bottom": 1071
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1098,
+        "right": 894,
+        "bottom": 1118
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1121,
+        "right": 894,
+        "bottom": 1141
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1144,
+        "right": 894,
+        "bottom": 1164
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1167,
+        "right": 894,
+        "bottom": 1187
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1190,
+        "right": 894,
+        "bottom": 1210
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1213,
+        "right": 894,
+        "bottom": 1233
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1236,
+        "right": 894,
+        "bottom": 1256
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1259,
+        "right": 894,
+        "bottom": 1279
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1282,
+        "right": 894,
+        "bottom": 1302
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1305,
+        "right": 894,
+        "bottom": 1325
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1328,
+        "right": 894,
+        "bottom": 1348
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1351,
+        "right": 894,
+        "bottom": 1371
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 846,
+        "y": 1374,
+        "right": 894,
+        "bottom": 1394
+      }
+    ],
+    "errors": []
+  },
+  "820x700": {
+    "viewport": {
+      "width": 820,
+      "height": 700
+    },
+    "documentHeight": 700,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 820,
+      "height": 700,
+      "bottom": 700,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 700,
+      "clientWidth": 820,
+      "clientHeight": 700
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 820,
+      "height": 210,
+      "bottom": 240,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 209,
+      "clientWidth": 820,
+      "clientHeight": 209
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 240,
+      "width": 820,
+      "height": 438,
+      "bottom": 678,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 438,
+      "clientWidth": 820,
+      "clientHeight": 438
+    },
+    "sidePanels": {
+      "x": 604,
+      "y": 240,
+      "width": 216,
+      "height": 438,
+      "bottom": 678,
+      "right": 820,
+      "scrollWidth": 263,
+      "scrollHeight": 438,
+      "clientWidth": 216,
+      "clientHeight": 438
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 240,
+      "width": 40,
+      "height": 438,
+      "bottom": 678,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 438,
+      "clientWidth": 39,
+      "clientHeight": 438
+    },
+    "canvas": {
+      "x": 40,
+      "y": 240,
+      "width": 564,
+      "height": 438,
+      "bottom": 678,
+      "right": 604,
+      "scrollWidth": 564,
+      "scrollHeight": 438,
+      "clientWidth": 564,
+      "clientHeight": 438
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 678,
+      "width": 820,
+      "height": 22,
+      "bottom": 700,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 21,
+      "clientWidth": 820,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 110,
+        "bottom": 350,
+        "headerVisible": true,
+        "bodyHeight": 82
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 32,
+        "bottom": 382,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 68,
+        "bottom": 450,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 39,
+        "bottom": 489,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 189,
+        "bottom": 678,
+        "headerVisible": true,
+        "bodyHeight": 124
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 818,
+        "y": 545,
+        "right": 866,
+        "bottom": 565
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 683,
+        "right": 814,
+        "bottom": 703
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 706,
+        "right": 814,
+        "bottom": 726
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 729,
+        "right": 814,
+        "bottom": 749
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 752,
+        "right": 814,
+        "bottom": 772
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 775,
+        "right": 814,
+        "bottom": 795
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 798,
+        "right": 814,
+        "bottom": 818
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 821,
+        "right": 814,
+        "bottom": 841
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 844,
+        "right": 814,
+        "bottom": 864
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 867,
+        "right": 814,
+        "bottom": 887
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 890,
+        "right": 814,
+        "bottom": 910
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 913,
+        "right": 814,
+        "bottom": 933
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 936,
+        "right": 814,
+        "bottom": 956
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 959,
+        "right": 814,
+        "bottom": 979
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 982,
+        "right": 814,
+        "bottom": 1002
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1005,
+        "right": 814,
+        "bottom": 1025
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1028,
+        "right": 814,
+        "bottom": 1048
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1051,
+        "right": 814,
+        "bottom": 1071
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1098,
+        "right": 814,
+        "bottom": 1118
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1121,
+        "right": 814,
+        "bottom": 1141
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1144,
+        "right": 814,
+        "bottom": 1164
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1167,
+        "right": 814,
+        "bottom": 1187
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1190,
+        "right": 814,
+        "bottom": 1210
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1213,
+        "right": 814,
+        "bottom": 1233
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1236,
+        "right": 814,
+        "bottom": 1256
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1259,
+        "right": 814,
+        "bottom": 1279
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1282,
+        "right": 814,
+        "bottom": 1302
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1305,
+        "right": 814,
+        "bottom": 1325
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1328,
+        "right": 814,
+        "bottom": 1348
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1351,
+        "right": 814,
+        "bottom": 1371
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 766,
+        "y": 1374,
+        "right": 814,
+        "bottom": 1394
+      }
+    ],
+    "errors": []
+  },
+  "700x640": {
+    "viewport": {
+      "width": 700,
+      "height": 640
+    },
+    "documentHeight": 694,
+    "overflowY": 54,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 700,
+      "height": 640,
+      "bottom": 640,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 640,
+      "clientWidth": 700,
+      "clientHeight": 640
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 30,
+      "width": 700,
+      "height": 238,
+      "bottom": 268,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 237,
+      "clientWidth": 700,
+      "clientHeight": 237
+    },
+    "toolOptions": null,
+    "workspace": {
+      "x": 0,
+      "y": 268,
+      "width": 700,
+      "height": 350,
+      "bottom": 618,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 350,
+      "clientWidth": 700,
+      "clientHeight": 350
+    },
+    "sidePanels": {
+      "x": 484,
+      "y": 268,
+      "width": 216,
+      "height": 350,
+      "bottom": 618,
+      "right": 700,
+      "scrollWidth": 263,
+      "scrollHeight": 350,
+      "clientWidth": 216,
+      "clientHeight": 350
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 268,
+      "width": 40,
+      "height": 350,
+      "bottom": 618,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 350,
+      "clientWidth": 39,
+      "clientHeight": 350
+    },
+    "canvas": {
+      "x": 40,
+      "y": 268,
+      "width": 444,
+      "height": 350,
+      "bottom": 618,
+      "right": 484,
+      "scrollWidth": 444,
+      "scrollHeight": 350,
+      "clientWidth": 444,
+      "clientHeight": 350
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 618,
+      "width": 700,
+      "height": 22,
+      "bottom": 640,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 21,
+      "clientWidth": 700,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 88,
+        "bottom": 356,
+        "headerVisible": true,
+        "bodyHeight": 60
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 25,
+        "bottom": 381,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Brushes",
+        "width": 216,
+        "height": 55,
+        "bottom": 436,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Navigator",
+        "width": 216,
+        "height": 31,
+        "bottom": 467,
+        "headerVisible": true,
+        "bodyHeight": 8
+      },
+      {
+        "title": "Shortcuts",
+        "width": 216,
+        "height": 151,
+        "bottom": 618,
+        "headerVisible": true,
+        "bodyHeight": 86
+      }
+    ],
+    "clipped": [
+      {
+        "tag": "input",
+        "label": "Ink colour",
+        "x": 546,
+        "y": 638,
+        "right": 566,
+        "bottom": 654
+      },
+      {
+        "tag": "input",
+        "label": "Comparison colour",
+        "x": 546,
+        "y": 658,
+        "right": 566,
+        "bottom": 674
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 698,
+        "y": 523,
+        "right": 746,
+        "bottom": 543
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 638,
+        "right": 694,
+        "bottom": 658
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 661,
+        "right": 694,
+        "bottom": 681
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 684,
+        "right": 694,
+        "bottom": 704
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 707,
+        "right": 694,
+        "bottom": 727
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 730,
+        "right": 694,
+        "bottom": 750
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 753,
+        "right": 694,
+        "bottom": 773
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 776,
+        "right": 694,
+        "bottom": 796
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 799,
+        "right": 694,
+        "bottom": 819
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 822,
+        "right": 694,
+        "bottom": 842
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 845,
+        "right": 694,
+        "bottom": 865
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 868,
+        "right": 694,
+        "bottom": 888
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 891,
+        "right": 694,
+        "bottom": 911
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 914,
+        "right": 694,
+        "bottom": 934
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 937,
+        "right": 694,
+        "bottom": 957
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 960,
+        "right": 694,
+        "bottom": 980
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 983,
+        "right": 694,
+        "bottom": 1003
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1006,
+        "right": 694,
+        "bottom": 1026
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1029,
+        "right": 694,
+        "bottom": 1049
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1076,
+        "right": 694,
+        "bottom": 1096
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1099,
+        "right": 694,
+        "bottom": 1119
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1122,
+        "right": 694,
+        "bottom": 1142
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1145,
+        "right": 694,
+        "bottom": 1165
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1168,
+        "right": 694,
+        "bottom": 1188
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1191,
+        "right": 694,
+        "bottom": 1211
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1214,
+        "right": 694,
+        "bottom": 1234
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1237,
+        "right": 694,
+        "bottom": 1257
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1260,
+        "right": 694,
+        "bottom": 1280
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1283,
+        "right": 694,
+        "bottom": 1303
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1306,
+        "right": 694,
+        "bottom": 1326
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1329,
+        "right": 694,
+        "bottom": 1349
+      },
+      {
+        "tag": "button",
+        "label": "Change",
+        "x": 646,
+        "y": 1352,
+        "right": 694,
+        "bottom": 1372
+      }
+    ],
+    "errors": []
+  }
+}
