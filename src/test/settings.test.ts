@@ -26,9 +26,28 @@ import {
   DEFAULT_APP_SETTINGS,
   SETTINGS_VERSION,
   parseAppSettings,
+  parseSettingsDocument,
   serializeAppSettings,
+  settingsDocument,
 } from "../core/settings/appSettings";
+import {
+  createSettingsSection,
+  fieldsSection,
+  readSettingsSection,
+  settingsField,
+  writeSettingsSection,
+  type SettingsSection,
+  type SettingsSectionOwner,
+  type SettingsSectionSpec,
+} from "../core/settings/settingsSection";
 import { SettingsStore } from "../core/settings/settingsStore";
+import {
+  DEFAULT_SHELL_PREFERENCES,
+  SHELL_PREFERENCES_VERSION,
+  normalizeShellPreferences,
+  serializeShellPreferences,
+  type ShellPreferences,
+} from "../core/shell/preferences";
 import type { BrushSettings, PressureCurvePoint } from "../types/brush";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
@@ -77,12 +96,16 @@ interface Harness {
   readonly store: SettingsStore;
 }
 
-function createHarness(gateway: MemorySettingsGateway = new MemorySettingsGateway()): Harness {
+function createHarness(
+  gateway: MemorySettingsGateway = new MemorySettingsGateway(),
+  sections: readonly SettingsSection<unknown>[] = [],
+): Harness {
   const engine = createEngine();
   const timers = new ManualTimers();
   const store = new SettingsStore({
     engine,
     gateway,
+    sections,
     schedule: timers.schedule,
     cancel: timers.cancel,
   });
@@ -621,5 +644,372 @@ describe("writing the settings", () => {
 
     expect(gateway.writes).toHaveLength(1);
     expect(JSON.parse(gateway.writes[0]).brush.size).toBe(33);
+  });
+});
+
+/**
+ * A third party's section.
+ *
+ * The section is a named, versioned group of fields, with an owner that
+ * holds the state and says when it changed. Nothing in it knows about the
+ * engine or the document: it is exactly what another builder writes to add
+ * a preference of their own to the settings file.
+ */
+interface ZoomState {
+  readonly zoom: number;
+  readonly mirrored: boolean;
+}
+
+const ZOOM_SECTION = fieldsSection<ZoomState>("zoom", 1, {
+  zoom: settingsField(
+    "zoom",
+    (value) => (typeof value === "number" && Number.isFinite(value) ? value : 1),
+  ),
+  mirrored: settingsField(
+    "mirrored",
+    (value) => (typeof value === "boolean" ? value : false),
+  ),
+});
+
+/** The owner of a section's state: it holds the state and announces changes. */
+class FakeSectionOwner<S> implements SettingsSectionOwner<S> {
+  private state: S;
+  private readonly listeners = new Set<() => void>();
+
+  constructor(initial: S) {
+    this.state = initial;
+  }
+
+  current(): S {
+    return this.state;
+  }
+
+  apply(state: S): void {
+    this.state = state;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** The owner changed: the store has to hear about it. */
+  change(state: S): void {
+    this.state = state;
+    this.announce();
+  }
+
+  /** The owner says it changed, but nothing did. */
+  announce(): void {
+    for (const listener of [...this.listeners]) {
+      listener();
+    }
+  }
+}
+
+describe("the settings document", () => {
+  it("keeps the engine's fields under their own names", () => {
+    expect(Object.keys(settingsDocument(DEFAULT_APP_SETTINGS))).toEqual([
+      "version",
+      "brush",
+      "presets",
+      "toolId",
+      "shapeFill",
+      "shapeSides",
+      "shapeInnerRatio",
+      "shapeRotation",
+      "fillTolerance",
+      "gradientType",
+      "gradientEndColor",
+      "gridVisible",
+      "gridSpacing",
+      "gridSnapping",
+    ]);
+  });
+
+  it("parses a file that is not a settings document into an empty one", () => {
+    expect(parseSettingsDocument(null)).toEqual({});
+    expect(parseSettingsDocument("{ this is not json")).toEqual({});
+    expect(parseSettingsDocument("[1, 2, 3]")).toEqual({});
+  });
+
+  it("keeps the keys a build does not know", () => {
+    const document = parseSettingsDocument(
+      JSON.stringify({ version: SETTINGS_VERSION, panels: { hidden: ["colors"] } }),
+    );
+
+    expect(document.panels).toEqual({ hidden: ["colors"] });
+  });
+});
+
+describe("a section on its own", () => {
+  it("reads the fields it has and defaults the ones it does not", () => {
+    expect(readSettingsSection(ZOOM_SECTION, { version: 1, zoom: 8 })).toEqual({
+      zoom: 8,
+      mirrored: false,
+    });
+  });
+
+  it("takes its defaults when the value is missing or malformed", () => {
+    expect(readSettingsSection(ZOOM_SECTION, undefined)).toEqual({
+      zoom: 1,
+      mirrored: false,
+    });
+    expect(readSettingsSection(ZOOM_SECTION, "nonsense")).toEqual({
+      zoom: 1,
+      mirrored: false,
+    });
+    expect(readSettingsSection(ZOOM_SECTION, { version: 1, zoom: "big" })).toEqual({
+      zoom: 1,
+      mirrored: false,
+    });
+  });
+
+  it("takes its defaults when it was written by a newer version of itself", () => {
+    // The section's meaning is unknown rather than wrong, so it is ignored.
+    expect(readSettingsSection(ZOOM_SECTION, { version: 99, zoom: 8 })).toEqual({
+      zoom: 1,
+      mirrored: false,
+    });
+  });
+
+  it("reads the fields of an older version of itself", () => {
+    expect(readSettingsSection(ZOOM_SECTION, { version: 0, zoom: 8 })).toEqual({
+      zoom: 8,
+      mirrored: false,
+    });
+  });
+
+  it("writes its state back with its own version", () => {
+    expect(writeSettingsSection(ZOOM_SECTION, { zoom: 2, mirrored: true })).toEqual({
+      version: 1,
+      zoom: 2,
+      mirrored: true,
+    });
+  });
+});
+
+describe("the settings file's sections", () => {
+  it("carries a section that another builder added", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      toolId: "eraser",
+      zoom: { version: 1, zoom: 3, mirrored: true },
+    });
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store, engine } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+
+    await store.load();
+
+    // The section's owner holds what the file said.
+    expect(owner.current()).toEqual({ zoom: 3, mirrored: true });
+    // And the rest of the file loads exactly as it always did.
+    expect(engine.getState().toolId).toBe("eraser");
+  });
+
+  it("writes a section's state back into the same file", async () => {
+    const gateway = new MemorySettingsGateway();
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store, timers } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+    await store.load();
+
+    owner.change({ zoom: 4, mirrored: true });
+    timers.runAll();
+    await settle();
+
+    expect(gateway.writes).toHaveLength(1);
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.zoom).toEqual({ version: 1, zoom: 4, mirrored: true });
+    // The engine's own fields are in the same file.
+    expect(written.version).toBe(SETTINGS_VERSION);
+    expect(written.toolId).toBe(DEFAULT_APP_SETTINGS.toolId);
+  });
+
+  it("keeps a section the file has and this build does not know", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      toolId: "eraser",
+      panels: { hidden: ["colors"] },
+    });
+    const { store, engine, timers } = createHarness(gateway);
+
+    await store.load();
+
+    // A section this build does not know does not stop the file from loading.
+    expect(engine.getState().toolId).toBe("eraser");
+
+    engine.setBrush({ size: 21 });
+    timers.runAll();
+    await settle();
+
+    // And a rewrite does not throw it away: the store owns the file, but it
+    // is not the owner of every key in it.
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.panels).toEqual({ hidden: ["colors"] });
+    expect(written.brush.size).toBe(21);
+  });
+
+  it("takes the defaults for a section written by a newer version", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      toolId: "eraser",
+      zoom: { version: 99, zoom: 5, mirrored: true },
+    });
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store, engine } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+
+    await store.load();
+
+    expect(owner.current()).toEqual({ zoom: 1, mirrored: false });
+    // The rest of the file still loads.
+    expect(engine.getState().toolId).toBe("eraser");
+  });
+
+  it("takes the defaults for a malformed section", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      zoom: "nonsense",
+    });
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+
+    await store.load();
+
+    expect(owner.current()).toEqual({ zoom: 1, mirrored: false });
+  });
+
+  it("does not dirty the document when a section changes", async () => {
+    const gateway = new MemorySettingsGateway();
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store, engine, timers } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+    await store.load();
+
+    owner.change({ zoom: 2, mirrored: false });
+    timers.runAll();
+    await settle();
+
+    const state = engine.getState();
+    expect(state.file.dirty).toBe(false);
+    expect(state.history.depth).toBe(0);
+  });
+
+  it("does not write the file again when a section says it changed but did not", async () => {
+    const gateway = new MemorySettingsGateway();
+    const owner = new FakeSectionOwner<ZoomState>({ zoom: 1, mirrored: false });
+    const { store, timers } = createHarness(gateway, [
+      createSettingsSection(ZOOM_SECTION, owner),
+    ]);
+    await store.load();
+
+    // The first change writes the file: there was none.
+    owner.announce();
+    timers.runAll();
+    await settle();
+
+    expect(gateway.writes).toHaveLength(1);
+
+    // The second one says nothing new, so the file already holds this state
+    // and there is nothing to write.
+    owner.announce();
+    timers.runAll();
+    await settle();
+
+    expect(gateway.writes).toHaveLength(1);
+  });
+
+  it("keeps the editor usable when a section cannot be read", async () => {
+    const gateway = new MemorySettingsGateway();
+    const broken: SettingsSection<unknown> = {
+      key: "broken",
+      read: () => {
+        throw new Error("the section is broken");
+      },
+      write: () => {},
+      current: () => ({}),
+      apply: () => {},
+      subscribe: () => () => {},
+    };
+    const { store, engine } = createHarness(gateway, [broken]);
+
+    await store.load();
+
+    expect(engine.getState().brush).toEqual(DEFAULT_APP_SETTINGS.brush);
+    expect(store.lastError).toBe("the section is broken");
+  });
+});
+
+describe("the shell's preferences as a section", () => {
+  /** The shell's own document, carried by the mechanism rather than rewritten. */
+  const SHELL_SECTION: SettingsSectionSpec<ShellPreferences> = {
+    key: "shell",
+    version: SHELL_PREFERENCES_VERSION,
+    codec: {
+      read: (value) => normalizeShellPreferences(value),
+      write: (state) =>
+        JSON.parse(serializeShellPreferences(state)) as Record<string, unknown>,
+    },
+  };
+
+  it("carries the shell preferences in the same file", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      shell: {
+        version: SHELL_PREFERENCES_VERSION,
+        hiddenPanels: ["colors"],
+        panelOrder: [],
+        panelSlots: {},
+        theme: "dark",
+        showStatusBar: false,
+        viewport: DEFAULT_SHELL_PREFERENCES.viewport,
+      },
+    });
+    const owner = new FakeSectionOwner<ShellPreferences>(DEFAULT_SHELL_PREFERENCES);
+    const { store, timers } = createHarness(gateway, [
+      createSettingsSection(SHELL_SECTION, owner),
+    ]);
+
+    await store.load();
+
+    expect(owner.current().theme).toBe("dark");
+    expect(owner.current().hiddenPanels).toEqual(["colors"]);
+    expect(owner.current().showStatusBar).toBe(false);
+
+    owner.change({ ...owner.current(), theme: "light" });
+    timers.runAll();
+    await settle();
+
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.shell.theme).toBe("light");
+    expect(written.shell.version).toBe(SHELL_PREFERENCES_VERSION);
+  });
+
+  it("takes the shell's defaults when the file has no shell section", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({ version: SETTINGS_VERSION });
+    const owner = new FakeSectionOwner<ShellPreferences>(DEFAULT_SHELL_PREFERENCES);
+    const { store } = createHarness(gateway, [
+      createSettingsSection(SHELL_SECTION, owner),
+    ]);
+
+    await store.load();
+
+    expect(owner.current()).toEqual(DEFAULT_SHELL_PREFERENCES);
   });
 });

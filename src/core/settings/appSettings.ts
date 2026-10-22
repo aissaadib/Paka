@@ -20,6 +20,13 @@
  *
  * A corrupt settings file must never stop the editor from starting, so every
  * one of those paths ends in a usable set of settings rather than an error.
+ *
+ * The file is a **document**: the engine's own fields at the top level, and
+ * one key per **section** beside them. A section is state that belongs in the
+ * file but not in the engine - which panels are hidden, what the workspace
+ * looks like - and it is added without touching this file's reader. See
+ * `settingsSection.ts` for the contract a section implements and
+ * `settingsStore.ts` for how the store reads, watches and writes them.
  */
 
 import { DEFAULT_BRUSH, brushSettingsEqual, readBrushSettings } from "../brushes/defaults";
@@ -37,6 +44,7 @@ import type { ToolId } from "../../types/tool";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
+import type { SettingsDocument } from "./settingsSection";
 
 /** The version of the settings file this build reads and writes. */
 export const SETTINGS_VERSION = 1;
@@ -159,6 +167,20 @@ function presetsOr(value: unknown): readonly BrushPreset[] {
 }
 
 /**
+ * Whether a document was written by a newer build.
+ *
+ * A file from a newer version is ignored wholesale, because its meaning is
+ * unknown rather than merely wrong. The check lives here so the reader and
+ * the store agree on which files are "newer": the store has to know, because
+ * a newer file's *other* keys must not be written back as if they were
+ * understood.
+ */
+export function isFutureSettingsDocument(document: SettingsDocument): boolean {
+  const version = document.version;
+  return typeof version === "number" && Number.isFinite(version) && version > SETTINGS_VERSION;
+}
+
+/**
  * Turns whatever was in the file into usable settings.
  *
  * Never throws and never rejects: a value it cannot make sense of takes its
@@ -170,8 +192,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     return DEFAULT_APP_SETTINGS;
   }
 
-  const version = record.version;
-  if (typeof version === "number" && Number.isFinite(version) && version > SETTINGS_VERSION) {
+  if (isFutureSettingsDocument(record)) {
     // A file written by a newer Paka. Its meaning is unknown rather than
     // wrong, so the whole file is ignored and the defaults are used.
     return DEFAULT_APP_SETTINGS;
@@ -226,26 +247,65 @@ export function parseAppSettings(text: string | null): AppSettings {
 
 /** Serializes the settings, with a stable key order. */
 export function serializeAppSettings(settings: AppSettings): string {
-  return `${JSON.stringify(
-    {
-      version: SETTINGS_VERSION,
-      brush: settings.brush,
-      presets: settings.presets,
-      toolId: settings.toolId,
-      shapeFill: settings.shapeFill,
-      shapeSides: settings.shapeSides,
-      shapeInnerRatio: settings.shapeInnerRatio,
-      shapeRotation: settings.shapeRotation,
-      fillTolerance: settings.fillTolerance,
-      gradientType: settings.gradientType,
-      gradientEndColor: settings.gradientEndColor,
-      gridVisible: settings.gridVisible,
-      gridSpacing: settings.gridSpacing,
-      gridSnapping: settings.gridSnapping,
-    },
-    null,
-    2,
-  )}\n`;
+  return serializeSettingsDocument(settingsDocument(settings));
+}
+
+/**
+ * The settings as a plain document.
+ *
+ * The document is what a settings file holds: the object the serializer
+ * stringifies. It is exposed so a **section** of the file that the engine
+ * does not own - the panel layout, the workspace, the shell's preferences -
+ * can live in the same document instead of in a second file. See
+ * `settingsSection.ts` for the contract a section implements.
+ *
+ * The engine's own fields keep their names, their defaults and their
+ * meanings: a document is the flat list of fields it always was, plus any
+ * number of section keys beside them.
+ */
+export function settingsDocument(settings: AppSettings): SettingsDocument {
+  return {
+    version: SETTINGS_VERSION,
+    brush: settings.brush,
+    presets: settings.presets,
+    toolId: settings.toolId,
+    shapeFill: settings.shapeFill,
+    shapeSides: settings.shapeSides,
+    shapeInnerRatio: settings.shapeInnerRatio,
+    shapeRotation: settings.shapeRotation,
+    fillTolerance: settings.fillTolerance,
+    gradientType: settings.gradientType,
+    gradientEndColor: settings.gradientEndColor,
+    gridVisible: settings.gridVisible,
+    gridSpacing: settings.gridSpacing,
+    gridSnapping: settings.gridSnapping,
+  };
+}
+
+/** Serializes a settings document, with a stable key order. */
+export function serializeSettingsDocument(document: SettingsDocument): string {
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/**
+ * The parsed settings document.
+ *
+ * `null` - no file yet - a file that is not valid JSON and a file that is
+ * not an object all yield an empty document: a corrupt settings file must
+ * not stop the editor from starting.
+ *
+ * The document is returned as it was found, keys the build does not know
+ * included, so a section another builder owns is not lost by a rewrite.
+ */
+export function parseSettingsDocument(text: string | null): SettingsDocument {
+  if (text === null) {
+    return {};
+  }
+  try {
+    return asRecord(JSON.parse(text)) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** Field-wise comparison, so an unchanged setting is never written again. */

@@ -677,6 +677,19 @@ debounced, so a brush-slider drag is one write rather than sixty. A file that
 cannot be read or written is recorded and forgotten - it is a minor
 inconvenience, not something the user has to act on.
 
+**The file is a document of sections.** The engine's own fields sit at the
+top level, exactly as they always did, and a **section** - a named, versioned
+group of fields that belongs in the file but not in the engine, such as the
+panel layout or the shell's preferences - sits beside them under its own key.
+A section is read field by field, with the same tolerance as the rest of the
+file: a missing or malformed field takes its default, and a section written by
+a newer version of itself is ignored, because its meaning is unknown rather
+than wrong. The store owns the file, so it reads each section out, hands it to
+its owner, and writes the owner's state back whenever it changes; a key that
+no section claims is written back untouched, so a build that does not know a
+section cannot destroy it. A section changes no pixels: it adds no history
+step, dirties nothing and never reaches a project file.
+
 ### The autosave seam (not enabled)
 
 `src/core/autosave/` holds the machinery for writing a recovery copy of the
