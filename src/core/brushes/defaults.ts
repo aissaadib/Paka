@@ -4,6 +4,7 @@ import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
+import type { StepMode } from "./numericInput";
 import {
   IDENTITY_PRESSURE_CURVE,
   normalizePressureCurve,
@@ -247,4 +248,32 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
 export function stepBrushSize(current: number, direction: 1 | -1): number {
   const step = current < 10 ? 1 : Math.max(1, Math.round(current * 0.1));
   return clamp(current + direction * step, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+}
+
+/**
+ * The step the brush size moves by under the keyboard.
+ *
+ * The normal step is the one the `[` / `]` shortcuts use: a pixel for a small
+ * brush, a tenth of the size for a large one. A fine step is a tenth of that
+ * - the last fraction of a pixel, for the size that has to be exact - and a
+ * coarse step is ten times it.
+ *
+ * This is the shared rule: the number box, the slider and the shortcut all
+ * move the size by it, so the three can never disagree about what one arrow
+ * key press does.
+ */
+export function brushSizeStep(
+  current: number,
+  direction: 1 | -1,
+  mode: StepMode = "normal",
+): number {
+  const base = stepBrushSize(current, direction);
+  const delta = base - current;
+  if (mode === "fine") {
+    return clamp(current + delta / 10, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+  }
+  if (mode === "coarse") {
+    return clamp(current + delta * 10, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+  }
+  return base;
 }
