@@ -842,6 +842,22 @@ gesture starts**, so a shape keeps the values that were active when the user
 pressed. One number serves both tools, so the toolbar's slider is labelled
 **Sides** for the polygon and **Points** for the star.
 
+The options are written down **once**, in `core/tools/shapeOptions.ts`: the
+values, their ranges, their defaults, their labels, and the table of which
+shape kind has which option. The geometry, the engine and the options bar's
+controls all read that model, so a slider's range *is* the range the geometry
+clamps to and the **Sides**/**Points** label is not written twice. The
+controls themselves are descriptions built from the model and registered in the
+shared per-tool registry (`core/shell/toolOptions.ts`), which is how a tool
+adds an option to a tool it does not own.
+
+The **rotation** belongs to every shape that has a box, so the rectangle and
+the ellipse turn as well: their corners and their samples are placed first and
+then turned about the centre of the dragged box, rigidly, exactly like the
+polygon's vertices are. A whole turn is the identity, and the identity returns
+the very same points, so the default rectangle and the default ellipse are
+unchanged.
+
 Because the outline is **replaced** rather than appended, the renderer contract
 gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
 index 0. The preview therefore lives in the same buffer as a live brush stroke,
