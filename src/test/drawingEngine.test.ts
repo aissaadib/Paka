@@ -2475,6 +2475,23 @@ describe("DrawingEngine selection", () => {
     );
   });
 
+  it("keeps the highlight on the handle under the pointer when the frame moves", () => {
+    const { engine, spy, frame } = selectStroke();
+    engine.handlePointerSample(
+      createSample({
+        phase: "move",
+        docX: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
+        docY: frame.y + frame.height / 2,
+      }),
+    );
+    expect(spy.selections[spy.selections.length - 1]?.hoveredHandle).toBe("scale-e");
+
+    // The selection moves 30 pixels to the left, away from the pointer: the
+    // highlight follows the pointer, not the selection.
+    engine.nudgeSelection(-30, 0);
+    expect(spy.selections[spy.selections.length - 1]?.hoveredHandle).not.toBe("scale-e");
+  });
+
   it("snaps a dragged handle onto the grid", () => {
     const { engine, layerId, frame, xs } = selectStroke();
     engine.setGridSpacing(25);

@@ -2226,6 +2226,8 @@ export class DrawingEngine implements StrokeSource {
   clearSelection(): void {
     this.cancelSelectionGesture();
     this.commands.breakMerge();
+    // The highlighted handle belonged to the selection that is going away.
+    this.applyHoveredHandle(null);
     if (!this.selection) {
       this.syncSelectionOverlay();
       return;
@@ -2903,6 +2905,8 @@ export class DrawingEngine implements StrokeSource {
    */
   private resetSelection(): void {
     this.selectionGesture = null;
+    // The highlighted handle belonged to the selection that is going away.
+    this.hoveredHandle = null;
     this.setSelection(null);
     this.syncSelectionOverlay();
   }
@@ -3024,6 +3028,11 @@ export class DrawingEngine implements StrokeSource {
     if (!renderer) {
       return;
     }
+    // The highlighted handle is recomputed here, because the frame can move
+    // without the pointer moving - a nudge, a flip - and the highlight
+    // follows the pointer, not the selection.
+    const cursor = this.cursor;
+    this.hoveredHandle = cursor === null ? null : this.hoverHandleAt(cursor.docX, cursor.docY);
     const marquee = this.selectionGesture?.mode === "marquee" ? this.selectionGesture.bounds : null;
     const strokes = this.selectedStrokes();
     if (marquee === null && strokes.length === 0) {
@@ -3579,7 +3588,6 @@ export class DrawingEngine implements StrokeSource {
 
   private reportCursor(sample: PointerSample): void {
     const handle = this.hoverHandleAt(sample.docX, sample.docY);
-    this.applyHoveredHandle(handle);
     this.cursor = {
       inside: true,
       docX: sample.docX,
@@ -3591,6 +3599,9 @@ export class DrawingEngine implements StrokeSource {
       hasPressure: sample.hasPressure,
       cursor: this.cursorFor(sample.docX, sample.docY, handle),
     };
+    // The cursor is updated first: the overlay recomputes the highlighted
+    // handle from the pointer's *current* position.
+    this.applyHoveredHandle(handle);
     this.emitCursor(this.cursor);
   }
 
@@ -3669,13 +3680,13 @@ export class DrawingEngine implements StrokeSource {
     }
     const doc = screenToDoc(this.viewport, cursor.screenX, cursor.screenY);
     const handle = this.hoverHandleAt(doc.x, doc.y);
-    this.applyHoveredHandle(handle);
     this.cursor = {
       ...cursor,
       docX: doc.x,
       docY: doc.y,
       cursor: this.cursorFor(doc.x, doc.y, handle),
     };
+    this.applyHoveredHandle(handle);
     this.emitCursor(this.cursor);
   }
 
