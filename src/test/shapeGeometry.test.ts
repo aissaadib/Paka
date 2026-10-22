@@ -26,6 +26,7 @@ import {
   MAX_SHAPE_INNER_RATIO,
   MIN_SHAPE_INNER_RATIO,
   SHAPE_INNER_RATIO_STEP,
+  defaultShapeOptionValue,
   findShapeOptionField,
   shapeOptionFieldsFor,
   shapeOptionLabel,
@@ -656,6 +657,10 @@ describe("shape options: the one model", () => {
   it("starts from the documented defaults", () => {
     expect(DEFAULT_SHAPE_OPTIONS).toEqual({ sides: 5, innerRatio: 0.5, rotation: 0 });
     expect(DEFAULT_SHAPE_FILL).toBe(false);
+    expect(defaultShapeOptionValue("shapeSides")).toBe(DEFAULT_SHAPE_OPTIONS.sides);
+    expect(defaultShapeOptionValue("shapeInnerRatio")).toBe(DEFAULT_SHAPE_OPTIONS.innerRatio);
+    expect(defaultShapeOptionValue("shapeRotation")).toBe(DEFAULT_SHAPE_OPTIONS.rotation);
+    expect(defaultShapeOptionValue("shapeFill")).toBe(DEFAULT_SHAPE_FILL);
     expect(findShapeOptionField("shapeSides")!.defaultValue).toBe(
       DEFAULT_SHAPE_OPTIONS.sides,
     );
