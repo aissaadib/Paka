@@ -3002,11 +3002,12 @@ export class DrawingEngine implements StrokeSource {
     if (!view) {
       return;
     }
+    // Measured before the change: the zoom of the view being set, not of the
+    // active one, so a zoom in the second view does not read as a zoom of the
+    // first.
+    const zoomChanged = viewport.zoom !== view.viewport.zoom;
     view.viewport = viewport;
     this.renderer?.setDisplayTargetViewport?.(viewId, viewport);
-    const zoomChanged = viewport.zoom !== this.viewport.zoom;
-    this.viewport = viewport;
-    this.renderer?.setViewport(viewport);
     if (republishCursor) {
       this.republishCursor(viewId);
     }

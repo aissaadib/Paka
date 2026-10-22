@@ -150,6 +150,10 @@ function write(option: ToolOption, actions: EditorActions, value: number | boole
     option.write(actions, value as string);
     return;
   }
+  if (option.kind === "select") {
+    option.write(actions, value as string);
+    return;
+  }
   if (option.kind === "slider") {
     option.write(actions, value as number);
   }
@@ -166,16 +170,16 @@ function sliderWithId(fields: readonly ToolOption[], id: string): SliderToolOpti
 
 describe("the groups each tool shows", () => {
   it("shows the brush for the tools that paint with one", () => {
-    expect(groupIds("brush")).toEqual(["brush"]);
+    expect(groupIds("brush")).toEqual(["brush", "symmetry"]);
     expect(groupIds("eraser")).toEqual(["brush"]);
-    expect(groupIds("line")).toEqual(["brush"]);
+    expect(groupIds("line")).toEqual(["brush", "symmetry"]);
   });
 
   it("shows the brush and the shape for the shape tools", () => {
-    expect(groupIds("rectangle")).toEqual(["brush", "shape"]);
-    expect(groupIds("ellipse")).toEqual(["brush", "shape"]);
-    expect(groupIds("polygon")).toEqual(["brush", "shape"]);
-    expect(groupIds("star")).toEqual(["brush", "shape"]);
+    expect(groupIds("rectangle")).toEqual(["brush", "shape", "symmetry"]);
+    expect(groupIds("ellipse")).toEqual(["brush", "shape", "symmetry"]);
+    expect(groupIds("polygon")).toEqual(["brush", "shape", "symmetry"]);
+    expect(groupIds("star")).toEqual(["brush", "shape", "symmetry"]);
   });
 
   it("shows the selection actions for the select tool", () => {
@@ -187,9 +191,12 @@ describe("the groups each tool shows", () => {
     expect(groupIds("gradient")).toEqual(["brush", "gradient"]);
   });
 
+  it("shows the guides their own controls", () => {
+    expect(groupIds("guides")).toEqual(["guides"]);
+  });
+
   it("gives the tools without options no group at all", () => {
     expect(groupIds("picker")).toEqual([]);
-    expect(groupIds("guides")).toEqual([]);
     expect(groupIds("pan")).toEqual([]);
   });
 
@@ -360,8 +367,10 @@ describe("reading the controls", () => {
     const snapshot = editor.getState();
     const fields = toolOptionFields("brush", "brush", snapshot);
     expect(sliderWithId(fields, "brushSize").read(snapshot)).toBe(24);
-    expect(sliderWithId(fields, "brushOpacity").read(snapshot)).toBe(0.5);
-    expect(sliderWithId(fields, "brushHardness").read(snapshot)).toBe(0.25);
+    // The ratio properties are stored as fractions and shown as percentages, so
+    // the number box asks for `50` beside a readout that says `50%`.
+    expect(sliderWithId(fields, "brushOpacity").read(snapshot)).toBe(50);
+    expect(sliderWithId(fields, "brushHardness").read(snapshot)).toBe(25);
   });
 });
 
