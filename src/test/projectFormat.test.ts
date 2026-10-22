@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
+import { DEFAULT_TAPER, MAX_TAPER_LENGTH } from "../core/brushes/taper";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
@@ -506,6 +507,76 @@ describe("parseProject round trip", () => {
       return;
     }
     expect(legacy.project.strokes[0].brush.hardness).toBe(1);
+  });
+
+  it("round-trips the stroke taper at version 13", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const taper = {
+      enabled: true,
+      startLength: 0.5,
+      startStrength: 0.8,
+      endLength: 0.4,
+      endStrength: 0.3,
+    };
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, taper } });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.taper).toEqual(taper);
+
+    // The value is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.taper).toEqual(taper);
+
+    // A version-12 file has no taper field and could only produce a stroke at
+    // its full width, so it must open untapered rather than being mis-read.
+    payload.version = 12;
+    delete payload.layers[0].elements[0].brush.taper;
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.taper).toEqual(DEFAULT_TAPER);
+  });
+
+  it("normalises a malformed taper instead of refusing the file", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: DEFAULT_BRUSH });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.layers[0].elements[0].brush.taper = {
+      enabled: true,
+      startLength: 99,
+      startStrength: -1,
+      endLength: "long",
+      endStrength: 4,
+    };
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const taper = parsed.project.strokes[0].brush.taper;
+    expect(taper.enabled).toBe(true);
+    expect(taper.startLength).toBe(MAX_TAPER_LENGTH);
+    expect(taper.startStrength).toBe(0);
+    expect(taper.endLength).toBe(0);
+    expect(taper.endStrength).toBe(1);
   });
 
   it("round-trips spacing, stabilizer and texture", () => {
@@ -1489,10 +1560,10 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
-    // the extra blend modes and version 12 on the pressure curve; none of those
-    // bumps was for the guides, and a version-9 file that carries them still
-    // opens.
-    expect(PROJECT_VERSION).toBe(12);
+    // the extra blend modes, version 12 on the pressure curve and version 13 on
+    // the stroke taper; none of those bumps was for the guides, and a
+    // version-9 file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(13);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),

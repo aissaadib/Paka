@@ -20,6 +20,38 @@ export interface PressureCurvePoint {
   readonly y: number;
 }
 
+/**
+ * The width ramp at the start and the end of a stroke.
+ *
+ * A taper narrows the stroke towards its two ends, so a stroke can end in a
+ * clean point instead of a blunt cap. The model is deliberately small:
+ *
+ *  - `startLength` and `endLength` are the length of the ramp, as a fraction
+ *    of the brush's nominal size, so a taper means the same thing at every
+ *    brush size, at every zoom and at every `rasterScale`.
+ *  - `startStrength` and `endStrength` are how much narrower the stroke is at
+ *    the very tip, as a fraction of its full width: `0` is no taper at all
+ *    and `1` is a point.
+ *  - The width ramps linearly along the path between the two.
+ *
+ * The taper applies to the stroke's **width**, not to its opacity: a stroke
+ * gets one alpha for its whole coverage (see `strokeOpacity`), so a fade
+ * could not be expressed per sample without breaking the rule that a stroke
+ * never darkens where it overlaps itself.
+ */
+export interface TaperSettings {
+  /** Whether the taper is applied at all. */
+  readonly enabled: boolean;
+  /** Length of the start ramp, as a fraction of the brush size. */
+  readonly startLength: number;
+  /** How much narrower the stroke is at its very start, as a fraction of its full width. */
+  readonly startStrength: number;
+  /** Length of the end ramp, as a fraction of the brush size. */
+  readonly endLength: number;
+  /** How much narrower the stroke is at its very end, as a fraction of its full width. */
+  readonly endStrength: number;
+}
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
   readonly size: number;
@@ -139,4 +171,21 @@ export interface BrushSettings {
    * and in a PNG export, at every zoom and `rasterScale`.
    */
   readonly stampTexture: number;
+  /**
+   * The width ramp at the start and the end of the stroke.
+   *
+   * `enabled` is off by default, so every stroke drawn before the taper
+   * existed is byte for byte unchanged. The taper is captured per stroke like
+   * every other appearance field, and it is applied to the **width**: the
+   * pressure response is evaluated first (the curve, then the size factor),
+   * and the taper multiplies the diameter that comes out of it, so a taper can
+   * narrow a stroke below the brush's minimum size - that is what makes a
+   * point possible. A stroke that has no path (a tap) or no length (the
+   * pointer did not move) is drawn at its full width: there is nothing for a
+   * ramp to run along.
+   *
+   * The dab engine draws its own dabs, so a stamped stroke keeps the plain
+   * dab plan and the taper does not apply to it.
+   */
+  readonly taper: TaperSettings;
 }

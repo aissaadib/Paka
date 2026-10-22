@@ -18,6 +18,8 @@ import type { BrushSettings } from "../../types/brush";
 import type { StrokeRecord } from "../document/types";
 import { clamp } from "../../utils/math";
 import { evaluatePressureCurve } from "../brushes/pressureCurve";
+import { taperWidthFactors } from "../brushes/taper";
+import { buildTaperedPath, drawTaperedPath } from "./taperStroke";
 
 /**
  * Blur length applied to a stroke's finished silhouette at hardness `0`, as a
@@ -131,6 +133,37 @@ export function stampDot(
 }
 
 /**
+ * Draws a stroke whose width changes along its path.
+ *
+ * The width at each sample is the pressure's diameter multiplied by the
+ * taper's factor, so the taper narrows the stroke *after* the pressure
+ * response and can take it below the brush's minimum size - that is what
+ * makes a point possible. The whole stroke is one path, filled once, so the
+ * tip is exactly as wide as the taper says and the stroke cannot darken
+ * where it overlaps itself.
+ *
+ * `fromIndex` does not apply: the path is the whole stroke, so it is always
+ * drawn in full. The caller clears the buffer first, which is what keeps the
+ * live preview and a rebuild identical.
+ */
+function rasterizeTaperedStroke(
+  ctx: CanvasRenderingContext2D,
+  stroke: StrokeRecord,
+  factors: readonly number[],
+): void {
+  const brush = stroke.brush;
+  const count = stroke.xs.length;
+  const halfWidths = new Array<number>(count);
+  for (let index = 0; index < count; index += 1) {
+    const pressure = stroke.pressures[index] ?? 1;
+    const diameter = strokeDiameter(brush, pressure) * factors[index];
+    halfWidths[index] = Math.max(diameter, 0) / 2;
+  }
+
+  drawTaperedPath(ctx, buildTaperedPath(stroke.xs, stroke.ys, halfWidths));
+}
+
+/**
  * Rasterizes a stroke, or just the newly appended part of it, at full coverage.
  *
  * `fromIndex` is the index of the first sample appended by the latest input
@@ -149,6 +182,10 @@ export function stampDot(
  * both are drawn at full coverage and the stroke's alpha is applied once, when
  * the buffer composites. Filling only happens on a full re-rasterization
  * (`fromIndex === 0`), which is the only way a shape is ever drawn.
+ *
+ * A stroke with a taper is drawn as one path instead of as segments, and the
+ * path ignores `fromIndex`: the tip's width depends on how far the stroke has
+ * travelled, so the whole path is drawn every time.
  */
 export function rasterizeStroke(
   ctx: CanvasRenderingContext2D,
@@ -194,6 +231,17 @@ export function rasterizeStroke(
     }
     ctx.closePath();
     ctx.fill();
+  }
+
+  // A tapered stroke is one path of the whole stroke. The factor list is
+  // empty when the taper does not apply, and the plain segment path below
+  // runs unchanged - byte for byte what every stroke drawn before the taper
+  // existed produces.
+  const factors = taperWidthFactors(brush.taper, brush.size, stroke.xs, stroke.ys);
+  if (factors.length > 0) {
+    rasterizeTaperedStroke(ctx, stroke, factors);
+    ctx.restore();
+    return;
   }
 
   for (let index = Math.max(1, fromIndex); index < count; index += 1) {

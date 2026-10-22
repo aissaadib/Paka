@@ -15,6 +15,7 @@ import {
   MIN_BRUSH_SIZE,
   MIN_STAMP_SPACING,
 } from "../core/brushes/defaults";
+import { MAX_TAPER_LENGTH } from "../core/brushes/taper";
 import { createDocument } from "../core/document/document";
 import { DEFAULT_GRID_SPACING } from "../core/document/grid";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
@@ -371,6 +372,86 @@ describe("DrawingEngine stroke capture", () => {
     // A shape is an outline, not a chain of dabs, so its record says so.
     expect(engine.listStrokes(layerId)).toHaveLength(1);
     expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+  });
+
+  it("captures the taper per stroke, so a later change rewrites nothing", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTaper({ enabled: true, startLength: 0.5, startStrength: 0.8, endLength: 0.4 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 40, timeStamp: 16 }));
+    engine.finishStroke();
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.brush.taper.enabled).toBe(true);
+    expect(stroke.brush.taper.startLength).toBe(0.5);
+    expect(stroke.brush.taper.startStrength).toBe(0.8);
+    expect(stroke.brush.taper.endLength).toBe(0.4);
+    // The end strength was never set, so it keeps the brush's own value.
+    expect(stroke.brush.taper.endStrength).toBe(DEFAULT_BRUSH.taper.endStrength);
+
+    // Changing the setting describes the next stroke; it never rewrites an
+    // existing record's brush.
+    engine.setTaper({ enabled: false, startStrength: 0.1 });
+    expect(engine.listStrokes(layerId)[0].brush.taper.enabled).toBe(true);
+    expect(engine.listStrokes(layerId)[0].brush.taper.startStrength).toBe(0.8);
+
+    // A tapered stroke is one undo step, like any other.
+    expect(engine.getState().history).toMatchObject({ depth: 1, canUndo: true });
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.listStrokes(layerId)[0].brush.taper.startStrength).toBe(0.8);
+  });
+
+  it("treats the taper as editor state: no history step, no dirty flag", () => {
+    const engine = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setTaper({ enabled: true });
+    expect(engine.getState().brush.taper.enabled).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
+
+    // A no-op change publishes nothing, and an out-of-range value is clamped.
+    engine.setTaper({ enabled: true });
+    expect(listener).toHaveBeenCalledTimes(1);
+    engine.setTaper({ startLength: 99 });
+    expect(engine.getState().brush.taper.startLength).toBe(MAX_TAPER_LENGTH);
+  });
+
+  it("draws shapes with the plain path, even when the brush is tapered", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTaper({ enabled: true, startLength: 1, startStrength: 1 });
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 60, docY: 40, timeStamp: 16 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 40, timeStamp: 32 }));
+
+    // A shape's outline is not drawn from one end to the other, so it has
+    // nothing to taper.
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.listStrokes(layerId)[0].brush.taper.enabled).toBe(false);
+  });
+
+  it("leaves nothing behind when a tapered stroke is cancelled", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.setTaper({ enabled: true, startLength: 1, startStrength: 1, endLength: 1, endStrength: 1 });
+    engine.beginStroke(createSample({ docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 40, timeStamp: 16 }));
+    engine.cancelStroke();
+
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.getState().history).toMatchObject({ depth: 0, canUndo: false });
+    expect(engine.getState().file.dirty).toBe(false);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {

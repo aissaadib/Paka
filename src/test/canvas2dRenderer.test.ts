@@ -15,6 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PRESSURE_CURVE } from "../core/brushes/defaults";
+import { DEFAULT_TAPER } from "../core/brushes/taper";
 import {
   blendChannel,
   isLayerBlendMode,
@@ -59,6 +60,7 @@ const BRUSH: BrushSettings = {
   stampHardness: 1,
   stampTexture: 0,
   pressureCurve: DEFAULT_PRESSURE_CURVE,
+  taper: DEFAULT_TAPER,
 };
 
 let recording: RecordingDocument;
@@ -1839,9 +1841,15 @@ class PixelCanvas {
       }
     };
 
-    /** Even-odd test of a device point against the current path. */
+    /**
+     * The non-zero winding test of a device point against the current path.
+     *
+     * This is the rule Canvas 2D uses by default, and the one a filled
+     * outline needs: a path that crosses itself is still one shape, so the
+     * crossing is filled rather than punched out of the middle.
+     */
     const insidePath = (path: number[][][], x: number, y: number): boolean => {
-      let crossings = 0;
+      let winding = 0;
       for (const subpath of path) {
         if (subpath.length < 2) {
           continue;
@@ -1853,12 +1861,12 @@ class PixelCanvas {
             const t = (y - from[1]) / (to[1] - from[1]);
             const crossX = from[0] + t * (to[0] - from[0]);
             if (crossX > x) {
-              crossings += 1;
+              winding += to[1] < from[1] ? 1 : -1;
             }
           }
         }
       }
-      return crossings % 2 === 1;
+      return winding !== 0;
     };
 
     /** Distance from a device point to a device-space segment. */
@@ -2913,101 +2921,102 @@ describe("Canvas2DRenderer bounded layer rasterization", () => {
   });
 });
 
+const SAMPLE_X = 16;
+const SAMPLE_Y = 14;
+
+function createTestStroke(
+  layerId: LayerId,
+  brush: BrushSettings,
+  id: string,
+  erase = false,
+): StrokeRecord {
+  return {
+    id,
+    layerId,
+    brush,
+    erase,
+    xs: [6, SAMPLE_X, 26],
+    ys: [6, SAMPLE_Y, 6],
+    pressures: [1, 1, 1],
+    times: [0, 16, 32],
+    startTime: 0,
+  };
+}
+
+/**
+ * Live, commit, rebuild and export must show the same pixels.
+ *
+ * The rebuild is the path the dirty bounds changed: it rasterizes the
+ * stroke into the buffer and blends only the rectangle it inks. The other
+ * three are the reference the user sees.
+ *
+ * The software canvas has no blur, so the soft case checks the feather
+ * path's geometry and placement rather than the kernel; the grain case is
+ * real, because the pattern pass is implemented.
+ */
+function checkEveryPathAgrees(brush: BrushSettings): void {
+  withPixels(
+    (doc) => doc,
+    (harness) => {
+      const layerId = harness.doc.layers[0].id;
+      const stored = createTestStroke(layerId, brush, "stored");
+
+      // 1. The rebuild: the layer is rasterized from the stroke list.
+      harness.elements.set(layerId, [stored]);
+      harness.renderer.invalidateLayer(layerId);
+      harness.renderer.render();
+      const rebuilt = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
+      expect(rebuilt[3]).toBe(255);
+      // The whole canvas, not one sample point: a defect that clips the edge
+      // of a stroke's region can leave the sampled pixel untouched.
+      const rebuiltCanvas = snapshotCanvas(harness.display);
+      const rebuiltExport = snapshotCanvas(
+        harness.renderer.composeDocumentImage() as unknown as PixelCanvas,
+      );
+
+      // The bounded blit can only replace the old full-surface blit if no
+      // coverage falls outside the rectangle it draws. The coverage stays
+      // within the brush radius of the samples (4 px for an 8 px brush), and
+      // the drawn rectangle is that bound plus the padding the area test
+      // pins.
+      expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
+
+      // A second rebuild must land on the same pixels.
+      harness.renderer.invalidateLayer(layerId);
+      harness.renderer.render();
+      expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+      expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "second rebuild");
+
+      // 2. Live: the same stroke drawn through the live path.
+      harness.elements.set(layerId, []);
+      harness.renderer.invalidateLayer(layerId);
+      harness.renderer.render();
+      const live = createTestStroke(layerId, brush, "live");
+      harness.renderer.beginStroke(live);
+      harness.renderer.extendStroke(live, 0);
+      harness.renderer.render();
+      expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+      expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "live preview");
+
+      // 3. The release: the buffer composites into the layer.
+      harness.renderer.endStroke(live);
+      harness.renderer.render();
+      expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+      expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "committed layer");
+
+      // 4. The export: the same picture at document size. The export carries
+      // no document border and no selection overlay, so it is compared with
+      // the export; and because the software canvas does not draw the border
+      // at all, it is compared with the display as well.
+      const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
+      expect(readPixel(exported, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
+      expectSameCanvas(snapshotCanvas(exported), rebuiltExport, "PNG export");
+      expectSameCanvas(snapshotCanvas(exported), rebuiltCanvas, "PNG export vs display");
+    },
+  );
+}
+
 describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
-  const SAMPLE_X = 16;
-  const SAMPLE_Y = 14;
-
-  function createTestStroke(
-    layerId: LayerId,
-    brush: BrushSettings,
-    id: string,
-    erase = false,
-  ): StrokeRecord {
-    return {
-      id,
-      layerId,
-      brush,
-      erase,
-      xs: [6, SAMPLE_X, 26],
-      ys: [6, SAMPLE_Y, 6],
-      pressures: [1, 1, 1],
-      times: [0, 16, 32],
-      startTime: 0,
-    };
-  }
-
-  /**
-   * Live, commit, rebuild and export must show the same pixels.
-   *
-   * The rebuild is the path the dirty bounds changed: it rasterizes the
-   * stroke into the buffer and blends only the rectangle it inks. The other
-   * three are the reference the user sees.
-   *
-   * The software canvas has no blur, so the soft case checks the feather
-   * path's geometry and placement rather than the kernel; the grain case is
-   * real, because the pattern pass is implemented.
-   */
-  function checkEveryPathAgrees(brush: BrushSettings): void {
-    withPixels(
-      (doc) => doc,
-      (harness) => {
-        const layerId = harness.doc.layers[0].id;
-        const stored = createTestStroke(layerId, brush, "stored");
-
-        // 1. The rebuild: the layer is rasterized from the stroke list.
-        harness.elements.set(layerId, [stored]);
-        harness.renderer.invalidateLayer(layerId);
-        harness.renderer.render();
-        const rebuilt = readPixel(harness.display, SAMPLE_X, SAMPLE_Y);
-        expect(rebuilt[3]).toBe(255);
-        // The whole canvas, not one sample point: a defect that clips the edge
-        // of a stroke's region can leave the sampled pixel untouched.
-        const rebuiltCanvas = snapshotCanvas(harness.display);
-        const rebuiltExport = snapshotCanvas(
-          harness.renderer.composeDocumentImage() as unknown as PixelCanvas,
-        );
-
-        // The bounded blit can only replace the old full-surface blit if no
-        // coverage falls outside the rectangle it draws. The coverage stays
-        // within the brush radius of the samples (4 px for an 8 px brush), and
-        // the drawn rectangle is that bound plus the padding the area test
-        // pins.
-        expect(coverageInside(harness.strokeBuffer, 2, 2, 30, 30)).toBe(true);
-
-        // A second rebuild must land on the same pixels.
-        harness.renderer.invalidateLayer(layerId);
-        harness.renderer.render();
-        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
-        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "second rebuild");
-
-        // 2. Live: the same stroke drawn through the live path.
-        harness.elements.set(layerId, []);
-        harness.renderer.invalidateLayer(layerId);
-        harness.renderer.render();
-        const live = createTestStroke(layerId, brush, "live");
-        harness.renderer.beginStroke(live);
-        harness.renderer.extendStroke(live, 0);
-        harness.renderer.render();
-        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
-        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "live preview");
-
-        // 3. The release: the buffer composites into the layer.
-        harness.renderer.endStroke(live);
-        harness.renderer.render();
-        expect(readPixel(harness.display, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
-        expectSameCanvas(snapshotCanvas(harness.display), rebuiltCanvas, "committed layer");
-
-        // 4. The export: the same picture at document size. The export carries
-        // no document border and no selection overlay, so it is compared with
-        // the export; and because the software canvas does not draw the border
-        // at all, it is compared with the display as well.
-        const exported = harness.renderer.composeDocumentImage() as unknown as PixelCanvas;
-        expect(readPixel(exported, SAMPLE_X, SAMPLE_Y)).toEqual(rebuilt);
-        expectSameCanvas(snapshotCanvas(exported), rebuiltExport, "PNG export");
-        expectSameCanvas(snapshotCanvas(exported), rebuiltCanvas, "PNG export vs display");
-      },
-    );
-  }
 
   it("agrees for a hard brush", () => {
     checkEveryPathAgrees({ ...BRUSH, size: 8, hardness: 1, texture: 0 });
@@ -3070,6 +3079,183 @@ describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
         harness.renderer.invalidateLayer(layerId);
         harness.renderer.render();
         expect(readPixel(harness.surfaces[0], SAMPLE_X, SAMPLE_Y)[3]).toBe(0);
+      },
+    );
+  });
+});
+
+describe("Canvas2DRenderer tapered strokes (real pixels)", () => {
+  /**
+   * A brush whose two ends taper to a narrower width.
+   *
+   * The ramps are one brush width long, so the tip of the start is 40 % of
+   * the brush's width and the tip of the end is 20 % of it.
+   */
+  const TAPERED: BrushSettings = {
+    ...BRUSH,
+    size: 10,
+    taper: {
+      enabled: true,
+      startLength: 1,
+      startStrength: 0.6,
+      endLength: 1,
+      endStrength: 0.8,
+    },
+  };
+
+  /** A horizontal stroke, sampled every two pixels, as a real stroke is. */
+  function horizontalStroke(
+    layerId: LayerId,
+    brush: BrushSettings,
+    id: string,
+    from = 4,
+    to = 28,
+  ): StrokeRecord {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    const pressures: number[] = [];
+    const times: number[] = [];
+    for (let x = from; x <= to; x += 2) {
+      xs.push(x);
+      ys.push(16);
+      pressures.push(1);
+      times.push(x);
+    }
+    return { id, layerId, brush, erase: false, xs, ys, pressures, times, startTime: 0 };
+  }
+
+  /**
+   * The number of rows in one column that carry ink.
+   *
+   * The paper is white and opaque, so a row carries ink when it is darker
+   * than the paper.
+   */
+  function inkedRows(canvas: PixelCanvas, x: number): number {
+    let rows = 0;
+    for (let y = 0; y < canvas.height; y += 1) {
+      if (readPixel(canvas, x, y)[0] < 250) {
+        rows += 1;
+      }
+    }
+    return rows;
+  }
+
+  it("narrows the stroke towards its two ends", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        harness.elements.set(layerId, [horizontalStroke(layerId, TAPERED, "tapered")]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // The middle of the stroke is the brush's own width.
+        expect(inkedRows(harness.display, 16)).toBe(10);
+        // The start tip is 40 % of it and the end tip 20 %.
+        expect(inkedRows(harness.display, 4)).toBeGreaterThanOrEqual(3);
+        expect(inkedRows(harness.display, 4)).toBeLessThanOrEqual(5);
+        expect(inkedRows(harness.display, 28)).toBeGreaterThanOrEqual(1);
+        expect(inkedRows(harness.display, 28)).toBeLessThanOrEqual(3);
+        // And the ramp is a ramp: the width grows along it.
+        expect(inkedRows(harness.display, 6)).toBeGreaterThan(
+          inkedRows(harness.display, 4),
+        );
+        expect(inkedRows(harness.display, 26)).toBeGreaterThan(
+          inkedRows(harness.display, 28),
+        );
+      },
+    );
+  });
+
+  it("draws a stroke with the taper off exactly as it did before", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const plain = horizontalStroke(layerId, BRUSH, "plain");
+        harness.elements.set(layerId, [plain]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const before = snapshotCanvas(harness.display);
+
+        // The same brush with the taper switched on but nothing to taper.
+        const idle: BrushSettings = {
+          ...BRUSH,
+          taper: { enabled: true, startLength: 0, startStrength: 0, endLength: 0, endStrength: 0 },
+        };
+        harness.elements.set(layerId, [horizontalStroke(layerId, idle, "idle")]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        expectSameCanvas(snapshotCanvas(harness.display), before, "an idle taper");
+      },
+    );
+  });
+
+  it("shows the same pixels live, after the release, after a rebuild and in the export", () => {
+    checkEveryPathAgrees(TAPERED);
+  });
+
+  it("does not darken a self-crossing stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // The stroke runs over the same pixels twice, at half the opacity.
+        const crossing: StrokeRecord = {
+          ...horizontalStroke(layerId, { ...TAPERED, opacity: 0.5 }, "crossing", 6, 26),
+          xs: [6, 16, 6],
+          ys: [16, 16, 16],
+        };
+        harness.elements.set(layerId, [crossing]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // Black at 50 % over white paper is 128; stacking it twice would be 64.
+        expectPixel(harness.display, 16, 16, [128, 128, 128], 1);
+      },
+    );
+  });
+
+  it("draws a tap at the brush's own width, because there is no path to taper", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const tap: StrokeRecord = {
+          id: "tap",
+          layerId,
+          brush: TAPERED,
+          erase: false,
+          xs: [16],
+          ys: [16],
+          pressures: [1],
+          times: [0],
+          startTime: 0,
+        };
+        harness.elements.set(layerId, [tap]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        expect(inkedRows(harness.display, 16)).toBe(10);
+      },
+    );
+  });
+
+  it("leaves nothing behind when the stroke is cancelled", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stroke = horizontalStroke(layerId, TAPERED, "tapered");
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.extendStroke(stroke, 0);
+        harness.renderer.render();
+        expect(inkedRows(harness.display, 16)).toBe(10);
+
+        harness.renderer.cancelStroke();
+        harness.renderer.render();
+        expect(inkedRows(harness.display, 16)).toBe(0);
       },
     );
   });

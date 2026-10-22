@@ -31,6 +31,7 @@ import {
   normalizeBrush,
 } from "../brushes/defaults";
 import { normalizePressureCurve } from "../brushes/pressureCurve";
+import { DEFAULT_TAPER, normalizeTaper } from "../brushes/taper";
 import {
   DEFAULT_DOCUMENT_BACKGROUND,
   DOCUMENT_SIZE_LIMIT_DESCRIPTION,
@@ -117,6 +118,13 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
+ * Version 13: a stroke's `brush` carries `taper`, the width ramp at the start
+ * and the end of the stroke. It changes how stored samples are rasterized, so
+ * a version-12 reader would draw the same samples at their full width - a
+ * different picture - and the version was bumped with the field required.
+ * Version-1 to -12 files open unchanged with the taper off, which is exactly
+ * the coverage they were written by.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -125,7 +133,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 12;
+export const PROJECT_VERSION = 13;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -884,6 +892,12 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // curve, which is the linear response they were written by.
     pressureCurve:
       version >= 12 ? normalizePressureCurve(record.pressureCurve) : DEFAULT_PRESSURE_CURVE,
+    // The taper changes how stored samples are rasterized, so it became a
+    // required field in version 13: a version-12 reader ignores it and draws
+    // the same samples at their full width, which is a different picture.
+    // Earlier files had no taper at all, and the taper off is exactly the
+    // coverage they were written by.
+    taper: version >= 13 ? normalizeTaper(record.taper) : DEFAULT_TAPER,
   });
 }
 

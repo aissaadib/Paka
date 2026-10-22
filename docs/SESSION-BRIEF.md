@@ -45,7 +45,7 @@ visual-regression harness.
   **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
   by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
   commands, the merge SHAs and the ownership of each branch.
-- Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
+- Project file format **version 13** (`PROJECT_VERSION = 13`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
   `stampSpacing` and `stampHardness` are required from v9. `stampTexture` is
@@ -53,6 +53,9 @@ visual-regression harness.
   `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and
   `exclusion` join `normal` / `multiply` / `screen`, and a v10 reader
   refuses a v11 file rather than rendering an unknown mode as `normal`.
+  `pressureCurve` is required from v12 and **`taper` from v13** (the stroke
+  taper; version-1 to -12 files read with the taper off, which is exactly the
+  coverage they were written by).
   `document.guides` is **additive within v9 and later** (missing = no guides),
   because the guides are display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
@@ -63,8 +66,9 @@ visual-regression harness.
   Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
   stabilizer, grain texture, the stamp (dab) engine, the per-dab directional
-  texture, the **brush preset library** and the **grid and snapping** shipped;
-  brush-tip and image-based stamp textures remain. Phase 4 has the eleven layer
+  texture, the **brush preset library**, the **stroke taper** and the **grid and
+  snapping** shipped; brush-tip and image-based stamp textures remain. Phase 4
+  has the eleven layer
   blend modes (`normal` / `multiply` / `screen` plus eight separable modes),
   masks and groups remain. The colour panel gained the **contrast and
   colour-difference readout** and **wider input formats** (8-digit hex, `hsl()`,
@@ -76,6 +80,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent13-stroke-taper` | **Stroke taper** - the start and the end of a stroke narrow **independently**, so a stroke can end in a clean point without pressure hardware. The **Taper** switch in the brush panel brings up a start and an end **length** (0-200 % of the brush size) and **strength** (0-100 %: how much narrower the tip is, so 100 % is a point). The taper narrows the stroke's **width** *after* the pressure response, so it can go below the brush's minimum size, and the ramp is measured as **arc length along the path**, so a fast stroke and a slow one taper over the same distance. Where the two ramps overlap the narrower one wins, so a short stroke is a lens rather than a bow tie; a tap (a press with no movement) is still a full-size dot. The tapered stroke is rasterized as **one path filled once** (a disc per sample, a quad per segment), so it has no seams, cannot darken where it overlaps itself and does not pinch when the path doubles back. The live preview redraws the whole stroke while the taper is on, so the preview, the commit, a rebuild, a reopen and an export show the same pixels. Off by default, captured per stroke, format **v13**; the dab engine draws its own dabs, so a stamped stroke keeps the plain dab plan. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -216,8 +221,20 @@ visual-regression harness.
   switch with **stamp spacing** (2–100 % of the brush size, the distance
   between dabs), **stamp hardness** (the falloff of one dab) and **stamp
   texture** (the strength of the bristle lanes) — all four brush and eraser
-  only — colour + 8-swatch palette, pressure size and pressure
+  only — a **taper** switch with a start and an end **length** (0–200 % of the
+  brush size) and **strength** (0–100 %, so 100 % is a point), also brush and
+  eraser only, colour + 8-swatch palette, pressure size and pressure
   opacity toggles. All settings are captured per stroke.
+- **Stroke taper**: with the taper on, a stroke narrows towards its two ends, so
+  it can end in a clean point without pressure hardware. The taper narrows the
+  **width** after the pressure response (so it can go below the brush's minimum
+  size) and the ramp is measured along the path as arc length. Where the two
+  ramps overlap the narrower one wins, and a tap is still a full-size dot. The
+  tapered stroke is one path filled once, so it has no seams, cannot darken
+  where it overlaps itself and does not pinch when the path doubles back. The
+  live preview, the commit, a rebuild, a reopen and an export agree. The taper
+  is **off by default** and does not apply to a stamped stroke, which keeps the
+  dab engine's own dabs.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
   unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
@@ -391,6 +408,27 @@ Key files for the next slice (directional / per-dab stamp textures):
   `rasterScale`. Alpha is multiplied once, so self-overlap cannot darken. It
   applies to brush/eraser/shapes; a filled shape's interior grains too. It is not
   a stamp/per-dab or directional texture.
+- **The taper narrows the width, after the pressure response.** `taper` is a
+  nested setting on the brush: `enabled`, a start and an end `length` (0..2, a
+  fraction of the brush's nominal size) and a start and an end `strength` (0..1,
+  how much narrower the tip is; `1` is a point). The order is: the pressure
+  curve, the pressure size factor, the minimum-size floor, and **then** the
+  taper multiplies the diameter - so a taper can go below the floor, which is
+  what makes a point possible. The taper applies to the **width** and not to the
+  opacity, because a stroke is one shape with one alpha: a fade could not be
+  expressed per sample without breaking the no-self-darkening rule. The ramp is
+  measured as **arc length** along the path, the narrower ramp wins where the
+  two overlap, and a stroke with no path (a tap) or no length is drawn at its
+  full width. A tapered stroke is rasterized as **one path filled once** (a
+  disc per sample, a quad per segment): the discs are the round joins and the
+  round tips, the quads are the body, and one fill means no seams, no
+  self-darkening and no pinch when the path doubles back. Because the end of
+  the stroke moves while it is drawn, the live path redraws the whole stroke
+  and clears only the rectangle it inks, exactly as a rebuild does, so the
+  preview, the commit, a rebuild, a reopen and an export agree. The taper is
+  **off by default**, applies to the brush and the eraser, and does **not**
+  apply to a stamped stroke (the dab engine draws its own dabs) or to a shape
+  (a shape's outline is not drawn from one end to the other).
 - **Preview vs commit**: press inserts real preview content (or starts a buffer),
   moves update it in place, release records exactly one command, cancel /
   lost capture / tool switch / over-ceiling removes it with **no history and no
@@ -552,6 +590,11 @@ Product:
 - Texture: one grain post-pass over the finished coverage, not an image-based
   texture. The stamp engine's own `stampTexture` is a per-dab texture, but it
   is a *procedural* bristle pattern, not a picture.
+- The taper: the width ramps only, and only along a path. It does not apply to
+  a stamped stroke (the dab engine draws its own dabs) or to a shape, and the
+  ramps are straight lines, not curves. A tapered stroke is redrawn in full
+  while it is being drawn, so a very long tapered stroke costs more per move
+  than an untapered one.
 - The stamp engine: round dabs only - no elongated, offset or tip shapes, no
   scatter, rotation or jitter, and no per-dab opacity (a
   stroke still gets one alpha). A stamped stroke's cost grows with the square of

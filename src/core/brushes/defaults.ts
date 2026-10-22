@@ -1,6 +1,6 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
+import type { BrushSettings, PressureCurvePoint, TaperSettings } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
@@ -9,6 +9,7 @@ import {
   normalizePressureCurve,
   pressureCurvesEqual,
 } from "./pressureCurve";
+import { DEFAULT_TAPER, normalizeTaper, taperSettingsEqual } from "./taper";
 
 /** The identity pressure response every pre-curve file behaves like. */
 export const DEFAULT_PRESSURE_CURVE = IDENTITY_PRESSURE_CURVE;
@@ -49,6 +50,7 @@ export const DEFAULT_BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  taper: DEFAULT_TAPER,
 };
 
 /** Clamps and validates a brush configuration. */
@@ -69,6 +71,7 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
     stampHardness: clamp(brush.stampHardness, 0, 1),
     stampTexture: clamp(brush.stampTexture, 0, 1),
+    taper: normalizeTaper(brush.taper),
   };
 }
 
@@ -130,12 +133,21 @@ export const BRUSH_CURVE_FIELDS = [
   "pressureCurve",
 ] as const satisfies readonly CurveBrushField[];
 
+/** The fields whose value is a taper. */
+type TaperBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends TaperSettings ? K : never;
+}[keyof BrushSettings];
+
+/** Every taper field of a brush. */
+export const BRUSH_TAPER_FIELDS = ["taper"] as const satisfies readonly TaperBrushField[];
+
 /** Every field a brush has, according to the lists above. */
 type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
   | (typeof BRUSH_COLOR_FIELDS)[number]
-  | (typeof BRUSH_CURVE_FIELDS)[number];
+  | (typeof BRUSH_CURVE_FIELDS)[number]
+  | (typeof BRUSH_TAPER_FIELDS)[number];
 
 /** A brush field that no list above claims. */
 type UnlistedBrushField = Exclude<keyof BrushSettings, ListedBrushField>;
@@ -209,6 +221,9 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_CURVE_FIELDS) {
     assign(merged, field, normalizePressureCurve(record[field]));
   }
+  for (const field of BRUSH_TAPER_FIELDS) {
+    assign(merged, field, normalizeTaper(record[field]));
+  }
   return normalizeBrush(merged);
 }
 
@@ -236,7 +251,8 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.stamp === b.stamp &&
     a.stampSpacing === b.stampSpacing &&
     a.stampHardness === b.stampHardness &&
-    a.stampTexture === b.stampTexture
+    a.stampTexture === b.stampTexture &&
+    taperSettingsEqual(a.taper, b.taper)
   );
 }
 

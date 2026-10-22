@@ -28,6 +28,7 @@ import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import type { Bounds } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
+import { taperIsActive } from "../brushes/taper";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
@@ -414,6 +415,19 @@ export class Canvas2DRenderer implements DrawingRenderer {
       // from scratch here; from the next sample on, appending is already
       // identical to a full re-rasterization of the stroke.
       this.clearStrokeBuffer();
+      this.prepareStrokeBuffer();
+      rasterizeStroke(this.strokeCtx, stroke, 0);
+    } else if (taperIsActive(stroke.brush.taper)) {
+      // A tapered stroke is one path of the whole stroke, and the tip's
+      // width depends on how far the stroke has travelled: the path moves
+      // with the end of the stroke, so the stroke is drawn again from scratch.
+      // Only the rectangle the stroke inks is cleared, exactly as a rebuild
+      // does it, so the live buffer is the same buffer a rebuild produces -
+      // the preview, the commit, a rebuild, a reopen and an export agree.
+      const region = this.strokeRegion(stroke);
+      if (region) {
+        this.clearStrokeBufferRegion(region);
+      }
       this.prepareStrokeBuffer();
       rasterizeStroke(this.strokeCtx, stroke, 0);
     } else {

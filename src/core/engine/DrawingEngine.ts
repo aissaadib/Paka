@@ -17,7 +17,7 @@
  *  - tools              -> `core/tools`
  */
 
-import type { BrushSettings } from "../../types/brush";
+import type { BrushSettings, TaperSettings } from "../../types/brush";
 import type { Bounds, Point } from "../../types/geometry";
 import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
@@ -28,6 +28,7 @@ import { createId } from "../../utils/id";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
+import { DEFAULT_TAPER } from "../brushes/taper";
 import {
   brushPresetsEqual,
   createPresetId,
@@ -376,9 +377,16 @@ function isInsideDocument(document: DrawingDocument, x: number, y: number): bool
  * brush and the eraser but not a shape: a shape is an outline, and a filled
  * shape is a flat polygon. So a shape records the plain segment path even when
  * the brush is stamped, and the stroke stays self-describing.
+ *
+ * A taper narrows a stroke towards its two ends, which is a property of a
+ * *path*: a shape's outline is closed and is not drawn from one end to the
+ * other, so a shape records the plain path as well.
  */
 function shapeBrush(brush: BrushSettings): BrushSettings {
-  return brush.stamp ? { ...brush, stamp: false } : brush;
+  if (!brush.stamp && !brush.taper.enabled) {
+    return brush;
+  }
+  return { ...brush, stamp: false, taper: DEFAULT_TAPER };
 }
 
 /**
@@ -1126,6 +1134,19 @@ export class DrawingEngine implements StrokeSource {
     this.brush = next;
     this.commands.breakMerge();
     this.publish();
+  }
+
+  /**
+   * Sets one part of the brush's taper.
+   *
+   * The taper is a nested setting, so a control that moves one of its
+   * numbers must not replace the whole thing: the patch is merged into the
+   * taper the brush has now. Like every other brush value this is editor
+   * state - it describes the next stroke, adds no history step and does not
+   * dirty the drawing.
+   */
+  setTaper(patch: Partial<TaperSettings>): void {
+    this.setBrush({ taper: { ...this.brush.taper, ...patch } });
   }
 
   /**

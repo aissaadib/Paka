@@ -180,15 +180,26 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **texture** (0-100 %: deterministic grain over the finished coverage), a
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
   how far apart the dabs sit), **stamp hardness** (the falloff of a single
-  dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
-  colour (primary and secondary pickers, an 8-swatch palette and the colour
+  dab) and **stamp texture** (0-100 %: the strength of the bristle lanes), a
+  **taper** switch with a **start** and an **end** length (0-200 % of the brush
+  size: how far the stroke ramps up to its full width) and strength (0-100 %:
+  how much narrower it is at the very tip, so 100 % is a point), colour
+  (primary and secondary pickers, an 8-swatch palette and the colour
   wheel), and toggles for pressure-driven size and pressure-driven opacity. Once
   either pressure toggle is on, a **Pressure curve** editor shapes how raw pen
   pressure maps to the response. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;
   hardness and texture apply to the brush, the eraser and shapes, while sampling,
-  stabilizer and the stamp apply to the brush and eraser (a shape's geometry
-  comes from the drag, not the freehand path).
+  stabilizer, the taper and the stamp apply to the brush and eraser (a shape's
+  geometry comes from the drag, not the freehand path).
+- **Stroke taper**: with the taper switched on, a stroke narrows towards its two
+  ends, so it can end in a clean point instead of a blunt cap. The taper
+  narrows the stroke's **width** after the pressure response, so it can go below
+  the brush's minimum size, and the ramp is measured along the path, so a fast
+  stroke and a slow one taper over the same distance. A tap - a press with no
+  movement - is still a full-size dot, and a stroke with no path to run along is
+  drawn at its full width. The taper is off by default, and the dab engine draws
+  its own dabs, so a stamped stroke keeps the plain dab plan.
 - **Stamp (dab) brush**: with the stamp switched on, a stroke is drawn as a
   chain of round dabs placed along its path instead of as continuous segments.
   The dabs overlap and their coverage is combined with a maximum, so a stroke
@@ -432,11 +443,13 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `10`** (`version: 1` to `9` files still
-  open and are written back as 10; their strokes default to a hard edge, texture
+- **The current project version is `13`** (`version: 1` to `12` files still
+  open and are written back as 13; their strokes default to a hard edge, texture
   0, a missing stabilizer reads as 0 because it was added additively within
-  version 6, the stamp is off because it did not exist before version 9, and
-  the per-dab texture is off because it did not exist before version 10).
+  version 6, the stamp is off because it did not exist before version 9, the
+  per-dab texture is off because it did not exist before version 10, the
+  pressure curve is the identity curve because it did not exist before version
+  12, and the stroke taper is off because it did not exist before version 13).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

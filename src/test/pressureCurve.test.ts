@@ -290,7 +290,8 @@ describe("project persistence", () => {
       layers: Array<{ elements: Array<{ brush: { pressureCurve: unknown } }> }>;
     };
     expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.version).toBe(12);
+    // The curve arrived in version 12; every later version carries it.
+    expect(payload.version).toBeGreaterThanOrEqual(12);
     expect(payload.layers[0].elements[0].brush.pressureCurve).toEqual(BENT);
 
     const parsed = parseProject(JSON.stringify(payload));

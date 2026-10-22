@@ -17,7 +17,7 @@ import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
 import type { BrushPreset } from "../core/brushes/presets";
-import type { BrushSettings } from "../types/brush";
+import type { BrushSettings, TaperSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
 import type { FlipAxis } from "../types/transform";
 import type { Listener } from "../utils/store";
@@ -25,6 +25,8 @@ import type { Listener } from "../utils/store";
 export interface EditorActions {
   setTool(toolId: ToolId): void;
   setBrush(patch: Partial<BrushSettings>): void;
+  /** Sets one part of the brush's taper; the rest of it is kept. */
+  setTaper(patch: Partial<TaperSettings>): void;
   /** Sets the colour a right-button gesture paints with. */
   setSecondaryColor(color: string): void;
   /** Exchanges the primary and secondary colours. */
@@ -131,6 +133,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
   const actions: EditorActions = {
     setTool: (toolId) => engine.setTool(toolId),
     setBrush: (patch) => engine.setBrush(patch),
+    setTaper: (patch) => engine.setTaper(patch),
     setSecondaryColor: (color) => engine.setSecondaryColor(color),
     swapColors: () => engine.swapColors(),
     saveBrushPreset: (name) => engine.saveBrushPreset(name),

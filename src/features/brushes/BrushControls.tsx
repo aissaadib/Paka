@@ -9,6 +9,7 @@ import {
   MIN_SPACING,
   MIN_STAMP_SPACING,
 } from "../../core/brushes/defaults";
+import { MAX_TAPER_LENGTH } from "../../core/brushes/taper";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 import { BrushPresets } from "./BrushPresets";
@@ -127,6 +128,66 @@ export function BrushControls() {
             title="Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect"
             format={(value) => `${Math.round(value * 100)}%`}
             onChange={(stampTexture) => actions.setBrush({ stampTexture })}
+          />
+        </>
+      ) : null}
+      <label
+        className="toggle"
+        title="Narrow the stroke towards its start and its end, so a stroke can end in a clean point"
+      >
+        <input
+          type="checkbox"
+          checked={brush.taper.enabled}
+          disabled={brush.stamp}
+          onChange={(event) => actions.setTaper({ enabled: event.target.checked })}
+        />
+        Taper
+      </label>
+      {brush.taper.enabled ? (
+        <>
+          <SliderField
+            label="Start length"
+            min={0}
+            max={MAX_TAPER_LENGTH * 100}
+            step={5}
+            value={brush.taper.startLength * 100}
+            title="How far the start of the stroke ramps up to the full width, as a percentage of the brush size"
+            format={(value) => `${Math.round(value)}%`}
+            disabled={brush.stamp}
+            onChange={(value) => actions.setTaper({ startLength: value / 100 })}
+          />
+          <SliderField
+            label="Start strength"
+            min={0}
+            max={1}
+            step={0.01}
+            value={brush.taper.startStrength}
+            title="How much narrower the stroke is at its very start; 100% is a point"
+            format={(value) => `${Math.round(value * 100)}%`}
+            disabled={brush.stamp}
+            onChange={(value) => actions.setTaper({ startStrength: value })}
+          />
+          <SliderField
+            label="End length"
+            min={0}
+            max={MAX_TAPER_LENGTH * 100}
+            step={5}
+            value={brush.taper.endLength * 100}
+            title="How far the end of the stroke ramps down to the tip, as a percentage of the brush size"
+            format={(value) => `${Math.round(value)}%`}
+            disabled={brush.stamp}
+            onChange={(value) => actions.setTaper({ endLength: value / 100 })}
+          />
+          <SliderField
+            label="End strength"
+            min={0}
+            max={1}
+            step={0.01}
+            value={brush.taper.endStrength}
+            title="How much narrower the stroke is at its very end; 100% is a point"
+            format={(value) => `${Math.round(value * 100)}%`}
+            disabled={brush.stamp}
+            onChange={(value) => actions.setTaper({ endStrength: value })}
           />
         </>
       ) : null}

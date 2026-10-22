@@ -463,8 +463,72 @@ path - a shape is an outline, and a filled shape is a flat polygon - and a
 shape's stroke record stores the stamp fields as they were not used, so the file
 says what was actually drawn.
 
-### The per-dab directional texture
+### Stroke taper
 
+`BrushSettings.taper` narrows a stroke towards its two ends, so a stroke can end
+in a clean point instead of a blunt cap. It is **off by default**, so every
+stroke drawn before the taper existed is byte for byte unchanged.
+
+The model is deliberately small (`core/brushes/taper.ts`):
+
+| Field | Range | Meaning |
+| --- | --- | --- |
+| `enabled` | boolean | The switch. |
+| `startLength`, `endLength` | 0-2 | The ramp's length, as a fraction of the brush's **nominal size**, so a taper means the same thing at every brush size, at every zoom and at every `rasterScale`. |
+| `startStrength`, `endStrength` | 0-1 | How much narrower the stroke is at the very tip: `0` is no taper at all, `1` is a point. |
+
+The width at a sample is the **pressure's diameter multiplied by the taper's
+factor**, so the order is: the pressure curve maps the raw pressure, the
+pressure factor narrows the diameter, the minimum-size floor applies, and the
+taper multiplies what comes out of it. The taper is applied last, which is why
+it can take a stroke *below* the brush's minimum size - that is what makes a
+point possible.
+
+The taper applies to the **width**, not to the opacity. A stroke is one shape
+with one alpha, applied when its buffer composites, so a fade could not be
+expressed per sample without breaking the rule that a stroke never darkens
+where it overlaps itself.
+
+The factors are a **pure function of the samples and the brush**: the ramp is
+measured as arc length along the stored path, so a fast stroke and a slow one
+taper over the same distance, and live drawing, a rebuild, undo/redo, a
+reopened file and a PNG export all agree. Where the two ramps overlap - a
+stroke shorter than the two ramps put together - the **narrower** of the two
+wins, so a short stroke is a lens rather than a bow tie.
+
+A stroke with no path (a tap) or no length at all is drawn at its full width:
+there is no distance for a ramp to run along.
+
+The rasterization is its own path (`core/rendering/taperStroke.ts`), because a
+round-capped **segment** has one width and the tip would be as wide as the
+segment that carries it. The tapered stroke is instead **one path**, filled
+once:
+
+```
+one disc per sample      the round joins and the round tips
+one quad per segment      the body, where the width ramps
+one fill                  the whole stroke, at full coverage
+```
+
+Filling the path once is what keeps the invariants the rest of the renderer
+relies on: the stroke is one shape with one alpha, so it cannot darken where it
+overlaps itself; there are no seams, because the edge is antialiased once
+instead of once per piece; and a path that doubles back on itself is still one
+shape, because the pieces overlap and the union is filled.
+
+Because the end of the stroke moves while it is being drawn, the **live** path
+redraws the whole stroke on every move instead of appending to it, and clears
+only the rectangle the stroke inks - exactly what a rebuild does. The live
+preview, the commit, a rebuild, a reopened file and an export therefore show
+the same pixels.
+
+The taper applies to the **brush and the eraser**. Shape tools keep the plain
+path - a shape's outline is closed and is not drawn from one end to the other -
+and a shape's stroke record stores the taper off, so the file says what was
+actually drawn. The dab engine draws its own dabs, so a stamped stroke keeps
+the plain dab plan and the taper does not apply to it.
+
+### The per-dab directional texture
 `BrushSettings.stampTexture` adds a texture **inside** each dab, so a stamped
 stroke reads as a bundle of bristle lanes rather than a line of dots. `0` is the
 plain round dab, byte for byte as before the field existed; above `0` the

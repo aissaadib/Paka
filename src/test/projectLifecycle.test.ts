@@ -252,6 +252,46 @@ describe("serialize and loadProject", () => {
     expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.texture).toBe(0.55);
   });
 
+  it("round-trips the stroke taper through save and reopen", () => {
+    const engine = new DrawingEngine({
+      brush: {
+        ...DEFAULT_BRUSH,
+        size: 40,
+        taper: {
+          enabled: true,
+          startLength: 0.5,
+          startStrength: 0.8,
+          endLength: 0.4,
+          endStrength: 0.3,
+        },
+      },
+    });
+    paintStroke(engine, 0);
+    const text = engine.serialize();
+
+    const reopened = new DrawingEngine();
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    reopened.loadProject(parsed.project, null);
+
+    const strokes = reopened.listStrokes(activeLayerId(reopened));
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].brush.taper).toEqual({
+      enabled: true,
+      startLength: 0.5,
+      startStrength: 0.8,
+      endLength: 0.4,
+      endStrength: 0.3,
+    });
+    // The replayed stroke is the same stroke: undo and redo keep the taper.
+    expect(reopened.undo()).toBe(true);
+    expect(reopened.redo()).toBe(true);
+    expect(reopened.listStrokes(activeLayerId(reopened))[0].brush.taper.startStrength).toBe(0.8);
+  });
+
   it("round-trips the stamp settings through save and reopen", () => {
     const engine = new DrawingEngine({
       brush: { ...DEFAULT_BRUSH, size: 40, stamp: true, stampSpacing: 0.3, stampHardness: 0.45 },

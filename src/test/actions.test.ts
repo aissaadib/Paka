@@ -38,6 +38,7 @@ beforeEach(() => {
   actions = {
     setTool: vi.fn(),
     setBrush: vi.fn(),
+    setTaper: vi.fn(),
     setSecondaryColor: vi.fn(),
     swapColors: vi.fn(),
     saveBrushPreset: vi.fn(),

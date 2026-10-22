@@ -10,6 +10,7 @@ import {
   stepBrushSize,
   updateBrushSettings,
 } from "../core/brushes/defaults";
+import { MAX_TAPER_LENGTH } from "../core/brushes/taper";
 import { clamp, distance, fromLogPosition, lerp, roundTo, toLogPosition } from "../utils/math";
 import { findToolByShortcut, getToolDefinition, TOOL_DEFINITIONS } from "../core/tools/toolDefinitions";
 
@@ -57,6 +58,13 @@ describe("brush configuration", () => {
       stampSpacing: 9,
       stampHardness: -2,
       stampTexture: 4,
+      taper: {
+        enabled: true,
+        startLength: 9,
+        startStrength: -1,
+        endLength: 7,
+        endStrength: 4,
+      },
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -71,6 +79,11 @@ describe("brush configuration", () => {
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
     expect(normalized.stampTexture).toBe(1);
+    expect(normalized.taper.enabled).toBe(true);
+    expect(normalized.taper.startLength).toBe(MAX_TAPER_LENGTH);
+    expect(normalized.taper.startStrength).toBe(0);
+    expect(normalized.taper.endLength).toBe(MAX_TAPER_LENGTH);
+    expect(normalized.taper.endStrength).toBe(1);
   });
 
   it("applies a patch without mutating the current settings", () => {

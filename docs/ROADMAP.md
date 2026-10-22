@@ -204,6 +204,12 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       (no history step, no dirty flag), a preset stores every `BrushSettings`
       field, and a table-driven guard over the default brush prevents a field
       from being silently dropped by the settings reader. Settings stay v1.
+- [x] Stroke taper: the start and the end of a stroke narrow independently, so
+      a stroke can end in a clean point without pressure hardware. The taper
+      narrows the width after the pressure response, the ramp is measured along
+      the path, and a stroke with no path is drawn at its full width. Captured
+      per stroke, format v13. The dab engine draws its own dabs, so a stamped
+      stroke keeps the plain dab plan.
 - [ ] Image-based or brush-tip stamp textures: a tip that is a mask rather than
       a round disc, so a stroke can be stamped with a felt tip or a dry ink
       blot. The per-dab machinery FF-01 added is what a tip would build on.

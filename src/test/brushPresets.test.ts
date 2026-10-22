@@ -28,7 +28,7 @@ import {
   settingsEqual,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings, PressureCurvePoint } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint, TaperSettings } from "../types/brush";
 import type { PointerSample } from "../types/pointer";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
@@ -38,6 +38,15 @@ const BENT_CURVE: readonly PressureCurvePoint[] = [
   { x: 0.5, y: 0.8 },
   { x: 1, y: 1 },
 ];
+
+/** A taper that is not the default one, with every field set. */
+const TAPER_WITH_EVERY_FIELD_SET: TaperSettings = {
+  enabled: true,
+  startLength: 0.45,
+  startStrength: 0.7,
+  endLength: 0.35,
+  endStrength: 0.25,
+};
 
 /**
  * A brush with every field set to a value that is not its default.
@@ -62,18 +71,22 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   stampSpacing: 0.15,
   stampHardness: 0.85,
   stampTexture: 0.65,
+  taper: TAPER_WITH_EVERY_FIELD_SET,
 };
 
 /** A value for one field that is neither its default nor its default again. */
 function distinctiveValue(
   field: keyof BrushSettings,
-): number | string | boolean | readonly PressureCurvePoint[] {
+): number | string | boolean | readonly PressureCurvePoint[] | TaperSettings {
   const fallback = DEFAULT_BRUSH[field];
   if (typeof fallback === "boolean") {
     return !fallback;
   }
   if (typeof fallback === "string") {
     return "#0a1b2c";
+  }
+  if (field === "taper") {
+    return TAPER_WITH_EVERY_FIELD_SET;
   }
   if (Array.isArray(fallback) || typeof fallback === "object") {
     return BENT_CURVE;
@@ -84,7 +97,7 @@ function distinctiveValue(
 /** The brush with one field changed, clamped the way the reader clamps it. */
 function brushWith(
   field: keyof BrushSettings,
-  value: number | string | boolean | readonly PressureCurvePoint[],
+  value: number | string | boolean | readonly PressureCurvePoint[] | TaperSettings,
 ): BrushSettings {
   return normalizeBrush({ ...DEFAULT_BRUSH, [field]: value } as BrushSettings);
 }

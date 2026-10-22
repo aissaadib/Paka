@@ -103,7 +103,14 @@ added without changing the model.
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
-            ]
+            ],
+            "taper": {
+              "enabled": false,
+              "startLength": 0,
+              "startStrength": 0,
+              "endLength": 0,
+              "endStrength": 0
+            }
           },
           "startTime": 1730000000000,
           "xs": [100, 104.5, 109],
@@ -133,7 +140,14 @@ added without changing the model.
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
-            ]
+            ],
+            "taper": {
+              "enabled": false,
+              "startLength": 0,
+              "startStrength": 0,
+              "endLength": 0,
+              "endStrength": 0
+            }
           },
           "startTime": 1730000004000,
           "xs": [104, 108],
@@ -163,7 +177,14 @@ added without changing the model.
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
-            ]
+            ],
+            "taper": {
+              "enabled": false,
+              "startLength": 0,
+              "startStrength": 0,
+              "endLength": 0,
+              "endStrength": 0
+            }
           },
           "startTime": 1730000012000,
           "xs": [300, 500, 500, 300, 300],
@@ -403,6 +424,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+| `taper` | object | The **width ramp** at the start and the end of the stroke: `enabled` (a boolean), `startLength` and `endLength` (0-2, the ramp's length as a fraction of the brush's nominal size) and `startStrength` and `endStrength` (0-1, how much narrower the stroke is at the very tip; `1` is a point). The taper narrows the stroke's **width** after the pressure response, so it can go below the brush's minimum size. It is off by default, and a stroke with no path (a tap) is drawn at its full width. Required in version 13; version-1 to -12 files have no field and read as the taper off, which is exactly the coverage they were written by. |
 
 ## Validation policy
 
@@ -467,6 +489,9 @@ looks like:
 - a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
   texture did not exist before version 10, and the texture off is exactly the
   coverage those files were written by;
+- a missing `taper` in a version-1 to -12 file → the taper off. The taper did
+  not exist before version 13, and the taper off is exactly the coverage those
+  files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -512,8 +537,8 @@ Two further guarantees:
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
-| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
+| 13 | Requires `taper` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the taper off (the coverage they were written by). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -553,6 +578,11 @@ Two further guarantees:
   version-11 reader that ignored it would draw the linear profile instead, which
   is a different picture. Version-1 to -11 files read with the identity curve,
   which is exactly the linear response they were written by.
+- **`taper` required version 13.** It changes how stored samples are rasterized -
+  the ends of the stroke are narrower than the brush - so a version-12 reader
+  that ignored it would draw the same samples at their full width, which is a
+  different picture. Version-1 to -12 files read with the taper off, which is
+  exactly the coverage they were written by.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

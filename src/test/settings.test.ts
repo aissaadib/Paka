@@ -29,7 +29,7 @@ import {
   serializeAppSettings,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings, PressureCurvePoint } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint, TaperSettings } from "../types/brush";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
 /** A scheduler the test drives by hand, so no test waits in real time. */
@@ -100,7 +100,7 @@ function createHarness(gateway: MemorySettingsGateway = new MemorySettingsGatewa
  */
 const NON_DEFAULT_BRUSH_VALUES: Record<
   keyof BrushSettings,
-  string | number | boolean | readonly PressureCurvePoint[]
+  string | number | boolean | readonly PressureCurvePoint[] | TaperSettings
 > = {
   size: 33,
   opacity: 0.42,
@@ -121,6 +121,13 @@ const NON_DEFAULT_BRUSH_VALUES: Record<
   stampSpacing: 0.28,
   stampHardness: 0.61,
   stampTexture: 0.52,
+  taper: {
+    enabled: true,
+    startLength: 0.4,
+    startStrength: 0.8,
+    endLength: 0.6,
+    endStrength: 0.3,
+  },
 };
 
 function nonDefaultBrush(): BrushSettings {

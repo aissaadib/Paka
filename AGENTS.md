@@ -65,6 +65,8 @@ architecture by browsing.
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`,
+`taperStroke` (the tapered stroke's path: a disc per sample, a quad per
+segment, one fill),
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
@@ -98,6 +100,8 @@ pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
+`core/brushes/taper.ts` (the taper model: the defaults, the validation and
+the width factors),
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
 `core/autosave/recovery.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
@@ -117,6 +121,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
 | Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L1324/L1350), `types/brush.ts`, `BrushControls.tsx`, format v7 |
+| Change the stroke taper | `core/brushes/taper.ts` (the model: the defaults, the validation, `taperWidthFactors`), `core/rendering/taperStroke.ts` (the path: a disc per sample, a quad per segment, one fill), `canvas2dStroke.ts` `rasterizeStroke`, `Canvas2DRenderer.ts` `extendStroke` (the live path redraws the whole stroke), `types/brush.ts` (`TaperSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (v13) |
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`duplicateBrushPreset`/`applyBrushPreset`), `features/brushes/BrushPresets.tsx`, `state/editorStore.ts` |
@@ -206,6 +211,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `ActionDefinition`, `ActionContext`, `ShortcutSpec`, `ActionId` | `core/actions/types.ts` | grep the symbol |
 | `normalizePressureCurve`, `evaluatePressureCurve`, `pressureCurvesEqual` | `core/brushes/pressureCurve.ts` | grep the symbol |
 | `DEFAULT_PRESSURE_CURVE`, `DEFAULT_SECONDARY_COLOR`, `BRUSH_CURVE_FIELDS` | `core/brushes/defaults.ts` | 14, 17, grep |
+| `TaperSettings` | `types/brush.ts` | grep the symbol |
+| `DEFAULT_TAPER`, `normalizeTaper`, `taperSettingsEqual`, `taperIsActive`, `taperWidthFactors`, `MAX_TAPER_LENGTH` | `core/brushes/taper.ts` | grep the symbol |
+| `buildTaperedPath`, `drawTaperedPath`, `TaperedPath`, `TaperDisc`, `TaperQuad` | `core/rendering/taperStroke.ts` | grep the symbol |
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
@@ -258,6 +266,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
 | Brush texture / grain | `canvas2dStroke.test.ts` (`textureCoverage`), `canvas2dRenderer.test.ts` (pattern pass), `projectFormat.test.ts`, `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
+| Stroke taper | `taper.test.ts` (the model, the width factors, the path pieces), `canvas2dRenderer.test.ts` (the tapered pixels, the live/commit/rebuild/export parity, the tap, the cancel), `drawingEngine.test.ts` (the capture, the undo step, the shape and the cancel), `projectFormat.test.ts` (v13 round trip), `projectLifecycle.test.ts` (save and reopen) |
 | Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, per-dab texture, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9/v10), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
 | Fixed-step transforms (the Selection menu) | `fixedStepTransform.test.ts` (the pivot, both directions, undo/redo, the two non-exact inverses), `tests/visual/selection-menu.spec.ts` (the menu in a real browser) |
 | Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
