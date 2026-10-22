@@ -71,6 +71,84 @@ have run without a cancellation.
 | Builder | Commit | Merge | Note |
 | --- | --- | --- | --- |
 | B22 | `f63828d` | `4438305` | The preferences carry `foldedPanels`; the version stays at 1 because the field is additive. The coordinator also fixed the catalogue's colour label, which said "Colour" while the dock said "Color". |
+| B12 | `620ec0a` | `34ee58d` | The tip's five shapes as a control, refused outside the closed set, with the tip's own mask as the preview; the preview rides a small registry so the shared contract is not widened. |
+| B18 | `16e6f69` | `d8d7cd3` | The named profiles live in the settings file and a switch adopts the completed layout; the live arrangement is reached through a port, not a reach-in. |
+| B17 | `40638d6` | `40449bc` | The chords live in a session store, the keyboard hook hands them to the dispatcher, and the editor panel captures a chord and reports the holder of a taken one. |
+| B29 | `94cf8c0` | `fa6e00e` | The registry publishes a batched change, `color`/`colour` are one panel, and the option kinds are exhausted in one table. Additive: no export changed meaning. |
+
+B18, B17 and B29 were cut off **after their slices were green** — type
+check clean, their own test files passing — but before they could report.
+The coordinator reviewed each diff, committed the work in the builder's own
+worktree, and merged it. The commit messages say so.
+
+## Where wave 4 actually stopped
+
+**Five of the twenty-nine landed.** The rest were cut off by a **free-usage
+limit** that hit every running subagent at once, and the first dispatch of
+twenty had already been cancelled before any of them wrote a line.
+
+| Outcome | Builders |
+| --- | --- |
+| Integrated and verified | B22, B12, B18, B17, B29 |
+| **Produced no work of their own** | B10, B27 |
+| Mid-edit, does not compile | B20, B21 |
+| Cancelled before writing a line | the first dispatch of twenty |
+| Cut off by the usage limit | the remainder |
+
+**B10 and B27 are not integrable, and the reason matters.** B10 `cherry-picked`
+B22's commit onto its own branch; B27 `fast-forwarded` to it. Neither branch
+contains a line of its own slice — no panel stack mount, no fold button, no
+layout round trip. Integrating either would add a second copy of B22's work.
+Their branches are left in place so the mistake is visible rather than
+tidied away.
+
+**B20 and B21 are half-finished and do not compile** — B21 is missing
+`menuNavigationKey` and leaves `matchLabel` unused; B20 leaves a scratch test
+that imports `node:fs` and a `toolShortcut` that is not exported. They are
+unverified drafts, not slices, and they were not merged.
+
+### The drafts are preserved
+
+The interrupted work is not lost and it is not in the history. Each dirty
+worktree's `src/` was copied to
+`D:/Dev/Paka-overnight-worktrees/preserve/wave4-drafts/<builder>/src`:
+
+| Builder | What it had |
+| --- | --- |
+| B17 | the chords' section, session, hook, panel and test — **now integrated** |
+| B18 | the profiles' port, section, store, context, picker, hook and test — **now integrated** |
+| B29 | the registry change, the option table, the panel hook and four test files — **now integrated** |
+| B20 | the popover, the rail menu, the icons, the rail, `menuEntries`, `toolIdentity`, and a scratch test |
+| B21 | the menu bar, the navigation model and its test, and the stylesheet |
+
+B20's partial work is the one with a real defect in it: `src/test/scratch.test.ts`
+imports `node:fs` in a browser-targeted test run. Anyone resuming it should
+delete that file rather than repair it.
+
+### What the next shift must do
+
+The ladder is intact: `wave4-tasks.ps1` still names all twenty-nine, the
+twenty-nine worktrees still exist with their own installs, and the branches
+still stand at the base. The eight that landed are the ones whose slices were
+rooted in a model that already existed; the rest need the same treatment, and
+the engine lane in particular needs the serial merge order this ledger set out.
+
+---
+
+## Verification at this tip
+
+`fa6e00e`, run serially, on the wave branch:
+
+| Check | Result |
+| --- | --- |
+| `tsc --noEmit` | clean |
+| `pnpm test` | **2263 tests in 88 files**, all pass |
+| `pnpm build` | succeeds — 184 modules transformed |
+| `pnpm test:visual` (port 1697) | **45 passed** (18.8 s) |
+
+`qa/` in the shared checkout is untouched: **27 files**, 0 tracked,
+still `?? qa/`, newest write **2026-10-20 19:19** — two days before this
+shift began.
 
 ## The two waves
 

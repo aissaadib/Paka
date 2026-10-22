@@ -185,6 +185,17 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
 | `SymmetryMode`, `SymmetrySettings`, `SymmetryAxis`, `SymmetryMirror`, `activeSymmetryAxes`, `symmetryMirrors`, `mirrorPoint`, `mirrorMovesAny`, `centeredSymmetrySettings` | `core/document/symmetry.ts` | grep the symbol |
 | `SYMMETRY_OVERLAY_ID`, `paintSymmetryAxes`, `setSymmetryOverlaySettings` | `core/rendering/symmetryAxesOverlay.ts` | grep the symbol |
+| `BRUSH_TIP_OPTION_ID`, `BRUSH_TIP_CHOICES`, `brushTipOption`, `brushTipPreview`, `registerBrushTipOptions` | `core/brushes/brushTipOptions.ts` | grep the symbol |
+| `OptionPreview`, `OptionPreviewKind`, `registerOptionPreview`, `optionPreviewFor` | `core/options/optionPreviews.ts` | grep the symbol |
+| `getShortcutStore`, `resetShortcutStore` | `core/actions/shortcutSession.ts` | grep the symbol |
+| `SHORTCUT_SECTION_KEY`, `createShortcutSection` | `core/actions/shortcutSection.ts` | grep the symbol |
+| `useShortcutStore`, `useShortcutOverrides` | `hooks/useShortcuts.ts` | grep the symbol |
+| `canonicalPanelId`, `registerPanelIfAbsent`, `isPanelRegistered`, `subscribeToPanelRegistry`, `panelRegistryVersion` | `core/shell/panelRegistry.ts` | grep the symbol |
+| `usePanelRegistryVersion`, `useRegisteredPanels`, `useRegisteredPanelsInSlot` | `hooks/usePanelRegistry.ts` | grep the symbol |
+| `layoutOfPreferences`, `preferencesOfLayout`, `createShellPreferencesLayoutPort` | `core/workspace/shellLayoutPort.ts` | grep the symbol |
+| `createWorkspaceProfileStore`, `WorkspaceLayoutPort`, `sameArrangement`, `createDetachedLayoutPort` | `core/workspace/workspaceProfileStore.ts` | grep the symbol |
+| `WORKSPACE_PROFILE_SECTION_KEY`, `createWorkspaceProfileSection` | `core/workspace/workspaceProfileSection.ts` | grep the symbol |
+| `useWorkspaceProfileStore`, `useWorkspaceProfiles`, `useWorkspaceProfileActions` | `hooks/useWorkspaceProfiles.ts` | grep the symbol |
 | `GridSettings`, `DEFAULT_GRID_SETTINGS`, `nearestGridLine`, `gridLinesBetween`, `snapDocumentPoint`, `snapTolerance` | `core/document/grid.ts` | grep the symbol |
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
 | `SelectionHandleId`, `selectionHandles`, `visibleSelectionHandles`, `handlesWithGrabbedHandle`, `findSelectionHandle`, `handleCursorAt`, `HANDLE_CURSORS`, `handleGrabRadius`, `rotationHandleOffset` | `core/document/selectionHandles.ts` | grep the symbol |
@@ -284,6 +295,9 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
 | Symmetry | `symmetry.test.ts` (the modes, the axes and where they stand, the mirror about the axis rather than the document's middle, the on-axis rule, the mirrors, and the display-only overlay) |
+| Brush tip control | `brushTipControl.test.ts` (the closed set of five shapes, the refusal of a shape this build does not know, the preview, and the write that is editor state - no history step, no dirty flag) |
+| The shortcut editor's runtime | `shortcutRuntime.test.ts` (the session store, the dispatcher's overrides, the chord a command gives up, the conflict reason, and the round trip through the section) |
+| The named workspace profiles in the file | `workspaceProfilePersistence.test.ts` (the section, the store, the arrangement port, the switch, the custom mark, and the round trip through the settings file) |
 | Pointer ownership | `pointerOwnership.test.ts` (the take/release/cancel rules, the routing, the binder's pointer handling and the cancelled gesture) |
 | Tool options | `toolOptions.test.ts` (the fields each tool shows, the control for every kind, the bar's grouping, and the path a feature takes to add an option to a tool it does not own), `toolOptionsContract.test.ts` (the registry, the visibility rules and the group rules) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
