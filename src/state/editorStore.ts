@@ -61,6 +61,8 @@ export interface EditorActions {
   setGridSpacing(spacing: number): void;
   /** Turns snapping to guides and grid lines on or off. */
   setGridSnapping(snap: boolean): void;
+  /** Shows or hides the canvas rulers; display state, never exported. */
+  setRulersVisible(visible: boolean): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
   undo(): void;
@@ -149,6 +151,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setGridVisible: (visible) => engine.setGridVisible(visible),
     setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
     setGridSnapping: (snap) => engine.setGridSnapping(snap),
+    setRulersVisible: (visible) => engine.setRulersVisible(visible),
     dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();

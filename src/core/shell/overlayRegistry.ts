@@ -15,6 +15,7 @@
  * rule that lets overlays be added freely.
  */
 
+import type { Bounds } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 
 /** Whether an overlay is drawn under or over the document's pixels. */
@@ -31,6 +32,22 @@ export interface OverlayPaintContext {
   readonly documentHeight: number;
   /** The renderer's scale factor: document pixels to backing-store pixels. */
   readonly scale: number;
+  /**
+   * The selection's frame in document pixels, or `null` when nothing is
+   * selected.
+   *
+   * The renderer owns the selection overlay already, so an overlay that marks
+   * it on another strip - the rulers do - reads it here rather than keeping a
+   * second copy of the same state.
+   */
+  readonly selectionBounds?: Bounds | null;
+  /**
+   * The display canvas's device pixel ratio.
+   *
+   * Chrome measured in CSS pixels - the rulers' strips - needs it to draw at
+   * the size the user sees whatever the screen's scale factor.
+   */
+  readonly devicePixelRatio?: number;
 }
 
 /** One overlay. */

@@ -242,6 +242,8 @@ export function AppMenuBar({
         { type: "separator" },
         { type: "item", label: "Actual Size", actionId: "zoomActual" },
         { type: "item", label: "Fit to Window", actionId: "zoomFit" },
+        { type: "separator" },
+        { type: "item", label: "Show Rulers", actionId: "toggleRulers" },
       ],
     },
   ];

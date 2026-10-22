@@ -297,7 +297,9 @@ export function paintRulers(context: OverlayPaintContext): void {
   if (!canvas) {
     return;
   }
-  const dpr = state.devicePixelRatio > 0 ? state.devicePixelRatio : 1;
+  const dpr = (context.devicePixelRatio ?? state.devicePixelRatio) > 0
+    ? (context.devicePixelRatio ?? state.devicePixelRatio)
+    : 1;
   // The canvas element's backing store is its CSS size times the device
   // pixel ratio, so the chrome is measured back in CSS pixels.
   const cssWidth = canvas.width / dpr;
@@ -310,7 +312,7 @@ export function paintRulers(context: OverlayPaintContext): void {
     ctx,
     viewport: context.viewport,
     geometry: rulerGeometry(context.viewport, cssWidth, cssHeight),
-    marks: rulerSelectionMarks(state.selection),
+    marks: rulerSelectionMarks(context.selectionBounds ?? state.selection),
     cursor: state.cursor,
     cssWidth,
     cssHeight,

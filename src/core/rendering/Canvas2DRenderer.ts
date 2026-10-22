@@ -26,6 +26,7 @@ import { isFillPatch, isGradient } from "../document/types";
 import type { SelectionHandles } from "../document/selectionHandles";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
+import { overlaysForLayer, type OverlayPaintContext } from "../shell/overlayRegistry";
 import type { Bounds } from "../../types/geometry";
 import type { BrushTipShape } from "../../types/brush";
 import type { Viewport } from "../../types/viewport";
@@ -605,6 +606,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
       viewport.offsetY * devicePixelRatio,
     );
 
+    this.paintOverlays(ctx, "under", scale);
+
     this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
 
     this.paintGrid(ctx, scale);
@@ -617,6 +620,45 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.lineWidth = 1 / scale;
     ctx.strokeStyle = DOCUMENT_BORDER_COLOR;
     ctx.strokeRect(0, 0, doc.width, doc.height);
+
+    this.paintOverlays(ctx, "over", scale);
+  }
+
+  /**
+   * Paints the registered overlays for one layer.
+   *
+   * The registry is the list of chrome that is not the document: a module
+   * registers an overlay and the renderer paints it here, so a new overlay
+   * needs no new line in this paint sequence. The overlays are display only by
+   * construction - they are handed the display context and nothing else, so
+   * they cannot reach a layer surface or `composeDocumentImage`, and an export
+   * is identical whether they are on or off.
+   */
+  private paintOverlays(
+    ctx: CanvasRenderingContext2D,
+    layer: "under" | "over",
+    scale: number,
+  ): void {
+    const doc = this.doc;
+    if (!doc) {
+      return;
+    }
+    const overlays = overlaysForLayer(layer);
+    if (overlays.length === 0) {
+      return;
+    }
+    const context: OverlayPaintContext = {
+      ctx,
+      viewport: this.viewport,
+      documentWidth: doc.width,
+      documentHeight: doc.height,
+      scale,
+      selectionBounds: this.selection?.bounds ?? null,
+      devicePixelRatio: this.devicePixelRatio,
+    };
+    for (const overlay of overlays) {
+      overlay.paint?.(context);
+    }
   }
 
   /**

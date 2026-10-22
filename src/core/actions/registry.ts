@@ -140,6 +140,13 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     run: ({ actions, engine }) => actions.setGridSnapping(!engine.getState().gridSnapping),
   },
   {
+    id: "toggleRulers",
+    label: "Show Rulers",
+    // Alt is deliberate: Ctrl+R is the webview's reload in a Tauri window.
+    shortcuts: [{ key: "r", code: "KeyR", mod: true, alt: true }],
+    run: ({ actions, engine }) => actions.setRulersVisible(!engine.getState().rulersVisible),
+  },
+  {
     id: "nudgeLeft",
     label: "Nudge Left",
     shortcuts: [key("arrowleft", "ArrowLeft"), { ...key("arrowleft", "ArrowLeft"), shift: true }],

@@ -59,6 +59,7 @@ export type ActionId =
   | "zoomFit"
   | "toggleGrid"
   | "toggleGridSnapping"
+  | "toggleRulers"
   | "nudgeLeft"
   | "nudgeRight"
   | "nudgeUp"

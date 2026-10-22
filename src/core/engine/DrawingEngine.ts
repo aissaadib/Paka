@@ -145,6 +145,7 @@ import { toStrokeSample } from "../input/pointer";
 import { serializeProject, type ParsedProject } from "../project/projectFormat";
 import { Canvas2DRenderer } from "../rendering/Canvas2DRenderer";
 import { strokeDiameter } from "../rendering/canvas2dStroke";
+import { setRulerOverlayState } from "../rendering/rulerOverlay";
 import type { DrawingRenderer, StrokeSource } from "../rendering/types";
 import {
   ZOOM_STEP,
@@ -279,6 +280,14 @@ export interface EditorSnapshot {
    * committed strokes already are. Off by default.
    */
   readonly gridSnapping: boolean;
+  /**
+   * Whether the canvas rulers are drawn.
+   *
+   * Editor state like the grid: the rulers are chrome on the display canvas,
+   * so they add no history step, dirty nothing and never reach a layer
+   * surface, a project file or an export. Off by default.
+   */
+  readonly rulersVisible: boolean;
   /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
@@ -606,6 +615,7 @@ export class DrawingEngine implements StrokeSource {
   private gridVisible = DEFAULT_GRID_SETTINGS.visible;
   private gridSpacing = DEFAULT_GRID_SETTINGS.spacing;
   private gridSnapping = DEFAULT_GRID_SETTINGS.snap;
+  private rulersVisible = false;
   private notice: string | null = null;
   /**
    * Whether the gesture-refusal notice has already been raised for the
@@ -1492,6 +1502,27 @@ export class DrawingEngine implements StrokeSource {
     this.gridVisible = visible;
     this.syncGridToRenderer();
     this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Shows or hides the canvas rulers.
+   *
+   * Display state, not an edit: the rulers are chrome painted on the display
+   * canvas over the artwork, so they add no history step, dirty nothing and
+   * never reach a layer surface, a project file or an export. A no-op change
+   * asks for no frame.
+   */
+  setRulersVisible(visible: boolean): void {
+    if (this.rulersVisible === visible) {
+      return;
+    }
+    this.rulersVisible = visible;
+    // The overlay reads its visibility from its own state, so the toggle is
+    // what turns the painter on; the frame below is what makes it appear.
+    setRulerOverlayState({ visible });
+    this.commands.breakMerge();
+    this.renderer?.requestRender();
     this.publish();
   }
 
@@ -3644,6 +3675,7 @@ export class DrawingEngine implements StrokeSource {
       gridVisible: this.gridVisible,
       gridSpacing: this.gridSpacing,
       gridSnapping: this.gridSnapping,
+      rulersVisible: this.rulersVisible,
       notice: this.notice,
     };
   }
@@ -3675,6 +3707,7 @@ export class DrawingEngine implements StrokeSource {
       previous.gridVisible === next.gridVisible &&
       previous.gridSpacing === next.gridSpacing &&
       previous.gridSnapping === next.gridSnapping &&
+      previous.rulersVisible === next.rulersVisible &&
       previous.notice === next.notice
     ) {
       return;

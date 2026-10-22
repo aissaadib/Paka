@@ -56,6 +56,7 @@ beforeEach(() => {
     setGridVisible: vi.fn(),
     setGridSpacing: vi.fn(),
     setGridSnapping: vi.fn(),
+    setRulersVisible: vi.fn(),
     dismissNotice: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
