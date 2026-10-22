@@ -58,6 +58,23 @@
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
+/* The disc is the tallest control in the colour dock. The dock is tabbed and
+   shares the column with the layers list, so at a short window the disc gives
+   way rather than pushing the sliders and the hex field out of the panel. */
+@media (max-height: 820px) {
+  .color-wheel__disc {
+    width: 124px;
+    height: 124px;
+  }
+}
+
+@media (max-height: 660px) {
+  .color-wheel__disc {
+    width: 104px;
+    height: 104px;
+  }
+}
+
 /* The value overlay: the disc is drawn at full brightness and dimmed to the
    selected value, so the value slider has a visible effect on the disc. */
 .color-wheel__shade {

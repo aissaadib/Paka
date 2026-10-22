@@ -45,6 +45,7 @@ import { useWorkspaceComposition } from "../../hooks/useWorkspace";
 import { WorkspaceProvider } from "../../state/workspaceContext";
 import { fileNameOf } from "../../utils/path";
 import { ToolRail } from "../toolbar/ToolRail";
+import { PanelDock } from "../panels/PanelDock";
 import { AppMenuBar } from "./AppMenuBar";
 import { ToolBar } from "./ToolBar";
 
@@ -77,11 +78,7 @@ if (!findPanel("layers")) {
     title: "Layers",
     slot: "right",
     order: 1,
-    render: () => (
-      <div className="side-panels__layers">
-        <LayersPanel />
-      </div>
-    ),
+    render: () => <LayersPanel />,
   });
 }
 
@@ -248,21 +245,41 @@ function WorkspaceShell() {
 }
 
 /**
- * The right-hand column: the panels the registry knows about.
+ * The right-hand column: a tabbed dock over the layers list.
  *
  * The panels come from the registry, their slot from the shell's slots and
  * their visibility from the shell's preferences, so the column is a reading
  * of the composition rather than a list of components.
+ *
+ * The dock groups the inspect-and-adjust panels, and the layers list - the
+ * one panel a drawing session works in continuously - keeps a share of the
+ * column of its own. Which panels are in the dock is the composition's
+ * decision; the dock only decides which visible one is on top.
  */
 function SideColumn() {
   const composition = useWorkspaceComposition();
   const panels = compositionPanelsInSlot(composition, "right");
+  const layers = panels.filter((panel) => panel.id === "layers");
+  const docked = panels.filter((panel) => panel.id !== "layers");
 
   return (
     <div className="side-panels">
-      {panels.map((panel) => (
-        <Fragment key={panel.id}>{findPanel(panel.id)?.render()}</Fragment>
-      ))}
+      {docked.length === 0 ? null : (
+        <PanelDock
+          panels={docked.map((panel) => ({
+            id: panel.id,
+            title: findPanel(panel.id)?.title ?? panel.id,
+            render: () => findPanel(panel.id)?.render() ?? null,
+          }))}
+        />
+      )}
+      {layers.length === 0 ? null : (
+        <div className="side-panels__layers">
+          {layers.map((panel) => (
+            <Fragment key={panel.id}>{findPanel(panel.id)?.render()}</Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

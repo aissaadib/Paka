@@ -161,11 +161,25 @@ test("the rail keeps every tool reachable in a short window", async ({ page }) =
   await page.locator(RAIL).waitFor();
 
   const rail = page.locator(RAIL);
+  // The rail either fits its tools or scrolls them; what it may not do is clip
+  // one away. (At this height the short chrome means it now fits, which is the
+  // better outcome - the scroll is the fallback, not the goal.)
   const scrolls = await rail.evaluate((element) => element.scrollHeight > element.clientHeight);
-  expect(scrolls).toBe(true);
+  const overflowY = await rail.evaluate((element) => getComputedStyle(element).overflowY);
+  if (scrolls) {
+    expect(["auto", "scroll"]).toContain(overflowY);
+  }
 
   // The last tool is reachable by scrolling the rail, not clipped away.
   const guides = page.getByRole("button", { name: "Guides", exact: true });
   await guides.scrollIntoViewIfNeeded();
   await expect(guides).toBeVisible();
+  const railBox = await rail.boundingBox();
+  const guideBox = await guides.boundingBox();
+  expect(railBox).not.toBeNull();
+  expect(guideBox).not.toBeNull();
+  expect(guideBox!.y).toBeGreaterThanOrEqual(railBox!.y - 1);
+  expect(guideBox!.y + guideBox!.height).toBeLessThanOrEqual(
+    railBox!.y + railBox!.height + 1,
+  );
 });

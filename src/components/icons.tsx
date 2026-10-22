@@ -286,3 +286,25 @@ export function IconNavigator(props: IconProps) {
     </Icon>
   );
 }
+
+/** A painter's palette: the colour panel's tab. */
+export function IconPalette(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.4a5.6 5.6 0 1 0 0 11.2c.95 0 1.25-.65.8-1.35-.45-.7-.05-1.45.8-1.45h1.1a2.3 2.3 0 0 0 2.3-2.3A5.9 5.9 0 0 0 8 2.4z" />
+      <circle cx="5.6" cy="6" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="4.8" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="10.4" cy="6" r=".7" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** A keyboard: the shortcut reference's tab. */
+export function IconKeyboard(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.6" y="4.4" width="12.8" height="7.2" rx="1.3" />
+      <path d="M4.1 6.7h.01M6.3 6.7h.01M8.5 6.7h.01M10.7 6.7h.01M4.4 9.3h.01M11.6 9.3h.01M6 9.3h4" />
+    </Icon>
+  );
+}
