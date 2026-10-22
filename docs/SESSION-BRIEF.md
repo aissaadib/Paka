@@ -81,7 +81,9 @@ visual-regression harness.
   blend modes (`normal` / `multiply` / `screen` plus eight separable modes),
   masks and groups remain. The colour panel gained the **contrast and
   colour-difference readout** and **wider input formats** (8-digit hex, `hsl()`,
-  `oklch()`). Phase 0 gained three more correctness items: live-preview
+  `oklch()`), and the **colour dock**: the two colours with their exact
+  values, an editable **palette** that survives a restart, and the **recent
+  colours**. Phase 0 gained three more correctness items: live-preview
   compositing inside its own layer, layer/history safety during a gesture, and a
   bounded document raster budget.
 
@@ -89,6 +91,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent07-color-dock` | **Colour dock, palette and recent colours** - the **Colour** panel is now one surface for colour: the two colours the artist paints with (**ink** for the left button, **alt** for the right) with their **exact values**, a **swap** and a **reset**, the HSV wheel, the **palette** of named swatches, the **recent colours** and the contrast readout. The palette is **editable** - add the current ink, click a swatch to paint with it, right click for the alt colour, `F2` to rename, `Delete` to remove - and it **survives a restart** in the per-user settings file; the **recent colours** are **session state**: bounded, newest first, a colour picked again moves to the front, and a **Clear** button empties them. Every colour path ends in the same two setters, so the wheel, the chips, the text fields, the swatches and the canvas picker cannot disagree about what the next stroke will be painted with; an exact value accepts hex, `hsl()` and `oklch()`, and a value that is not a colour - or not opaque - is **refused with a reason** and the colour the editor holds is left alone. `X` swaps the two colours and `D` resets them. The palette and the alt colour are preferences, so settings stay **version 1**; the recent colours are not written to the file at all. **No project-format change.** |
 | `feat/agent10-brush-cursor` | **Brush cursor, size ring and quick resize** - the brush's real footprint is drawn on the canvas as a **ring** that follows the pointer, sized in **document pixels through the zoom** (so it shrinks and grows with the canvas) and outlined one *device* pixel wide (so it stays a hairline at any density). A **quick resize** - `Ctrl`+`Alt` and drag, up to grow and down to shrink - changes the brush size with the current size in pixels shown beside the ring, and `Esc` cancels it and puts the size back. The gesture is owned by the engine and runs **before** any tool sees the press, so a resize can never leave a stroke behind; it is **relative** (`size = start * e^(-dy/100)`), so the ring does not jump when the drag begins, and it is clamped to the brush's own `1..512` range. The size is written through the ordinary `setBrush`, so the ring, the readout, the toolbar's slider and the next stroke agree - and it is **editor state**: no history step, no dirty flag, nothing in the file. Both the ring and the resize are **views**: the ring is a DOM overlay, a sibling of the canvas, so it never reaches a layer surface, a PNG export, the history or the project file. The gesture is a shortcut, not the only way in: `[` and `]` step the size, `Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's **Size** slider is a labelled range input. **No project-format change.** |
 | `feat/agent02-tool-options-bar` | **Contextual tool-options strip** - a **one-row strip under the menu bar** shows the **active tool's** options and nothing else: the brush for the brush and the eraser, the brush *and* the shape for the shape tools, the selection actions for the select tool, the tolerance for the bucket and the gradient's own controls for the gradient tool. The strip is **32 px tall whatever the tool**, so switching tools never moves the canvas, and a window too narrow for the controls scrolls the strip sideways instead of wrapping it. Every control is described by one **declarative schema** that says where its value is read from and which editor action it writes, so there is no second copy of a brush value, and a control is only offered when the tool **really uses it** - the gradient has no brush size, a shape has no stabilizer and no dab spacing - so nothing on the strip is a decoration. The size and the opacity stay in the strip and the rest of the brush sits behind a **popover**. Every option is editor state: changing one is not an edit, and the values survive a tool change. **No project-format change.** |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
@@ -236,6 +239,25 @@ visual-regression harness.
   `setBrush`, so it follows a colour picked off the canvas and the toolbar's
   colour input; the sliders are keyboard-operable; choosing a colour is not an
   edit.
+- **Colour dock** (the **Colour** panel): the two colours the artist paints
+  with — the **ink** (left button) and the **alt** colour (right button) —
+  each with a swatch to pick by eye and a field for an exact value. The field
+  takes hex, `hsl()` and `oklch()`; text that is not a colour, and a
+  translucent colour the app cannot paint, are **refused with a reason** and
+  the colour in hand is left exactly as it was. **Swap** (`X`) exchanges the
+  two and **Reset** (`D`) puts both back to their defaults. Both are editor
+  state resolved at press time, so neither repaints existing work.
+- **Palette** (the **Colour** panel): the swatches the artist keeps to hand,
+  and they are **editable** — **Add ink** saves the current colour, clicking a
+  swatch paints with it, right-clicking makes it the alt colour, double
+  clicking (or `F2`) renames it in place and the small cross (or `Delete`)
+  removes it. A colour is never saved twice and a swatch always has a name.
+  The palette is a **preference**: it survives a restart in the settings file,
+  and changing it is not an edit.
+- **Recent colours** (the **Colour** panel): the colours that have been
+  picked, newest first, bounded, with a **Clear** button. A colour picked
+  again moves to the front instead of appearing twice. They are **session
+  state**: not written to the settings file, and not restored at startup.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
   eraser and shapes), sampling (2–200 % of diameter, sample density),
   stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
@@ -243,7 +265,7 @@ visual-regression harness.
   switch with **stamp spacing** (2–100 % of the brush size, the distance
   between dabs), **stamp hardness** (the falloff of one dab) and **stamp
   texture** (the strength of the bristle lanes) — all four brush and eraser
-  only — colour + 8-swatch palette, pressure size and pressure
+  only — colour, pressure size and pressure
   opacity toggles. All settings are captured per stroke.
 - **Brush cursor and size ring**: the brush's real footprint is drawn on the
   canvas as a **ring** that follows the pointer. The ring's diameter is the
@@ -327,6 +349,8 @@ src/
                 selectionTransform (the scale/rotate geometry) and
                 selectionHandles (the transform handles)
     brushes/    defaults/normalization, strokeBuilder (sample capture),
+                presets (the named brush library)
+    color/      palette (the saved swatches) and history (the recent colours)
                 brushCursor (the ring's geometry) and brushSizeGesture (the
                 quick resize's rules)
     fill/       pure flood scan, fill-patch record
@@ -555,6 +579,30 @@ Key files for the next slice (directional / per-dab stamp textures):
   hue is 220° - and any colour changed elsewhere replaces it with the stored
   colour. Choosing a colour is session state for the next gesture, not an
   edit.
+- **The colour dock has one source of truth too.** The *ink* is the brush's
+  colour and the *alt* colour is the engine's secondary; both are editor
+  state resolved once at press time, so a stroke, a shape, a fill and a
+  gradient each keep the colour they started with. Every colour path in the
+  app ends in the same two setters - `setBrush` and `setSecondaryColor` - so
+  the wheel, the chips, the exact fields, the palette swatches, the recent
+  colours and the canvas picker cannot disagree about what the next gesture
+  will paint with. `setBrush` is also where a colour is **recorded** in the
+  recent-colours history, which is why the history cannot drift away from the
+  brush.
+- **The palette is a preference; the recent colours are session state.** The
+  palette is a list of named swatches and lives in the settings file, so it
+  survives a restart. The recent colours are bounded, newest first, and are
+  deliberately **not** written to the settings file: the palette is the thing
+  that is kept, the history is what happened in this sitting. Both are editor
+  state, so neither adds a history entry, bumps the revision or dirties the
+  drawing - and removing a swatch never touches a stroke.
+- **A translucent colour is refused, not approximated.** The app stores
+  `#rrggbb` everywhere - a brush, a fill, a gradient, a swatch - and paints
+  opaque colours only, so an alpha cannot be honoured. Storing it opaque would
+  paint something the artist did not ask for, and storing the alpha would
+  change the project format and the settings file. The exact field therefore
+  refuses it **with its own reason** and reverts to the colour in hand, the
+  same treatment as garbage but a true one. Nothing is silently dropped.
 - **The brush cursor is a view, and the quick resize is editor state.** The ring
   is a DOM overlay - a sibling of the canvas, not a layer of it - so it cannot
   reach a layer surface, a PNG export, the history or the project file, and
@@ -652,6 +700,13 @@ Product:
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+- Colours: the app has **no alpha anywhere**, so there is no transparent
+  colour to pick and a translucent one is refused rather than approximated. The
+  palette holds one colour per swatch, with no gradients or patterns in it, and
+  a swatch cannot be dragged, resized or given a second colour. The palette is
+  a flat list - there is no reordering, no folders and no multiple palettes.
+  The recent colours are bounded and are not written to the settings file, so
+  they do not survive a restart.
 - **There is no autosave and no crash recovery.** The recovery machinery and
   its policy seam exist (`src/core/autosave/`) and are covered by tests, but
   the decisions that govern autosaving - when it runs, how a never-saved
@@ -679,6 +734,17 @@ Product:
 
 Verification gaps:
 
+- The colour dock was checked **in a real browser** through the Playwright
+  harness (`tests/visual/color-dock.spec.ts`): the two colours and their exact
+  values are on screen, `X` and `D` swap and reset them, a typed value is
+  applied and a wrong one is refused with its reason, the palette is added to,
+  renamed in place and removed from, and the recent colours remember what was
+  picked, newest first. The model, the engine seam and the **settings round
+  trip** are covered by Vitest (`colorPalette.test.ts`, `colorHistory.test.ts`,
+  `settings.test.ts`), including a swatch painting a real stroke, a shape and
+  a fill. The **packaged Tauri window is not verified** for this slice, and the
+  browser preview has no native settings file, so the persistence is proved by
+  the settings test rather than by a reload.
 - The **brush cursor and the quick resize** were checked in a real browser
   (Chromium, the harness's own build) through a new Playwright spec: the ring's
   measured diameter equals the brush size through the zoom and it sits on the

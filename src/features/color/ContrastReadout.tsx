@@ -23,7 +23,7 @@
 
 import { useState } from "react";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { parseHexColor, rgbToHex } from "../../utils/color";
+import { colorInputValue } from "../../utils/color";
 import {
   UNKNOWN_REASONS,
   formatContrastRatio,
@@ -33,16 +33,18 @@ import {
 } from "../../utils/colorMetrics";
 import { compareColorPair, describeColorIssue } from "../../utils/colorPair";
 import type { ColorPairReport } from "../../utils/colorPair";
-import { PALETTE } from "./palette";
 
 /** The word shown in place of a number the readout does not have. */
 const UNKNOWN = "unknown";
 
-/** `input[type=color]` only accepts an opaque `#rrggbb`. */
-function pickerValue(color: string): string {
-  const parsed = parseHexColor(color);
-  return parsed === null ? "#ffffff" : rgbToHex(parsed.rgb);
-}
+/**
+ * The colour the native picker shows for a value it cannot read.
+ *
+ * A project file may hold any non-empty string as a colour, and the native
+ * control accepts only `#rrggbb`, so it needs a value it can show. White is
+ * the paper the readout measures against, so it is the honest fallback.
+ */
+const UNREADABLE = "#ffffff";
 
 /** Why a pair could not be measured, in words the panel can show. */
 function pairFailure(pair: ColorPairReport): string {
@@ -67,7 +69,13 @@ export function ContrastReadout() {
   const against = comparison ?? state.document.background;
 
   const pair = compareColorPair(state.brush.color, against);
-  const paper = measureColor(state.brush.color, state.document.background, PALETTE);
+  // The closest swatch is looked for in the artist's own palette, so the
+  // readout names a colour they can actually pick rather than one of ours.
+  const paper = measureColor(
+    state.brush.color,
+    state.document.background,
+    state.palette.map((swatch) => swatch.color),
+  );
 
   return (
     <div className="color-readout">
@@ -89,12 +97,12 @@ export function ContrastReadout() {
           <span className="color-readout__field-label">Ink</span>
           <span
             className="color-readout__picker-wrap"
-            style={{ backgroundColor: pickerValue(state.brush.color) }}
+            style={{ backgroundColor: colorInputValue(state.brush.color, UNREADABLE) }}
           >
             <input
               className="color-readout__picker"
               type="color"
-              value={pickerValue(state.brush.color)}
+              value={colorInputValue(state.brush.color, UNREADABLE)}
               aria-label="Ink colour"
               onChange={(event) => actions.setBrush({ color: event.target.value })}
             />
@@ -107,12 +115,12 @@ export function ContrastReadout() {
           <span className="color-readout__field-label">Against</span>
           <span
             className="color-readout__picker-wrap"
-            style={{ backgroundColor: pickerValue(against) }}
+            style={{ backgroundColor: colorInputValue(against, UNREADABLE) }}
           >
             <input
               className="color-readout__picker"
               type="color"
-              value={pickerValue(against)}
+              value={colorInputValue(against, UNREADABLE)}
               aria-label="Comparison colour"
               onChange={(event) => setComparison(event.target.value)}
             />

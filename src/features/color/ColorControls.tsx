@@ -1,27 +1,29 @@
 /**
- * Stroke colour controls: a primary and a secondary colour plus a small fixed
- * palette.
+ * Stroke colour controls: the primary and the secondary colour.
  *
  * Left-button gestures paint with the primary colour; right-button gestures
  * paint with the secondary one. Both are editor state captured at press time,
- * so swapping them never repaints existing strokes. The secondary colour has no
- * project-format field of its own.
+ * so swapping them never repaints existing strokes. The secondary colour has
+ * no project-format field of its own.
+ *
+ * This is the *quick* half of the colour dock: the two colours and the two
+ * actions that change them. The palette and the recent colours live in the
+ * colour panel, which is where they can be edited - a swatch list in a toolbar
+ * row would grow with every colour the artist saves, and a toolbar that grows
+ * is a toolbar that pushes the canvas off the screen.
  */
 
+import { canSwapColors, isDefaultColors } from "../../core/color/colors";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { PALETTE } from "./palette";
-
-/** `input[type=color]` only accepts `#rrggbb`. */
-function toColorInputValue(color: string): string {
-  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#000000";
-}
+import { colorInputValue } from "../../utils/color";
 
 export function ColorControls() {
   const { actions } = useEditor();
   const { brush, secondaryColor } = useEditorState();
-  const current = toColorInputValue(brush.color);
-  const secondary = toColorInputValue(secondaryColor);
-  const canSwap = current.toLowerCase() !== secondary.toLowerCase();
+  const current = brush.color;
+  const secondary = secondaryColor;
+  const canSwap = canSwapColors(current, secondary);
+  const isDefault = isDefaultColors(current, secondary);
 
   return (
     <div className="toolbar__group color-controls">
@@ -29,7 +31,7 @@ export function ColorControls() {
         <input
           className="color-well"
           type="color"
-          value={current}
+          value={colorInputValue(current)}
           onChange={(event) => actions.setBrush({ color: event.target.value })}
           aria-label="Primary stroke color"
           title="Primary stroke color (left button)"
@@ -37,7 +39,7 @@ export function ColorControls() {
         <input
           className="color-well color-controls__picker--secondary"
           type="color"
-          value={secondary}
+          value={colorInputValue(secondary)}
           onChange={(event) => actions.setSecondaryColor(event.target.value)}
           aria-label="Secondary stroke color"
           title="Secondary stroke color (right button)"
@@ -48,32 +50,20 @@ export function ColorControls() {
           onClick={() => actions.swapColors()}
           disabled={!canSwap}
           aria-label="Swap primary and secondary colors"
-          title="Swap primary and secondary colors"
+          title="Swap primary and secondary colors (X)"
         >
           ⇄
         </button>
-      </div>
-      <div className="color-controls__palette" role="group" aria-label="Color palette">
-        {PALETTE.map((color) => (
-          <button
-            key={color}
-            type="button"
-            className={[
-              "color-controls__swatch",
-              color.toLowerCase() === current.toLowerCase() ? "is-active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={{ backgroundColor: color }}
-            title={`${color} (right-click: secondary)`}
-            aria-label={`Use color ${color}`}
-            onClick={() => actions.setBrush({ color })}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              actions.setSecondaryColor(color);
-            }}
-          />
-        ))}
+        <button
+          type="button"
+          className="color-controls__reset"
+          onClick={() => actions.resetColors()}
+          disabled={isDefault}
+          aria-label="Default colors"
+          title="Put both colors back to their defaults (D)"
+        >
+          Reset
+        </button>
       </div>
     </div>
   );

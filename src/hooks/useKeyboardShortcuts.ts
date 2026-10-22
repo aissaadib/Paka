@@ -11,6 +11,8 @@
  *                                ellipse / polygon / star / bucket fill /
  *                                colour picker / guides / pan
  *   [ / ]          decrease / increase brush size
+ *   X              swap the ink and the alt colour
+ *   D              put both colours back to their defaults
  *   Alt+[ / Alt+]  decrease / increase brush size by one pixel
  *   Arrows         nudge the selection by 1 px (Shift: 10 px)
  *   Ctrl+D         duplicate the selection

@@ -172,6 +172,25 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   it to the secondary chip. The colour is resolved when the gesture starts and
   stored on the stroke, shape, fill or gradient, so swapping later never
   repaints existing work. It is editor state, not a project field.
+- **Colour dock**: the **Colour** panel opens with the two colours the artist
+  paints with - the **ink** (left button) and the **alt** colour (right
+  button) - each with a swatch to pick by eye and a field to type an exact
+  value into. The field takes hex, `hsl()` and `oklch()`; text that is not a
+  colour, and a translucent colour the app cannot paint, are **refused with a
+  reason** and the colour in hand is left exactly as it was. **Swap** (`X`)
+  exchanges the two and **Reset** (`D`) puts both back to their defaults.
+- **Editable palette**: the swatches the artist keeps to hand. **Add ink**
+  saves the current colour as a swatch, clicking one paints with it,
+  right-clicking makes it the alt colour, double-clicking (or `F2` on a
+  focused swatch) renames it in place and the small cross (or `Delete`)
+  removes it. The same colour is never saved twice, a swatch always has a
+  name, and the palette is stored in the per-user settings file, so it is
+  still there next time the app opens.
+- **Recent colours**: the colours that have been picked, newest first, with a
+  **Clear** button and a bounded list. A colour picked again moves to the
+  front instead of appearing twice. The recent list is a convenience for the
+  sitting, not a preference: it is **not** written to the settings file and
+  does not survive a restart - the palette is what is kept.
 - **Contrast and colour-difference readout**: under the wheel, the **WCAG 2.2
   contrast ratio** between the brush colour and the document's paper (with a
   plain-language band, from "excellent" to "low"), and the palette swatch
@@ -181,12 +200,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   control: no history step, no dirty flag, and it follows a colour chosen
   anywhere - the wheel, the toolbar's colour input, a swatch or the canvas
   picker.
-- **Preferences survive a restart**: the brush, the active tool, the shape
-  options, the fill tolerance and the gradient settings are stored in a
-  per-user settings file in the operating system's configuration folder and
-  restored at startup. The file holds preferences only - never a drawing - and
-  changing one is not an edit, so it adds no history step and never marks the
-  document unsaved.
+- **Preferences survive a restart**: the brush, the two colours, the palette,
+  the active tool, the shape options, the fill tolerance and the gradient
+  settings are stored in a per-user settings file in the operating system's
+  configuration folder and restored at startup. The file holds preferences
+  only - never a drawing - and changing one is not an edit, so it adds no
+  history step and never marks the document unsaved.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
   (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
   outer edge), **sampling** (2-200 % of the brush diameter: how densely fast
@@ -196,8 +215,8 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
   how far apart the dabs sit), **stamp hardness** (the falloff of a single
   dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
-  colour (primary and secondary pickers, an 8-swatch palette and the colour
-  wheel), and toggles for pressure-driven size and pressure-driven opacity. Once
+  colour (primary and secondary pickers and the colour dock's palette) and
+  toggles for pressure-driven size and pressure-driven opacity. Once
   either pressure toggle is on, a **Pressure curve** editor shapes how raw pen
   pressure maps to the response. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;

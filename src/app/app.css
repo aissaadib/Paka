@@ -359,6 +359,19 @@
   cursor: default;
 }
 
+.color-controls__picker {
+  width: 28px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+.color-controls__reset {
+  height: 22px;
+  padding: 0 6px;
 .color-controls__palette {
   display: grid;
   grid-template-columns: repeat(4, 14px);
@@ -370,12 +383,23 @@
   width: 14px;
   height: 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.color-controls__swatch.is-active {
+.color-controls__reset:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.color-controls__reset:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .gradient-stops {

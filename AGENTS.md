@@ -73,6 +73,9 @@ architecture by browsing.
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
+`core/color/palette.ts` (288: the swatch model, the name rules, the palette operations),
+`features/color/PalettePanel.tsx` (200: the palette grid, the rename and the remove),
+`features/color/ColorTextField.tsx` (120: the shared colour field and its refusals),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
@@ -99,12 +102,16 @@ and the budget).
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
+`features/color/ColorDock.tsx`, `features/color/RecentColors.tsx`,
+`features/color/SwatchGrid.tsx`,
+`core/color/history.ts`, `core/color/colors.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/brushes/brushCursor.ts` (the ring's geometry),
 `core/brushes/brushSizeGesture.ts` (the quick resize's rules),
 `core/input/ownership.ts` (who owns the keyboard and the pointer),
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
 `core/autosave/recovery.ts`,
+`test/support/stubRenderer.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 `scripts/generate-app-icon.mjs`,
 `scripts/generate-third-party-notices.mjs`.
@@ -137,6 +144,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the tool-options strip | `features/options/toolOptionSchema.ts` (the groups, the fields and their read/write pairs), `features/options/OptionControl.tsx` (the four control kinds), `features/options/ToolOptionsBar.tsx` (the strip), `features/options/toolOptions.css` (the strip's metrics) |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
+| Change the colour dock, the palette or the recent colours | `core/color/palette.ts` (the swatch model, the name rules, the palette operations), `core/color/history.ts` (the bounded recency list), `features/color/ColorDock.tsx` (the ink and the alt colour), `features/color/PalettePanel.tsx` (add, rename, remove), `features/color/RecentColors.tsx` (the strip and its clear), `features/color/SwatchGrid.tsx` (the grid and the arrow keys), `features/color/ColorTextField.tsx` (the shared exact field), `core/engine/DrawingEngine.ts` (`setPalette`/`addPaletteSwatch`/`renamePaletteSwatch`/`removePaletteSwatch`/`resetColors`/`clearColorHistory`), `core/settings/appSettings.ts` (the `palette` field), `features/color/color.css` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
@@ -225,6 +233,10 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `Popover` | `components/toolbar/Popover.tsx` | grep the symbol |
 | `TOOL_ICONS` | `components/toolbar/toolIcons.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
+| `PaletteSwatch`, `DEFAULT_PALETTE`, `normalizePalette`, `addPaletteSwatch`, `renamePaletteSwatch`, `removePaletteSwatch`, `findSwatchByColor` | `core/color/palette.ts` | grep the symbol |
+| `COLOR_HISTORY_LIMIT`, `pushColorHistory`, `normalizeColorHistory`, `colorHistoryEqual`, `ColorPickOptions` | `core/color/history.ts` | 30, 49 |
+| `canSwapColors`, `isDefaultColors` | `core/color/colors.ts` | grep the symbol |
+| `ColorDock`, `PalettePanel`, `RecentColors`, `SwatchGrid`, `ColorTextField` | `features/color/ColorDock.tsx`, `features/color/PalettePanel.tsx`, `features/color/RecentColors.tsx`, `features/color/SwatchGrid.tsx`, `features/color/ColorTextField.tsx` | grep the symbol |
 
 ## 6. Docs → section
 
@@ -269,6 +281,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
+| Colour palette and recent colours | `colorPalette.test.ts` (the swatch model, the engine's palette, a swatch painting a stroke, a shape and a fill, and the settings round trip), `colorHistory.test.ts` (the order, the bound, the de-duplication, what records a colour and what the list must never touch), `tests/visual/color-dock.spec.ts` (the dock, the palette editing and the recent colours in a real browser) |
 | Colour input formats | `colorInput.test.ts` (8-digit hex, `hsl()`, `oklch()`, the gamut clamp, the round trip, garbage and translucent input) |
 | Settings persistence | `settings.test.ts` (the round trip, the defaults, the malformed and future-versioned file, the clamping, the no-dirty contract, a failed write) |
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |

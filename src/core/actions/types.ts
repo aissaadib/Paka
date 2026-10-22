@@ -67,6 +67,8 @@ export type ActionId =
   | "delete"
   | "brushSizeDown"
   | "brushSizeUp"
+  | "swapColors"
+  | "resetColors"
   | "brushSizeFineDown"
   | "brushSizeFineUp"
   | `tool:${ToolId}`;

@@ -1,4 +1,276 @@
-/** Colour panel: the HSV wheel, its sliders and the colour readout. */
+/** Colour panel: the colour dock, the HSV wheel, the swatches and the readout. */
+
+/* The colour dock: the ink and the alt colour, with their exact values.
+   It sits at the top of the panel so the two colours the artist paints with
+   are the first thing they see and the first thing they can reach. */
+.color-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 2px 6px;
+}
+
+.color-dock__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.color-dock__label {
+  flex: 0 0 24px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/* The chip shows the colour itself; the native control inside it is only the
+   hit target, because the platform's own swatch does not follow the dark
+   theme. */
+.color-dock__chip {
+  position: relative;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.color-dock__picker {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.color-dock__chip:focus-within {
+  outline: 1px solid var(--text);
+  outline-offset: 1px;
+}
+
+.color-dock__field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.color-dock__actions {
+  display: flex;
+  gap: 4px;
+  padding-top: 1px;
+}
+
+.color-dock__button {
+  flex: 1 1 auto;
+  height: var(--control-height-sm);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.color-dock__button:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.color-dock__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The colour text field. It is a *view* of a colour with a local draft, so
+   the message under it is the only place a refusal is announced, in text, so
+   nothing is carried by the border colour alone. */
+.color-field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.color-field__input {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.color-field__input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.color-field__message {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* The grid of swatches. The column count comes from the component, so the
+   same grid serves the recent colours and the palette. */
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--swatch-columns, 8), minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+}
+
+.swatch-grid__swatch {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.swatch-grid__swatch:hover {
+  border-color: var(--text);
+}
+
+.swatch-grid__swatch.is-active {
+  box-shadow: inset 0 0 0 2px var(--text-strong);
+}
+
+.swatch-grid__swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The recent colours and the palette. Both are quiet lists under a small
+   heading, and both keep their empty state in text so the panel never shows
+   a bare gap where something should be. */
+.color-recent,
+.color-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 4px;
+  border-top: 1px solid var(--border);
+}
+
+.color-recent__header,
+.color-palette__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.color-recent__title,
+.color-palette__title {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.color-recent__clear,
+.color-palette__add {
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.color-recent__clear:hover:not(:disabled),
+.color-palette__add:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.color-recent__clear:disabled,
+.color-palette__add:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.color-recent__empty,
+.color-palette__empty {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* The message under the palette: a refused rename is said in words, so the
+   reason is not carried by a border colour alone. */
+.color-palette__message {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* A palette cell holds the swatch and its own remove control, so the control
+   is always in the tab order and always reachable without a mouse. It is
+   hidden until the cell is hovered or something inside it is focused. */
+.color-palette__cell {
+  position: relative;
+  min-width: 0;
+}
+
+.color-palette__remove {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.color-palette__cell:hover .color-palette__remove,
+.color-palette__cell:focus-within .color-palette__remove {
+  opacity: 1;
+}
+
+.color-palette__remove:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-strong);
+}
+
+.color-palette__remove:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.color-palette__rename {
+  width: 100%;
+  height: 100%;
+  min-height: 20px;
+  padding: 0 2px;
+  font-size: 10px;
+}
 
 .color-wheel {
   display: flex;
@@ -131,32 +403,12 @@
   border-radius: 2px;
 }
 
-/* The colour text field. It replaced the read-only hex readout, so it keeps
-   the mono treatment and takes the rest of the row; the message under it is
-   the only place a refusal is announced, in text, so nothing is carried by
-   the border colour alone. */
-.color-wheel__entry {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
+/* The colour text field inside the wheel's readout. The shared field carries
+   the layout; the wheel only asks for its mono treatment. */
 .color-wheel__input {
   width: 100%;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-}
-
-.color-wheel__input[aria-invalid="true"] {
-  border-color: var(--danger);
-}
-
-.color-wheel__message {
-  color: var(--text-dim);
-  font-size: 11px;
-  line-height: 1.3;
 }
 
 /* The contrast and colour-difference readout: two rows of text under the

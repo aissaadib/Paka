@@ -59,7 +59,12 @@ function describe(error: unknown): string {
 
 /** Writes the preferences into the editor. Editor state only: no history, no dirty. */
 function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
-  engine.setBrush(settings.brush);
+  // The colours are restored, not picked: the recent-colours list is session
+  // state, so it starts empty rather than holding the colours the last
+  // session ended with.
+  engine.setBrush(settings.brush, { record: false });
+  engine.setSecondaryColor(settings.secondaryColor, { record: false });
+  engine.setPalette(settings.palette);
   engine.setPresets(settings.presets);
   engine.setTool(settings.toolId);
   engine.setShapeFill(settings.shapeFill);
@@ -80,6 +85,8 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
   return {
     version: SETTINGS_VERSION,
     brush: snapshot.brush,
+    secondaryColor: snapshot.secondaryColor,
+    palette: snapshot.palette,
     presets: snapshot.presets,
     toolId: snapshot.toolId,
     shapeFill: snapshot.shapeFill,

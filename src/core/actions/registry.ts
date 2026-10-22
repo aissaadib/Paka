@@ -235,6 +235,21 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     },
   },
   {
+    id: "swapColors",
+    label: "Swap Colours",
+    // The two colours the artist paints with: the ink on the left button and
+    // the alt colour on the right. The swap exchanges which of the two the
+    // next gesture uses; it never repaints what is already drawn.
+    shortcuts: [key("x", "KeyX")],
+    run: ({ actions }) => actions.swapColors(),
+  },
+  {
+    id: "resetColors",
+    label: "Default Colours",
+    // The colours a fresh session starts with. A plain `d`, the way a drawing
+    // program resets its two colours.
+    shortcuts: [key("d", "KeyD")],
+    run: ({ actions }) => actions.resetColors(),
     id: "brushSizeFineDown",
     label: "Decrease Brush Size by One Pixel",
     // Alt is the fine modifier: the plain bracket steps by a tenth of the
