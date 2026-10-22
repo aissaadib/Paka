@@ -90,6 +90,31 @@ export type ToolOption =
   | ColorToolOption
   | GroupToolOption;
 
+/**
+ * The name of a kind of tool option.
+ *
+ * The kinds are a closed list, so a consumer can enumerate them: the options
+ * bar's renderer checks itself against this list, and a kind added here
+ * without a control to draw it is a compile error rather than a blank space.
+ */
+export type ToolOptionKind =
+  | "slider"
+  | "number"
+  | "toggle"
+  | "select"
+  | "color"
+  | "group";
+
+/** Every kind of tool option, in the order the contract lists them. */
+export const TOOL_OPTION_KINDS: readonly ToolOptionKind[] = Object.freeze([
+  "slider",
+  "number",
+  "toggle",
+  "select",
+  "color",
+  "group",
+]);
+
 /** Resolves a label against the current snapshot. */
 export function toolOptionLabel(option: ToolOption, snapshot: EditorSnapshot): string {
   return typeof option.label === "function" ? option.label(snapshot) : option.label;
