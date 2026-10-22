@@ -10,9 +10,11 @@
  * normal entry in the project file, and pixels that re-rasterize identically
  * after undo, reopen or resize.
  *
- * The polygon and the star read their options (the side count, the inner ratio
- * and the rotation) once, when the gesture starts, so the shape keeps the
- * values that were active when the user pressed.
+ * The shape reads its options (the side count, the inner ratio and the
+ * rotation) once, when the gesture starts, so it keeps the values that were
+ * active when the user pressed. The options come from the one model
+ * (`shapeOptions.ts`), and they are editor state: changing one is not an
+ * edit.
  *
  * A release that cancels, a tool switch or a lost capture *discards* the
  * preview rather than committing it: unlike a brush stroke, nothing has been
@@ -32,6 +34,10 @@ import {
   type ShapeOptions,
   type ShapePoint,
 } from "./shapeGeometry";
+// The shape tools bring their own options: the module registers them in the
+// shared per-tool registry when it is loaded, so the options bar shows the
+// controls the one model describes without the options bar knowing about them.
+import "./shapeToolOptions";
 import type { Tool, ToolContext } from "./types";
 
 /** Below this document-space size a shape is treated as a click, not a shape. */
