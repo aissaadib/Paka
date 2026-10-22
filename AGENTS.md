@@ -177,7 +177,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
 | `GridSettings`, `DEFAULT_GRID_SETTINGS`, `nearestGridLine`, `gridLinesBetween`, `snapDocumentPoint`, `snapTolerance` | `core/document/grid.ts` | grep the symbol |
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
-| `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
+| `SelectionHandleId`, `selectionHandles`, `visibleSelectionHandles`, `handlesWithGrabbedHandle`, `findSelectionHandle`, `handleCursorAt`, `HANDLE_CURSORS`, `handleGrabRadius`, `rotationHandleOffset` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
@@ -295,7 +295,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Gradients | `gradient.test.ts` |
 | Layer blend modes | `blendModes.test.ts` (the formulas and their boundaries), `canvas2dRenderer.test.ts` (the canvas operation mapping, exact pixels, alpha, preview and export) |
 | Selection math | `strokeSelection.test.ts` |
-| Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
+| Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test, when the handles are shown, and the three defects the first review found), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
