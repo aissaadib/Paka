@@ -1,0 +1,15 @@
+/**
+ * The brush tip's swatch: the mask a stamped dab is masked with.
+ *
+ * The swatch shows the mark on paper, so it carries the paper's own light
+ * ground and the ink is the dark one the brush paints with.
+ */
+
+.brush-tip {
+  display: block;
+  /* The swatch is a picture, not a control: it takes no clicks. */
+  pointer-events: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #f2f3f5;
+}

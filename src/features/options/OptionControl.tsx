@@ -22,6 +22,7 @@ import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
 import { optionControl, type OptionControl as OptionControlSpec } from "../../core/options/optionControl";
 import type { ToolOption } from "../../core/shell/toolOptions";
 import type { EditorActions } from "../../state/editorStore";
+import { OptionPreviewView } from "./OptionPreviewView";
 import "./toolOptions.css";
 
 export interface OptionControlProps {
@@ -108,6 +109,8 @@ export function OptionControlView({ control }: OptionControlViewProps) {
               </option>
             ))}
           </select>
+          {/* The picture beside the control: what the chosen value looks like. */}
+          {control.preview ? <OptionPreviewView preview={control.preview} /> : null}
         </label>
       );
     case "color":
