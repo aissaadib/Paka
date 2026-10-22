@@ -49,6 +49,7 @@ export function PresetRow({
         "brush-row",
         selected ? "is-selected" : "",
         current ? "is-current" : "",
+        edited ? "is-edited" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -59,13 +60,13 @@ export function PresetRow({
     >
       <BrushTipPreview brush={preset.brush} background={background} label={`${preset.name}: ${description}`} />
       <span className="brush-row__name">{preset.name}</span>
-      {edited ? <span className="brush-row__edited" title="The brush has changed since this preset was applied">•</span> : null}
-      {builtin ? <span className="brush-row__builtin" title="A built-in brush">built-in</span> : null}
       {isRecentlyUsed(preset) ? (
         <span className="brush-row__recent" title="Used recently">
-          recent
+          <span className="brush-row__recent-dot" aria-hidden="true" />
+          <span className="visually-hidden">Used recently</span>
         </span>
       ) : null}
+      {builtin ? <span className="brush-row__builtin" title="A built-in brush">built-in</span> : null}
       <button
         type="button"
         className="brush-row__star"

@@ -57,6 +57,14 @@ class OversizedFileGateway implements ProjectFileGateway {
     return null;
   }
 
+  async pickPresetLibraryToOpen(): Promise<string | null> {
+    return null;
+  }
+
+  async pickPresetLibraryToSave(): Promise<string | null> {
+    return null;
+  }
+
   async readTextFile(): Promise<string> {
     return this.text;
   }
