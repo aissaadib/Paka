@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Viewport state: what the shell remembers about where the user is looking.
  *
  * The viewport *geometry* - zoom, offsets, the screen/document mapping - is in
