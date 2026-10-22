@@ -10,6 +10,10 @@
  * The row is a toolbar, so the arrow keys move between its controls - except
  * while a slider or a number box has the focus, where the arrow keys belong
  * to the value.
+ *
+ * This is the band, not the options: the options themselves are a feature's
+ * business, and a feature that brings its own strip replaces the groups below
+ * with its own component.
  */
 
 import type { KeyboardEvent } from "react";
@@ -29,7 +33,7 @@ const FOCUSABLE =
 /** The controls that own the arrow keys themselves. */
 const EDITABLE = new Set(["range", "number", "text", "search", "email", "url"]);
 
-export function ToolOptionsBar() {
+export function OptionsBar() {
   const toolId = useEditorToolId();
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

@@ -25,8 +25,8 @@ import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { fileNameOf } from "../../utils/path";
 import { ToolRail } from "../toolbar/ToolRail";
 import { AppBar } from "./AppBar";
+import { OptionsBar } from "./OptionsBar";
 import { PanelArea } from "./PanelArea";
-import { ToolOptionsBar } from "./ToolOptionsBar";
 
 export function Workspace() {
   const { actions, files } = useEditor();
@@ -120,7 +120,7 @@ export function Workspace() {
         dockOpen={dockOpen}
         onToggleDock={() => setDockOpen((open) => !open)}
       />
-      <ToolOptionsBar />
+      <OptionsBar />
       <div className="workspace-body">
         <ToolRail />
         <CanvasStage />
