@@ -23,6 +23,7 @@ import {
   brushPropertiesFor,
   type BrushSliderProperty,
 } from "../../core/brushes/brushProperties";
+import { BrushPreview } from "./BrushPreview";
 import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
 
@@ -34,6 +35,9 @@ export function BrushControls() {
 
   return (
     <div className="toolbar__group brush-controls">
+      {/* The live swatch: what this brush will paint, painted by the engine's
+          own rasterizer. The size is read from the slider below it. */}
+      <BrushPreview />
       <BrushPresets />
       {brushPropertiesFor(brush).map((property) => {
         if (property.kind === "toggle") {
