@@ -18,7 +18,7 @@
  */
 
 import type { BrushSettings } from "../../types/brush";
-import type { Bounds, Point } from "../../types/geometry";
+import type { Bounds, Point, Size } from "../../types/geometry";
 import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
 import type { FlipAxis } from "../../types/transform";
@@ -165,11 +165,22 @@ import {
   type ShapePoint,
 } from "../tools/shapeGeometry";
 import type { Tool, ToolContext } from "../tools/types";
+import { OverviewCache, centerViewOn, fitSelectionView } from "./canvasViews";
 
 /** Low-frequency state React is allowed to render from. */
 export interface EditorSnapshot {
   readonly document: DrawingDocument;
   readonly viewport: Viewport;
+  /**
+   * The CSS size of the drawing surface.
+   *
+   * View state, like the viewport itself: it changes when the window is
+   * resized and it is never part of the document. A panel that has to know
+   * what the canvas is showing (the navigator's marked area) needs it,
+   * because the visible area is the canvas' size mapped through the
+   * viewport.
+   */
+  readonly viewportSize: Size;
   readonly brush: BrushSettings;
   /**
    * The colour a right-button stroke paints with.
@@ -617,6 +628,14 @@ export class DrawingEngine implements StrokeSource {
   private selectionRun = 0;
   private cursor: CursorReport | null = null;
   private viewportSize = { width: 0, height: 0 };
+  /**
+   * The cached overview of the document, for a navigator panel.
+   *
+   * A rebuildable cache: it is thrown away when the document changes and
+   * built again from it. It never reaches a layer surface, a project file
+   * or a PNG export.
+   */
+  private readonly overviewCache = new OverviewCache<HTMLCanvasElement>();
   private laidOut = false;
   private devicePixelRatio = 1;
   private rasterScale = 1;
@@ -781,7 +800,14 @@ export class DrawingEngine implements StrokeSource {
     if (width <= 0 || height <= 0) {
       return;
     }
-    this.viewportSize = { width, height };
+    // The size object is only replaced when the size really changed, so the
+    // snapshot's `viewportSize` keeps its identity and a repeated report of
+    // the same size does not republish the state.
+    const sizeChanged =
+      this.viewportSize.width !== width || this.viewportSize.height !== height;
+    if (sizeChanged) {
+      this.viewportSize = { width, height };
+    }
 
     if (!this.laidOut) {
       this.laidOut = true;
@@ -798,6 +824,11 @@ export class DrawingEngine implements StrokeSource {
         this.renderer.setRasterScale(this.rasterScale);
       }
       this.renderer.setDisplaySize(width, height, dpr);
+    }
+
+    if (sizeChanged) {
+      // The visible area moved, so a panel that marks it has to redraw.
+      this.publish();
     }
   }
 
@@ -1616,6 +1647,118 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.setViewport(fitToViewport(this.viewportSize, this.documentSize()));
+  }
+
+  /**
+   * Moves the view so that a document point sits in the middle of the canvas.
+   *
+   * The zoom stays where it is; only the pan changes. This is what a click in
+   * the navigator does.
+   *
+   * View state: no history entry, no revision bump and no dirty flag. The
+   * offset is the same one `core/shell/viewportState.ts` uses to put a
+   * remembered point in the middle of the canvas, so the view and the
+   * remembered viewport always agree.
+   */
+  centerViewportOn(docX: number, docY: number): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    this.setViewport(centerViewOn(this.viewport, this.viewportSize, docX, docY));
+  }
+
+  /**
+   * Moves the view so that the whole document sits in the middle of the canvas.
+   *
+   * The zoom stays where it is; only the pan changes. View state: no history
+   * entry, no revision bump and no dirty flag.
+   */
+  centerViewport(): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    const document = this.documentSize();
+    this.centerViewportOn(document.width / 2, document.height / 2);
+  }
+
+  /**
+   * Moves and zooms the view so that the whole selection is visible.
+   *
+   * Nothing happens when there is no selection to show: the view is left
+   * where the user put it rather than jumping to a guess. View state: no
+   * history entry, no revision bump and no dirty flag.
+   */
+  zoomToSelection(): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    const bounds = this.selectionBounds();
+    if (!bounds) {
+      return;
+    }
+    const view = fitSelectionView(this.viewportSize, bounds);
+    if (view) {
+      this.setViewport(view);
+    }
+  }
+
+  /**
+   * A small overview of the document, for a navigator panel.
+   *
+   * The overview is cached: it is rebuilt only when the document changed or a
+   * different size was asked for, so panning, zooming and redrawing the panel
+   * cost nothing. A gesture in flight owns content that is not in the document
+   * yet, so the cached overview is returned unchanged until the gesture ends.
+   *
+   * A read: no document pixel changes, nothing enters history and the
+   * document is not marked dirty.
+   */
+  getOverview(width: number, height: number): HTMLCanvasElement | null {
+    const renderer = this.renderer;
+    if (!renderer) {
+      return null;
+    }
+    if (this.isGestureActive()) {
+      // The document is mid-gesture: the cached overview is the honest
+      // picture, and a half-drawn stroke is not part of the document yet.
+      return this.overviewCache.peek();
+    }
+    const targetWidth = Math.max(1, Math.round(width));
+    const targetHeight = Math.max(1, Math.round(height));
+    return this.overviewCache.read(
+      {
+        document: this.doc,
+        revision: this.revision,
+        width: targetWidth,
+        height: targetHeight,
+      },
+      () => this.produceOverview(renderer, targetWidth, targetHeight),
+    );
+  }
+
+  /**
+   * Makes the overview itself.
+   *
+   * A renderer that can make an overview is asked for one; a renderer that
+   * cannot falls back to the document's own composite, which the panel
+   * scales down when it draws it. Either way the picture is the document as
+   * it is - the overview never shows the grid, the guides, the selection or
+   * the in-progress stroke.
+   */
+  private produceOverview(
+    renderer: DrawingRenderer,
+    width: number,
+    height: number,
+  ): HTMLCanvasElement | null {
+    const render = renderer.renderOverview;
+    if (typeof render === "function") {
+      const canvas = render.call(renderer, width, height);
+      if (canvas) {
+        return canvas;
+      }
+    }
+    const composite = renderer.composeDocumentImage();
+    return composite ?? null;
   }
 
   // ------------------------------------------------------------------ history
@@ -3479,6 +3622,7 @@ export class DrawingEngine implements StrokeSource {
     return {
       document: this.doc,
       viewport: this.viewport,
+      viewportSize: this.viewportSize,
       brush: this.brush,
       secondaryColor: this.secondaryColor,
       presets: this.presets,
@@ -3511,6 +3655,7 @@ export class DrawingEngine implements StrokeSource {
     if (
       previous.document === next.document &&
       previous.viewport === next.viewport &&
+      previous.viewportSize === next.viewportSize &&
       previous.brush === next.brush &&
       previous.secondaryColor === next.secondaryColor &&
       previous.presets === next.presets &&

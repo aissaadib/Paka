@@ -1,0 +1,82 @@
+/** Navigator panel: the overview surface, its empty state and the footer. */
+
+.navigator {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* The frame carries the border and the size, not the canvas.
+   The canvas is taken out of the flow on purpose: a canvas' intrinsic size is
+   its backing store, and a column that is sized by its content would then
+   measure the backing store (which is the CSS size times the device pixel
+   ratio) and grow the panel every time it was redrawn. Out of flow, the
+   canvas fills the frame and contributes nothing to the column's width. */
+.navigator__frame {
+  position: relative;
+  min-width: 176px;
+  height: 132px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.navigator__surface {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The pointer handlers own the gesture: do not scroll or zoom the page. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.navigator__surface:active {
+  cursor: grabbing;
+}
+
+.navigator__surface:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.navigator__empty {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.navigator__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.navigator__zoom {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.navigator__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.navigator__button {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.navigator__button:hover {
+  background: var(--bg-raised-hover);
+}
