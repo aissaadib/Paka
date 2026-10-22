@@ -53,6 +53,7 @@ const BRUSH: BrushSettings = {
   minSizeRatio: 0,
   spacing: 0.1,
   stabilizer: 0,
+  stabilizerMode: "smooth",
   texture: 0,
   stamp: false,
   stampSpacing: 0.1,

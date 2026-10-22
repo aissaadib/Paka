@@ -69,13 +69,18 @@ function createSpyRenderer() {
     endStroke: () => {},
     cancelStroke: () => {},
     setSelection: (_selection: RendererSelection | null) => {},
+    setGradientOverlay: () => {},
     setSelectedGuide: () => {},
     setGrid: (grid) => {
       grids.push(grid);
     },
+    setRulers: () => {},
+    setSymmetry: () => {},
+    setReferenceOverlay: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
+    renderOverview: () => null,
     readCompositePixel: (): Rgb | null => null,
     readCompositeImage: (): ImageData | null => null,
     render: () => {},
