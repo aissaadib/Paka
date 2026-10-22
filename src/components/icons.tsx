@@ -276,3 +276,105 @@ export function IconFile(props: IconProps) {
     </Icon>
   );
 }
+
+/** A square and a circle: the shape family, shown while no shape is armed. */
+export function IconShapes(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.2" y="3.6" width="7.2" height="7.2" rx="0.8" />
+      <circle cx="10.2" cy="10.4" r="3.4" />
+    </Icon>
+  );
+}
+
+/** A grid of swatches: the colour panel. */
+export function IconPalette(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.2" />
+      <path d="M2.4 6.1h11.2M2.4 9.8h11.2M6.1 2.4v11.2M9.8 2.4v11.2" opacity="0.55" />
+    </Icon>
+  );
+}
+
+/** Stacked sheets: the layers panel. */
+export function IconLayers(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.2 14 5.3 8 8.4 2 5.3z" />
+      <path d="M2 8.2 8 11.3l6-3.1" />
+      <path d="M2 11 8 14.1l6-3.1" opacity="0.55" />
+    </Icon>
+  );
+}
+
+/** A compass rose: the navigator panel. */
+export function IconNavigator(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="8" cy="8" r="5.6" />
+      <path d="M10.4 5.6 9.2 9.2 5.6 10.4 6.8 6.8z" />
+    </Icon>
+  );
+}
+
+/** A picture in a frame: the reference images panel. */
+export function IconImage(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.2" />
+      <path d="M2.6 10.6 5.8 7.6l2.6 2.4 2.2-1.8 2.8 2.4" />
+      <circle cx="10.6" cy="6.2" r="0.9" />
+    </Icon>
+  );
+}
+
+/** A tick: the menu's checked state. */
+export function IconCheck(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3.2 8.4 6.4 11.6l6.4-7.2" />
+    </Icon>
+  );
+}
+
+/** A plain frame: the glyph of a panel with no icon of its own. */
+export function IconPanel(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="3" width="11" height="10" rx="1.2" />
+      <path d="M2.5 6.2h11" />
+    </Icon>
+  );
+}
+
+/** A sheet turned a quarter turn: the view's rotation. */
+export function IconRotateView(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12.6 6.4A5 5 0 1 0 13 9.6" />
+      <path d="M13.4 2.8v3.8H9.6" />
+    </Icon>
+  );
+}
+
+/** A sheet with a dashed left half: the view's mirror. */
+export function IconMirrorView(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.4v11.2" strokeDasharray="2 2" />
+      <path d="M6.2 2.4H3.4v11.2h2.8z" />
+      <path d="M9.8 2.4h2.8v11.2H9.8z" />
+    </Icon>
+  );
+}
+
+/** An arrow curving back: the view's reset. */
+export function IconResetView(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M3 8a5 5 0 1 1 1.6 3.7" />
+      <path d="M2.4 8.6 3 11.6l3-.6" />
+    </Icon>
+  );
+}

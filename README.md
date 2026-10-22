@@ -80,6 +80,16 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   records nothing. A click without a drag leaves nothing behind. A gradient is
   stored as geometry plus colour stops - never as a pixel snapshot - so undo,
   redo and save/reopen rebuild exactly the same content.
+- **Editing a gradient on the canvas** (with the **Gradient** tool): click the
+  gradient's own **axis** - the line a linear gradient runs along, or the
+  **circle** a radial one draws - and it is selected; its **two handles** appear
+  (the ends of the axis, or the centre and the radius handle of a radial
+  gradient). Drag a handle and the gradient follows **live**, with one undo step
+  recorded on the release; `Esc` abandons the drag and puts the gradient back
+  exactly as it was. The handles are **display only**: they never reach a layer
+  surface, a PNG export or the project file. Press a handle and the **arrow
+  keys** nudge it by one document pixel (`Shift`: ten), which is the precise way
+  to place an endpoint; the status bar reads the selected gradient's geometry.
 - **Selection and transform** (`M`): drag a marquee to select the strokes of the
   active layer it meets, or click a stroke to select just that one and click
   empty paper to clear. The selection is shown as a dashed frame around the
@@ -207,7 +217,24 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   zoom.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
-  moves the canvas. Zoom buttons, actual size and fit-to-window.
+  moves the canvas. Zoom buttons, actual size and fit-to-window. The **space
+  bar** held down turns any drag into a pan, so a user without a middle mouse
+  button is not left out. The zoom buttons stop at the ends of the range the
+  canvas supports, and the status bar's zoom field takes a typed one: `150`,
+  `150%` or `1.5x`, clamped to the range the viewport allows.
+- **View orientation**: the whole canvas can be turned 90° (`Shift+R`) and
+  mirrored left to right (`Shift+M`), and **Reset View** (`Ctrl+Shift+0`) puts
+  it back: the whole document, upright and unmirrored. These are *view* state:
+  the document's pixels are never touched, they add no undo step and they never
+  mark the drawing unsaved, so turning the paper over to look at something
+  leaves the file saved. The status bar names the view while it is not upright.
+- **Navigator**: a panel under the layers shows the whole document with the
+  visible area marked. Click or drag in it to move the canvas' view - a click
+  outside the marked area jumps the view there, a drag inside it keeps the
+  artwork under the pointer - and the arrow keys pan it when it has the focus.
+  The panel shows the zoom and offers **Fit** and **Centre**. It is a view of
+  the document: it never changes a pixel, adds no undo step and never marks
+  the drawing unsaved.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder,
   visibility, opacity, blend mode (`Normal`, `Multiply`, `Screen`, `Overlay`,
   `Soft light`, `Hard light`, `Color dodge`, `Darken`, `Lighten`, `Difference`,
@@ -217,6 +244,15 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   A layer cannot be changed while a stroke, fill, gradient or selection drag is
   in flight, so a release can never commit into a layer that was removed
   mid-drag.
+- **Panels**: the **Panels** menu shows and hides the side panels - the colour
+  wheel, the layers and the navigator - and each panel's header folds it down
+  to a single line. Hiding a panel gives its space straight back to the canvas,
+  and it never loses what it was showing: a panel that keeps state of its own
+  stays mounted while it is hidden, and a panel that reads the drawing is
+  unmounted. *Show All Panels*, *Hide All Panels* and *Reset Layout* are in the
+  same menu, and the layout is remembered in the per-user settings file. The
+  menu bar itself is keyboard driven: the arrow keys open a menu and walk its
+  items, and `Escape` closes it.
 - **Undo/redo** for strokes, fills, gradients *and* layer operations: add,
   duplicate, delete (including the deleted layer's strokes, fills and gradients),
   rename, reorder, visibility, opacity and blend mode. Available from the
@@ -239,9 +275,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **PNG export** (`File → Export PNG…`) of the full composite at document size,
   including layer visibility, opacity and blend mode, without touching the
   editable document.
-- **Status bar** reporting document size, zoom, history depth, how many strokes
-  are selected, the live cursor position in document coordinates, the current
-  file name and file messages.
+- **Status bar** reporting the file name and its unsaved marker, the document
+  size, the active tool, the active layer, the zoom, the history depth, how
+  many strokes are selected, the live cursor position in document coordinates,
+  the current file name and file messages. Every field is read from the
+  engine's own state, and the zoom field is editable: it shows the zoom the
+  canvas really has and takes a typed one.
 - **HiDPI** rendering: layer surfaces are rasterized at up to 2x and the display
   canvas follows the device pixel ratio, while document geometry stays fixed.
 
@@ -341,13 +380,20 @@ paste-ready version of the same briefing is in
   label. The guides *do* take part in the snapping (the **Snap** switch), but
   the snapping is a magnet with a 6 screen pixel radius, not a lock: a guide
   pulls a point that comes close to it and nothing else. There are no rulers.
+- **The navigator is an overview, not a map.** It draws the document at the
+  panel's size, so it shows where the artwork is rather than what is in it,
+  and it has no zoom control of its own - the **Fit** and **Centre** buttons
+  act on the canvas' view. The overview is refreshed when the document
+  changes, not while a stroke is being drawn.
 - **Gradients are two-stop, linear or radial, and paint the whole layer.**
   There is no draggable stop editor, no angle snapping and no gradient with a
   transparent stop (opacity applies to the whole element). A gradient is
   content, not a mask or adjustment: it covers what is below it on its layer, so
-  paint a gradient on its own layer to keep earlier artwork visible. Gradients
-  are not selectable, so they can be undone but not moved, duplicated or
-  flipped.
+  paint a gradient on its own layer to keep earlier artwork visible. A gradient
+  can be **selected and its geometry edited** on the canvas (the axis or the
+  circle, then the two handles), but it still cannot be moved, duplicated or
+  flipped, and its **stops** can only be edited before it is drawn - the stop
+  editor describes the *next* gradient, not one already on the canvas.
 - **A bucket fill is a committed raster patch, not an editable region.** The
   mask is binary, so there is no feathering and no gap-closing; the slider only
   affects the next fill, and the fill is scanned at click time (no pre-commit

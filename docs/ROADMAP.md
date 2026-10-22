@@ -181,6 +181,17 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       5 for the new element kind. See
       [ARCHITECTURE.md](ARCHITECTURE.md#gradients) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#gradients).
+- [x] On-canvas gradient editing: the gradient tool selects a gradient by its
+      **geometry** (the axis of a linear one, the circle of a radial one) and
+      shows **two handles**; dragging one previews the new geometry live and
+      commits **one** undo step on the release, while a cancel restores the
+      committed gradient exactly. The handles are a display overlay (never a
+      layer surface, an export or the project file), the focused handle is
+      nudged by the arrow keys, and the format does not change: the record
+      already stored the two points the renderer draws from. The stops of a
+      *committed* gradient are still not editable - the middle-stop editor
+      describes the next drag. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#editing-a-gradient-on-the-canvas).
 
 ## Phase 3 - Brush feel
 
@@ -272,6 +283,24 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       physical gesture snaps alike at every zoom. The snapping is applied in
       the engine's single pointer entry point, so the sample the user drew and
       the sample that was committed agree. Off by default.
+- [x] **Navigator**: a panel shows the whole document with the visible area
+      marked. A click outside the marked area jumps the view there, a drag
+      inside it keeps the artwork under the pointer, and the arrow keys pan it
+      when it has the focus; the panel shows the zoom and offers **Fit** and
+      **Centre**. The overview is a downscale of the **cached** composite and
+      is rebuilt only when the document changes, so panning and zooming cost
+      nothing. It is view state: no pixels change, no history step, no dirty
+      flag, nothing reaches an export.
+- [x] **Panel manager**: a **registry** of the side panels (a stable id, a
+      label, an icon, a place in the stack and how it is mounted) and a
+      **Panels** menu that shows and hides them, folds them to their header
+      and resets the layout. Hiding a panel gives the space straight back to
+      the canvas, and it never loses the panel's state: a panel that keeps
+      state of its own stays mounted while it is hidden, and a panel derived
+      from the document is unmounted. The layout is shell state - showing a
+      panel is not an edit - and it rides along in the per-user settings file
+      as a section, so there is one settings file and one writer. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#the-panel-manager).
 - [ ] Rulers.
 - [ ] Adjustment layers / non-destructive effects.
 

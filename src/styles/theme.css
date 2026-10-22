@@ -10,6 +10,11 @@
 :root {
   color-scheme: dark;
 
+  /* The interface scale, as a factor of the designed size. The workspace
+     preference sets it on the root element, so every metric below follows
+     without a single component having to know about it. */
+  --ui-scale: 1;
+
   /* Surfaces */
   --bg-app: #17191c;
   --bg-panel: #1c1f23;
@@ -32,11 +37,41 @@
 
   /* Metrics */
   --radius: 3px;
-  --control-height: 24px;
-  --control-height-sm: 20px;
+  --control-height: calc(24px * var(--ui-scale));
+  --control-height-sm: calc(20px * var(--ui-scale));
+  /* The width of a side panel. The stack's own width follows its content, so
+     hiding every panel gives the space back to the canvas. */
+  --panel-width: calc(216px * var(--ui-scale));
 
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+/* The light scheme.
+ *
+ * The tokens are the same set, so every component follows without knowing
+ * which scheme is on. The area around the paper stays a shade darker than
+ * the panels: the paper is white, and a white sheet on a white workspace
+ * would have no edge to read. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-app: #e9ecf1;
+  --bg-panel: #f5f6f9;
+  --bg-raised: #ffffff;
+  --bg-raised-hover: #e4e8ee;
+  --bg-inset: #ffffff;
+  --bg-workspace: #cfd4dc;
+
+  --border: #d2d7df;
+  --border-strong: #b3bac6;
+  --text: #31363d;
+  --text-strong: #14171b;
+  --text-dim: #666e79;
+
+  --accent: #2f6fdb;
+  --accent-soft: rgba(47, 111, 219, 0.14);
+  --danger: #c2352c;
 }
 
 * {
@@ -54,7 +89,11 @@ body,
 body {
   background: var(--bg-app);
   color: var(--text);
-  font: 12px/1.45 var(--font-ui);
+  /* The interface scale follows the workspace preference, so the whole shell
+     grows and shrinks together instead of one control at a time. */
+  font-family: var(--font-ui);
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.45;
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }

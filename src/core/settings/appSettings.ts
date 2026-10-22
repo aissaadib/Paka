@@ -30,6 +30,17 @@ import {
   type BrushPreset,
 } from "../brushes/presets";
 import { DEFAULT_GRID_SETTINGS, normalizeGridSpacing } from "../document/grid";
+import {
+  DEFAULT_FILL_ANTIALIAS,
+  DEFAULT_FILL_CLOSE_GAPS,
+  DEFAULT_FILL_EXPAND,
+  DEFAULT_FILL_REFERENCE,
+  normalizeFillAntialias,
+  normalizeFillCloseGaps,
+  normalizeFillExpand,
+  normalizeFillReference,
+  type FillReferenceMode,
+} from "../fill/fillOptions";
 import { DEFAULT_SHAPE_OPTIONS, normalizeShapeOptions } from "../tools/shapeGeometry";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
 import type { BrushSettings } from "../../types/brush";
@@ -66,6 +77,20 @@ export interface AppSettings {
   readonly shapeRotation: number;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   readonly fillTolerance: number;
+  /**
+   * What the bucket measures its region against.
+   *
+   * The **layer** the mode names is not persisted: a layer belongs to a
+   * document, while this preference has to survive a restart. A restored
+   * `layer` mode therefore samples the active layer until the user picks one.
+   */
+  readonly fillReference: FillReferenceMode;
+  /** How far the bucket grows (positive) or shrinks (negative) a region, in pixels. */
+  readonly fillExpand: number;
+  /** How wide the bucket's soft edge is, in document pixels. */
+  readonly fillAntialias: number;
+  /** How wide a passage the bucket seals, in document pixels. */
+  readonly fillCloseGaps: number;
   /** Whether the next gradient is linear or radial. */
   readonly gradientType: "linear" | "radial";
   /** End colour of the next gradient. */
@@ -94,6 +119,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   shapeInnerRatio: DEFAULT_SHAPE_OPTIONS.innerRatio,
   shapeRotation: DEFAULT_SHAPE_OPTIONS.rotation,
   fillTolerance: 24,
+  fillReference: DEFAULT_FILL_REFERENCE,
+  fillExpand: DEFAULT_FILL_EXPAND,
+  fillAntialias: DEFAULT_FILL_ANTIALIAS,
+  fillCloseGaps: DEFAULT_FILL_CLOSE_GAPS,
   gradientType: "linear",
   gradientEndColor: DEFAULT_GRADIENT_END_COLOR,
   gridVisible: DEFAULT_GRID_SETTINGS.visible,
@@ -195,6 +224,12 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     fillTolerance: Math.round(
       clamp(numberOr(record.fillTolerance, DEFAULT_APP_SETTINGS.fillTolerance), 0, 255),
     ),
+    // The bucket's other options are additive: a settings file written before
+    // they existed simply has none of them, and each one takes its default.
+    fillReference: normalizeFillReference(record.fillReference),
+    fillExpand: normalizeFillExpand(record.fillExpand),
+    fillAntialias: normalizeFillAntialias(record.fillAntialias),
+    fillCloseGaps: normalizeFillCloseGaps(record.fillCloseGaps),
     gradientType: record.gradientType === "radial" ? "radial" : "linear",
     gradientEndColor: colorOr(record.gradientEndColor, DEFAULT_APP_SETTINGS.gradientEndColor),
     // The grid fields are additive: a settings file written before the grid
@@ -226,26 +261,61 @@ export function parseAppSettings(text: string | null): AppSettings {
 
 /** Serializes the settings, with a stable key order. */
 export function serializeAppSettings(settings: AppSettings): string {
-  return `${JSON.stringify(
-    {
-      version: SETTINGS_VERSION,
-      brush: settings.brush,
-      presets: settings.presets,
-      toolId: settings.toolId,
-      shapeFill: settings.shapeFill,
-      shapeSides: settings.shapeSides,
-      shapeInnerRatio: settings.shapeInnerRatio,
-      shapeRotation: settings.shapeRotation,
-      fillTolerance: settings.fillTolerance,
-      gradientType: settings.gradientType,
-      gradientEndColor: settings.gradientEndColor,
-      gridVisible: settings.gridVisible,
-      gridSpacing: settings.gridSpacing,
-      gridSnapping: settings.gridSnapping,
-    },
-    null,
-    2,
-  )}\n`;
+  return serializeSettingsDocument(settingsDocument(settings));
+}
+
+/**
+ * The settings as a plain document.
+ *
+ * The document is what a settings file holds: the object the serializer
+ * stringifies. It is exposed so a section of the file that the engine does
+ * not own - the panel layout - can be added to the same document instead of
+ * to a second file.
+ */
+export function settingsDocument(settings: AppSettings): Record<string, unknown> {
+  return {
+    version: SETTINGS_VERSION,
+    brush: settings.brush,
+    presets: settings.presets,
+    toolId: settings.toolId,
+    shapeFill: settings.shapeFill,
+    shapeSides: settings.shapeSides,
+    shapeInnerRatio: settings.shapeInnerRatio,
+    shapeRotation: settings.shapeRotation,
+    fillTolerance: settings.fillTolerance,
+    fillReference: settings.fillReference,
+    fillExpand: settings.fillExpand,
+    fillAntialias: settings.fillAntialias,
+    fillCloseGaps: settings.fillCloseGaps,
+    gradientType: settings.gradientType,
+    gradientEndColor: settings.gradientEndColor,
+    gridVisible: settings.gridVisible,
+    gridSpacing: settings.gridSpacing,
+    gridSnapping: settings.gridSnapping,
+  };
+}
+
+/** Serializes a settings document, with a stable key order. */
+export function serializeSettingsDocument(document: Record<string, unknown>): string {
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/**
+ * The parsed settings document.
+ *
+ * `null` - no file yet - a file that is not valid JSON and a file that is
+ * not an object all yield an empty document: a corrupt settings file must
+ * not stop the editor from starting.
+ */
+export function parseSettingsDocument(text: string | null): Record<string, unknown> {
+  if (text === null) {
+    return {};
+  }
+  try {
+    return asRecord(JSON.parse(text)) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** Field-wise comparison, so an unchanged setting is never written again. */
@@ -260,6 +330,10 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
     a.shapeInnerRatio === b.shapeInnerRatio &&
     a.shapeRotation === b.shapeRotation &&
     a.fillTolerance === b.fillTolerance &&
+    a.fillReference === b.fillReference &&
+    a.fillExpand === b.fillExpand &&
+    a.fillAntialias === b.fillAntialias &&
+    a.fillCloseGaps === b.fillCloseGaps &&
     a.gradientType === b.gradientType &&
     a.gradientEndColor === b.gradientEndColor &&
     a.gridVisible === b.gridVisible &&

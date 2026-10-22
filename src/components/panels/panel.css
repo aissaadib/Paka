@@ -1,0 +1,75 @@
+/**
+ * Panel chrome: the frame every side panel shares.
+ *
+ * The frame is owned by the shell, not by a feature, so the colour panel and
+ * the layers panel look the same without either of them styling the other's
+ * parts.
+ */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* The width is fixed so the column does not jump when a panel is folded;
+     the stack's own width follows its content, so hiding every panel gives
+     the space back to the canvas. */
+  width: var(--panel-width);
+  min-width: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+}
+
+/* A hidden panel keeps its place in the stack but takes no space. */
+.panel--hidden {
+  display: none;
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel__title {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.panel__footer {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* The fold chevron points down while the panel is open and up while it is
+   folded to its header. */
+.panel__collapse-icon {
+  transition: transform 120ms ease;
+}
+
+.panel--collapsed .panel__collapse-icon {
+  transform: rotate(180deg);
+}

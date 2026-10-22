@@ -16,6 +16,11 @@
  *     failed write is recorded and forgotten. Neither stops the editor, and
  *     neither is raised as an error in the UI.
  *
+ * A **section** is the fourth thing the store carries: state that belongs in
+ * the file but not in the engine, such as the panel layout. The store owns
+ * the file, so a section's owner hands its state to the store rather than
+ * writing the file itself, and the store writes it back whenever it changes.
+ *
  * The store is framework-free, so the whole "read, apply, change, persist"
  * cycle can be exercised in Node.
  */
@@ -25,11 +30,14 @@ import {
   DEFAULT_APP_SETTINGS,
   SETTINGS_VERSION,
   parseAppSettings,
-  serializeAppSettings,
+  parseSettingsDocument,
+  serializeSettingsDocument,
+  settingsDocument,
   settingsEqual,
   type AppSettings,
 } from "./appSettings";
 import type { SettingsGateway } from "./settingsGateway";
+import type { SettingsSection } from "./settingsSection";
 
 /**
  * How long a change waits before the file is written.
@@ -43,6 +51,15 @@ const DEFAULT_DEBOUNCE_MS = 300;
 export interface SettingsStoreOptions {
   readonly engine: DrawingEngine;
   readonly gateway: SettingsGateway;
+  /**
+   * Sections of the file that the engine does not own.
+   *
+   * The store owns the file, so shell state - the panel layout, for
+   * instance - cannot write to it directly. A section is the hand-off: the
+   * store reads the section out of the file, gives it to its owner, and
+   * writes the owner's state back whenever it changes.
+   */
+  readonly sections?: readonly SettingsSection<unknown>[];
   /** How long a change waits before the file is written. */
   readonly debounceMs?: number;
   /** Injected timer functions, so the tests need not wait in real time. */
@@ -58,7 +75,7 @@ function describe(error: unknown): string {
 }
 
 /** Writes the preferences into the editor. Editor state only: no history, no dirty. */
-function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
+export function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setBrush(settings.brush);
   engine.setPresets(settings.presets);
   engine.setTool(settings.toolId);
@@ -67,6 +84,10 @@ function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setShapeInnerRatio(settings.shapeInnerRatio);
   engine.setShapeRotation(settings.shapeRotation);
   engine.setFillTolerance(settings.fillTolerance);
+  engine.setFillReference(settings.fillReference);
+  engine.setFillExpand(settings.fillExpand);
+  engine.setFillAntialias(settings.fillAntialias);
+  engine.setFillCloseGaps(settings.fillCloseGaps);
   engine.setGradientType(settings.gradientType);
   engine.setGradientEndColor(settings.gradientEndColor);
   engine.setGridVisible(settings.gridVisible);
@@ -75,7 +96,7 @@ function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
 }
 
 /** Reads the preferences the editor currently holds. */
-function readFromEngine(engine: DrawingEngine): AppSettings {
+export function readFromEngine(engine: DrawingEngine): AppSettings {
   const snapshot = engine.getState();
   return {
     version: SETTINGS_VERSION,
@@ -87,6 +108,10 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
     shapeInnerRatio: snapshot.shapeInnerRatio,
     shapeRotation: snapshot.shapeRotation,
     fillTolerance: snapshot.fillTolerance,
+    fillReference: snapshot.fillReference,
+    fillExpand: snapshot.fillExpand,
+    fillAntialias: snapshot.fillAntialias,
+    fillCloseGaps: snapshot.fillCloseGaps,
     gradientType: snapshot.gradientType,
     gradientEndColor: snapshot.gradientEndColor,
     gridVisible: snapshot.gridVisible,
@@ -95,9 +120,21 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
   };
 }
 
+/**
+ * The preferences, written into an editor surface.
+ *
+ * Exported under a name that says what it is for, because the document
+ * session registry needs the same two operations: the preferences belong to
+ * the application, not to a document, so they are mirrored between the
+ * application-level copy and the active document's engine. Both sides use
+ * these functions, so the two can never disagree about what a preference is.
+ */
+export { applyToEngine as applyPreferencesToEngine, readFromEngine as readPreferencesFromEngine };
+
 export class SettingsStore {
   private readonly engine: DrawingEngine;
   private readonly gateway: SettingsGateway;
+  private readonly sections: readonly SettingsSection<unknown>[];
   private readonly debounceMs: number;
   private readonly schedule: (callback: () => void, delayMs: number) => unknown;
   private readonly cancel: (handle: unknown) => void;
@@ -110,12 +147,14 @@ export class SettingsStore {
   private writing = false;
   private queued = false;
   private stopWatching: (() => void) | null = null;
+  private stopWatchingSections: (() => void) | null = null;
   private readError: string | null = null;
   private writeError: string | null = null;
 
   constructor(options: SettingsStoreOptions) {
     this.engine = options.engine;
     this.gateway = options.gateway;
+    this.sections = options.sections ?? [];
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.schedule =
       options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
@@ -158,6 +197,7 @@ export class SettingsStore {
     this.applying = true;
     try {
       applyToEngine(this.engine, settings);
+      this.applySections(parseSettingsDocument(text));
     } finally {
       this.applying = false;
     }
@@ -176,6 +216,10 @@ export class SettingsStore {
     if (this.stopWatching !== null) {
       this.stopWatching();
       this.stopWatching = null;
+    }
+    if (this.stopWatchingSections !== null) {
+      this.stopWatchingSections();
+      this.stopWatchingSections = null;
     }
     if (this.pending !== null) {
       this.cancel(this.pending);
@@ -196,7 +240,11 @@ export class SettingsStore {
     try {
       do {
         this.queued = false;
-        const contents = serializeAppSettings(this.settings);
+        const document = settingsDocument(this.settings);
+        for (const section of this.sections) {
+          section.write(document, section.current());
+        }
+        const contents = serializeSettingsDocument(document);
         try {
           await this.gateway.write(contents);
           this.writeError = null;
@@ -212,11 +260,27 @@ export class SettingsStore {
     }
   }
 
-  private watch(): void {
-    if (this.stopWatching !== null) {
-      return;
+  /** Hands the document's sections to their owners. */
+  private applySections(document: Record<string, unknown>): void {
+    for (const section of this.sections) {
+      section.apply(section.read(document));
     }
-    this.stopWatching = this.engine.subscribe(() => this.onEditorChanged());
+  }
+
+  private watch(): void {
+    if (this.stopWatching === null) {
+      this.stopWatching = this.engine.subscribe(() => this.onEditorChanged());
+    }
+    if (this.stopWatchingSections === null && this.sections.length > 0) {
+      const stops = this.sections.map((section) =>
+        section.subscribe(() => this.onSectionChanged()),
+      );
+      this.stopWatchingSections = () => {
+        for (const stop of stops) {
+          stop();
+        }
+      };
+    }
   }
 
   private onEditorChanged(): void {
@@ -228,6 +292,14 @@ export class SettingsStore {
       return;
     }
     this.settings = next;
+    this.scheduleWrite();
+  }
+
+  /** A section changed: the file has to be written again. */
+  private onSectionChanged(): void {
+    if (!this.loaded || this.applying) {
+      return;
+    }
     this.scheduleWrite();
   }
 

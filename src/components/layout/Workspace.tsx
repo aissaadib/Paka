@@ -1,18 +1,18 @@
 /**
- * Application shell: menu bar, toolbar, tool rail, canvas, layers panel and
- * status bar.
+ * Application shell: menu bar, tool options bar, toolbar, tool rail, canvas,
+ * panel stack and status bar.
  *
  * The state kept here is the workflow the engine deliberately knows nothing
  * about: which dialog is open, and which action is waiting for the user to
- * confirm that unsaved work may be discarded.
+ * confirm that unsaved work may be discarded. The panels themselves live in
+ * the panel stack, which the panel manager drives.
  */
 
 import { useCallback, useState } from "react";
 import { CanvasStage } from "../../features/canvas/CanvasStage";
 import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
-import { ColorPanel } from "../../features/color/ColorPanel";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
-import { LayersPanel } from "../../features/layers/LayersPanel";
+import { ToolOptionsBar } from "../../features/options/ToolOptionsBar";
 import {
   UnsavedChangesDialog,
   type UnsavedAction,
@@ -23,14 +23,19 @@ import { useFileCommands } from "../../features/project/useFileCommands";
 import { closeWindowNow } from "../../features/project/windowControls";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
+import { usePanModifier } from "../../hooks/usePanModifier";
+import { useWorkspaceSettings } from "../../hooks/useWorkspace";
 import { fileNameOf } from "../../utils/path";
+import { SecondaryViewPanel } from "../../features/views/SecondaryViewPanel";
+import { PanelStack } from "../panels/PanelStack";
 import { ToolRail } from "../toolbar/ToolRail";
 import { AppMenuBar } from "./AppMenuBar";
 import { ToolBar } from "./ToolBar";
 
 export function Workspace() {
   const { actions, files } = useEditor();
-  const { document: drawingDocument, file } = useEditorState();
+  const { document: drawingDocument, file, secondaryViewOpen } = useEditorState();
+  const workspace = useWorkspaceSettings();
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [pending, setPending] = useState<UnsavedAction | null>(null);
 
@@ -104,9 +109,15 @@ export function Workspace() {
   }, [pending, proceed, saveThen]);
 
   useKeyboardShortcuts(save, saveAs, requestOpen);
+  usePanModifier();
 
   return (
-    <div className="app-shell">
+    // A hidden shell row takes no space: the grid row collapses to nothing, so
+    // the canvas gets the pixels back without the user resizing the window.
+    <div
+      className="app-shell"
+      data-tool-rail={workspace.shell.toolRail ? "shown" : "hidden"}
+    >
       <AppMenuBar
         onNewDocument={requestNewDocument}
         onOpenProject={requestOpen}
@@ -114,16 +125,15 @@ export function Workspace() {
         onSaveProjectAs={saveAs}
         onExportPng={exportPng}
       />
+      <ToolOptionsBar />
       <ToolBar />
       <div className="workspace-body">
-        <ToolRail />
-        <CanvasStage />
-        <div className="side-panels">
-          <ColorPanel />
-          <div className="side-panels__layers">
-            <LayersPanel />
-          </div>
+        {workspace.shell.toolRail ? <ToolRail /> : null}
+        <div className="canvas-views">
+          <CanvasStage />
+          {secondaryViewOpen ? <SecondaryViewPanel /> : null}
         </div>
+        <PanelStack />
       </div>
       <CanvasStatusBar
         fileMessage={fileMessage}

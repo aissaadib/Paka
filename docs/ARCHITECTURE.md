@@ -118,10 +118,11 @@ memory; it never changes document size or stroke coordinates.
 | `src/app` | Entry point, provider wiring, global styles | features, components, state |
 | `src/components` | Presentational shell: menu bar, toolbars, panels, icons | types only |
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
-| `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
-| `src/state` | The editor store + React context that holds the single engine instance | core/engine |
+| `src/hooks` | React bindings: `useEditor`, `useEditorState`, `usePanels`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
+| `src/state` | The editor store + React context that holds the single engine instance, and the panel store that holds the panel layout | core/engine, core/panels |
 | `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
+| `src/core/panels` | The panel manager's adapter over the shell's panel registry, the layout rules and the layout's settings section | core/shell, core/settings (types), utils |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
 | `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
@@ -677,6 +678,73 @@ debounced, so a brush-slider drag is one write rather than sixty. A file that
 cannot be read or written is recorded and forgotten - it is a minor
 inconvenience, not something the user has to act on.
 
+### The panel manager
+
+The side panels - the brush library, the colour wheel, the layers, the
+navigator - are **shell state**, not document state. Which of them are on
+screen says what the window looks like; it never says what the drawing
+contains. So the panel layout follows the same contract every other
+preference follows: showing or hiding a panel pushes no history entry, bumps
+no revision and never makes a document dirty.
+
+Three pieces, and the split between them is the point:
+
+- **the registry** is the wave's shared contract
+  (`core/shell/panelRegistry.ts`): a panel **registers itself** and the shell
+  renders whatever the registry says. A panel's own module calls
+  `registerPanel` with its id, its title, the slot it docks in, its order and
+  its body, so **adding a panel to the shell means editing the panel's own
+  module and nothing else** - the shell's composition is never edited to
+  accommodate a new panel. The registry is plain data plus a render callback,
+  so it can be inspected and asserted on without a browser, which is what the
+  project's own rule about the React layer requires. Only panels that exist
+  are registered: an entry for a panel that has not been built would be a
+  menu item that opens nothing. The ids are stable, because they are written
+  to disk; a renamed panel keeps its id and a removed panel leaves its id
+  behind in old settings files, where the reader drops it.
+- **the layout** (`core/panels/panelLayout.ts`) is the pure state: which panels
+  are hidden and which are folded. Every operation is a function from one
+  layout to the next, so "hide", "show", "fold", "reset" and "read the file"
+  are all testable without a browser.
+- **the store** (`state/panelStore.ts`) holds the live layout for React and is
+  the only writer of it. It is framework-free, like the editor store, and it
+  notifies its listeners only when the layout really changed.
+
+**Hiding a panel reclaims the space at once.** The workspace's grid gives the
+panel column an `auto` width, and a hidden panel is `display: none`, so the
+column shrinks to the width of the panels that are still visible - and to
+nothing at all when every panel is hidden. The canvas gets the pixels back
+without the user resizing anything, and the canvas' own resize observer keeps
+the pointer mapping correct.
+
+**Hiding a panel does not lose its state.** A panel that keeps React state of
+its own - the colour wheel holds the hue and saturation the user asked for,
+the brush browser holds its search text - stays **mounted** while it is
+hidden, so it cannot lose that state. A panel that is derived from the
+document - the layers, the navigator - is **unmounted** when it is hidden,
+because it has nothing to lose and no reason to keep rendering out of sight.
+The registry says which is which, per panel.
+
+**Folding** a panel keeps it mounted and hides its body, so unfolding it
+brings back exactly what was there.
+
+**The layout is persisted in the settings file, as a section.** The settings
+store owns the file, so the panel store does not write one of its own: the
+layout is handed to the store as a `SettingsSection` (`core/settings/
+settingsSection.ts`), which the store reads at startup, hands to the panel
+store, and writes back under the `panels` key whenever the layout changes.
+One file, one writer, and the layout rides along with the other preferences.
+A settings file written before the panel manager existed has no `panels` key
+and the layout starts from its defaults.
+
+**The menu is part of the contract.** The **Panels** menu lists the
+registered panels as checkboxes, plus *Show All Panels*, *Hide All Panels* and
+*Reset Layout*; the two that would change nothing are disabled. Only panels
+the registry knows are offered, so the menu can never show a panel that does
+not exist. The menu bar is keyboard driven: the arrow keys open a menu and
+walk its items, the disabled items are skipped, Home and End jump to the ends
+and Escape closes the menu and puts the focus back where it came from.
+
 ### The autosave seam (not enabled)
 
 `src/core/autosave/` holds the machinery for writing a recovery copy of the
@@ -966,6 +1034,66 @@ skipped. Gradients are therefore content, not an adjustment or a mask: an opaque
 gradient covers earlier elements on its layer, which is why painting one on its
 own layer is the normal workflow. The editor options (`setGradientType`,
 `setGradientEndColor`) describe the next drag only and are not serialized.
+
+#### Editing a gradient on the canvas
+
+A committed gradient is editable, because a gradient *is* geometry: the record
+already stores the two points the renderer draws from, so moving them is a
+matter of replacing the record - no new element kind, no new file field, no
+format version.
+
+**The selection.** The gradient tool owns a selection of its own, like the
+select tool owns the stroke selection and the guides tool owns the guide
+selection. It is **editor state**: the gradient is document content and travels
+with the document, but *which* gradient is selected belongs to the tool, so it
+is dropped when the tool is left, when the active layer changes and when the
+gradient itself is removed by an undo.
+
+The hit test is against the gradient's **geometry**, not against its pixels: a
+gradient paints its whole layer, so every point of the paper belongs to it and
+only the axis (linear) or the circle (radial) can say which one the user meant.
+The topmost gradient on the active layer wins, because the topmost one is the
+one the user sees. `core/gradient/gradientHandles.ts` holds that rule, and the
+two handle positions, as pure functions.
+
+**The handles.** A selected gradient shows two handles: the ends of its axis
+for a linear gradient, its centre and its radius handle for a radial one. Their
+*positions* are in document space, so they sit on the gradient's own points at
+any zoom; the *grab radius* is in screen pixels, so a handle is equally easy to
+grab at 2 % and at 6400 %. The handles and the line between them are a
+**display overlay**: the renderer paints them on the display canvas, exactly
+like the selection's transform handles, and they never reach a layer surface,
+the document, a PNG export or the project file.
+
+**The gesture.** A press is resolved in this order: on a handle of the selected
+gradient (drag it), on the geometry of a gradient on the active layer (select
+it), anywhere else (draw a new gradient). A handle drag is a **preview**: the
+record is replaced in place - same id, same place in the painting order - and
+the layer is invalidated, so the renderer rebuilds the gradient from the
+document and the user watches the real thing. Nothing enters history while the
+drag runs.
+
+The release records **one** command, `GradientEditCommand`, which carries both
+records: the committed one and the one that replaced it. Undo puts the original
+back, redo puts the edited one back. A drag that ended where it started records
+nothing, so history never holds a step that appears to do nothing, and a drag
+that collapsed the gradient restores the committed one rather than recording an
+invisible step. A cancel - `pointercancel`, a lost capture, a tool switch or
+`Esc` - puts the committed record back **exactly**: the same object, with its
+stops and its opacity, and no history entry and no revision change.
+
+**The keyboard.** The handle the user last grabbed is the focused one, and the
+arrow keys move it by one document pixel (`Shift`: ten). Repeated nudges
+coalesce in the command stack, so a held arrow key is one undo step, exactly
+like the stroke selection's nudge. The status bar reads the selected gradient's
+geometry.
+
+**What is not here.** The stops of a *committed* gradient are not editable yet:
+the middle-stop editor describes the **next** drag, so its data is editor state
+rather than document content, and an on-canvas stop marker would have to be
+wired to the committed record instead - a different data path, and one that
+would duplicate the stop list. The geometry edit deliberately leaves the stops
+alone, so the two never fight over the same data.
 
 ### Selection and transform
 
@@ -1325,6 +1453,54 @@ byte-identical to one with it off.
 `EditorSnapshot` and they are stored in the per-user settings file, so they
 survive a restart. Changing one is not an edit: no history step, no revision
 bump, no dirty flag.
+
+### Navigator
+
+The **navigator** is a small panel that shows the whole document and marks the
+part of it the canvas is showing. It is a *view* of the document, never a
+second source of truth: it reads the composite the renderer already has and it
+writes nothing but the viewport.
+
+**Three coordinate spaces.** The document has its own pixels; the canvas has
+CSS pixels and a view transform (scale, rotation, mirror); the navigator has
+its own CSS pixels. The conversion between them is a pure module
+(`features/navigator/navigatorGeometry.ts`), so it can be unit tested without a
+DOM, a canvas or an engine - the same reason `core/rendering/viewport.ts`
+exists for the main canvas. The navigator shows the document **upright**: a
+rotation is a property of the window, not of the artwork, so the overview is
+always the artwork as it is and the visible area is drawn as the (possibly
+tilted) quadrilateral the canvas really shows.
+
+**The overview is cached.** `DrawingRenderer.renderOverview` composites the
+paper and the visible layers into a small canvas, drawing from the **cached**
+layer surfaces - it is a downscale of what is on screen, not a second rendering
+of the document. The engine keeps that canvas and rebuilds it only when the
+document changed (its identity or its revision) or when a different size was
+asked for, so a pan, a zoom, a resize of the panel or a redraw of the
+rectangle costs nothing. While a gesture is in flight the cached overview is
+returned unchanged: a stroke in flight owns content that is not in the document
+yet, and re-rasterizing a layer mid-gesture is work the display would do
+anyway.
+
+**The rectangle follows the view.** The visible area is the four corners of the
+canvas viewport mapped back into the document and then into the navigator. The
+engine publishes the canvas' CSS size next to the viewport
+(`EditorSnapshot.viewportSize`), because the transform alone does not say what
+is on screen: the visible document area also depends on how big the surface is.
+A zoom, a pan, a rotation, a mirror and a resize all move the rectangle, and
+none of them is an edit - no history step, no revision bump, no dirty flag.
+
+**Pointing at the navigator.** A pointer *inside* the visible area grabs it:
+the view keeps the offset it was grabbed with, so the artwork stays under the
+pointer. A pointer *outside* it jumps: the view centres on the point. The
+engine's `centerViewportOn` does the move, deriving the new offset from the
+view transform the viewport already has, so the point lands in the middle of
+the canvas whether the view is upright, turned or mirrored.
+
+**No feedback loop.** The panel writes a viewport only in response to a
+pointer or a key. It never writes one in response to a snapshot change, so the
+two cannot chase each other: the rectangle is drawn *from* the view, never
+*pushed* into it.
 
 ### Dirty surfaces
 
@@ -1844,15 +2020,18 @@ These are real gaps, not footnotes:
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
   `polygon`, `star`, `bucket`, `gradient` and `picker`, plus `pan`. There is no
   text tool. A bucket
-  fill writes a region; a gradient is a two-stop linear/radial colour function,
-  not an editable gradient with draggable stops.
+  fill writes a region; a gradient is a linear/radial colour function whose
+  geometry is editable on the canvas, but whose stops are not.
 - **Selection is stroke-level, layer-scoped and limited to translation, scaling,
   rotation, duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
-  layer or the tool changes. **Fill patches and gradients are not selectable** -
-  the stroke-only view deliberately filters them out - so they can only be
-  undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
+  layer or the tool changes. **Fill patches are not selectable** and gradients
+  are not part of the stroke selection - the stroke-only view deliberately
+  filters them out - so they can only be undone, not moved, duplicated or
+  flipped. A gradient has its own, separate selection (the gradient tool's):
+  it selects the gradient and lets its geometry be edited, and nothing else.
+  There is no add/subtract modifier, no
   feathering,
   no clipping, no perspective and no non-uniform scale; duplicate stays on the
   layer (there is no cross-layer copy/paste). The frame is the selected strokes'
@@ -1891,13 +2070,17 @@ These are real gaps, not footnotes:
   The scan samples the merged visible composite (including the paper), and
   documents above 16,777,216 pixels refuse a fill with a notice rather than
   risking a long freeze.
-- **A gradient is a two-stop whole-layer colour function.** There is no stop
-  editor, no angle or aspect modifier, no transparency stop and no clipping to a
-  selection or shape; opacity applies to the entire element. It is content, not
-  an adjustment layer, so it covers earlier elements on its layer. A drag
-  re-rasterizes the whole layer on every pointer move, the same trade as moving a
-  selection; that is the thing to cache first if a heavy layer makes the preview
-  lag.
+- **A gradient is a whole-layer colour function whose geometry is editable.** The
+  two handles of the selected gradient move its axis (linear) or its centre and
+  radius (radial), and the arrow keys nudge the focused handle - but there is
+  no **stop editor for a committed gradient**: the middle-stop editor describes
+  the *next* drag, so a gradient already on the canvas keeps the stops it was
+  drawn with. There is no angle or aspect modifier, no transparency stop and no
+  clipping to a selection or shape; opacity applies to the entire element. It is
+  content, not an adjustment layer, so it covers earlier elements on its layer.
+  A drag re-rasterizes the whole layer on every pointer move, the same trade as
+  moving a selection; that is the thing to cache first if a heavy layer makes
+  the preview lag.
 - **An eraser stroke costs one extra surface-sized canvas** while it is in
   flight (its pre-stroke snapshot). It is allocated lazily and released when the
   stroke ends, but on a very large document it is a visible memory spike next to

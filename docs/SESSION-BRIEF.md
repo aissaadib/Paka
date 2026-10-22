@@ -76,6 +76,9 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent06-preset-browser` | **Brush preset browser** - the preset picker becomes a **Brushes panel**: a searchable, sortable list of the user's brushes and the **built-in** ones, each row showing a **real tip** - the mark the preset paints, drawn by the renderer's own code from the preset's own brush settings, so a property that changes a stroke changes the swatch. The list can be ordered by **name**, by **recent use** or by **size**, and narrowed to the **starred** brushes; a star is the user's own note and works on a built-in brush too. Every operation is wired to the engine: **save**, **rename**, **update** (write the live brush back into the preset), **duplicate**, **delete**, **star**, **import** and **export**. A **built-in brush is code**, so it cannot be renamed, overwritten or deleted - duplicating it is how the user gets a version they can change - and a deletion of the user's own brush is **confirmed** before it happens. The **live brush and the stored preset stay apart**: applying a preset copies its values into the brush, so an edit of the brush is visibly *not* an edit of the preset until it is written back, and the panel says which preset is in effect and whether it has been changed. A **library file** (`.json`) exports the user's brushes and imports somebody else's: a file that is not a library, one from a newer version, one that is too large and one with more than 200 brushes are **refused with a message**, a malformed entry is skipped and the rest is imported, and an imported brush gets a **fresh id and a name that does not clash**. Everything is editor state: applying or managing a preset adds no history step and never marks the drawing unsaved. Settings stay **version 1** - the three new fields are additive and a file without them loads unchanged. |
+| `feat/agent18-gradient-editing` | **On-canvas gradient editing** - a committed gradient can now be **selected and its geometry edited** on the canvas. The gradient tool owns a selection of its own: a press on the gradient's **axis** (linear) or its **circle** (radial) selects it - the hit test is against the *geometry*, because a gradient paints its whole layer - and the **two handles** appear: the ends of the axis, or the centre and the radius handle. Dragging a handle replaces the record in place and re-rasterizes the layer, so the gradient follows **live**; the release records **one** undo step (`GradientEditCommand`, which carries the committed record and the one that replaced it), and a cancel - `pointercancel`, a tool switch or `Esc` - puts the committed record back **exactly**, with no history entry and no dirty flag. The handles are a **display overlay**: painted on the display canvas, never in a layer surface, a PNG export or the project file. The handle the user last grabbed is **focused**, and the arrow keys nudge it by one document pixel (`Shift`: ten), coalescing into one undo step. The status bar reads the selected gradient's geometry. **No project-format change** - the record already stored the two points the renderer draws from. The stops of a *committed* gradient are still not editable: the middle-stop editor describes the **next** drag, so an on-canvas stop marker would need a second, different data path. |
+| `feat/agent04-panel-manager` | **Panel manager** - the shell's **shared panel registry** (`core/shell/panelRegistry.ts`) makes a panel **register itself**, so adding one to the shell means editing the panel's own module and nothing else, and the shell renders whatever the registry says. A **Panels** menu shows and hides the panels, folds them to their header and resets the layout; *Show All*, *Hide All* and *Reset Layout* sit in the same menu, and the two that would change nothing are disabled. **Hiding a panel gives the space straight back to the canvas** - the column's width follows its content - and it never loses the panel's state: a panel that keeps React state of its own stays mounted while it is hidden, and a panel derived from the document is unmounted. The layout is **shell state**, so showing a panel is not an edit (no history step, no dirty flag), and it is persisted in the **settings file as a section** under `panels`, so there is one settings file and one writer. The menu bar is keyboard driven: the arrow keys open a menu and walk its items, the disabled items are skipped, and `Escape` closes it and puts the focus back. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -147,8 +150,20 @@ visual-regression harness.
   scan with a status-bar notice.
 - **Gradients** (`G`): drag to paint linear or radial (toolbar **Radial**
   switch) from the brush colour to the **To** colour, at brush opacity. Real
-  preview element, one undo step, cancel removes it. Two stops only; paints the
-  whole layer in element order; no stop editor, no angle snapping.
+  preview element, one undo step, cancel removes it. Paints the whole layer in
+  element order; no angle snapping. The middle-stop editor adds middle stops
+  for the **next** drag.
+  A committed gradient can be **edited on the canvas**: press its **axis**
+  (linear) or its **circle** (radial) to select it - the hit test is against
+  the geometry, because a gradient paints the whole layer - and its **two
+  handles** appear (the ends of the axis, or the centre and the radius
+  handle). Dragging a handle previews the new geometry live and records **one**
+  undo step on the release; `Esc` (or a lost capture) restores the committed
+  gradient exactly and records nothing. The handles are a display overlay only:
+  no layer surface, no PNG export, no project file. The last grabbed handle is
+  **focused**, and the arrow keys nudge it (1 px, `Shift` 10 px, coalesced into
+  one undo step); the status bar reads the selected gradient's geometry. The
+  stops of a committed gradient are still not editable.
 - **Selection/transform** (`M`): marquee or click selects whole strokes of the
   active layer; drag moves them; the four **corner handles** scale the
   selection and the **rotation handle** above the frame turns it; arrow keys
@@ -218,6 +233,35 @@ visual-regression harness.
   texture** (the strength of the bristle lanes) — all four brush and eraser
   only — colour + 8-swatch palette, pressure size and pressure
   opacity toggles. All settings are captured per stroke.
+- **Brush library**: a **Brushes** panel lists the saved brushes and the
+  **built-in** ones, with a search box, an order (name, recent use, size) and a
+  **starred** filter. Each row shows the **real tip** — the mark the preset
+  paints, drawn by the renderer's own code from the preset's own brush — plus
+  its name, whether it is the brush in effect and whether the brush has been
+  changed since it was applied. A brush can be saved, renamed, overwritten
+  (**update**), duplicated, deleted (with a confirmation), starred, and
+  exported to or imported from a **library file**. A **built-in brush is code**:
+  it cannot be renamed, overwritten or deleted, but it can be starred and
+  duplicated. Applying a brush is not an edit: no history step, no dirty flag.
+- **Brush controls**: every numeric property is a slider **and** an exact number
+  box. The number box is a text field first: an empty or half-typed value never
+  reaches the editor, and a value outside the range is corrected in place
+  rather than silently ignored. The keyboard moves a value in three steps — an
+  arrow key by the field's own step, `Shift`+arrow by a tenth of it (the fine
+  adjustment), `Page Up`/`Page Down` by ten times it — and the brush size
+  moves proportionally, so the step is a pixel at 6 px and ten percent at
+  100 px. **Reset** restores the brush to the defaults it came from: the
+  preset's own values when the brush is based on a preset, the factory default
+  otherwise. The preset's defaults and the edited values are kept apart, so
+  editing a slider does not change the preset until it is written back.
+- **Live brush preview**: the options bar carries a swatch that shows what the
+  current brush draws, on the document's own paper. It is drawn by the
+  engine's own primitives — the segment rasterizer, the stamp engine's dab
+  plan, the hardness feather and the grain — so a property that changes a
+  stroke changes the swatch the same way. It is redrawn when the brush
+  changes and at no other time: it never touches the document, and no pointer
+  sample reaches it. The swatch is zoomed so the brush fits it, so it shows
+  the *shape* of the mark; the size is read from the number box beside it.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
   unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
@@ -235,6 +279,14 @@ visual-regression harness.
   size, so the pattern is the same in document pixels at every `rasterScale`.
 - **Navigation**: wheel scroll, `Shift+Wheel` horizontal, `Ctrl`/`Alt+Wheel`
   zoom at cursor, pan tool / middle drag, zoom buttons, actual size, fit.
+- **Navigator**: a panel under the layers shows the whole document with the
+  visible area marked. A click outside the marked area jumps the view there, a
+  drag inside it keeps the artwork under the pointer, and the arrow keys pan
+  it when it has the focus. The panel shows the zoom and offers **Fit** and
+  **Centre**. It is a view of the document: no pixels change, no history step,
+  no dirty flag, and nothing reaches an export. The overview is a downscale of
+  the cached composite and is rebuilt only when the document changes, so a pan
+  or a zoom costs nothing.
 - **Layers**: add, duplicate, delete, rename (double-click), reorder, visibility,
   opacity, blend mode (`Normal`, `Multiply`, `Screen`) and selection. A blend
   mode combines the finished layer with the paper and every lower layer. Layer
@@ -242,6 +294,15 @@ visual-regression harness.
   while a gesture is in flight**, so a release can never commit into a layer
   that was removed mid-drag.
 - **History**: 200 commands; one step per gesture; a slider drag is one step.
+- **Panels**: the **Panels** menu shows and hides the side panels (the colour
+  wheel, the layers, the navigator), folds them to their header and resets the
+  layout; *Show All*, *Hide All* and *Reset Layout* sit beside them. Hiding a
+  panel gives its space straight back to the canvas, and it never loses the
+  panel's state: a panel that keeps state of its own stays mounted while it is
+  hidden, and a panel that reads the drawing is unmounted. The layout is shell
+  state (showing a panel is not an edit) and it survives a restart in the
+  settings file, under the `panels` key. The menu bar is keyboard driven: the
+  arrow keys open a menu and walk its items, and `Escape` closes it.
 - **Projects**: `File → New/Open/Save/Save As` (`Ctrl+O`, `Ctrl+S`,
   `Ctrl+Shift+S`), versioned `.paka` with ordered layer content (stroke samples,
   fill masks, gradient geometry), atomic writes, dirty indicator, discard guard.
@@ -266,8 +327,12 @@ src/
                 project (file commands/dialogs/title/close guard),
                 shapes, fill, gradient
   hooks/        React bindings, keyboard shortcuts, native environment
-  state/        editorStore (snapshot + intents) and context
+  state/        editorStore (snapshot + intents) and context,
+                panelStore (the panel layout) and context
   core/
+    panels/     the panel manager's adapter over the shell's panel registry,
+                the layout rules and the layout's settings section
+    shell/      the shared shell contracts: the panel registry, the slots
     document/   document/layer metadata, ordered element store, selection,
                 guides (the guide model, geometry and document operations),
                 selectionTransform (the scale/rotate geometry) and
@@ -465,6 +530,21 @@ Key files for the next slice (directional / per-dab stamp textures):
   mask. Redo/reopen replay the mask, never re-run the flood.
 - **A gradient is geometry + stops**, not pixels; radial = fixed centre, radius
   by distance, inner radius 0. Endpoints clamp to the document.
+- **A gradient's geometry is editable, and the edit is a record replacement.**
+  The gradient tool owns a selection of its own, and the selection is hit
+  against the gradient's **geometry** (the axis of a linear gradient, the circle
+  of a radial one) because a gradient paints its whole layer: every point of the
+  paper belongs to it, so only the geometry can say which one is meant. A drag
+  replaces the record in place - same id, same place in the painting order -
+  and the release records **one** `GradientEditCommand` carrying both the
+  committed record and the one that replaced it, so undo restores the original
+  exactly. A cancel restores the committed record **exactly** and records
+  nothing. The handles and the line are a **display overlay**: painted on the
+  display canvas, never in a layer surface, an export or the project file. The
+  selection is editor state, so it is dropped when the tool, the layer or the
+  gradient itself goes away. The stops of a committed gradient are not editable:
+  the middle-stop editor describes the **next** drag, so its stops are editor
+  state and an on-canvas stop marker would need a second data path.
 - **Editor options describe the next gesture and are not serialized**:
   `shapeFill`, `shapeSides` (3-24, default 5), `shapeInnerRatio` (0.05-1,
   default 0.5), `shapeRotation` (0-360°, default 0), `fillTolerance` (default
@@ -539,8 +619,13 @@ Product:
   profile in the packaged app before the surfaces can be restructured; measured
   numbers, their environmental limits and that recipe are in
   [PERFORMANCE_AUDIT_2026-10-20.md](PERFORMANCE_AUDIT_2026-10-20.md).
-- Gradients: two stops, whole-layer, no stop editor, no angle snapping, no
-  transparent stop, not selectable (cannot move/duplicate/flip).
+- Gradients: whole-layer, no stop editor for a *committed* gradient (the
+  middle-stop editor describes the next drag), no angle snapping, no
+  transparent stop, and the gradient cannot be moved/duplicated/flipped - but
+  its **geometry is editable**: the gradient tool selects a gradient by its
+  axis (linear) or its circle (radial) and shows two handles, and a handle
+  drag previews live, commits as one undo step and is restored exactly by a
+  cancel.
 - Fills: binary mask, no feather/gap-closing, no pre-commit preview, not
   selectable.
 - Hardness: a single Gaussian feather of the finished silhouette, so the edge
@@ -552,6 +637,14 @@ Product:
 - Texture: one grain post-pass over the finished coverage, not an image-based
   texture. The stamp engine's own `stampTexture` is a per-dab texture, but it
   is a *procedural* bristle pattern, not a picture.
+- **No flow.** A stroke's opacity is applied once, when its finished coverage
+  composites, so a stroke never darkens where it overlaps itself. A flow is
+  the per-dab build-up that *would* darken a slow stroke, and the coverage
+  union cannot carry a per-dab alpha. There is therefore **no flow control**,
+  and no taper, cap style or size jitter either: a control for a property the
+  engine ignores is worse than no control at all. The list is kept in
+  `src/core/brushes/brushProperties.ts` with the reason and the work that
+  would close each gap, and the brush engine (agents 11-14) owns them.
 - The stamp engine: round dabs only - no elongated, offset or tip shapes, no
   scatter, rotation or jitter, and no per-dab opacity (a
   stroke still gets one alpha). A stamped stroke's cost grows with the square of

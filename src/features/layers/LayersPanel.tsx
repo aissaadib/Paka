@@ -4,6 +4,9 @@
  * Layer metadata lives in the document model; this panel only issues intents.
  * The list is shown top-first (top of the stack at the top), matching how the
  * canvas composites.
+ *
+ * The panel registers itself with the shell's registry, so adding a panel to
+ * the shell means editing the panel's own module and nothing else.
  */
 
 import { useMemo } from "react";
@@ -18,6 +21,7 @@ import {
 import { Panel } from "../../components/panels/Panel";
 import { IconButton } from "../../components/toolbar/IconButton";
 import { SliderField } from "../../components/toolbar/SliderField";
+import { registerPanel } from "../../core/shell/panelRegistry";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { LayerRow } from "./LayerRow";
 import "./layers.css";
@@ -160,3 +164,18 @@ export function LayersPanel() {
     </Panel>
   );
 }
+
+registerPanel({
+  id: "layers",
+  title: "Layers",
+  slot: "right",
+  order: 10,
+  icon: "layers",
+  // Everything the panel shows comes from the document, so there is no state
+  // to lose by unmounting it.
+  mounting: "when-visible",
+  collapsible: true,
+  grow: true,
+  description: "The layer list, its blend mode and its opacity.",
+  render: () => <LayersPanel />,
+});
