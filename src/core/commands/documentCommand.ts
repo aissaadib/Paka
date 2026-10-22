@@ -15,6 +15,15 @@
  */
 
 import { createId } from "../../utils/id";
+import { updateLayer } from "../document/document";
+import {
+  dissolveGroup,
+  findLayer,
+  groupLayers,
+  isGroup,
+  moveLayerIntoGroup,
+  moveLayerOutOfGroup,
+} from "../document/layerGroups";
 import type { DrawingDocument, LayerElement, LayerId } from "../document/types";
 import type { Command } from "./types";
 
@@ -63,6 +72,10 @@ export interface DocumentCommandSpec {
    * active layer would also drop the user's current selection. Structural
    * commands (add/delete/duplicate) leave it off: they own which layer becomes
    * active.
+   *
+   * The layer-group commands set it too: grouping, renaming, moving and
+   * dissolving a group never remove a layer, so the layer the user is drawing
+   * on stays the active one, before and after the undo.
    */
   readonly preserveActiveLayer?: boolean;
 }
@@ -91,7 +104,7 @@ function resolveActiveLayer(
   if (
     active === null ||
     active === target.activeLayerId ||
-    !target.layers.some((layer) => layer.id === active)
+    !findLayer(target.layers, active)
   ) {
     return target;
   }
@@ -172,4 +185,183 @@ function mergeInto(current: DocumentCommandSpec, next: Command, host: DocumentCo
     },
     host,
   );
+}
+
+// ---------------------------------------------------------------- layer groups
+
+/**
+ * Why a layer-group change was refused.
+ *
+ * - `gesture`: a stroke, fill, gradient or selection gesture owns content
+ *   that is not in history yet. A layer change could remove the layer the
+ *   preview is painted into, so the release would commit into a layer that is
+ *   no longer part of the document. The safe answer is to change nothing.
+ * - `invalid`: the request itself cannot be carried out - an unknown layer, a
+ *   group that does not exist, layers that are not siblings, a move that would
+ *   make a group its own ancestor.
+ */
+export type LayerGroupRefusal = "gesture" | "invalid";
+
+/** What the engine knows about the state a layer-group change happens in. */
+export interface LayerGroupCommandOptions {
+  /**
+   * True while a stroke, fill, gradient or selection gesture is in flight.
+   *
+   * The engine owns that state, so it passes it in: a layer change is refused
+   * while a gesture is in flight, exactly as it is for every other layer
+   * operation.
+   */
+  readonly gestureInFlight?: boolean;
+}
+
+/** The result of asking for a layer-group change. */
+export type LayerGroupCommandOutcome =
+  | {
+      readonly ok: true;
+      /** The command: one undoable step. */
+      readonly command: Command;
+      /** The document the command applies. */
+      readonly after: DrawingDocument;
+    }
+  | { readonly ok: false; readonly reason: LayerGroupRefusal };
+
+/** Where a layer is moved to. */
+export type GroupMoveTarget =
+  /** Into the given group, at the top of it. */
+  | { readonly kind: "into"; readonly groupId: LayerId }
+  /** Out of the group that holds it, into the group above that one. */
+  | { readonly kind: "out" };
+
+/**
+ * Puts layers into a new group.
+ *
+ * The layers must be siblings, and there must be at least two of them; the
+ * group takes the place of the topmost of them and keeps their order. Their
+ * content is not touched: a group owns no content of its own, so the pixels
+ * stay on the same layers.
+ */
+export function createGroupLayersCommand(
+  document: DrawingDocument,
+  layerIds: readonly LayerId[],
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCommandOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const after = groupLayers(document, layerIds);
+  if (after === document) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after,
+    command: createDocumentCommand(
+      { label: "Group Layers", before: document, after, preserveActiveLayer: true },
+      host,
+    ),
+  };
+}
+
+/**
+ * Renames a group.
+ *
+ * A rename is a metadata change: it never touches the pixels, and undoing it
+ * keeps the active layer, so the user stays on the layer they are looking at.
+ */
+export function createRenameGroupCommand(
+  document: DrawingDocument,
+  groupId: LayerId,
+  name: string,
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCommandOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const trimmed = name.trim();
+  const group = findLayer(document.layers, groupId);
+  if (trimmed === "" || !group || !isGroup(group)) {
+    return { ok: false, reason: "invalid" };
+  }
+  const after = updateLayer(document, groupId, { name: trimmed });
+  if (after === document) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after,
+    command: createDocumentCommand(
+      { label: "Rename Group", before: document, after, preserveActiveLayer: true },
+      host,
+    ),
+  };
+}
+
+/**
+ * Moves a layer into a group, or out of the group that holds it.
+ *
+ * The move is refused when it would break the tree: a group may not be moved
+ * into itself, nor into one of its own descendants - a child cannot be its
+ * own ancestor.
+ */
+export function createMoveGroupMemberCommand(
+  document: DrawingDocument,
+  layerId: LayerId,
+  target: GroupMoveTarget,
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCommandOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const after =
+    target.kind === "into"
+      ? moveLayerIntoGroup(document, layerId, target.groupId)
+      : moveLayerOutOfGroup(document, layerId);
+  if (after === document) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after,
+    command: createDocumentCommand(
+      { label: "Move Layer", before: document, after, preserveActiveLayer: true },
+      host,
+    ),
+  };
+}
+
+/**
+ * Dissolves a group: its children take its place, in the same order.
+ *
+ * The children's pixels are untouched - a group owns no content of its own -
+ * so the command moves no element data at all: it is a change of the tree
+ * alone, and undoing it puts the tree back exactly as it was.
+ */
+export function createDissolveGroupCommand(
+  document: DrawingDocument,
+  groupId: LayerId,
+  host: DocumentCommandHost,
+  options: LayerGroupCommandOptions = {},
+): LayerGroupCommandOutcome {
+  if (options.gestureInFlight) {
+    return { ok: false, reason: "gesture" };
+  }
+  const group = findLayer(document.layers, groupId);
+  if (!group || !isGroup(group)) {
+    return { ok: false, reason: "invalid" };
+  }
+  const after = dissolveGroup(document, groupId);
+  if (after === document) {
+    return { ok: false, reason: "invalid" };
+  }
+  return {
+    ok: true,
+    after,
+    command: createDocumentCommand(
+      { label: "Ungroup Layers", before: document, after, preserveActiveLayer: true },
+      host,
+    ),
+  };
 }

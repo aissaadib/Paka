@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
+import { groupLayers } from "../core/document/layerGroups";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
 import type {
   FillPatchRecord,
@@ -152,6 +153,7 @@ describe("serializeProject", () => {
       "blendMode",
       "elements",
       "id",
+      "kind",
       "name",
       "opacity",
       "visible",
@@ -1039,6 +1041,7 @@ interface RawLayer {
   visible: boolean;
   opacity: number;
   blendMode: string;
+  kind: string;
   elements: RawStroke[];
 }
 
@@ -1077,6 +1080,7 @@ function rawProject(): RawProject {
         visible: true,
         opacity: 1,
         blendMode: "normal",
+        kind: "layer",
         elements: [
           {
             kind: "stroke",
@@ -1570,8 +1574,9 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
-    // the extra blend modes, version 12 on the pressure curve and version 13
-    // on the brush tip; none of those bumps was for the guides, and a
+    // the extra blend modes, version 12 on the pressure curve, version 13 on
+    // the brush tip and version 13 on the layer groups; none of those bumps
+    // was for the guides, and a
     // version-9 file that carries them still opens.
     expect(PROJECT_VERSION).toBe(13);
 
@@ -1659,5 +1664,150 @@ describe("the composition guides in the project file", () => {
     expect(parsed.project.document.guides[0].id).toBe("guide-9");
     // The next generated guide id walks past the one the file carried.
     expect(createId("guide")).not.toBe("guide-9");
+  });
+});
+
+/**
+ * The layer groups in the project file.
+ *
+ * Version 13 added the group: a layer entry carries a `kind`, and a group
+ * carries the layers it holds. A version-12 reader knows neither: it would
+ * read a group as a paintable layer with no content, and every layer inside
+ * the group would be lost from the picture - a different drawing, not merely
+ * an incomplete one - so the version was bumped and an older reader refuses
+ * the file.
+ */
+describe("the layer groups in the project file", () => {
+  /** A document with two layers in a group, and a stroke on the lower one. */
+  function groupedProject() {
+    const base = createDocument({ name: "Study", width: 640, height: 480 });
+    const withLayer = addLayer(base);
+    const document = groupLayers(withLayer, [
+      withLayer.layers[0].id,
+      withLayer.layers[1].id,
+    ]);
+    const group = document.layers[0];
+    const [bottom, top] = group.children;
+    const stroke = strokeFor(bottom.id);
+
+    return {
+      document,
+      group,
+      bottom,
+      top,
+      stroke,
+      text: serializeProject(document, storeOf([[bottom.id, [stroke]]])),
+    };
+  }
+
+  it("round-trips a group with the layers it holds", () => {
+    const { document, bottom, top, text } = groupedProject();
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    // The tree comes back exactly as it was written.
+    expect(parsed.project.document).toEqual(document);
+    expect(parsed.project.document.layers[0].kind).toBe("group");
+    expect(parsed.project.document.layers[0].children.map((child) => child.id)).toEqual([
+      bottom.id,
+      top.id,
+    ]);
+    // The group's children keep their order.
+    expect(parsed.project.document.layers[0].children.map((child) => child.name)).toEqual([
+      bottom.name,
+      top.name,
+    ]);
+    // The content is the children's, not the group's.
+    expect(parsed.project.strokes.map((stroke) => stroke.layerId)).toEqual([bottom.id]);
+    expect(parsed.project.elements.map((element) => element.layerId)).toEqual([bottom.id]);
+  });
+
+  it("writes the kind of every layer, and the children of a group", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as {
+      layers: Array<Record<string, unknown> & { children?: Array<Record<string, unknown>> }>;
+    };
+
+    const [group] = payload.layers;
+    expect(group.kind).toBe("group");
+    expect(group.elements).toBeUndefined();
+    expect(group.children).toHaveLength(2);
+    for (const child of group.children ?? []) {
+      expect(child.kind).toBe("layer");
+      expect(child.elements).toBeDefined();
+    }
+  });
+
+  it("refuses the new file in a reader that only knows version 12", () => {
+    const { text } = groupedProject();
+
+    // A version-12 reader would read the group as a paintable layer with no
+    // content, and lose the layers inside it. It must refuse the file.
+    const parsed = parseProject(text, { maxVersion: 12 });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("newer version of Paka");
+  });
+
+  it("refuses a file that claims an old version and carries a group", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { version: number };
+    payload.version = 12;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("version 13");
+  });
+
+  it("refuses an unknown layer kind", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    payload.layers[0].kind = "folder";
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("unknown kind");
+  });
+
+  it("refuses a group that carries elements, and a layer that carries layers", () => {
+    const { text } = groupedProject();
+
+    const withElements = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    withElements.layers[0].elements = [];
+    expect(parseProject(JSON.stringify(withElements)).ok).toBe(false);
+
+    const withChildren = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    withChildren.layers[0].kind = "layer";
+    expect(parseProject(JSON.stringify(withChildren)).ok).toBe(false);
+  });
+
+  it("refuses a group that lists no layers", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    delete payload.layers[0].children;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("does not list the layers it holds");
+  });
+
+  it("refuses two layers that share an id, even across a group", () => {
+    const { text, bottom } = groupedProject();
+    const payload = JSON.parse(text) as {
+      layers: Array<Record<string, unknown> & { children?: Array<Record<string, unknown>> }>;
+    };
+    const [group] = payload.layers;
+    const children = group.children ?? [];
+    const second = children[1];
+    if (second) {
+      second.id = bottom.id;
+    }
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("share the id");
   });
 });

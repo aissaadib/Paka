@@ -33,6 +33,16 @@ export type LayerBlendMode =
   | "difference"
   | "exclusion";
 
+/**
+ * What a node in the document's layer tree is.
+ *
+ * - `layer` is a **paintable** layer: it owns content (strokes, fill patches,
+ *   gradients) and is composited on its own.
+ * - `group` is a **container**: it holds other nodes and paints nothing
+ *   itself. Its children's pixels are composited in its place.
+ */
+export type LayerKind = "layer" | "group";
+
 export interface Layer {
   readonly id: LayerId;
   readonly name: string;
@@ -40,6 +50,22 @@ export interface Layer {
   /** Layer opacity in `[0, 1]`. */
   readonly opacity: number;
   readonly blendMode: LayerBlendMode;
+  /**
+   * `"layer"` for a paintable layer, `"group"` for a container of layers.
+   *
+   * The kind is part of the model, not a display flag: a group owns no
+   * content, and the compositing order of the whole document is the
+   * depth-first walk of the tree.
+   */
+  readonly kind: LayerKind;
+  /**
+   * The nodes this layer holds, bottom-first.
+   *
+   * Empty for a paintable layer. A group may hold groups, so the tree may
+   * nest; the rules that keep it a tree - the order, and the rule that a
+   * child cannot be its own ancestor - live in `layerGroups.ts`.
+   */
+  readonly children: readonly Layer[];
 }
 
 /** Mutable fields of a layer that user actions may change. */
@@ -86,7 +112,14 @@ export interface DrawingDocument {
   readonly height: number;
   /** Paper color painted below all layers. */
   readonly background: string;
-  /** Bottom-first layer order: index 0 is the bottom-most layer. */
+  /**
+   * Bottom-first layer order: index 0 is the bottom-most layer.
+   *
+   * The list is the **root of the layer tree**: a node may hold children
+   * (a group), and the whole document is walked depth-first, bottom-first,
+   * to find the layers that paint. The rules of the tree live in
+   * `layerGroups.ts`.
+   */
   readonly layers: readonly Layer[];
   readonly activeLayerId: LayerId | null;
   /**

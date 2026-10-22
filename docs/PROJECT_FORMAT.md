@@ -81,6 +81,7 @@ added without changing the model.
       "visible": true,
       "opacity": 1,
       "blendMode": "normal",
+      "kind": "layer",
       "elements": [
         {
           "kind": "stroke",
@@ -199,6 +200,25 @@ added without changing the model.
           "opacity": 0.5
         }
       ]
+    },
+    {
+      "id": "group-1",
+      "name": "Group 1",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "kind": "group",
+      "children": [
+        {
+          "id": "layer-2",
+          "name": "Ink",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "normal",
+          "kind": "layer",
+          "elements": []
+        }
+      ]
     }
   ]
 }
@@ -211,7 +231,9 @@ tracing them, so the interior is solid rather than empty. The fourth element is 
 bucket fill: it paints its opaque colour through the 4x3 coverage mask at
 `(304, 404)` and is ordered after the strokes, so it covers them. The gradient is
 a half-opacity linear ramp across the document, ordered after everything else, so
-it paints over them on that layer.
+it paints over them on that layer. The second layer entry is a **group**: it
+holds another layer, and paints nothing itself - the layer it holds is
+composited in the group's place.
 
 ### `format`, `version`
 
@@ -259,12 +281,25 @@ compositing order. A file must contain at least one layer.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `id` | string | Layer id; must be unique within the file. |
+| `id` | string | Layer id; must be unique within the file, groups included. |
 | `name` | string | Shown in the layers panel. |
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
 | `blendMode` | string | `"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` or `"exclusion"`; applied to the whole layer against the paper and the layers below it. |
-| `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
+| `kind` | string | `"layer"` (a paintable layer) or `"group"` (a container of layers). Required in version 13; absent before it, where every layer is a paintable layer. |
+| `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. Present on a paintable layer, absent on a group. |
+| `children` | array | The layers a group holds, bottom-first. Present on a group, absent on a paintable layer. A group may hold groups, so the list nests. |
+
+The list is a **tree**: a layer entry is either a paintable layer or a group,
+and a group carries the layers it holds in `children`. A group owns no content
+of its own - the layers it holds carry the pixels - so a group has no
+`elements` and a paintable layer has no `children`. A reader refuses a group
+that carries elements, and a paintable layer that carries other layers.
+
+The **compositing order** is the depth-first, bottom-first walk of the tree:
+a group is composited in the place it sits, and the layers it holds are
+composited in their own order, in the group's place. A reader must not
+flatten the tree, drop a group or reorder the layers inside one.
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
 discriminator: `"stroke"`, `"fill"` or `"gradient"`. A reader rejects an unknown
@@ -273,7 +308,8 @@ ordered list under `strokes` with no `kind` (every entry there is a stroke).
 
 An element's layer is implied by the layer that contains it; there is no
 `layerId` field inside an element, which makes it impossible for content to
-disagree with its own layer.
+disagree with its own layer. The same is true of a group: its content belongs
+to the layers it holds, never to the group itself.
 
 ### `elements[]`
 
@@ -434,6 +470,10 @@ looks like:
 - document dimensions outside 8-8192 per side, more than 16,777,216 pixels in
   total, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
+- a layer entry with no `kind` in a version-13 file, an unknown `kind`, a group
+  or a `children` list in a file that claims a version below 13, a group that
+  carries `elements`, a paintable layer that carries `children`, and a group
+  that lists no layers;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
 - a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"` or
   `"gradient"`, or a gradient in a version-4 file;
@@ -467,8 +507,10 @@ looks like:
 
 - a missing/blank document name → `"Untitled"`;
 - an unusable `background` → white;
-- a missing/blank layer name → `"Layer N"`;
-- an `activeLayerId` that is not in the file → the bottom layer is selected;
+- a missing/blank layer name → `"Layer N"` (a group is renamed `"Group N"`);
+- an `activeLayerId` that is not in the file → the bottom **paintable** layer is
+  selected (a group owns no content, so it cannot be the destination of a
+  drawing);
 - a missing/non-numeric `startTime` → `0`;
 - a missing `erase` flag → the stroke paints (which is what every version-1
   stroke does);
@@ -534,7 +576,7 @@ Two further guarantees:
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
 | 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
-| 13 | Requires `tip` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the `round` tip (the plain disc they were written by). | The current version; what this build always writes. |
+| 13 | Adds `kind` to every layer entry and `children` to a group, so `layers[]` is a tree; and requires `tip` on every stroke brush, the shape a stamped dab is masked with. Reads version-1 to -12 files unchanged (they have no `kind` and no `tip`: every one of their layers is a paintable layer and their strokes are plain discs). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -581,6 +623,17 @@ Two further guarantees:
   with the `round` tip, which is exactly the coverage they were written by. The
   tip is a closed set of five shapes, so a shape a build does not know is
   refused rather than drawn as something else.
+- **Layer groups are also why version 13 exists.** A layer entry may now be a
+  `group`: a container that holds other layers and paints nothing itself. A
+  version-12 reader knows neither the `kind` field nor the `children` list: it
+  would read a group as a paintable layer with no content, and every layer
+  inside the group would be missing from the picture - a different drawing, not
+  merely an incomplete one. So the version was bumped, and a version-12 reader
+  refuses the file with "created by a newer version of Paka" instead of
+  mis-reading it. Version-1 to -12 files have no `kind` and no `children`, and
+  every one of their layers is a paintable layer, exactly as they were written.
+  A file that claims an older version and carries a group is refused too, for
+  the same reason.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
@@ -688,6 +741,10 @@ The output has no border, no zoom and no surrounding UI.
   `color-dodge`, `darken`, `lighten`, `difference`, `exclusion`). Hue,
   saturation, color and luminosity are not exposed, and there are no
   group/clipping contexts or alpha inheritance.
+- **A group carries no compositing of its own yet.** The file can hold a
+  group and the tree round-trips exactly, but a group's opacity, visibility and
+  blend mode are not applied to the layers it holds: the layers are composited
+  as they are.
 - **No autosave and no recovery file.** An unclean exit loses unsaved work; the
   close guard is the only protection.
 - **Metadata is minimal**: no author, no timestamps, no thumbnails, no colour

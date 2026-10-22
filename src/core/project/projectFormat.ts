@@ -50,6 +50,7 @@ import type {
   StrokeSource,
 } from "../document/types";
 import { isLayerBlendMode } from "../document/blendModes";
+import { isGroup, paintableLayers } from "../document/layerGroups";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import { isBrushTipShape } from "../rendering/brushTip";
@@ -118,12 +119,24 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
- * Version 13: a stroke's `brush` carries `tip`, the shape a stamped dab is
+ * Version 13: two changes, each of which a version-12 reader cannot ignore.
+ *
+ * First, a stroke's `brush` carries `tip`, the shape a stamped dab is
  * masked with. It changes how a stamped stroke's samples are rasterized, so a
  * version-12 reader ignores it and draws the same dabs as plain discs - a
  * different picture - and the version was bumped. Version-1 to -12 files open
  * unchanged with the `round` tip, which is exactly the coverage they were
  * written by.
+ *
+ * Second, a layer may be a **group** - a container that holds other
+ * layers and paints nothing itself. A layer entry gained a `kind` field
+ * ("layer" or "group") and a group entry carries a `children` list. A
+ * version-12 reader knows neither: it would read a group as a paintable layer
+ * with no content, and every layer inside the group would be lost from the
+ * picture - a different drawing, not merely an incomplete one - so the
+ * version was bumped. Version-1 to -12 files open unchanged: they have no
+ * `kind` and no `children`, and every one of their layers is a paintable
+ * layer, exactly as they were written.
  *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
@@ -198,9 +211,31 @@ export interface SerializedLayer {
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: string;
-  /** Painting order: strokes, fills and gradients interleave exactly as made. */
-  readonly elements: readonly SerializedElement[];
+  /**
+   * `"layer"` for a paintable layer, `"group"` for a container of layers.
+   *
+   * Required in version 13. A version-12 file has no `kind`: every one of
+   * its layers is a paintable layer.
+   */
+  readonly kind: SerializedLayerKind;
+  /**
+   * Painting order: strokes, fills and gradients interleave exactly as made.
+   *
+   * Present on a paintable layer, absent on a group: a group owns no content
+   * of its own.
+   */
+  readonly elements?: readonly SerializedElement[];
+  /**
+   * The layers a group holds, bottom-first.
+   *
+   * Present on a group, absent on a paintable layer. A group owns no content
+   * of its own: the layers it holds carry the content.
+   */
+  readonly children?: readonly SerializedLayer[];
 }
+
+/** The kinds a layer entry may have. */
+export type SerializedLayerKind = "layer" | "group";
 
 export interface SerializedProject {
   readonly format: string;
@@ -486,17 +521,40 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         position: guide.position,
       })),
     },
-    layers: document.layers.map((layer) => ({
+    layers: document.layers.map((layer) => serializeLayer(layer, strokes)),
+  };
+
+  return JSON.stringify(payload);
+}
+
+/**
+ * Serializes one node of the layer tree.
+ *
+ * A **group** is written as a container: its `children` carry the layers it
+ * holds, and it carries no elements of its own. A paintable layer is written
+ * with its elements and no children.
+ */
+function serializeLayer(layer: Layer, strokes: StrokeSource): SerializedLayer {
+  if (isGroup(layer)) {
+    return {
       id: layer.id,
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
       blendMode: layer.blendMode,
-      elements: strokes.listElements(layer.id).map(serializeElement),
-    })),
+      kind: "group",
+      children: layer.children.map((child) => serializeLayer(child, strokes)),
+    };
+  }
+  return {
+    id: layer.id,
+    name: layer.name,
+    visible: layer.visible,
+    opacity: layer.opacity,
+    blendMode: layer.blendMode,
+    kind: "layer",
+    elements: strokes.listElements(layer.id).map(serializeElement),
   };
-
-  return JSON.stringify(payload);
 }
 
 function serializeElement(element: LayerElement): SerializedElement {
@@ -640,90 +698,30 @@ function readProject(
   const layers: Layer[] = [];
   const elements: LayerElement[] = [];
   const strokes: StrokeRecord[] = [];
-  const seenLayerIds = new Set<string>();
-  let sampleCount = 0;
-  let fillPixelCount = 0;
+  const state: LayerReadState = {
+    seenLayerIds: new Set<string>(),
+    elements,
+    strokes,
+    warnings,
+    sampleCount: 0,
+    fillPixelCount: 0,
+    layerCount: 0,
+    groupCount: 0,
+  };
 
-  root.layers.forEach((rawLayer, layerIndex) => {
-    const label = `Layer ${layerIndex + 1}`;
-    const record = asRecord(rawLayer, label);
+  const tree = readLayerTree(
+    root.layers,
+    "Layer",
+    version,
+    width,
+    height,
+    state,
+    maxSamples,
+    maxFillPixels,
+  );
+  layers.push(...tree);
 
-    const id = readId(record.id, "layer");
-    if (seenLayerIds.has(id)) {
-      fail(`Two layers in this project share the id "${id}".`);
-    }
-    seenLayerIds.add(id);
-
-    let layerName = `Layer ${layerIndex + 1}`;
-    if (typeof record.name === "string" && record.name.trim() !== "") {
-      layerName = record.name;
-    } else {
-      warnings.push(`${label} had no name and was renamed.`);
-    }
-
-    const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
-    const visible = readBoolean(record.visible, `${label} visibility`);
-    const blendMode = readString(record.blendMode, `${label} blend mode`);
-    if (!isLayerBlendMode(blendMode)) {
-      fail(`${label} uses the unsupported blend mode "${blendMode}".`);
-    }
-
-    layers.push({ id, name: layerName, visible, opacity, blendMode });
-
-    // Version 4 uses one ordered `elements` list. Older files have a `strokes`
-    // array only, which is exactly a list of stroke elements in the same order.
-    const rawElements =
-      version >= 4
-        ? readElementList(record.elements, `${label} elements`)
-        : readElementList(record.strokes, `${label} strokes`);
-
-    for (const [elementIndex, rawElement] of rawElements.entries()) {
-      const elementLabel = `${label}, element ${elementIndex + 1}`;
-      const element = asRecord(rawElement, elementLabel);
-
-      if (version >= 4) {
-        const kind = readString(element.kind, `${elementLabel} kind`);
-        if (kind === "fill") {
-          const patch = readFillPatch(
-            element,
-            elementLabel,
-            id,
-            width,
-            height,
-            fillPixelCount,
-            maxFillPixels,
-          );
-          fillPixelCount += patch.width * patch.height;
-          elements.push(patch);
-          continue;
-        }
-        if (kind === "gradient") {
-          if (version < 5) {
-            fail(`${elementLabel} uses a gradient, which requires file version 5.`);
-          }
-          elements.push(readGradient(element, elementLabel, id, width, height));
-          continue;
-        }
-        if (kind !== "stroke") {
-          fail(`${elementLabel} has the unknown kind "${kind}".`);
-        }
-      }
-
-      const stroke = readStroke(
-        element,
-        elementLabel,
-        id,
-        sampleCount,
-        maxSamples,
-        version,
-      );
-      sampleCount += stroke.xs.length;
-      elements.push(stroke);
-      strokes.push(stroke);
-    }
-  });
-
-  const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, seenLayerIds, layers, warnings);
+  const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, state.seenLayerIds, layers, warnings);
   const guides = readGuides(rawDocument.guides, warnings);
 
   const document: DrawingDocument = {
@@ -738,6 +736,214 @@ function readProject(
   };
 
   return { document, elements, strokes, warnings };
+}
+
+/**
+ * The state one read shares across the whole layer tree.
+ *
+ * The ids, the elements and the counters are global to the file: two layers
+ * anywhere in the tree may not share an id, and the elements of every layer
+ * come back in one list, in document order.
+ */
+interface LayerReadState {
+  readonly seenLayerIds: Set<string>;
+  readonly elements: LayerElement[];
+  readonly strokes: StrokeRecord[];
+  readonly warnings: string[];
+  sampleCount: number;
+  fillPixelCount: number;
+  /** How many paintable layers the file holds; names the ones without a name. */
+  layerCount: number;
+  /** How many groups the file holds; names the ones without a name. */
+  groupCount: number;
+}
+
+/**
+ * Reads a list of layer nodes, at the root of the document or inside a group.
+ *
+ * The list is the tree: a group's children are read exactly like the root
+ * list, so a group may hold groups.
+ */
+function readLayerTree(
+  rawLayers: unknown,
+  label: string,
+  version: number,
+  documentWidth: number,
+  documentHeight: number,
+  state: LayerReadState,
+  maxSamples: number,
+  maxFillPixels: number,
+): Layer[] {
+  if (!Array.isArray(rawLayers)) {
+    fail(`${label} list must be an array.`);
+  }
+  const layers: Layer[] = [];
+  rawLayers.forEach((rawLayer, index) => {
+    layers.push(
+      readLayer(
+        rawLayer,
+        `${label} ${index + 1}`,
+        version,
+        documentWidth,
+        documentHeight,
+        state,
+        maxSamples,
+        maxFillPixels,
+      ),
+    );
+  });
+  return layers;
+}
+
+/**
+ * Reads the `kind` of a layer entry.
+ *
+ * Version 13 introduced groups, so the field is required from that version
+ * on. A file that claims an older version and carries a group is refused: it
+ * cannot be read as it stands, and reading it as a flat list of paintable
+ * layers would draw a different picture.
+ */
+function readLayerKind(value: unknown, label: string, version: number): SerializedLayerKind {
+  if (version < 13) {
+    if (value === undefined || value === "layer") {
+      return "layer";
+    }
+    fail(`${label} is a "${String(value)}", which requires file version 13.`);
+  }
+  if (value === undefined) {
+    fail(`${label} has no kind; a layer must say whether it is a layer or a group.`);
+  }
+  const kind = readString(value, `${label} kind`);
+  if (kind !== "layer" && kind !== "group") {
+    fail(`${label} has the unknown kind "${kind}".`);
+  }
+  return kind;
+}
+
+/** Reads one node of the layer tree: a paintable layer or a group. */
+function readLayer(
+  raw: unknown,
+  label: string,
+  version: number,
+  documentWidth: number,
+  documentHeight: number,
+  state: LayerReadState,
+  maxSamples: number,
+  maxFillPixels: number,
+): Layer {
+  const record = asRecord(raw, label);
+
+  const kind = readLayerKind(record.kind, label, version);
+  if (version < 13 && record.children !== undefined) {
+    fail(`${label} holds other layers, which requires file version 13.`);
+  }
+
+  const id = readId(record.id, kind === "group" ? "group" : "layer");
+  if (state.seenLayerIds.has(id)) {
+    fail(`Two layers in this project share the id "${id}".`);
+  }
+  state.seenLayerIds.add(id);
+
+  if (kind === "group") {
+    state.groupCount += 1;
+  } else {
+    state.layerCount += 1;
+  }
+
+  let layerName = kind === "group" ? `Group ${state.groupCount}` : `Layer ${state.layerCount}`;
+  if (typeof record.name === "string" && record.name.trim() !== "") {
+    layerName = record.name;
+  } else {
+    state.warnings.push(`${label} had no name and was renamed.`);
+  }
+
+  const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
+  const visible = readBoolean(record.visible, `${label} visibility`);
+  const blendMode = readString(record.blendMode, `${label} blend mode`);
+  if (!isLayerBlendMode(blendMode)) {
+    fail(`${label} uses the unsupported blend mode "${blendMode}".`);
+  }
+
+  if (kind === "group") {
+    // A group owns no content of its own: the layers it holds carry it.
+    if (record.elements !== undefined) {
+      fail(`${label} is a group and cannot carry elements of its own.`);
+    }
+    if (record.children === undefined) {
+      fail(`${label} does not list the layers it holds.`);
+    }
+    const children = readLayerTree(
+      record.children,
+      `${label}, layer`,
+      version,
+      documentWidth,
+      documentHeight,
+      state,
+      maxSamples,
+      maxFillPixels,
+    );
+    return { id, name: layerName, visible, opacity, blendMode, kind: "group", children };
+  }
+
+  if (record.children !== undefined) {
+    fail(`${label} is a paintable layer and cannot hold other layers.`);
+  }
+
+  // Version 4 uses one ordered `elements` list. Older files have a `strokes`
+  // array only, which is exactly a list of stroke elements in the same order.
+  const rawElements =
+    version >= 4
+      ? readElementList(record.elements, `${label} elements`)
+      : readElementList(record.strokes, `${label} strokes`);
+
+  for (const [elementIndex, rawElement] of rawElements.entries()) {
+    const elementLabel = `${label}, element ${elementIndex + 1}`;
+    const element = asRecord(rawElement, elementLabel);
+
+    if (version >= 4) {
+      const elementKind = readString(element.kind, `${elementLabel} kind`);
+      if (elementKind === "fill") {
+        const patch = readFillPatch(
+          element,
+          elementLabel,
+          id,
+          documentWidth,
+          documentHeight,
+          state.fillPixelCount,
+          maxFillPixels,
+        );
+        state.fillPixelCount += patch.width * patch.height;
+        state.elements.push(patch);
+        continue;
+      }
+      if (elementKind === "gradient") {
+        if (version < 5) {
+          fail(`${elementLabel} uses a gradient, which requires file version 5.`);
+        }
+        state.elements.push(
+          readGradient(element, elementLabel, id, documentWidth, documentHeight),
+        );
+        continue;
+      }
+      if (elementKind !== "stroke") {
+        fail(`${elementLabel} has the unknown kind "${elementKind}".`);
+      }
+    }
+
+    const stroke = readStroke(
+      element,
+      elementLabel,
+      id,
+      state.sampleCount,
+      maxSamples,
+      version,
+    );
+    state.sampleCount += stroke.xs.length;
+    state.elements.push(stroke);
+    state.strokes.push(stroke);
+  }
+
+  return { id, name: layerName, visible, opacity, blendMode, kind: "layer", children: [] };
 }
 
 /**
@@ -932,6 +1138,8 @@ function resolveActiveLayer(
   if (value !== null && value !== undefined) {
     warnings.push("The active layer recorded in the project no longer exists; the bottom layer was selected.");
   }
-  const first = layers[0];
+  // The fallback has to be a layer that paints: a group owns no content, so
+  // it cannot be the destination of a drawing.
+  const first = paintableLayers(layers)[0];
   return first ? first.id : null;
 }

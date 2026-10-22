@@ -109,6 +109,8 @@ function createEngine() {
           visible: true,
           opacity: 1,
           blendMode: "normal",
+          kind: "layer",
+          children: [],
         },
       ],
       activeLayerId: "layer-1",
