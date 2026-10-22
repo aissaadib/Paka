@@ -27,6 +27,7 @@ import type { SelectionHandles } from "../document/selectionHandles";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import { overlaysForLayer, type OverlayPaintContext } from "../shell/overlayRegistry";
+import { flattenLayers } from "../document/layerGroups";
 import type { Bounds } from "../../types/geometry";
 import type { BrushTipShape } from "../../types/brush";
 import type { Viewport } from "../../types/viewport";
@@ -254,6 +255,16 @@ export class Canvas2DRenderer implements DrawingRenderer {
    */
   private previewSurface: HTMLCanvasElement | null = null;
   /**
+   * Isolated scratch surfaces for groups with a non-default opacity or blend
+   * mode, one per nesting depth.
+   *
+   * A normal, fully opaque group is flattened into its parent, which is byte-
+   * identical and costs no canvas. Isolation is only needed when the group
+   * itself has to be composited as one unit, and the scratch is reused across
+   * frames. Default groups (the common case) never allocate one.
+   */
+  private readonly groupSurfaces: HTMLCanvasElement[] = [];
+  /**
    * Coverage of the in-flight stamped stroke, in device pixels.
    *
    * The stamp engine unions its dabs with a maximum, and Canvas 2D cannot
@@ -356,8 +367,9 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     // Surfaces for removed layers are dropped; new layers get a dirty surface
-    // the first time they are composited.
-    this.surfaces.retain(doc.layers.map((layer) => layer.id));
+    // the first time they are composited. Child layers of a group are layers
+    // too: the whole tree is retained, not just the root list.
+    this.surfaces.retain(flattenLayers(doc.layers).map((layer) => layer.id));
   }
 
   setViewport(viewport: Viewport): void {
@@ -385,6 +397,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.abandonStroke();
     }
     this.dropPreviewSurface();
+    this.groupSurfaces.length = 0;
     this.requestFrame();
   }
 
@@ -960,17 +973,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = doc.background;
     ctx.fillRect(0, 0, 1, 1);
 
-    const offsetX = -Math.floor(docX * this.rasterScale);
-    const offsetY = -Math.floor(docY * this.rasterScale);
-    for (const layer of doc.layers) {
-      if (!isComposited(layer)) {
-        continue;
-      }
-      const surface = this.ensureRasterized(layer.id);
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
-      ctx.drawImage(surface.canvas, offsetX, offsetY);
-    }
+    this.paintLayerNodes(ctx, doc.layers, {
+      preview: null,
+      depth: 0,
+      probeOffset: {
+        x: -Math.floor(docX * this.rasterScale),
+        y: -Math.floor(docY * this.rasterScale),
+      },
+    });
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -1010,6 +1020,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.probeCanvas = null;
     this.featherBuffer = null;
     this.previewSurface = null;
+    this.groupSurfaces.length = 0;
     this.stampUpload = null;
   }
 
@@ -1033,28 +1044,106 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = doc.background;
     ctx.fillRect(0, 0, doc.width, doc.height);
 
-    for (const layer of doc.layers) {
-      if (!isComposited(layer)) {
+    this.paintLayerNodes(ctx, doc.layers, {
+      preview,
+      depth: 0,
+      probeOffset: null,
+    });
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Paints a list of layer-tree nodes, depth-first and bottom-first.
+   *
+   * This is the one painter the display, the export, the colour probe and the
+   * bucket-fill composite read all use, so they cannot disagree about what a
+   * group means:
+   *
+   *  - a hidden node takes its whole subtree with it;
+   *  - a normal, fully opaque group is flattened into its parent (the common
+   *    case, and byte-identical to painting its children directly);
+   *  - a group with opacity < 1 or a non-normal blend is composited through
+   *    an isolated scratch surface, so its children blend with each other
+   *    before the group blends with the backdrop;
+   *  - a paintable layer draws its surface, and the in-flight preview in its
+   *    own slot when `preview` names it.
+   *
+   * `probeOffset` switches to the 1x1 colour-probe space: layer surfaces are
+   * drawn at that pixel offset and group scratches are 1x1 as well, so a
+   * sample reads exactly the pixel the composite would show.
+   */
+  private paintLayerNodes(
+    ctx: CanvasRenderingContext2D,
+    nodes: readonly Layer[],
+    options: {
+      readonly preview: StrokeRecord | null;
+      readonly depth: number;
+      readonly probeOffset: { readonly x: number; readonly y: number } | null;
+    },
+  ): void {
+    const doc = this.doc;
+    if (!doc) {
+      return;
+    }
+
+    for (const node of nodes) {
+      if (!isComposited(node)) {
         continue;
       }
-      const surface = this.ensureRasterized(layer.id);
-      const previewHere = preview !== null && preview.layerId === layer.id;
 
-      if (previewHere && (layer.opacity < 1 || layer.blendMode !== "normal")) {
+      if (node.kind === "group") {
+        const isolated = node.opacity < 1 || node.blendMode !== "normal";
+        if (!isolated) {
+          this.paintLayerNodes(ctx, node.children, options);
+          continue;
+        }
+        const scratch = this.beginGroupSurface(options.depth, options.probeOffset !== null);
+        if (!scratch) {
+          continue;
+        }
+        this.paintLayerNodes(scratch.ctx, node.children, {
+          ...options,
+          depth: options.depth + 1,
+        });
+        ctx.save();
+        ctx.globalAlpha = node.opacity;
+        ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
+        if (options.probeOffset) {
+          ctx.drawImage(scratch.canvas, 0, 0);
+        } else {
+          ctx.drawImage(scratch.canvas, 0, 0, doc.width, doc.height);
+        }
+        ctx.restore();
+        continue;
+      }
+
+      const surface = this.ensureRasterized(node.id);
+
+      if (options.probeOffset) {
+        ctx.globalAlpha = node.opacity;
+        ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
+        ctx.drawImage(surface.canvas, options.probeOffset.x, options.probeOffset.y);
+        continue;
+      }
+
+      const previewHere = options.preview !== null && options.preview.layerId === node.id;
+      if (previewHere && (node.opacity < 1 || node.blendMode !== "normal")) {
         // Group first, then apply the layer's opacity and blend once: the same
         // order a commit takes. A hidden or zero-opacity layer was skipped
         // above, so its preview is hidden with it.
-        const group = this.buildPreviewGroup(surface, preview);
+        const group = this.buildPreviewGroup(surface, options.preview as StrokeRecord);
         if (group) {
-          ctx.globalAlpha = layer.opacity;
-          ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+          ctx.globalAlpha = node.opacity;
+          ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
           ctx.drawImage(group, 0, 0, doc.width, doc.height);
           continue;
         }
       }
 
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+      ctx.globalAlpha = node.opacity;
+      ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
       ctx.drawImage(surface.canvas, 0, 0, doc.width, doc.height);
 
       if (previewHere) {
@@ -1064,14 +1153,53 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The buffer holds full coverage; the stroke's alpha is applied here,
         // once (and, for a soft brush, its edge is feathered once - never per
         // segment).
+        const preview = options.preview as StrokeRecord;
         ctx.globalAlpha = strokeOpacity(preview.brush, preview.pressures);
         ctx.globalCompositeOperation = "source-over";
         this.paintStrokeCoverage(ctx, preview);
       }
     }
+  }
 
+  /**
+   * Clears and prepares the isolated scratch for a group at `depth`.
+   *
+   * One surface per nesting depth is enough: a group's children are painted
+   * before its surface is composited into the parent, so siblings reuse it.
+   * The probe uses a 1x1 surface and no transform; display and export use the
+   * same raster resolution as a layer surface.
+   */
+  private beginGroupSurface(
+    depth: number,
+    probe: boolean,
+  ): { readonly canvas: HTMLCanvasElement; readonly ctx: CanvasRenderingContext2D } | null {
+    const doc = this.doc;
+    if (!doc) {
+      return null;
+    }
+    let canvas = this.groupSurfaces[depth];
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      this.groupSurfaces[depth] = canvas;
+    }
+    resizeCanvas(
+      canvas,
+      probe ? 1 : doc.width * this.rasterScale,
+      probe ? 1 : doc.height * this.rasterScale,
+    );
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!probe) {
+      ctx.setTransform(this.rasterScale, 0, 0, this.rasterScale, 0, 0);
+    }
+    return { canvas, ctx };
   }
 
   /**

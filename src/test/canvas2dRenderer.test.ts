@@ -21,6 +21,12 @@ import {
   LAYER_BLEND_MODES,
 } from "../core/document/blendModes";
 import { addLayer, createDocument, moveLayer, updateLayer } from "../core/document/document";
+import {
+  addGroup,
+  findLayer,
+  groupLayers,
+  moveLayerToParent,
+} from "../core/document/layerGroups";
 import type {
   DrawingDocument,
   FillPatchRecord,
@@ -3723,5 +3729,165 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
     // profile at its centre at scale 1 and the average of four device pixels
     // at scale 2, which differ by a few levels.
     expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
+  });
+});
+
+describe("layer group compositing", () => {
+  /**
+   * Three layers with the bottom and top ones grouped, so the root stack is
+   * `[middle, group]` and the group's children are `[bottom, top]`.
+   */
+  function groupedDocument(patch: Parameters<typeof updateLayer>[2] = {}) {
+    const document = addLayer(addLayer(createDocument({ width: 100, height: 80 })));
+    const [bottom, middle, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", top?.id ?? ""]);
+    const group = grouped.layers.find((node) => node.kind === "group");
+    if (!group) {
+      throw new Error("the group was not created");
+    }
+    return {
+      document: updateLayer(grouped, group.id, patch),
+      group: group.id,
+      bottom: bottom?.id ?? "",
+      middle: middle?.id ?? "",
+      top: top?.id ?? "",
+    };
+  }
+
+  function render(harness: ReturnType<typeof createHarness>, document: DrawingDocument): void {
+    harness.renderer.setDocument(document);
+    harness.renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+  }
+
+  it("composites a normal, opaque group by flattening its children in place", () => {
+    const harness = createHarness();
+    const { document } = groupedDocument();
+    render(harness, document);
+
+    // middle, then the group's bottom and top - no extra scratch surface.
+    expect(harness.display.drawImages).toHaveLength(3);
+    expect(recording.allocated).toHaveLength(4);
+    expect(harness.display.drawImages.every((call) => call.alpha === 1)).toBe(true);
+    expect(harness.display.drawImages.every((call) => call.composite === "source-over")).toBe(
+      true,
+    );
+  });
+
+  it("hides a whole group's children when the group is hidden", () => {
+    const harness = createHarness();
+    const { document, group } = groupedDocument({ visible: false });
+    render(harness, document);
+
+    // Only the middle layer is left; the two grouped layers are not drawn.
+    expect(harness.display.drawImages).toHaveLength(1);
+    expect(group).toBeDefined();
+  });
+
+  it("hides only the hidden child of a visible group", () => {
+    const harness = createHarness();
+    const base = groupedDocument();
+    const document = updateLayer(base.document, base.top, { visible: false });
+    render(harness, document);
+
+    // middle and the group's bottom child; top is hidden.
+    expect(harness.display.drawImages).toHaveLength(2);
+  });
+
+  it("isolates a group with opacity, then applies the group's alpha once", () => {
+    const harness = createHarness();
+    const { document } = groupedDocument({ opacity: 0.5 });
+    render(harness, document);
+
+    // middle + the group's scratch: the group is one composite unit.
+    expect(harness.display.drawImages).toHaveLength(2);
+    const groupDraw = harness.display.drawImages.find((call) => call.alpha === 0.5);
+    expect(groupDraw).toBeDefined();
+    const scratch = groupDraw?.args[0] as RecordingCanvas;
+    // Both children were composited into the scratch first.
+    expect(scratch.drawImages).toHaveLength(2);
+  });
+
+  it("applies a group's blend mode to its isolated composite", () => {
+    const harness = createHarness();
+    const { document } = groupedDocument({ blendMode: "multiply" });
+    render(harness, document);
+
+    const groupDraw = harness.display.drawImages.find((call) => call.composite === "multiply");
+    expect(groupDraw).toBeDefined();
+  });
+
+  it("composites nested isolated groups through one scratch per depth", () => {
+    const harness = createHarness();
+    const document = addLayer(addLayer(createDocument({ width: 100, height: 80 })));
+    const [bottom, middle, top] = document.layers;
+    const grouped = groupLayers(document, [bottom?.id ?? "", middle?.id ?? ""]);
+    const outer = grouped.layers.find((node) => node.kind === "group");
+    if (!outer) {
+      throw new Error("the outer group was not created");
+    }
+    const inner = addGroup(grouped, { parentId: outer.id });
+    if (!inner) {
+      throw new Error("the inner group was not created");
+    }
+    const nested = moveLayerToParent(
+      inner.document,
+      top?.id ?? "",
+      inner.group.id,
+      0,
+    );
+    const withOpacity = updateLayer(
+      updateLayer(nested, outer.id, { opacity: 0.5 }),
+      inner.group.id,
+      { opacity: 0.5 },
+    );
+
+    harness.renderer.setDocument(withOpacity);
+    harness.renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.render();
+
+    // The display sees only the outer group's composite.
+    expect(harness.display.drawImages).toHaveLength(1);
+    const outerDraw = harness.display.drawImages[0];
+    expect(outerDraw?.alpha).toBe(0.5);
+    const outerScratch = outerDraw?.args[0] as RecordingCanvas;
+    // bottom, middle, and the inner group's scratch.
+    expect(outerScratch.drawImages).toHaveLength(3);
+
+    const innerDraw = outerScratch.drawImages.find((call) => call.alpha === 0.5);
+    expect(innerDraw).toBeDefined();
+    const innerScratch = innerDraw?.args[0] as RecordingCanvas;
+    expect(innerScratch.drawImages).toHaveLength(1);
+  });
+
+  it("uses the same group order for the display and for the export", () => {
+    const harness = createHarness();
+    const { document } = groupedDocument();
+    render(harness, document);
+    const displayCount = harness.display.drawImages.length;
+
+    const exportCanvas = harness.composeDocument();
+
+    expect(exportCanvas.drawImages).toHaveLength(displayCount);
+    expect(exportCanvas.drawImages.map((call) => call.alpha)).toEqual(
+      harness.display.drawImages.map((call) => call.alpha),
+    );
+    expect(exportCanvas.drawImages.map((call) => call.composite)).toEqual(
+      harness.display.drawImages.map((call) => call.composite),
+    );
+  });
+
+  it("reads the composite through the group, not only the root list", () => {
+    const harness = createHarness();
+    const { document, group } = groupedDocument({ visible: false });
+    render(harness, document);
+
+    expect(harness.renderer.readCompositePixel(10, 10)).toEqual({ r: 0, g: 0, b: 0 });
+
+    const probe = recording.allocated.find((canvas) => canvas.getImageDataCalls.length > 0);
+    expect(probe?.drawImages).toHaveLength(1);
+    expect(findLayer(document.layers, group)?.visible).toBe(false);
   });
 });
