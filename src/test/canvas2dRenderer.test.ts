@@ -3259,6 +3259,54 @@ describe("Canvas2DRenderer tapered strokes (real pixels)", () => {
       },
     );
   });
+
+  it("erases with the same tapered footprint it paints with", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const painted = horizontalStroke(layerId, { ...BRUSH, size: 16 }, "painted", 2, 40);
+        // The eraser's ramps are one brush width long, so the eraser is at
+        // its widest in the middle of the stroke and tapers to a point at both
+        // of its ends.
+        const eraser = horizontalStroke(layerId, { ...TAPERED, size: 16 }, "erased", 2, 40);
+        const erasing: StrokeRecord = { ...eraser, erase: true };
+
+        harness.elements.set(layerId, [painted]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expect(inkedRows(harness.display, 22)).toBe(16);
+
+        harness.elements.set(layerId, [painted, erasing]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        // Where the eraser is at its widest it takes the whole stroke away.
+        expect(inkedRows(harness.display, 22)).toBe(0);
+        // Where the eraser tapers to a point it leaves the ink alone.
+        expect(inkedRows(harness.display, 3)).toBeGreaterThan(0);
+      },
+    );
+  });
+
+  it("keeps the dab engine's plan when the brush is stamped, taper or not", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stamped: BrushSettings = { ...BRUSH, stamp: true, taper: TAPERED.taper };
+        const stroke = horizontalStroke(layerId, stamped, "stamped");
+
+        harness.elements.set(layerId, [stroke]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // The dab engine draws its own dabs, so the taper does not apply and
+        // the stroke is as wide as the brush all the way along.
+        expect(inkedRows(harness.display, 4)).toBe(10);
+        expect(inkedRows(harness.display, 16)).toBe(10);
+      },
+    );
+  });
 });
 
 describe("Canvas2DRenderer preview scratch lifetime", () => {
