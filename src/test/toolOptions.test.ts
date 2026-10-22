@@ -24,6 +24,7 @@ function snapshotFor(toolId: ToolId): EditorSnapshot {
     shapeSides: 7,
     shapeInnerRatio: 0.42,
     shapeRotation: 33,
+    shapeClosed: true,
     fillTolerance: 19,
   } as unknown as EditorSnapshot;
 }
@@ -35,6 +36,7 @@ function recorder() {
     setShapeSides: vi.fn((value: number) => calls.push(["setShapeSides", value])),
     setShapeInnerRatio: vi.fn((value: number) => calls.push(["setShapeInnerRatio", value])),
     setShapeRotation: vi.fn((value: number) => calls.push(["setShapeRotation", value])),
+    setShapeClosed: vi.fn((value: boolean) => calls.push(["setShapeClosed", value])),
     setFillTolerance: vi.fn((value: number) => calls.push(["setFillTolerance", value])),
   } as unknown as EditorActions;
   return { actions, calls };
@@ -55,6 +57,7 @@ describe("tool option fields", () => {
       "shapeFill",
     ]);
     expect(ids("bucket")).toEqual(["fillTolerance"]);
+    expect(ids("polyline")).toEqual(["shapeClosed", "shapeFill"]);
   });
 
   it("gives tools without options an empty list", () => {
@@ -132,6 +135,7 @@ describe("brush group visibility", () => {
       "ellipse",
       "polygon",
       "star",
+      "polyline",
       "gradient",
     ] as const) {
       expect(toolShowsBrushControls(toolId)).toBe(true);

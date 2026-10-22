@@ -232,6 +232,13 @@ export interface EditorSnapshot {
    */
   readonly shapeRotation: number;
   /**
+   * Whether a finished polyline path is closed.
+   *
+   * Editor state, like `shapeFill`: it describes the *next* path, and a path
+   * reads it when it opens, so a path keeps the setting it was started with.
+   */
+  readonly shapeClosed: boolean;
+  /**
    * Colour distance the bucket treats as "the same region", in 8-bit sRGB
    * channel units (`0..255`). Editor state: it describes the next fill, not the
    * fills already committed, which carry their own pixels.
@@ -344,6 +351,7 @@ const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
   "ellipse",
   "polygon",
   "star",
+  "polyline",
   "gradient",
 ]);
 
@@ -580,6 +588,8 @@ export class DrawingEngine implements StrokeSource {
   private shapeSides = DEFAULT_SHAPE_SIDES;
   private shapeInnerRatio = DEFAULT_SHAPE_INNER_RATIO;
   private shapeRotation = DEFAULT_SHAPE_ROTATION;
+  /** Whether a finished polyline path is closed. */
+  private shapeClosed = false;
   /** Bucket-fill tolerance in 8-bit channel units. */
   private fillTolerance = 24;
   private activeFill: ActiveFill | null = null;
@@ -1326,6 +1336,7 @@ export class DrawingEngine implements StrokeSource {
       sides: this.shapeSides,
       innerRatio: this.shapeInnerRatio,
       rotation: this.shapeRotation,
+      closed: this.shapeClosed,
     });
   }
 
@@ -1338,6 +1349,7 @@ export class DrawingEngine implements StrokeSource {
       sides,
       innerRatio: this.shapeInnerRatio,
       rotation: this.shapeRotation,
+      closed: this.shapeClosed,
     }).sides;
     if (next === this.shapeSides) {
       return;
@@ -1356,6 +1368,7 @@ export class DrawingEngine implements StrokeSource {
       sides: this.shapeSides,
       innerRatio: ratio,
       rotation: this.shapeRotation,
+      closed: this.shapeClosed,
     }).innerRatio;
     if (next === this.shapeInnerRatio) {
       return;
@@ -1373,11 +1386,29 @@ export class DrawingEngine implements StrokeSource {
       sides: this.shapeSides,
       innerRatio: this.shapeInnerRatio,
       rotation: degrees,
+      closed: this.shapeClosed,
     }).rotation;
     if (next === this.shapeRotation) {
       return;
     }
     this.shapeRotation = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets whether a finished polyline path is closed.
+   *
+   * Editor state, like `shapeFill`: it describes the *next* path, and the path
+   * reads it when it opens, so a path keeps the setting it was started with.
+   * Closing a path is a choice the user can also make per path - by clicking
+   * the first corner - so the switch is a default, not a rule.
+   */
+  setShapeClosed(closed: boolean): void {
+    if (this.shapeClosed === closed) {
+      return;
+    }
+    this.shapeClosed = closed;
     this.commands.breakMerge();
     this.publish();
   }
@@ -1563,8 +1594,16 @@ export class DrawingEngine implements StrokeSource {
     if (this.currentToolId === toolId) {
       return;
     }
-    // Let the outgoing tool finish cleanly (a brush stroke is committed).
-    this.activeTool().reset(this.toolContext);
+    // Let the outgoing tool finish cleanly: a brush stroke is committed, and a
+    // polyline path - which stays open across clicks - is committed rather
+    // than thrown away. A shape drag has not reached the layer yet, so it is
+    // discarded.
+    const outgoing = this.activeTool();
+    if (outgoing.commitGesture) {
+      outgoing.commitGesture(this.toolContext);
+    } else {
+      outgoing.reset(this.toolContext);
+    }
     this.currentToolId = toolId;
     // A selection belongs to the select tool. Switching away drops it rather
     // than leaving it visible: painting is *not* clipped to a selection, so a
@@ -3097,6 +3136,54 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
+   * Cancels the gesture in flight, if there is one.
+   *
+   * The preview goes and **nothing is recorded**: no history step, no revision
+   * bump and no dirty flag, because a gesture that never reached the document
+   * cannot have changed it. The tool is told as well, so it does not go on
+   * believing a gesture is in flight and swallow the next press.
+   *
+   * This is what the `Esc` key does while a stroke, a shape, a fill or a
+   * gradient is being drawn: the user is throwing the work away, not asking
+   * for it to be kept.
+   *
+   * Returns whether a gesture was cancelled, so the caller can tell "there was
+   * something to cancel" from "there was nothing in flight".
+   */
+  cancelActiveGesture(): boolean {
+    const drawing =
+      this.activeStroke !== null || this.activeFill !== null || this.activeGradient !== null;
+    if (!drawing) {
+      return false;
+    }
+    this.abortStroke();
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * True while the active tool holds a path that a command could finish.
+   *
+   * Only the polyline does: its path stays open across clicks, so `Enter` has
+   * to be able to end it. Every other tool answers `false`.
+   */
+  canFinishShapeGesture(): boolean {
+    return this.activeTool().canCommit?.() === true;
+  }
+
+  /**
+   * Finishes the path the active tool is holding, if it has one.
+   *
+   * The path becomes an ordinary stroke: one undo step, one entry in the
+   * project file, and pixels that re-rasterize identically after an undo, a
+   * reopen or an export.
+   */
+  finishShapeGesture(): void {
+    this.activeTool().commitGesture?.(this.toolContext);
+  }
+
+  /**
    * Clears an in-flight guide gesture without telling the tool.
    *
    * Used when a *new* gesture starts: the tool is already running that
@@ -3472,6 +3559,10 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke) {
       this.cancelStroke();
     }
+    // The tool owns the gesture's bookkeeping, so it is told as well: a tool
+    // that goes on believing a gesture is in flight would swallow the next
+    // press, and a polyline would carry its old vertices into the next path.
+    this.activeTool().reset(this.toolContext);
   }
 
   private buildSnapshot(): EditorSnapshot {
@@ -3493,6 +3584,7 @@ export class DrawingEngine implements StrokeSource {
       shapeSides: this.shapeSides,
       shapeInnerRatio: this.shapeInnerRatio,
       shapeRotation: this.shapeRotation,
+      shapeClosed: this.shapeClosed,
       fillTolerance: this.fillTolerance,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
@@ -3523,6 +3615,7 @@ export class DrawingEngine implements StrokeSource {
       previous.shapeSides === next.shapeSides &&
       previous.shapeInnerRatio === next.shapeInnerRatio &&
       previous.shapeRotation === next.shapeRotation &&
+      previous.shapeClosed === next.shapeClosed &&
       previous.fillTolerance === next.fillTolerance &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&

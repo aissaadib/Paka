@@ -64,6 +64,8 @@ export interface AppSettings {
   readonly shapeInnerRatio: number;
   /** Rotation of the next polygon or star, in degrees. */
   readonly shapeRotation: number;
+  /** Whether a finished polyline path is closed. */
+  readonly shapeClosed: boolean;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   readonly fillTolerance: number;
   /** Whether the next gradient is linear or radial. */
@@ -93,6 +95,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   shapeSides: DEFAULT_SHAPE_OPTIONS.sides,
   shapeInnerRatio: DEFAULT_SHAPE_OPTIONS.innerRatio,
   shapeRotation: DEFAULT_SHAPE_OPTIONS.rotation,
+  shapeClosed: DEFAULT_SHAPE_OPTIONS.closed,
   fillTolerance: 24,
   gradientType: "linear",
   gradientEndColor: DEFAULT_GRADIENT_END_COLOR,
@@ -181,6 +184,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     sides: numberOr(record.shapeSides, DEFAULT_SHAPE_OPTIONS.sides),
     innerRatio: numberOr(record.shapeInnerRatio, DEFAULT_SHAPE_OPTIONS.innerRatio),
     rotation: numberOr(record.shapeRotation, DEFAULT_SHAPE_OPTIONS.rotation),
+    closed: booleanOr(record.shapeClosed, DEFAULT_APP_SETTINGS.shapeClosed),
   });
 
   return {
@@ -192,6 +196,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     shapeSides: shape.sides,
     shapeInnerRatio: shape.innerRatio,
     shapeRotation: shape.rotation,
+    shapeClosed: shape.closed,
     fillTolerance: Math.round(
       clamp(numberOr(record.fillTolerance, DEFAULT_APP_SETTINGS.fillTolerance), 0, 255),
     ),
@@ -236,6 +241,7 @@ export function serializeAppSettings(settings: AppSettings): string {
       shapeSides: settings.shapeSides,
       shapeInnerRatio: settings.shapeInnerRatio,
       shapeRotation: settings.shapeRotation,
+      shapeClosed: settings.shapeClosed,
       fillTolerance: settings.fillTolerance,
       gradientType: settings.gradientType,
       gradientEndColor: settings.gradientEndColor,
@@ -259,6 +265,7 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
     a.shapeSides === b.shapeSides &&
     a.shapeInnerRatio === b.shapeInnerRatio &&
     a.shapeRotation === b.shapeRotation &&
+    a.shapeClosed === b.shapeClosed &&
     a.fillTolerance === b.fillTolerance &&
     a.gradientType === b.gradientType &&
     a.gradientEndColor === b.gradientEndColor &&

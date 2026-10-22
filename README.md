@@ -38,7 +38,23 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   was drawn with - and a line is never filled, since it bounds no interior.
   Shapes draw with the current brush, so size, colour and opacity
   come from the brush controls; a press outside the paper records nothing, and a
-  click that never moved leaves nothing behind.
+  click that never moved leaves nothing behind. `Esc` throws away a shape that
+  is still being dragged: the preview goes and nothing is recorded, so a shape
+  the user has changed their mind about never reaches the layer.
+- **Polyline** (`Y`): a path of straight segments the user places **one corner
+  at a time**. Click to place a corner, click and drag to place a corner at the
+  end of the segment, and a rubber band runs from the last corner to the
+  pointer, so the path is on screen before it is committed. `Shift` straightens
+  the segment to 45 degrees, exactly like the line tool. The path ends three
+  ways: `Enter` keeps it, a **double click** keeps it, and clicking the
+  **first corner** closes the path and keeps it - so a closed shape needs no
+  separate command. `Esc` throws it away. Moving on to another tool keeps the
+  path, because it is finished work rather than a half-finished preview. A
+  committed path is an ordinary stroke: one undo step, one entry in the project
+  file, and pixels that re-rasterize identically after an undo, a reopen or an
+  export. The toolbar's **Close path** switch closes a finished path by
+  default, and the **Fill shape** switch fills it; an open path is filled up to
+  the implied closing edge, which is not stroked.
 - **Polygon and star** (`P`, `S`): a **polygon** is a regular *n*-gon (3-24
   sides, default 5) inscribed in the **ellipse** of the dragged box, with a
   vertex at the top; a **star** is the classic *2p*-vertex outline (3-24
@@ -333,8 +349,8 @@ paste-ready version of the same briefing is in
 ## Known limitations
 
 - Only the **brush**, **eraser**, **select**, **line**, **rectangle**,
-  **ellipse**, **polygon**, **star**, **bucket**, **gradient**, **colour
-  picker** and **guides** tools exist, plus
+  **ellipse**, **polygon**, **star**, **polyline**, **bucket**, **gradient**,
+  **colour picker** and **guides** tools exist, plus
   pan. There is no text tool.
 - **Guides are axis-only.** A guide is vertical or horizontal, a second guide on
   the same position is refused, the colour is fixed, and there is no position
@@ -382,7 +398,9 @@ paste-ready version of the same briefing is in
   filled from the same polyline its outline is traced with, so its interior is
   faceted to the same sub-pixel degree as its outline. A polygon and a star are
   stored the same way, so a committed one cannot be re-edited as a polygon or a
-  star - it is an ordinary stroke afterwards.
+  star - it is an ordinary stroke afterwards. A committed **polyline** is an
+  ordinary stroke too, so it cannot be re-edited as a path: the corners are
+  baked into the samples, and there is no vertex handle.
 - Every layer *edit* is one undo step, but layer **selection** is not: it
   changes no pixels and is deliberately not treated as an edit.
 - The **separable** blend modes are implemented: `normal`, `multiply`, `screen`,

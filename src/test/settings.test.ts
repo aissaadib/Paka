@@ -220,6 +220,7 @@ describe("the settings file", () => {
       version: SETTINGS_VERSION,
       toolId: "not-a-tool",
       shapeFill: "yes",
+      shapeClosed: "yes",
       fillTolerance: "lots",
       brush: { size: "big" },
     });
@@ -230,6 +231,7 @@ describe("the settings file", () => {
     const state = engine.getState();
     expect(state.toolId).toBe(DEFAULT_APP_SETTINGS.toolId);
     expect(state.shapeFill).toBe(DEFAULT_APP_SETTINGS.shapeFill);
+    expect(state.shapeClosed).toBe(DEFAULT_APP_SETTINGS.shapeClosed);
     expect(state.fillTolerance).toBe(DEFAULT_APP_SETTINGS.fillTolerance);
     expect(state.brush.size).toBe(DEFAULT_APP_SETTINGS.brush.size);
   });
@@ -294,6 +296,7 @@ describe("the preferences survive a restart", () => {
     first.engine.setShapeSides(7);
     first.engine.setShapeInnerRatio(0.25);
     first.engine.setShapeRotation(45);
+    first.engine.setShapeClosed(true);
     first.engine.setFillTolerance(77);
     first.engine.setGradientType("radial");
     first.engine.setGradientEndColor("#abcdef");
@@ -314,6 +317,7 @@ describe("the preferences survive a restart", () => {
     expect(state.shapeSides).toBe(7);
     expect(state.shapeInnerRatio).toBe(0.25);
     expect(state.shapeRotation).toBe(45);
+    expect(state.shapeClosed).toBe(true);
     expect(state.fillTolerance).toBe(77);
     expect(state.gradientType).toBe("radial");
     expect(state.gradientEndColor).toBe("#abcdef");

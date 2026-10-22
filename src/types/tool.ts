@@ -9,6 +9,7 @@ export type ToolId =
   | "ellipse"
   | "polygon"
   | "star"
+  | "polyline"
   | "bucket"
   | "gradient"
   | "picker"

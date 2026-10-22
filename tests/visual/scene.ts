@@ -50,6 +50,16 @@ export interface SceneStroke {
    * interior takes the brush colour and whose outline is still traced on top.
    */
   readonly fill?: boolean;
+  /**
+   * When true the stroke is a **shape**: the tool replaces its whole outline
+   * on every move instead of extending it.
+   *
+   * The two paths rasterize differently - a shape is redrawn from its first
+   * sample every time - so the harness has to preview a shape the way the
+   * engine does, or the live picture it checks is not the picture the user
+   * watched.
+   */
+  readonly shape?: boolean;
   /** A transform to apply to the samples before the stroke is drawn. */
   readonly transform?: SceneTransform;
 }
@@ -129,6 +139,16 @@ export interface Scene {
   readonly guides?: readonly SceneGuide[];
   /** The grid overlay; omitted means the document shows no grid. */
   readonly grid?: SceneGrid;
+  /**
+   * The raster scale the surfaces are drawn at; 1 by default.
+   *
+   * The app rasterizes a layer at up to twice the document's resolution on a
+   * high-DPI display, and the picture the user sees is that surface scaled
+   * down. A scene at 2 therefore asks the question the product really has to
+   * answer: does the live preview still match the committed stroke when the
+   * surfaces are twice the document's resolution?
+   */
+  readonly rasterScale?: number;
 }
 
 /** True when the element is a stroke, which is the only kind with a live path. */

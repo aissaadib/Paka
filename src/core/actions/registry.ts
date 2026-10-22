@@ -178,8 +178,23 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
         actions.cancelGuideGesture();
         return;
       }
+      // A gesture in flight owns content that is not in the document yet, so
+      // Escape throws it away rather than committing it: the preview goes and
+      // nothing is recorded.
+      if (actions.cancelActiveGesture()) {
+        return;
+      }
       actions.clearSelection();
     },
+  },
+  {
+    id: "finishShape",
+    label: "Finish Path",
+    shortcuts: [key("enter", "Enter")],
+    // Only the polyline holds a path that outlives a pointer gesture, so the
+    // command claims the key only while there is one to finish.
+    when: ({ engine }) => engine.canFinishShapeGesture(),
+    run: ({ actions }) => actions.finishShapeGesture(),
   },
   {
     id: "delete",

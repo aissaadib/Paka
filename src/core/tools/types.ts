@@ -193,6 +193,21 @@ export interface Tool {
    * to paint or to subtract.
    */
   readonly erases?: boolean;
+  /**
+   * True while the tool holds a gesture that a command could finish.
+   *
+   * Only the polyline does: its path stays open across clicks, so a command
+   * (`Enter`) has to be able to end it. Every other tool answers `false`,
+   * because their gesture ends with the pointer release.
+   */
+  canCommit?(): boolean;
+  /**
+   * Ends the gesture the tool is holding and **keeps** it.
+   *
+   * Called when the user moves on to another tool, so finished work is not
+   * thrown away. A tool with nothing open does nothing.
+   */
+  commitGesture?(context: ToolContext): void;
   onPointerDown(context: ToolContext, sample: PointerSample): void;
   onPointerMove(context: ToolContext, sample: PointerSample): void;
   onPointerUp(context: ToolContext, sample: PointerSample): void;

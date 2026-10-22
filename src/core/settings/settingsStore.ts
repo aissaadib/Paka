@@ -66,6 +66,7 @@ function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setShapeSides(settings.shapeSides);
   engine.setShapeInnerRatio(settings.shapeInnerRatio);
   engine.setShapeRotation(settings.shapeRotation);
+  engine.setShapeClosed(settings.shapeClosed);
   engine.setFillTolerance(settings.fillTolerance);
   engine.setGradientType(settings.gradientType);
   engine.setGradientEndColor(settings.gradientEndColor);
@@ -86,6 +87,7 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
     shapeSides: snapshot.shapeSides,
     shapeInnerRatio: snapshot.shapeInnerRatio,
     shapeRotation: snapshot.shapeRotation,
+    shapeClosed: snapshot.shapeClosed,
     fillTolerance: snapshot.fillTolerance,
     gradientType: snapshot.gradientType,
     gradientEndColor: snapshot.gradientEndColor,

@@ -129,6 +129,7 @@ describe("tool definitions", () => {
       "ellipse",
       "polygon",
       "star",
+      "polyline",
       "bucket",
       "gradient",
       "picker",
@@ -143,6 +144,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
     expect(getToolDefinition("polygon").shortcut).toBe("P");
     expect(getToolDefinition("star").shortcut).toBe("S");
+    expect(getToolDefinition("polyline").shortcut).toBe("Y");
     expect(getToolDefinition("bucket").shortcut).toBe("F");
     expect(getToolDefinition("gradient").shortcut).toBe("G");
     expect(getToolDefinition("picker").shortcut).toBe("I");

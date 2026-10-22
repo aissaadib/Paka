@@ -18,6 +18,8 @@ interface FakeState {
   gridVisible: boolean;
   gridSnapping: boolean;
   brushSize: number;
+  /** True while a tool holds a path the Finish Path command could end. */
+  canFinishShape: boolean;
 }
 
 let state: FakeState;
@@ -34,6 +36,7 @@ beforeEach(() => {
     gridVisible: false,
     gridSnapping: false,
     brushSize: 6,
+    canFinishShape: false,
   };
   actions = {
     setTool: vi.fn(),
@@ -49,6 +52,7 @@ beforeEach(() => {
     setShapeSides: vi.fn(),
     setShapeInnerRatio: vi.fn(),
     setShapeRotation: vi.fn(),
+    setShapeClosed: vi.fn(),
     setFillTolerance: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
@@ -57,6 +61,8 @@ beforeEach(() => {
     setGridSpacing: vi.fn(),
     setGridSnapping: vi.fn(),
     dismissNotice: vi.fn(),
+    cancelActiveGesture: vi.fn(() => false),
+    finishShapeGesture: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     zoomIn: vi.fn(),
@@ -94,6 +100,7 @@ beforeEach(() => {
         gridSnapping: state.gridSnapping,
         brush: { size: state.brushSize },
       }) as unknown as EditorSnapshot,
+    canFinishShapeGesture: () => state.canFinishShape,
   } as unknown as DrawingEngine;
   file = { save: vi.fn(), saveAs: vi.fn(), open: vi.fn() } as unknown as FileActionHandlers;
 });
@@ -236,6 +243,28 @@ describe("document and view commands", () => {
   it("clears the selection otherwise", () => {
     press("escape", { code: "Escape", ctrl: false, meta: false });
     expect(actions.clearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("throws the gesture in flight away with Escape", () => {
+    // A gesture owns content that is not in the document yet, so Escape must
+    // cancel it rather than commit it - and must not clear the selection as
+    // well.
+    vi.mocked(actions.cancelActiveGesture).mockReturnValueOnce(true);
+    press("escape", { code: "Escape", ctrl: false, meta: false });
+    expect(actions.cancelActiveGesture).toHaveBeenCalledOnce();
+    expect(actions.clearSelection).not.toHaveBeenCalled();
+  });
+
+  it("finishes an open path with Enter, and only while there is one", () => {
+    // Nothing to finish: the key is not claimed.
+    expect(press("enter", { code: "Enter", ctrl: false, meta: false })).toBeNull();
+    expect(actions.finishShapeGesture).not.toHaveBeenCalled();
+
+    state.canFinishShape = true;
+    expect(press("enter", { code: "Enter", ctrl: false, meta: false })?.action.id).toBe(
+      "finishShape",
+    );
+    expect(actions.finishShapeGesture).toHaveBeenCalledOnce();
   });
 
   it("deletes a selected guide before touching strokes", () => {

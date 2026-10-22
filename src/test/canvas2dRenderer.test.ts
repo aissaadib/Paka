@@ -2740,6 +2740,165 @@ describe("Canvas2DRenderer live preview compositing (real pixels)", () => {
   });
 });
 
+/**
+ * A shape's outline: a closed rectangle, as the shape tools hand it over.
+ *
+ * The last point repeats the first, so the closing edge is drawn - exactly
+ * like the rectangle tool's own outline.
+ */
+function createShapeStroke(layerId: LayerId, overrides: Partial<StrokeRecord> = {}): StrokeRecord {
+  return {
+    ...createStroke(layerId),
+    xs: [6, 26, 26, 6, 6],
+    ys: [6, 6, 26, 26, 6],
+    pressures: [1, 1, 1, 1, 1],
+    times: [0, 0, 0, 0, 0],
+    ...overrides,
+  };
+}
+
+/**
+ * The shape's pixels.
+ *
+ * A shape is previewed by *replacing* its outline, not by extending it, so
+ * these tests are about the one question a user cannot answer by looking: does
+ * the picture on screen while the shape is being dragged survive the release
+ * unchanged? The answer has to be yes, because the release is what reaches
+ * the layer, the file and the export.
+ */
+describe("Canvas2DRenderer shape pixels", () => {
+  it("shows the same pixels while the shape is dragged as after the release", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const stroke = createShapeStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.render();
+        const preview = snapshotCanvas(harness.display);
+
+        harness.renderer.endStroke(stroke);
+        harness.renderer.render();
+        expectSameCanvas(
+          snapshotCanvas(harness.display),
+          preview,
+          "the committed shape differs from the preview the user watched",
+        );
+      },
+    );
+  });
+
+  it("rebuilds the committed shape to the same pixels", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const stroke = createShapeStroke(layerId);
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.endStroke(stroke);
+        harness.renderer.render();
+        const committed = snapshotCanvas(harness.display);
+
+        // A rebuild from the stored elements - what an undo, a redo or a
+        // reopened file does - has to produce the very same picture.
+        harness.elements.set(layerId, [stroke]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expectSameCanvas(
+          snapshotCanvas(harness.display),
+          committed,
+          "the rebuilt shape differs from the committed one",
+        );
+      },
+    );
+  });
+
+  it("fills a shape's interior and still traces its outline", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const stroke = createShapeStroke(harness.doc.layers[0].id, { fill: true });
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.render();
+
+        // The interior takes the brush colour...
+        expectPixel(harness.display, 16, 16, [0, 0, 0]);
+        // ...and the outline is still traced on top of it.
+        expectPixel(harness.display, 6, 16, [0, 0, 0]);
+      },
+    );
+  });
+
+  it("leaves the paper untouched when the shape is cancelled", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const stroke = createShapeStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.render();
+        // The outline is on screen; the interior is still paper.
+        expectPixel(harness.display, 6, 16, [0, 0, 0]);
+        expectPixel(harness.display, 16, 16, [255, 255, 255]);
+
+        harness.renderer.cancelStroke();
+        harness.renderer.render();
+        // The preview is gone, and the layer never held it.
+        expectPixel(harness.display, 6, 16, [255, 255, 255]);
+        expect(readPixel(harness.surfaces[0], 6, 16)).toEqual([0, 0, 0, 0]);
+      },
+    );
+  });
+
+  it("agrees at twice the raster scale", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const stroke = createShapeStroke(harness.doc.layers[0].id);
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.render();
+        const preview = snapshotCanvas(harness.display);
+
+        harness.renderer.endStroke(stroke);
+        harness.renderer.render();
+        expectSameCanvas(
+          snapshotCanvas(harness.display),
+          preview,
+          "the committed shape differs from the preview at twice the raster scale",
+        );
+      },
+      { rasterScale: 2 },
+    );
+  });
+
+  it("draws a polyline as an open path: the closing edge is not drawn", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const stroke: StrokeRecord = {
+          ...createStroke(harness.doc.layers[0].id),
+          xs: [4, 16, 28],
+          ys: [16, 4, 16],
+          pressures: [1, 1, 1],
+          times: [0, 0, 0],
+        };
+        harness.renderer.beginStroke(stroke);
+        harness.renderer.replaceStroke(stroke);
+        harness.renderer.render();
+
+        // The two segments are drawn...
+        expectPixel(harness.display, 10, 10, [0, 0, 0]);
+        expectPixel(harness.display, 22, 10, [0, 0, 0]);
+        // ...and the edge that would close the path is not.
+        expectPixel(harness.display, 16, 16, [255, 255, 255]);
+      },
+    );
+  });
+});
+
 describe("Canvas2DRenderer preview compositing calls", () => {
   it("groups the preview before applying a non-default layer opacity and blend", () => {
     const harness = createHarness();

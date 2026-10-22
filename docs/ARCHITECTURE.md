@@ -124,7 +124,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
-| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
+| `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, polyline, bucket, gradient, picker, guides, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
@@ -858,6 +858,85 @@ leave a dot; a gesture that starts outside the paper records nothing at all
 **release** sample decide the committed geometry, so the shape settles on where
 the pointer was let go: holding `Shift`/`Alt` through the release keeps the
 constraint, releasing the modifier first drops it.
+
+#### The polyline
+
+A **polyline** is the one shape that is not derived from a drag. The user places
+its corners one at a time, so the path stays **open** across several pointer
+gestures - which is why it is a tool of its own (`PolylineTool`) rather than
+another `ShapeKind`. The trick is unchanged: the committed path is an ordinary
+`StrokeRecord`, so it inherits one-undo-step semantics, the project file,
+re-rasterization and layer compositing, and the format does not move.
+
+The tool owns the corners and nothing else:
+
+- a **click** places a corner where the pointer is;
+- a **drag** places a corner at the release point, and the segment follows the
+  pointer while the button is down;
+- a **rubber band** runs from the last corner to the pointer, so the path is on
+  screen before it is committed (`setShapeOutline` with the band appended);
+- `Shift` straightens the segment to 45 degrees, measured **from the last
+  corner**, so it is the segment that is straightened rather than the pointer's
+  absolute direction. The band and the placed corner use the same constrained
+  point, so the shape the user watches is the shape they get.
+
+`core/tools/shapeGeometry.ts` still holds the geometry, and it is still pure:
+`polylineOutline(vertices, closed)` drops a repeated corner (so the path never
+carries a zero-length segment, which would print a stray dot) and repeats the
+first corner at the end of a **closed** path, exactly like the rectangle's
+outline does, so the closing edge is stroked and the fill has a loop to fill. An
+open path keeps its last corner last: the closing edge is *not* drawn, because
+the user never asked for it.
+
+The path ends three ways, and all three are one undo step:
+
+- **`Enter`** (the *Finish Path* command in the action registry) keeps it;
+- a **double click** keeps it;
+- clicking the **first corner** closes the path and keeps it, so a closed shape
+  needs no separate command. The grab radius is screen space, like the guides'
+  grab radius, so the first corner is equally easy to grab at 25 % and at 6400 %
+  zoom.
+
+`Esc` throws the path away, and moving on to another tool **keeps** it: a path
+the user has drawn is finished work, not a half-finished preview, so a tool
+switch commits it the way a brush stroke is committed. That is the one place
+where a shape tool and the polyline differ, and it is why the `Tool` interface
+carries an optional `commitGesture` beside `reset`: `reset` throws the gesture
+away (the document is being replaced, a capture was lost), `commitGesture` ends
+it and keeps it (the user moved on).
+
+Because the path is one stroke, an open path is **filled** up to the implied
+closing edge when the *Fill shape* switch is on - the interior takes the brush
+colour - while the outline is stroked only along the real segments. That is what
+every paint program does with an open path's fill.
+
+The toolbar's **Close path** switch closes a finished path by default. It is
+**editor state**, like `shapeFill` and the polygon's side count: it is read
+**when the path opens**, so a path keeps the setting it was started with, it is
+not undoable, it does not dirty the file, and it is persisted in the per-user
+settings file through the same reader as every other preference. Clicking the
+first corner still closes a path whatever the switch says, because that is a
+decision the user makes about *this* path: the switch is a default, not a rule.
+
+### Escape throws the drawing in flight away
+
+`Esc` is the *cancel* key, and it used to do only half the job: it cleared the
+stroke selection (and, with the guides tool, cancelled the guide drag), so a
+shape or a brush stroke that was being drawn kept previewing and was **committed
+on the release**. The user asked for the work to be dropped and got it kept.
+
+`DrawingEngine.cancelActiveGesture()` is the whole of the fix. It cancels the
+in-flight stroke, fill or gradient, and it tells the tool as well, so the tool
+does not go on believing a gesture is in flight and swallow the next press - the
+same reason `cancelGuideGesture` resets the guides tool. Nothing is recorded: no
+history step, no revision bump and no dirty flag, because a gesture that never
+reached the document cannot have changed it.
+
+The action registry gives the key to the guides tool first (it owns the guide
+drag), then to `cancelActiveGesture`, and only then to *clear the selection* -
+so the most urgent thing in flight is the thing that is thrown away. The engine
+exposes the same thing as `canFinishShapeGesture()` / `finishShapeGesture()`,
+which is how the *Finish Path* command knows whether there is a path to end.
 
 ### Bucket (flood) fill
 
@@ -1699,6 +1778,18 @@ DOM-free by design.
   the draw-call stream: it
   clears the buffer and redraws the whole outline, and the preview composites at
   the stroke's own alpha.
+- The **polyline** is covered in `polyline.test.ts`, because it is the one shape
+  whose gesture outlives a pointer gesture: a click places a corner, the band
+  runs to the pointer, `Shift` straightens the segment, the first corner closes
+  the path, a double click ends it, `Enter` ends it, `Esc` throws it away with
+  no history and no dirty flag, a tool switch **keeps** it, a path with one
+  corner is discarded, and the committed path is one undo step that survives a
+  save and a reopen. The **pixels** are covered twice: in the unit suite the
+  software canvas compares the preview with the committed stroke and with the
+  rebuilt one, pixel for pixel, and in the visual-regression harness a scene
+  draws a polyline through the **shape's** live path (`replaceStroke`) and
+  asserts in a real browser that the live drawing, the rebuilt layer and the
+  export agree - at the document's resolution and at twice it.
 - `canvas2dStroke` is tested directly: diameter/opacity curves, feather radius
   (`0` at hardness 1, proportional for soft strokes), and - through the
   recording context - that rasterization is always **full coverage** (which is

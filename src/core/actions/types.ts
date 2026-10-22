@@ -64,6 +64,7 @@ export type ActionId =
   | "nudgeUp"
   | "nudgeDown"
   | "escape"
+  | "finishShape"
   | "delete"
   | "brushSizeDown"
   | "brushSizeUp"

@@ -1,0 +1,25 @@
+{
+  "id": "polyline-filled",
+  "width": 160,
+  "height": 120,
+  "background": "#ffffff",
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        {
+          "kind": "stroke",
+          "shape": true,
+          "fill": true,
+          "brush": {
+            "hardness": 1,
+            "color": "#16181c",
+            "size": 8
+          },
+          "xs": [30, 130, 100, 60, 30],
+          "ys": [30, 30, 95, 95, 30]
+        }
+      ]
+    }
+  ]
+}

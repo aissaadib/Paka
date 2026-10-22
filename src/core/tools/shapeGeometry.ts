@@ -27,7 +27,7 @@ export interface ShapePoint {
 }
 
 /**
- * The options a polygon or a star is drawn with.
+ * The options a polygon, a star or a polyline is drawn with.
  *
  * They describe the *next* shape, not the ones already committed: a committed
  * shape stores only its points, so changing an option never rewrites existing
@@ -38,11 +38,13 @@ export interface ShapePoint {
  * - `sides` is the polygon's side count and the star's point count.
  * - `innerRatio` is the star's inner radius as a fraction of its outer radius.
  * - `rotation` turns the outline about the box's centre, in degrees.
+ * - `closed` closes a finished polyline path.
  */
 export interface ShapeOptions {
   readonly sides: number;
   readonly innerRatio: number;
   readonly rotation: number;
+  readonly closed: boolean;
 }
 
 /** A polygon needs three sides; 24 is visually a circle and still tiny. */
@@ -74,6 +76,7 @@ export const DEFAULT_SHAPE_OPTIONS: ShapeOptions = {
   sides: DEFAULT_SHAPE_SIDES,
   innerRatio: DEFAULT_SHAPE_INNER_RATIO,
   rotation: DEFAULT_SHAPE_ROTATION,
+  closed: false,
 };
 
 /**
@@ -88,6 +91,7 @@ export function normalizeShapeOptions(options: ShapeOptions): ShapeOptions {
     sides: clamp(Math.round(options.sides), MIN_SHAPE_SIDES, MAX_SHAPE_SIDES),
     innerRatio: clamp(options.innerRatio, MIN_SHAPE_INNER_RATIO, MAX_SHAPE_INNER_RATIO),
     rotation: clamp(Math.round(options.rotation), 0, 360),
+    closed: options.closed === true,
   };
 }
 
@@ -98,6 +102,26 @@ export interface ShapeDrag {
   readonly shift: boolean;
   /** Draw from the centre: the anchor is the midpoint of the shape. */
   readonly alt: boolean;
+}
+
+/**
+ * Constrains a drag vector to the nearest 45-degree direction.
+ *
+ * The length is kept, so a constrained line is the same line turned to a
+ * convenient angle rather than a shorter one. A zero vector is returned
+ * unchanged: there is no direction to snap.
+ *
+ * The line tool and the polyline share it, so "Shift means 45 degrees" means
+ * the same thing in both.
+ */
+export function constrainTo45Degrees(dx: number, dy: number): { dx: number; dy: number } {
+  if (dx === 0 && dy === 0) {
+    return { dx, dy };
+  }
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  const length = Math.hypot(dx, dy);
+  return { dx: Math.cos(snapped) * length, dy: Math.sin(snapped) * length };
 }
 
 /**
@@ -166,13 +190,9 @@ function lineOutline(drag: ShapeDrag): ShapePoint[] {
   let { dx, dy } = dragVector(drag);
   // Shift constrains a line to the nearest 45-degree direction, keeping its
   // length. Rectangles and ellipses constrain differently (a square or circle),
-  // so this lives here rather than in the shared vector.
-  if (drag.shift && (dx !== 0 || dy !== 0)) {
-    const angle = Math.atan2(dy, dx);
-    const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
-    const length = Math.hypot(dx, dy);
-    dx = Math.cos(snapped) * length;
-    dy = Math.sin(snapped) * length;
+  // so the constraint is the line's own - the polyline shares it.
+  if (drag.shift) {
+    ({ dx, dy } = constrainTo45Degrees(dx, dy));
   }
   const { anchor } = drag;
   if (drag.alt) {
@@ -320,6 +340,53 @@ function rotateAboutCentre(
     };
   });
 }
+
+/**
+ * The outline of a polyline: the vertices the user placed, in order.
+ *
+ * A polyline is the one shape that is not derived from a drag - the user
+ * places its vertices one at a time - so its geometry *is* the vertex list.
+ * The function exists to give the list the same contract every other outline
+ * has:
+ *
+ *  - a **repeat is dropped**, so the path never carries a zero-length segment
+ *    (which would print a stray dot where the vertex already is);
+ *  - a **closed path repeats its first vertex at the end**, exactly like the
+ *    rectangle's outline does, so the closing edge is stroked and the fill has
+ *    a loop to fill.
+ *
+ * An open path keeps its last vertex last: the closing edge is *not* drawn,
+ * because the user never asked for it.
+ */
+export function polylineOutline(
+  vertices: readonly ShapePoint[],
+  closed: boolean,
+): ShapePoint[] {
+  const points: ShapePoint[] = [];
+  for (const vertex of vertices) {
+    const last = points[points.length - 1];
+    if (last && last.x === vertex.x && last.y === vertex.y) {
+      continue;
+    }
+    points.push({ x: vertex.x, y: vertex.y });
+  }
+  if (closed && points.length >= 2) {
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (first.x !== last.x || first.y !== last.y) {
+      points.push({ x: first.x, y: first.y });
+    }
+  }
+  return points;
+}
+
+/**
+ * A path needs two vertices before it encloses anything.
+ *
+ * One vertex is a point, not a path: committing it would leave a stray dot
+ * and an undo step that appears to do nothing.
+ */
+export const MIN_POLYLINE_VERTICES = 2;
 
 /**
  * Turns the placed outline about the centre and closes it.

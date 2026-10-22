@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent15-shape-tools` | **Polyline and a cancel that cancels** - a **Polyline** tool (`Y`) draws a path of straight segments the user places **one corner at a time**: a click places a corner, a drag places one at the release point, and a rubber band runs from the last corner to the pointer. `Shift` straightens the segment to 45 degrees, measured from the last corner, exactly like the line tool. The path ends three ways - `Enter` keeps it, a double click keeps it, and clicking the **first corner** closes it and keeps it - and it is one ordinary stroke, so one undo step, one entry in the project file and **no format change**. Moving on to another tool **keeps** the path, because a drawn path is finished work. `Esc` now throws **any** drawing in flight away - a shape, a brush stroke, a fill or a gradient - with no history step, no revision bump and no dirty flag; before this, `Esc` only cleared the selection, so a shape that was being dragged kept previewing and was committed on the release. The shape's preview is now proved to equal the committed result: unit tests compare the pixels, and the visual-regression harness previews a scene through the **shape's** live path and checks live = rebuilt = exported in a real browser, at the document's resolution and at twice it. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -124,7 +125,23 @@ visual-regression harness.
   preview, one stroke = one undo step; `Shift` constrains (45°, squares, circles,
   a regular polygon or star), `Alt` draws from the centre. Rectangle/ellipse/
   polygon/star can be filled via the **Fill shape** switch; a line cannot.
-  Shapes ignore pen pressure (constant width).
+  Shapes ignore pen pressure (constant width). `Esc` throws a shape that is
+  still being drawn away: the preview goes and nothing is recorded.
+- **Polyline** (`Y`): a path of straight segments the user places **one corner
+  at a time**. A click places a corner, a drag places one at the release point,
+  and a rubber band runs from the last corner to the pointer, so the path is on
+  screen before it is committed. `Shift` straightens the segment to 45 degrees,
+  measured from the last corner, exactly like the line tool. The path ends
+  three ways: `Enter` keeps it, a double click keeps it, and clicking the
+  **first corner** closes it and keeps it - so a closed shape needs no separate
+  command. `Esc` throws it away; moving on to another tool **keeps** it,
+  because a drawn path is finished work rather than a half-finished preview.
+  A committed path is an ordinary stroke: one undo step, one entry in the
+  project file, pixels that re-rasterize identically after an undo, a reopen or
+  an export, and **no project-format change**. The toolbar's **Close path**
+  switch closes a finished path by default (it is editor state, read when the
+  path opens) and the **Fill shape** switch fills it; an open path is filled up
+  to the implied closing edge, which is not stroked.
 - **Polygon and star** (`P`, `S`): a regular *n*-gon (3-24 sides, default 5)
   inscribed in the **ellipse** of the dragged box with a vertex at the top, and
   the classic **2p-vertex** star (3-24 points, default 5) inscribed in the
@@ -475,7 +492,7 @@ Key files for the next slice (directional / per-dab stamp textures):
   full brush it was drawn with, including `hardness`, `spacing`, `stabilizer`,
   `texture`, `stamp`, `stampSpacing`, `stampHardness` and `stampTexture`.
 - **Preferences are session state that happens to survive a restart.** The
-  settings file holds the nine editor preferences and nothing else: no
+  settings file holds the editor preferences and nothing else: no
   drawing, no document, no history. Restoring them goes through the engine's
   editor-state setters, so a restored preference costs no history entry, no
   revision bump and no dirty flag - the same contract the brush settings have
@@ -524,12 +541,16 @@ Key files for the next slice (directional / per-dab stamp textures):
 Product:
 
 - No text tool; only brush, eraser, select, line, rectangle, ellipse, polygon,
-  star, bucket, gradient, picker, guides, pan.
+  star, polyline, bucket, gradient, picker, guides, pan.
 - Shapes: a committed shape stores its **points**, not its kind, so a polygon or
   a star cannot be re-edited as one - it is an ordinary stroke afterwards. There
   is no rotation *gesture* (the option covers the need), no irregular polygon,
   no per-vertex handles, and the polygon's and the star's options are session
   state: they are not persisted, and they are shared between the two tools.
+- Polyline: the corners are baked into the samples, so a committed path cannot
+  be re-edited as a path (there are no vertex handles), and the path is closed
+  by clicking the first corner rather than by an option - there is no
+  "closed path" switch.
 - A layer is still re-rasterized from scratch when it changes, but the rebuild is
   bounded by each element's own footprint: it clears and blends only the rectangle
   the element inks, so the cost follows the stroke geometry instead of the
@@ -596,6 +617,21 @@ Product:
 
 Verification gaps:
 
+- The polyline and the `Esc` cancel were checked in the **browser app** on the
+  live display canvas, by reading the canvas's pixels: a path of three corners
+  previews (the rubber band and the segments are on screen), `Enter` commits it
+  with the **same pixels** and one history step, `Esc` removes the preview
+  (the pixel count falls back to the committed picture) and leaves the history
+  and the dirty flag alone, a tool switch **keeps** the path, and `Esc` during
+  a rectangle drag removes the rectangle's preview so the release commits
+  nothing. The **Close path** switch was checked the same way: the same three
+  corners draw fewer pixels with the switch off than with it on, because the
+  closing edge is stroked, and each path is one history step. The committed
+  pixels are also covered by the unit suite (the
+  software canvas compares the preview, the committed stroke and the rebuild)
+  and by the visual-regression harness in a real browser (live = rebuilt =
+  exported, at the document's resolution and at twice it). A **packaged**
+  Tauri check of the polyline has not been run.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's

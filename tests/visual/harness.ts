@@ -281,6 +281,10 @@ export function runScene(
   const allElements = new Map(elements);
 
   const display = document.createElement("canvas");
+  // The surfaces are rasterized at the scene's scale: a scene at 2 asks
+  // whether the live preview still matches the committed stroke when the
+  // layer surfaces are twice the document's resolution.
+  const rasterScale = scene.rasterScale ?? 1;
   const renderer: DrawingRenderer = new Canvas2DRenderer({
     canvas: display,
     strokeSource: {
@@ -288,7 +292,7 @@ export function runScene(
         (elements.get(layerId) ?? []).filter(isStroke),
       listElements: (layerId: LayerId) => elements.get(layerId) ?? [],
     },
-    rasterScale: 1,
+    rasterScale,
     // Never fires: every render is issued explicitly, so the harness does not
     // depend on the app's animation loop (and cannot be stalled by a
     // suspended requestAnimationFrame).
@@ -297,7 +301,7 @@ export function runScene(
   renderer.setDocument(drawingDocument);
   renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
   renderer.setDisplaySize(scene.width, scene.height, 1);
-  renderer.setRasterScale(1);
+  renderer.setRasterScale(rasterScale);
   // The grid is display state: the scene may ask for it, and the harness
   // turns it off again whenever it needs the picture the export must match.
   const gridSettings = scene.grid
@@ -337,7 +341,14 @@ export function runScene(
   if (liveCapable && lastLayer) {
     const stroke = toStroke(lastElement, layerIds[lastLayerIndex]);
     renderer.beginStroke(stroke);
-    renderer.extendStroke(stroke, 0);
+    if (lastElement.shape === true) {
+      // A shape does not extend: the tool replaces its whole outline on every
+      // move, so the buffer is redrawn from the first sample. Previewing it
+      // the brush's way would check a picture the user never sees.
+      renderer.replaceStroke(stroke);
+    } else {
+      renderer.extendStroke(stroke, 0);
+    }
     renderer.render();
     livePixels = readPixels(display);
     // The gesture ends, exactly as it does in the app. Without this the

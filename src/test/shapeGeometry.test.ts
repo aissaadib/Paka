@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_SHAPE_SIDES,
   MIN_SHAPE_SIDES,
+  constrainTo45Degrees,
   outlineExtent,
+  polylineOutline,
   shapeOutline,
   type ShapeDrag,
   type ShapeOptions,
@@ -20,7 +22,7 @@ function drag(overrides: Partial<ShapeDrag> = {}): ShapeDrag {
 }
 
 function options(overrides: Partial<ShapeOptions> = {}): ShapeOptions {
-  return { sides: 5, innerRatio: 0.5, rotation: 0, ...overrides };
+  return { sides: 5, innerRatio: 0.5, rotation: 0, closed: false, ...overrides };
 }
 
 function bounds(points: readonly ShapePoint[]) {
@@ -560,5 +562,116 @@ describe("outline extent", () => {
         { x: 3, y: 4 },
       ]),
     ).toBe(5);
+  });
+});
+
+/**
+ * The polyline's geometry.
+ *
+ * A polyline is the one shape that is not derived from a drag, so its geometry
+ * is the vertex list the user placed. The rules the list has to follow are the
+ * same ones every other outline follows: no zero-length segment, and a closed
+ * path that repeats its first point so the closing edge is drawn.
+ */
+describe("the polyline outline", () => {
+  const triangle: ShapePoint[] = [
+    { x: 0, y: 0 },
+    { x: 40, y: 0 },
+    { x: 20, y: 30 },
+  ];
+
+  it("keeps the vertices in the order they were placed", () => {
+    expect(polylineOutline(triangle, false)).toEqual(triangle);
+  });
+
+  it("drops a repeated vertex, so the path has no zero-length segment", () => {
+    const outline = polylineOutline(
+      [
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+      ],
+      false,
+    );
+    expect(outline).toEqual([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 10, y: 10 },
+    ]);
+  });
+
+  it("repeats the first vertex at the end of a closed path", () => {
+    const outline = polylineOutline(triangle, true);
+    expect(outline).toHaveLength(4);
+    expect(outline[3]).toEqual(outline[0]);
+  });
+
+  it("leaves an open path open: the closing edge is not drawn", () => {
+    const outline = polylineOutline(triangle, false);
+    expect(outline).toHaveLength(3);
+    expect(outline[outline.length - 1]).not.toEqual(outline[0]);
+  });
+
+  it("does not close a path that has fewer than two vertices", () => {
+    expect(polylineOutline([{ x: 3, y: 4 }], true)).toEqual([{ x: 3, y: 4 }]);
+    expect(polylineOutline([], true)).toEqual([]);
+  });
+
+  it("does not repeat the first vertex twice when the path is already closed", () => {
+    const outline = polylineOutline(
+      [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 0, y: 0 },
+      ],
+      true,
+    );
+    expect(outline).toEqual([
+      { x: 0, y: 0 },
+      { x: 10, y: 0 },
+      { x: 0, y: 0 },
+    ]);
+  });
+});
+
+/**
+ * The 45-degree constraint.
+ *
+ * The line tool and the polyline share it, so "Shift means 45 degrees" means
+ * the same thing in both.
+ */
+describe("the 45-degree constraint", () => {
+  it("leaves a zero vector alone", () => {
+    expect(constrainTo45Degrees(0, 0)).toEqual({ dx: 0, dy: 0 });
+  });
+
+  it("snaps a near-diagonal to 45 degrees", () => {
+    const { dx, dy } = constrainTo45Degrees(100, 60);
+    expect(dx).toBeCloseTo(dy, 6);
+    expect(dx).toBeGreaterThan(0);
+  });
+
+  it("keeps the length of the segment", () => {
+    const length = Math.hypot(100, 60);
+    const { dx, dy } = constrainTo45Degrees(100, 60);
+    expect(Math.hypot(dx, dy)).toBeCloseTo(length, 6);
+  });
+
+  it("snaps to the nearest of the eight directions", () => {
+    const horizontal = constrainTo45Degrees(50, 2);
+    expect(horizontal.dy).toBeCloseTo(0, 6);
+    expect(horizontal.dx).toBeCloseTo(50, 0);
+
+    const steep = constrainTo45Degrees(2, 50);
+    expect(steep.dx).toBeCloseTo(0, 6);
+    expect(steep.dy).toBeCloseTo(50, 0);
+  });
+
+  it("turns a negative vector the same way", () => {
+    const { dx, dy } = constrainTo45Degrees(-100, -100);
+    expect(dx).toBeCloseTo(dy, 6);
+    expect(dx).toBeLessThan(0);
   });
 });

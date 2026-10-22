@@ -47,6 +47,8 @@ export interface EditorActions {
   setShapeInnerRatio(ratio: number): void;
   /** Rotation of the next polygon or star, in degrees (0-360). */
   setShapeRotation(degrees: number): void;
+  /** Whether a finished polyline path is closed. */
+  setShapeClosed(closed: boolean): void;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   setFillTolerance(tolerance: number): void;
   /** Chooses linear or radial for the next gradient drag. */
@@ -63,6 +65,15 @@ export interface EditorActions {
   setGridSnapping(snap: boolean): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
+  /**
+   * Cancels the gesture in flight, if there is one.
+   *
+   * The preview goes and nothing is recorded: no history step, no revision
+   * bump and no dirty flag. Returns whether a gesture was cancelled.
+   */
+  cancelActiveGesture(): boolean;
+  /** Finishes the path the polyline tool is holding open. */
+  finishShapeGesture(): void;
   undo(): void;
   redo(): void;
   zoomIn(): void;
@@ -142,6 +153,7 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setShapeSides: (sides) => engine.setShapeSides(sides),
     setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),
     setShapeRotation: (degrees) => engine.setShapeRotation(degrees),
+    setShapeClosed: (closed) => engine.setShapeClosed(closed),
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
@@ -150,6 +162,8 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
     setGridSnapping: (snap) => engine.setGridSnapping(snap),
     dismissNotice: () => engine.dismissNotice(),
+    cancelActiveGesture: () => engine.cancelActiveGesture(),
+    finishShapeGesture: () => engine.finishShapeGesture(),
     undo: () => {
       engine.undo();
     },

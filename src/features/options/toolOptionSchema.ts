@@ -113,6 +113,15 @@ const shapeInnerRatioOption: SliderToolOption = {
     ),
 };
 
+const shapeClosedOption: ToggleToolOption = {
+  id: "shapeClosed",
+  kind: "toggle",
+  label: "Close path",
+  title: "Close the next polyline path when it is finished, instead of leaving it open",
+  read: (snapshot) => snapshot.shapeClosed,
+  write: (actions, value) => actions.setShapeClosed(value),
+};
+
 const fillToleranceOption: SliderToolOption = {
   id: "fillTolerance",
   kind: "slider",
@@ -137,6 +146,7 @@ export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> 
   ellipse: [shapeFillOption],
   polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption],
   star: [shapeSidesOption, shapeInnerRatioOption, shapeRotationOption, shapeFillOption],
+  polyline: [shapeClosedOption, shapeFillOption],
   bucket: [fillToleranceOption],
 };
 
@@ -166,6 +176,7 @@ export function toolShowsBrushControls(toolId: ToolId): boolean {
     case "ellipse":
     case "polygon":
     case "star":
+    case "polyline":
     case "gradient":
       return true;
     case "select":

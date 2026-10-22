@@ -152,6 +152,31 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       labelled **Sides** for the polygon and **Points** for the star. A polygon
       and a star are ordinary strokes, so the file format did not move. See
       [ARCHITECTURE.md](ARCHITECTURE.md#the-polygon-and-the-star).
+- [x] Polyline (`Y`): a path of straight segments the user places **one corner at
+      a time**. A click places a corner, a drag places one at the release point,
+      and a rubber band runs from the last corner to the pointer, so the path is
+      on screen before it is committed. `Shift` straightens the segment to 45
+      degrees, measured from the last corner, exactly like the line tool. The
+      path ends three ways: `Enter` keeps it, a double click keeps it, and
+      clicking the **first corner** closes it and keeps it - so a closed shape
+      needs no separate command. `Esc` throws it away, and moving on to another
+      tool **keeps** it, because a drawn path is finished work rather than a
+      half-finished preview. A committed path is an ordinary stroke: one undo
+      step, one entry in the project file, pixels that re-rasterize identically
+      after an undo, a reopen or an export, and **no file-format change**. The
+      toolbar's **Close path** switch closes a finished path by default - editor
+      state, read when the path opens and persisted in the per-user settings
+      file - and the **Fill shape** switch fills it; an open path is filled up
+      to the implied closing edge, which is not stroked. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#the-polyline).
+- [x] `Esc` throws the drawing in flight away: a shape, a brush stroke, a fill
+      or a gradient that is still being drawn is cancelled, the preview goes and
+      **nothing** is recorded - no history step, no revision bump, no dirty
+      flag. The tool is told as well, so it does not go on believing a gesture
+      is in flight and swallow the next press. Before this, `Esc` only cleared
+      the selection, so a shape that was being dragged kept previewing and was
+      committed on the release. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#escape-throws-the-drawing-in-flight-away).
 - [x] Bucket (flood) fill (`F`): a press flood-fills the contiguous region under
       the pointer and writes it to the active layer as a bounded, pixel-exact
       patch. The scan samples the **merged visible composite** (paper plus every

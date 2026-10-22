@@ -75,6 +75,7 @@ const PHYSICAL_KEYS: Readonly<Record<string, string>> = {
   Backspace: "backspace",
   Delete: "delete",
   Escape: "escape",
+  Enter: "enter",
   ArrowLeft: "arrowleft",
   ArrowRight: "arrowright",
   ArrowUp: "arrowup",
@@ -199,6 +200,8 @@ function keyLabel(key: string): string {
       return "↓";
     case "escape":
       return "Esc";
+    case "enter":
+      return "Enter";
     case "delete":
       return "Delete";
     case "backspace":

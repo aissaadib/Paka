@@ -7,6 +7,7 @@ import { GradientTool } from "./gradientTool";
 import { GuidesTool } from "./guidesTool";
 import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
+import { PolylineTool } from "./polylineTool";
 import { SelectTool } from "./selectTool";
 import { ShapeTool } from "./shapeTool";
 import {
@@ -16,6 +17,7 @@ import {
   GUIDES_TOOL,
   LINE_TOOL,
   POLYGON_TOOL,
+  POLYLINE_TOOL,
   RECTANGLE_TOOL,
   SELECT_TOOL,
   STAR_TOOL,
@@ -37,6 +39,9 @@ export function createToolRegistry(): ToolRegistry {
     ellipse: new ShapeTool("ellipse", ELLIPSE_TOOL),
     polygon: new ShapeTool("polygon", POLYGON_TOOL),
     star: new ShapeTool("star", STAR_TOOL),
+    // A path of straight segments the user places one vertex at a time; it
+    // stays open across clicks, so it is a tool of its own.
+    polyline: new PolylineTool(POLYLINE_TOOL),
     // Flood fill: a press applies a pixel patch, a release commits it.
     bucket: new BucketTool(),
     // Gradient: a drag previews geometry and the release commits it.

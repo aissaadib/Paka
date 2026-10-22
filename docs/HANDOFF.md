@@ -89,6 +89,7 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent15-shape-tools` | **Polyline and a cancel that cancels** — a **Polyline** tool (`Y`) draws a path of straight segments the user places **one corner at a time** (a click places a corner, a drag places one at the release point, and a rubber band runs from the last corner to the pointer). `Shift` straightens the segment to 45 degrees from the last corner. The path ends three ways — `Enter`, a double click, or a click on the **first corner**, which closes it — and it is one ordinary stroke, so one undo step and **no format change**. A tool switch **keeps** the path. `Esc` now throws **any** drawing in flight away with no history step and no dirty flag; before this, `Esc` only cleared the selection, so a shape being dragged was still committed on the release. The shape's preview is proved equal to the committed result by unit tests and by the visual-regression harness (live = rebuilt = exported, at 1x and at 2x). |
 | `feat/ff26-transform` | **Scale and rotate a selection** — the select tool's overlay grows four **corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame; the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off**. The transform is **baked on apply** (it moves the strokes' samples and nothing else), so there is **no format change**. One undo step per transform, through the same command as a move. The geometry is pure (`core/document/selectionTransform.ts`, `core/document/selectionHandles.ts`) and unit tested; the handles are display-only. |
 | `feat/t11-guides` | **Composition guides** — a **Guides** tool (`U`) places a vertical or horizontal guide by dragging on empty canvas and moves an existing guide by dragging it; a click selects it, `Delete` removes it, `Esc` cancels a drag. The guide model, the axis heuristic, the rounding, the screen-space grab radius, the hit-test and the duplicate rule live in a pure module (`core/document/guides.ts`). The guides are document state but **display-only**, so the format change is additive and the version stays 9. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change. |
@@ -425,12 +426,29 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
   820×731, CSS 656×584, DPR 1.25, paper rect at (40, 64) → backing paper origin
   (41, 89), 0.46125 backing px per document px. Re-measure for a different window.
 - Tool shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
-  `o` ellipse, `p` polygon, `s` star, `f` bucket fill, `g` gradient, `i` picker,
-  `u` guides, `h` pan (middle-drag also pans);
-  `Esc` clears a selection; arrow keys nudge (`Shift` = 10 px); `Ctrl+D`
+  `o` ellipse, `p` polygon, `s` star, `y` polyline, `f` bucket fill, `g` gradient,
+  `i` picker, `u` guides, `h` pan (middle-drag also pans);
+  `Esc` throws the drawing in flight away and otherwise clears a selection;
+  `Enter` finishes an open polyline path; arrow keys nudge (`Shift` = 10 px);
+  `Ctrl+D`
   duplicate; `Ctrl+Shift+H`/`V` flip. With the guides tool active, `Esc` cancels
   the guide drag and clears the guide selection, and `Delete` removes the
   selected guide.
+- **Polyline and `Esc` check (verified 2026-10-22, browser app).** Press `y`: the
+  rail shows a **Polyline** button and the toolbar shows the **Close path** and
+  **Fill shape** switches. Click three points: the path and the rubber band are
+  on the live display canvas, `history` stays `0` and the file stays clean.
+  `Enter` commits
+  it: `history` reads `1`, the file reads `● unsaved` and **the pixels do not
+  change** - the committed path is the path that was previewed. `Esc` during the
+  next path removes the preview (the pixels fall back to the committed picture),
+  leaves `history` alone and leaves the file's dirty flag alone, and the next
+  press still works. Switching to another tool **keeps** the open path
+  (`history` rises by one). The **Close path** switch closes a finished path:
+  the same three corners draw more pixels with the switch on than with it off,
+  because the closing edge is stroked, and the path is still one history step.
+  With the rectangle tool, a drag plus `Esc` removes
+  the rectangle's preview and the release commits nothing.
 - **Guides check (verified 2026-10-21).** Press `u`: the rail shows a **Guides**
   button and the status bar counts the guides. A drag on empty canvas creates one
   guide and raises `history` by one; the guide sits at the **press** coordinate

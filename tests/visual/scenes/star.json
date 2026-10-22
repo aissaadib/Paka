@@ -9,6 +9,7 @@
       "elements": [
         {
           "kind": "stroke",
+          "shape": true,
           "brush": {
             "hardness": 1,
             "color": "#16181c",

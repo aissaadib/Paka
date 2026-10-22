@@ -68,6 +68,14 @@ export const STAR_TOOL: ToolDefinition = {
   fillable: true,
 };
 
+export const POLYLINE_TOOL: ToolDefinition = {
+  id: "polyline",
+  label: "Polyline",
+  shortcut: "Y",
+  description: "Click to place the corners of a path, then press Enter to finish it",
+  fillable: true,
+};
+
 export const PICKER_TOOL: ToolDefinition = {
   id: "picker",
   label: "Colour picker",
@@ -113,6 +121,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   ELLIPSE_TOOL,
   POLYGON_TOOL,
   STAR_TOOL,
+  POLYLINE_TOOL,
   BUCKET_TOOL,
   GRADIENT_TOOL,
   PICKER_TOOL,

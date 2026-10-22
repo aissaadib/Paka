@@ -78,8 +78,8 @@ architecture by browsing.
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
-(395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
-rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
+(430: the line, the rectangle, the ellipse, the polygon, the star, the polyline,
+the rigid rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
 (~300: the work-area clamp, the physical-pixel arithmetic and the cases),
 `core/document/grid.ts` (283: the grid lattice, the snap candidates and the
 document-space tolerance), `core/settings/appSettings.ts` (269: the settings
@@ -112,6 +112,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides` in `Canvas2DRenderer.ts` |
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
+| Change the polyline (the path tool) | `core/tools/polylineTool.ts` (the corners, the band, the three ways to end a path), `core/tools/shapeGeometry.ts` (`polylineOutline`, `constrainTo45Degrees`), `core/tools/types.ts` (`Tool.commitGesture`/`canCommit`), `core/tools/toolDefinitions.ts` (`POLYLINE_TOOL`), `core/actions/registry.ts` (the *Finish Path* command), `DrawingEngine.ts` (`finishShapeGesture`, `cancelActiveGesture`), `src/test/polyline.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
@@ -187,6 +188,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `Tool`, `ToolContext` | `core/tools/types.ts` | 167, 17 |
 | `ShapeKind`, `ShapeOptions`, `normalizeShapeOptions` | `core/tools/shapeGeometry.ts` | 22, 42, 86 |
 | `shapeOutline`, `outlineExtent` | `core/tools/shapeGeometry.ts` | 120, 143 |
+| `polylineOutline`, `constrainTo45Degrees` | `core/tools/shapeGeometry.ts` | grep the symbol |
+| `PolylineTool` | `core/tools/polylineTool.ts` | grep the symbol |
 | `rotateAboutCentre`, `polygonOutline`, `starOutline` (private) | `core/tools/shapeGeometry.ts` | 305, 349, 378 |
 | `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 992, 1004 / 1022 / 1039 |
 | `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
@@ -263,6 +266,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush hardness / soft edge | `canvas2dStroke.test.ts`, `canvas2dRenderer.test.ts`, `projectFormat.test.ts` |
 | Stroke raster | `canvas2dStroke.test.ts` |
 | Shape geometry (line, rectangle, ellipse, polygon, star) | `shapeGeometry.test.ts` (the vertex counts, the inscribed ellipse, the clamps, the rotation, the closed polyline, the star's simple outline) |
+| The polyline (the path tool) and `Esc` | `polyline.test.ts` (the corners, the band, the three ways to end a path, the cancel, the undo step, the save and reopen) |
 | Renderer / layers / compositing | `canvas2dRenderer.test.ts` (grep `it(`) |
 | Engine gestures, history, selection | `drawingEngine.test.ts` (grep `it(`) |
 | Format | `projectFormat.test.ts` |

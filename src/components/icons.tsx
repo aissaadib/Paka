@@ -127,6 +127,16 @@ export function IconStar(props: IconProps) {
   );
 }
 
+/** A path of straight segments: the polyline. */
+export function IconPolyline(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.4 12.4 6 5.2l4 5.4 3.6-6.2" />
+      <path d="M2.4 12.4h.01M6 5.2h.01M10 10.6h.01M13.6 4.4h.01" />
+    </Icon>
+  );
+}
+
 export function IconHand(props: IconProps) {
   return (
     <Icon {...props}>
