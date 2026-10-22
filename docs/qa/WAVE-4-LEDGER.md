@@ -36,35 +36,35 @@ have run without a cancellation.
 
 | # | Task | Owner | Branch | Status |
 | --- | --- | --- | --- | --- |
-| B01 | the engine's pointer router consults the ownership model | A29 | `feat/wave4/B01-pointer-routing` | queued |
-| B02 | the symmetry reaches the engine | A13 | `feat/wave4/B02-symmetry-engine` | queued |
-| B03 | the engine delegates the selection's geometry | A16 | `feat/wave4/B03-selection-engine` | queued |
-| B04 | the gradient's gesture and overlay | A21 | `feat/wave4/B04-gradient-engine` | queued |
-| B05 | the layer groups reach the engine and the renderer | A26 | `feat/wave4/B05-layer-groups-engine` | queued |
-| B06 | the pressure dynamics reach the brush and the renderer | A12 | `feat/wave4/B06-dynamics-renderer` | queued |
-| B07 | the reference images reach the renderer and the app | A18 | `feat/wave4/B07-reference-renderer` | queued |
-| B08 | the renderer paints the registered overlays | A19 | `feat/wave4/B08-overlay-pipeline` | queued |
-| B09 | the first real section through the settings mechanism | A22 | `feat/wave4/B09-settings-wiring` | queued |
-| B10 | the panel stack is mounted and the fold button exists | A11 | `feat/wave4/B10-panel-stack-mount` | running |
-| B11 | the preset browser is mounted and the library's files work | A06 | `feat/wave4/B11-preset-browser-mount` | running |
-| B12 | the brush tip has a control | A14 | `feat/wave4/B12-tip-control` | running |
-| B13 | the engine seeds the shipped brushes | A27 | `feat/wave4/B13-bundled-presets-engine` | queued |
-| B14 | the brush size gesture reaches the engine | A05 | `feat/wave4/B14-brush-size-engine` | queued |
-| B15 | the navigator is mounted and the renderer answers the overview | A09 | `feat/wave4/B15-navigator-mount` | queued |
-| B16 | the bucket's options reach the engine | A20 | `feat/wave4/B16-fill-options-engine` | queued |
-| B17 | the user's chords reach the running app | A23 | `feat/wave4/B17-shortcut-runtime` | running |
-| B18 | the named profiles live in the settings file | A24 | `feat/wave4/B18-workspace-profiles-persist` | running |
-| B19 | the brush group reads the property model; the bar is mounted | A04 | `feat/wave4/B19-brush-group` | queued |
-| B20 | the rail and the options bar draw the same tool | A03 | `feat/wave4/B20-toolbox-adoption` | running |
-| B21 | the menu bar's roving tabindex and type-ahead | A25 | `feat/wave4/B21-menu-aria` | running |
-| B22 | the folded panels travel with the shell's preferences | A07 | `feat/wave4/B22-colour-fold-state` | **integrated** |
-| B23 | the brush cursor is wired to the engine | A10 | `feat/wave4/B23-brush-cursor-engine` | queued |
-| B24 | the layers panel shows the tree | A08 | `feat/wave4/B24-layer-tree-panel` | queued |
-| B25 | the polygon and the star gain an outer radius | A15 | `feat/wave4/B25-shape-outer-radius` | queued |
-| B26 | the shell's arrangement is read from the settings file | A01 | `feat/wave4/B26-workspace-wiring` | queued |
-| B27 | the panel layout's owner adapter and its round trip | A28 | `feat/wave4/B27-panel-layout-round-trip` | running |
-| B28 | the engine's overlay draws the handles from the module | A17 | `feat/wave4/B28-transform-handles-engine` | queued |
-| B29 | the registry notifies; the option kinds are exhausted | A02 | `feat/wave4/B29-registration-order` | running |
+| B01 | the engine's pointer router consults the ownership model | A29 | feat/wave4/B01-* | cut off by the limit |
+| B02 | the symmetry reaches the engine | A13 | feat/wave4/B02-* | cut off by the limit |
+| B03 | the engine delegates the selection's geometry | A16 | feat/wave4/B03-* | never dispatched |
+| B04 | the gradient's gesture and overlay | A21 | feat/wave4/B04-* | never dispatched |
+| B05 | the layer groups reach the engine and the renderer | A26 | feat/wave4/B05-* | never dispatched |
+| B06 | the pressure dynamics reach the brush and the renderer | A12 | feat/wave4/B06-* | never dispatched |
+| B07 | the reference images reach the renderer and the app | A18 | feat/wave4/B07-* | never dispatched |
+| B08 | the renderer paints the registered overlays | A19 | feat/wave4/B08-* | never dispatched |
+| B09 | the first real section through the settings mechanism | A22 | feat/wave4/B09-* | never dispatched |
+| B10 | the panel stack is mounted and the fold button exists | A11 | feat/wave4/B10-* | **no work of its own** - cherry-picked B22's commit |
+| B11 | the preset browser is mounted and the library's files work | A06 | feat/wave4/B11-* | cut off by the limit |
+| B12 | the brush tip has a control | A14 | feat/wave4/B12-* | **integrated** |
+| B13 | the engine seeds the shipped brushes | A27 | feat/wave4/B13-* | cut off by the limit |
+| B14 | the brush size gesture reaches the engine | A05 | feat/wave4/B14-* | never dispatched |
+| B15 | the navigator is mounted and the renderer answers the overview | A09 | feat/wave4/B15-* | never dispatched |
+| B16 | the bucket's options reach the engine | A20 | feat/wave4/B16-* | cut off by the limit |
+| B17 | the user's chords reach the running app | A23 | feat/wave4/B17-* | **integrated** |
+| B18 | the named profiles live in the settings file | A24 | feat/wave4/B18-* | **integrated** |
+| B19 | the brush group reads the property model; the bar is mounted | A04 | feat/wave4/B19-* | never dispatched |
+| B20 | the rail and the options bar draw the same tool | A03 | feat/wave4/B20-* | mid-edit, does not compile |
+| B21 | the menu bar's roving tabindex and type-ahead | A25 | feat/wave4/B21-* | mid-edit, does not compile |
+| B22 | the folded panels travel with the shell's preferences | A07 | feat/wave4/B22-* | **integrated** |
+| B23 | the brush cursor is wired to the engine | A10 | feat/wave4/B23-* | cut off by the limit |
+| B24 | the layers panel shows the tree | A08 | feat/wave4/B24-* | never dispatched |
+| B25 | the polygon and the star gain an outer radius | A15 | feat/wave4/B25-* | cut off by the limit |
+| B26 | the shell's arrangement is read from the settings file | A01 | feat/wave4/B26-* | never dispatched |
+| B27 | the panel layout's owner adapter and its round trip | A28 | feat/wave4/B27-* | **no work of its own** - fast-forwarded to B22 |
+| B28 | the engine's overlay draws the handles from the module | A17 | feat/wave4/B28-* | never dispatched |
+| B29 | the registry notifies; the option kinds are exhausted | A02 | feat/wave4/B29-* | **integrated** |
 
 ## The integration log
 
