@@ -122,6 +122,24 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       same command as a move. The handles belong to the committed selection and
       are display-only: they never reach a layer surface or a PNG export. See
       [ARCHITECTURE.md](ARCHITECTURE.md#selection-and-transform).
+- [x] Selection modes: a marquee can **replace** the selection, **add** to it,
+      **subtract** from it or **intersect** with it. Because the selection is a
+      set of whole strokes, every mode is an exact set operation over those
+      ids - there is no feathered or expanded selection, because the
+      representation cannot express one, and no such mode is offered. The four
+      modes are toolbar buttons while the select tool is active, and the
+      modifier keys reach the same three (`Shift` add, `Alt` subtract,
+      `Shift`+`Alt` intersect); a held key wins for that gesture and the
+      toolbar shows the mode the drag is applying, so the two cannot disagree.
+      A mode also decides what a drag is: a plain replacement marquee moves
+      the selection when the press lands inside its frame, while the other
+      three are always marquees, so a stroke *inside* the frame can still be
+      added, subtracted or intersected. While the drag runs, the band and the
+      strokes it meets are drawn in the mode's colour, so the drag says what it
+      is about to do before it does it. `Ctrl+A` selects all and `Ctrl+Shift+I`
+      inverts the selection. Choosing a mode, selecting and inverting are all
+      **not** edits: no history step, no dirty flag, nothing in an export. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#selection-modes).
 - [x] Filled shapes: rectangle and ellipse commit with `fill: true` when the
       toolbar's **Fill shape** switch is on, so the rasterizer fills the polygon
       their samples bound before tracing the outline on top - one undo step, one

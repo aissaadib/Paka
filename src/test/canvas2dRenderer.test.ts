@@ -1456,6 +1456,48 @@ describe("Canvas2DRenderer selection overlay", () => {
     expect(composed.named("strokeRect")).toHaveLength(0);
   });
 
+  it("paints the band and the pending strokes in the mode's colour", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const stroke = createStroke(doc.layers[0].id);
+    const harness = createHarness();
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection({
+      bounds: { x: 2, y: 3, width: 40, height: 20 },
+      strokes: [],
+      pending: [stroke],
+      mode: "add",
+    });
+    harness.display.calls.length = 0;
+    harness.renderer.render();
+
+    // The pending strokes and the rubber band share the mode's colour, so a
+    // drag says what it is about to do before it does it.
+    const traces = harness.display.named("stroke");
+    expect(traces).toHaveLength(1);
+    expect(traces[0].strokeStyle).toBe("#3fb950");
+    const rectangles = harness.display.named("strokeRect");
+    expect(rectangles[0].strokeStyle).toBe("#3fb950");
+  });
+
+  it("keeps the mode's overlay out of the exported composite", () => {
+    const doc = createDocument({ width: 100, height: 80 });
+    const stroke = createStroke(doc.layers[0].id);
+    const harness = createHarness();
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(100, 80, 1);
+    harness.renderer.setSelection({
+      bounds: { x: 2, y: 3, width: 40, height: 20 },
+      strokes: [],
+      pending: [stroke],
+      mode: "subtract",
+    });
+
+    const composed = harness.composeDocument();
+    expect(composed.named("stroke")).toHaveLength(0);
+    expect(composed.named("strokeRect")).toHaveLength(0);
+  });
+
   it("draws the transform handles on the display canvas only", () => {
     const doc = createDocument({ width: 100, height: 80 });
     const harness = createHarness();

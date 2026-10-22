@@ -151,6 +151,32 @@
   white-space: nowrap;
 }
 
+/* The selection mode buttons: a segmented control, so the mode that is in
+   force reads at a glance. The active button carries the accent, the same
+   colour the selection overlay uses. */
+
+.selection-modes__button {
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.selection-modes__button:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.selection-modes__button.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
 .brush-controls {
   /* A dedicated, wrapping row: five sliders plus the pressure toggles are wider
      than a typical window, and clipping them made settings unreachable. */

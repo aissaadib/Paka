@@ -76,6 +76,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent16-selection-modes` | **Selection modes and selection feedback** - a marquee can **replace** the selection (the default), **add** to it, **subtract** from it or **intersect** with it. Because the selection is a set of whole strokes, every mode is an exact set operation over those ids (`core/document/selectionModes.ts`), so there is no feathered or expanded selection and **no such mode is offered**. The four modes are toolbar buttons while the select tool is active, and the modifier keys reach the same three (`Shift` add, `Alt` subtract, `Shift`+`Alt` intersect); a held key wins over the toolbar for that gesture and the engine publishes the mode the gesture resolved, so the toolbar, the status bar and the drag always agree. A mode also decides **what a drag is**: a plain replacement marquee moves the selection when the press lands inside its frame, while the other three are always marquees, so a stroke *inside* the frame can still be added, subtracted or intersected. While the drag runs the rubber band and the strokes it meets are drawn in the mode's colour, so the drag says what it is about to do before it does it. **Select All** (`Ctrl+A`) and **Invert Selection** (`Ctrl+Shift+I`) complete the set of operations. Choosing a mode, selecting and inverting are all **not edits**: no history step, no dirty flag, nothing in an export, and no project-format change. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -153,10 +154,24 @@ visual-regression harness.
   active layer; drag moves them; the four **corner handles** scale the
   selection and the **rotation handle** above the frame turns it; arrow keys
   nudge (1 px, `Shift` 10 px, coalesced); `Ctrl+D` duplicates;
-  `Ctrl+Shift+H`/`V` flips; `Delete` removes; `Esc` cancels; all one undo step
+  `Ctrl+Shift+H`/`V` flips; `Ctrl+A` selects all and `Ctrl+Shift+I` inverts
+  the selection; `Delete` removes; `Esc` cancels; all one undo step
   each and mirrored in the **Selection** menu.
   Selection is an overlay only, never serialized or exported, and painting is
   not clipped to it.
+  A marquee has **four modes** - **New**, **Add**, **Subtract** and
+  **Intersect** - set in the toolbar or reached with the modifier keys
+  (`Shift` add, `Alt` subtract, `Shift`+`Alt` intersect). The keys override
+  the toolbar's mode for the gesture they are held down for, and the toolbar
+  and the status bar show the mode the drag is applying, so the two cannot
+  disagree. A mode decides what a drag is: a plain **New** marquee moves the
+  selection when the press lands inside its frame, while **Add**, **Subtract**
+  and **Intersect** are always marquees, so a stroke *inside* the frame can
+  still be added, subtracted or intersected. The band and the strokes it meets
+  are drawn in the mode's colour while the drag runs, so the drag says what it
+  is about to do before it does it. The modes are exact set operations over
+  whole strokes: there is **no feathered or expanded selection**, because the
+  representation cannot express one.
   A **scale** is uniform and about the centre of the selection's frame: the
   corner keeps its direction from the centre, so dragging away from the centre
   grows the selection and dragging towards it shrinks it, and the factor is
@@ -269,7 +284,8 @@ src/
   state/        editorStore (snapshot + intents) and context
   core/
     document/   document/layer metadata, ordered element store, selection,
-                guides (the guide model, geometry and document operations),
+                selection modes (the marquee's set operations), guides (the
+                guide model, geometry and document operations),
                 selectionTransform (the scale/rotate geometry) and
                 selectionHandles (the transform handles)
     brushes/    defaults/normalization, strokeBuilder (sample capture)
@@ -565,7 +581,10 @@ Product:
   switch/tool switch, not a painting mask, no perspective and no non-uniform
   scale, no copy/paste across layers. A transform is **baked on apply**, so
   there is no persistent transform to edit afterwards, and the painted width is
-  not scaled with the path.
+  not scaled with the path. The marquee has four modes (replace, add,
+  subtract, intersect), which are exact set operations over whole strokes:
+  there is no feathered or expanded selection, because the representation
+  cannot express one, and no such mode is offered.
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
@@ -696,7 +715,8 @@ Verification gaps:
 - Shortcuts: `b` brush, `e` eraser, `m` select, `l` line, `r` rectangle,
   `o` ellipse, `p` polygon, `s` star, `f` bucket, `g` gradient, `i` picker,
   `h` pan (middle-drag also pans); `Esc` clears/cancels; arrows nudge
-  (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip.
+  (`Shift` 10 px); `Ctrl+D` duplicate; `Ctrl+Shift+H`/`V` flip; `Ctrl+A`
+  select all; `Ctrl+Shift+I` invert the selection.
 - Windows toolchain (details in HANDOFF §7): cargo is at
   `%USERPROFILE%\.cargo\bin` and must be prepended to `PATH`; WinLibs
   `mingw64\bin` must also be on `PATH` (rustc calls `dlltool.exe` by name);

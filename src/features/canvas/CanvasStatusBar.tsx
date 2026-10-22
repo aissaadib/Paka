@@ -12,6 +12,10 @@
 
 import { useEffect, useRef } from "react";
 import { SNAP_TOLERANCE_PX } from "../../core/document/grid";
+import {
+  SELECTION_MODE_HINTS,
+  SELECTION_MODE_LABELS,
+} from "../../core/document/selectionModes";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useNativeEnvironment } from "../../hooks/useNativeEnvironment";
 import type { CursorReport } from "../../types/pointer";
@@ -57,6 +61,8 @@ export function CanvasStatusBar({
     file,
     selectedStrokes,
     selectedGuideId,
+    selectionMode,
+    toolId,
     notice,
     gridVisible,
     gridSpacing,
@@ -133,6 +139,14 @@ export function CanvasStatusBar({
           {selectedStrokes} selected
         </span>
       )}
+      {toolId === "select" ? (
+        <span
+          className="status-bar__item"
+          title={SELECTION_MODE_HINTS[selectionMode]}
+        >
+          marquee: {SELECTION_MODE_LABELS[selectionMode].toLowerCase()}
+        </span>
+      ) : null}
       {selectedGuide ? (
         <span
           className="status-bar__item"

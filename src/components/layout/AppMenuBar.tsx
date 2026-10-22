@@ -53,7 +53,7 @@ export function AppMenuBar({
   onExportPng,
 }: AppMenuBarProps) {
   const { actions } = useEditor();
-  const { history, document: drawingDocument, selectedStrokes } = useEditorState();
+  const { history, document: drawingDocument, selectedStrokes, toolId } = useEditorState();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -133,6 +133,23 @@ export function AppMenuBar({
       id: "selection",
       label: "Selection",
       entries: [
+        {
+          type: "item",
+          label: "Select All",
+          shortcut: "Ctrl+A",
+          // A selection belongs to the select tool, so the menu offers these
+          // only there - exactly where the shortcut is claimed.
+          disabled: drawingDocument.activeLayerId === null || toolId !== "select",
+          onSelect: actions.selectAll,
+        },
+        {
+          type: "item",
+          label: "Invert Selection",
+          shortcut: "Ctrl+Shift+I",
+          disabled: drawingDocument.activeLayerId === null || toolId !== "select",
+          onSelect: actions.invertSelection,
+        },
+        { type: "separator" },
         {
           type: "item",
           label: "Duplicate",

@@ -992,10 +992,69 @@ that could drift. Selection is editor state, not document state: it is not
 serialized, it adds no history step, and it never marks the document dirty.
 
 The overlay is **display-only**. The engine hands the renderer
-`{ bounds, strokes, handles }` through `setSelection(...)`; the renderer traces
-the centrelines in blue and draws the frame as a dashed rectangle, after the
-layers and the in-progress stroke and before the document border. It never reaches a
-layer surface and `composeDocumentImage` (and therefore PNG export) never sees it.
+`{ bounds, strokes, pending, mode, handles }` through `setSelection(...)`; the
+renderer traces the centrelines in blue and draws the frame as a dashed
+rectangle, after the layers and the in-progress stroke and before the document
+border. It never reaches a layer surface and `composeDocumentImage` (and
+therefore PNG export) never sees it.
+
+#### Selection modes
+
+A marquee does not have to **replace** the selection. Because the selection is a
+**set of whole strokes**, every classic marquee mode is a set operation on that
+set, and `core/document/selectionModes.ts` is the whole of it:
+
+- **New** (`replace`) - the band *is* the new selection. A band that meets
+  nothing clears the selection.
+- **Add** - the band joins the selection. A band that meets nothing leaves the
+  selection exactly as it was.
+- **Subtract** - the band is taken out of the selection.
+- **Intersect** - only the strokes in *both* the band and the selection
+  survive.
+
+The set operations are exact: a unit of selection is a whole stroke, so a mode
+can never split a stroke or pick part of one. What the geometry **cannot** do
+is feather or expand a selection - that would need a region rather than a set
+of ids - so no such mode exists and none is offered in the toolbar. An **empty**
+result is **no selection**: a selection that holds nothing is not a selection,
+and the overlay goes with it.
+
+The mode is chosen in the **toolbar** (four buttons) or with the **modifier
+keys** (`Shift` for add, `Alt` for subtract, `Shift`+`Alt` for intersect), and
+the two can never disagree: the keys override the toolbar's mode for the
+gesture they are held down for, and the engine resolves both through the same
+`resolveSelectionMode`. While a marquee is in flight the engine publishes the
+mode that gesture resolved, so the toolbar and the status bar show what the
+drag is actually doing; when the gesture ends the toolbar's own mode is shown
+again. The mode is resolved **at press time** and belongs to that gesture, so a
+key pressed or released while the pointer is down cannot change what the drag
+is already doing.
+
+The mode also decides **what a drag is**. A plain `replace` marquee is a
+*move* when the press lands inside the frame and a marquee otherwise. In every
+other mode the drag is **always** a marquee, wherever it lands - which is what
+lets a stroke *inside* the current frame be added, subtracted or intersected
+instead of being unreachable behind the frame. The transform handles still win
+over both: grabbing one is an explicit "transform this".
+
+The **pending** set is the live preview of a drag: the strokes the band meets
+right now, drawn in the mode's colour (blue for a replacement, green for an
+addition, amber for a subtraction, orchid for an intersection) beside the
+committed selection, so the drag says what it is about to do before it does it.
+The band is drawn in the same colour. The preview is the same rule the release
+applies, so the two cannot disagree; the cost is one pass over the active
+layer's strokes per pointer move, which the stroke hit test keeps cheap by
+rejecting a stroke on its bounding box before testing its segments.
+
+The mode is **editor state**, like `shapeFill`: choosing one is not an edit, so
+it adds no history step, never marks the document dirty and never reaches an
+export. It is not persisted, so a fresh session starts in `replace`.
+
+**Select All** (`Ctrl+A`) and **Invert Selection** (`Ctrl+Shift+I`) complete
+the set of operations: select every stroke of the active layer, or everything
+on it that is not selected. The inversion of nothing is everything and the
+inversion of everything is nothing - both are ordinary set operations, and
+neither is an edit.
 
 The **handles belong to the committed selection**, never to the marquee's rubber
 band: while a band is being dragged the overlay shows the band and no handles,
@@ -1007,7 +1066,8 @@ Four gestures, chosen on press:
 
 - **Marquee** - drag anywhere outside the frame. The rubber band is live in the
   overlay; the committed selection is decided on release and re-derived from the
-  strokes. A marquee that meets nothing clears the selection.
+  strokes. A marquee that meets nothing clears the selection in the `replace`
+  mode, and leaves the selection alone in the other modes.
 - **Move** - drag from inside the frame. Every selected stroke's samples are
   written as `original + delta` and the layer is re-rasterized, so the pixels on
   screen are always exactly what the element list would produce; the store stays
@@ -1749,6 +1809,21 @@ DOM-free by design.
   after the layers and before the solid border, `setSelection(null)` leaves only
   the border, the handles are painted on the display canvas only, and the
   exported composite contains neither the frame nor the handles.
+  The **modes** have their own pure suite (`selectionModes`): the four set
+  operations over stroke ids, the empty-selection rule, the inversion, and the
+  modifier keys' mapping onto the modes. The engine suite drives them through
+  the same pointer entry point: an add, a subtract and an intersect changing
+  the selection, an add-mode band that meets nothing leaving it alone, a
+  subtraction that takes everything leaving **no** selection, a stroke inside
+  the frame joining the selection in the add mode where the same press would
+  have moved it in the replace mode, the modifier keys asking for the same
+  modes, the published mode agreeing with the toolbar and with the gesture in
+  flight, the mode and the selection never dirtying the document, a cancelled
+  band leaving the selection alone, the live preview of the strokes a band
+  meets, select-all and invert, and the selection surviving an undo that does
+  not touch it while dropping the strokes an undo removed. The renderer suite
+  asserts the mode's colour on the band and the pending strokes, and that
+  neither reaches the exported composite.
 - `Canvas2DRenderer` is tested with a **recording** fake canvas and 2D context:
   the compositor's rules (paper, layer order, visibility, opacity, the
   in-progress stroke, the border, dirty-driven re-rasterization, post-destroy
@@ -1852,11 +1927,13 @@ These are real gaps, not footnotes:
   or mask a brush stroke), only on the active layer, and it is dropped when the
   layer or the tool changes. **Fill patches and gradients are not selectable** -
   the stroke-only view deliberately filters them out - so they can only be
-  undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
-  feathering,
-  no clipping, no perspective and no non-uniform scale; duplicate stays on the
+  undone, not moved, duplicated or flipped. There is **no feathering**, no
+  clipping, no perspective and no non-uniform scale; duplicate stays on the
   layer (there is no cross-layer copy/paste). The frame is the selected strokes'
-  bounding box, not the region that was dragged.
+  bounding box, not the region that was dragged. The marquee itself has four
+  modes - replace, add, subtract and intersect - which are exact set
+  operations over whole strokes; there is no feathered or expanded selection,
+  because the representation cannot express one.
 - **A transform is baked on apply.** A scaled or turned selection is committed
   as new sample positions, so there is no persistent transform to edit later,
   and the painted width is not scaled with the path - a transform changes where

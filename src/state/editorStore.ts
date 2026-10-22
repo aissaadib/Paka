@@ -13,6 +13,7 @@ import {
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
+import type { SelectionMode } from "../core/document/selectionModes";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
@@ -79,8 +80,19 @@ export interface EditorActions {
   setLayerBlendMode(layerId: LayerId, blendMode: LayerBlendMode): void;
   moveLayer(layerId: LayerId, delta: number): void;
   selectLayer(layerId: LayerId): void;
+  /**
+   * Chooses how the next marquee combines with the selection that is there.
+   *
+   * Editor state: choosing a mode is not an edit, so it adds no history step
+   * and never marks the document unsaved.
+   */
+  setSelectionMode(mode: SelectionMode): void;
   clearSelection(): void;
   deleteSelection(): void;
+  /** Selects every stroke of the active layer. */
+  selectAll(): void;
+  /** Selects everything on the active layer that is not selected. */
+  invertSelection(): void;
   /** Removes the guide the guides tool has selected, as one undoable step. */
   deleteSelectedGuide(): void;
   /** Cancels the guide gesture in flight and clears the guide selection. */
@@ -170,9 +182,16 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setLayerBlendMode: (layerId, blendMode) => engine.setLayerBlendMode(layerId, blendMode),
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
     selectLayer: (layerId) => engine.selectLayer(layerId),
+    setSelectionMode: (mode) => engine.setSelectionMode(mode),
     clearSelection: () => engine.clearSelection(),
     deleteSelection: () => {
       engine.deleteSelection();
+    },
+    selectAll: () => {
+      engine.selectAll();
+    },
+    invertSelection: () => {
+      engine.invertSelection();
     },
     deleteSelectedGuide: () => {
       engine.deleteSelectedGuide();

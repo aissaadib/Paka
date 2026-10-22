@@ -13,12 +13,21 @@
  * the frame, so a press on a corner would otherwise start a move. Grabbing a
  * handle is an explicit "transform this", and it wins.
  *
+ * The **mode** decides what a drag that is not on a handle does. A plain
+ * `replace` marquee is a move when the press lands inside the selection, as
+ * above. In every other mode - `add`, `subtract` or `intersect`, whether the
+ * toolbar asked for it or a modifier key did - the drag is a marquee that
+ * combines with the selection, wherever it lands. That is what lets a stroke
+ * *inside* the current frame be added, subtracted or intersected: the mode
+ * decides, and the frame does not get in the way.
+ *
  * The tool owns only the gesture bookkeeping (`active`, so a stray move or
  * cancel without a press is ignored). Everything else - what stays selected,
  * what a translation means, whether it is undoable - belongs to the engine,
  * which owns the document and history. The tool never touches strokes.
  */
 
+import { resolveSelectionMode } from "../document/selectionModes";
 import type { PointerSample } from "../../types/pointer";
 import type { ToolContext } from "./types";
 import type { ToolDefinition } from "../../types/tool";
@@ -46,7 +55,8 @@ export class SelectTool {
       context.beginSelectionTransform(sample, handle);
       return;
     }
-    if (context.isInsideSelection(sample.docX, sample.docY)) {
+    const mode = resolveSelectionMode(context.getSelectionMode(), sample.modifiers);
+    if (mode === "replace" && context.isInsideSelection(sample.docX, sample.docY)) {
       context.beginSelectionMove(sample);
     } else {
       context.beginSelection(sample);

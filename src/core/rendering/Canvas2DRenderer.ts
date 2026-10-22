@@ -24,6 +24,7 @@ import type {
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
 import type { SelectionHandles } from "../document/selectionHandles";
+import type { SelectionMode } from "../document/selectionModes";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import type { Bounds } from "../../types/geometry";
@@ -67,6 +68,21 @@ export interface Canvas2DRendererOptions {
 const DOCUMENT_BORDER_COLOR = "rgba(0, 0, 0, 0.35)";
 /** Accent used for the selection marquee and the traced selected strokes. */
 const SELECTION_COLOR = "#2f7bff";
+/**
+ * The colour each marquee mode paints its band and its pending strokes in.
+ *
+ * The four modes are told apart by hue, so a drag says what it is about to do
+ * before it does it: blue for a plain replacement, green for an addition, amber
+ * for a subtraction and orchid for an intersection. The hues are chosen apart
+ * from the guide accent and the gradient accent, so an overlay is never
+ * mistaken for another.
+ */
+const SELECTION_MODE_COLORS: Readonly<Record<SelectionMode, string>> = {
+  replace: SELECTION_COLOR,
+  add: "#3fb950",
+  subtract: "#e3a008",
+  intersect: "#c678dd",
+};
 /** Opaque enough to read over dark ink, translucent enough to see it through. */
 const SELECTION_TRACE_ALPHA = 0.85;
 /** Device pixels; divided by the display scale so it is constant at any zoom. */
@@ -101,6 +117,16 @@ const GRID_COLOR = "rgba(70, 84, 104, 0.22)";
  * when zoomed in and quiet when zoomed out.
  */
 const MIN_GRID_GAP_PX = 3;
+
+/**
+ * The colour a marquee mode paints in.
+ *
+ * Without a mode - a committed selection's frame, with no drag in flight -
+ * the plain selection accent is used.
+ */
+function selectionModeColor(mode: SelectionMode | null | undefined): string {
+  return mode === null || mode === undefined ? SELECTION_COLOR : SELECTION_MODE_COLORS[mode];
+}
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -707,7 +733,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
   /**
    * Draws the selection overlay: the selected strokes traced in the accent
-   * colour, then the rubber-band rectangle and the transform handles.
+   * colour, the strokes a marquee meets traced in the mode's colour, then the
+   * rubber-band rectangle and the transform handles.
    *
    * Strokes are traced along their centrelines rather than re-rasterized with
    * their brush, because the overlay answers one question - "what will a
@@ -722,36 +749,24 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
 
+    const accent = selectionModeColor(selection.mode);
+
     if (selection.strokes.length > 0) {
-      ctx.globalAlpha = SELECTION_TRACE_ALPHA;
-      ctx.strokeStyle = SELECTION_COLOR;
-      ctx.lineWidth = SELECTION_TRACE_WIDTH / scale;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (const stroke of selection.strokes) {
-        const count = stroke.xs.length;
-        if (count === 0) {
-          continue;
-        }
-        ctx.beginPath();
-        ctx.moveTo(stroke.xs[0], stroke.ys[0]);
-        if (count === 1) {
-          // A single sample is a dab; a zero-length segment plus a round cap
-          // draws it as a dot, which is what the stroke itself painted.
-          ctx.lineTo(stroke.xs[0], stroke.ys[0]);
-        } else {
-          for (let index = 1; index < count; index += 1) {
-            ctx.lineTo(stroke.xs[index], stroke.ys[index]);
-          }
-        }
-        ctx.stroke();
-      }
+      this.traceStrokes(ctx, scale, selection.strokes, SELECTION_COLOR);
+    }
+
+    // The pending strokes: what the marquee meets right now. They are drawn in
+    // the mode's colour, so a drag says what it is about to add, remove or
+    // keep before it does it.
+    const pending = selection.pending ?? [];
+    if (pending.length > 0) {
+      this.traceStrokes(ctx, scale, pending, accent);
     }
 
     const bounds = selection.bounds;
     if (bounds) {
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.strokeStyle = accent;
       ctx.lineWidth = 1 / scale;
       ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
       ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
@@ -763,6 +778,41 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Traces the centrelines of `strokes` in one colour.
+   *
+   * A single sample is a dab: a zero-length segment plus a round cap draws it
+   * as a dot, which is what the stroke itself painted.
+   */
+  private traceStrokes(
+    ctx: CanvasRenderingContext2D,
+    scale: number,
+    strokes: readonly StrokeRecord[],
+    color: string,
+  ): void {
+    ctx.globalAlpha = SELECTION_TRACE_ALPHA;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = SELECTION_TRACE_WIDTH / scale;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const stroke of strokes) {
+      const count = stroke.xs.length;
+      if (count === 0) {
+        continue;
+      }
+      ctx.beginPath();
+      ctx.moveTo(stroke.xs[0], stroke.ys[0]);
+      if (count === 1) {
+        ctx.lineTo(stroke.xs[0], stroke.ys[0]);
+      } else {
+        for (let index = 1; index < count; index += 1) {
+          ctx.lineTo(stroke.xs[index], stroke.ys[index]);
+        }
+      }
+      ctx.stroke();
+    }
   }
 
   /**

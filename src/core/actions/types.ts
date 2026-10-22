@@ -51,6 +51,8 @@ export type ActionId =
   | "open"
   | "duplicateLayer"
   | "duplicateSelection"
+  | "selectAll"
+  | "invertSelection"
   | "flipHorizontal"
   | "flipVertical"
   | "zoomIn"

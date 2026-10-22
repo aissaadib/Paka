@@ -10,6 +10,7 @@
 import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../document/types";
 import type { GridSettings } from "../document/grid";
 import type { SelectionHandles } from "../document/selectionHandles";
+import type { SelectionMode } from "../document/selectionModes";
 import type { Viewport } from "../../types/viewport";
 import type { Bounds } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
@@ -31,6 +32,23 @@ export interface RendererSelection {
   readonly bounds: Bounds | null;
   /** Strokes to trace as an accent overlay. */
   readonly strokes: readonly StrokeRecord[];
+  /**
+   * The strokes a marquee meets right now, or `null` when no marquee is
+   * dragged.
+   *
+   * They are the **pending** part of the overlay: what the release would add,
+   * remove or keep. They are drawn in the mode's colour, so a drag says what
+   * it is about to do before it does it.
+   */
+  readonly pending?: readonly StrokeRecord[] | null;
+  /**
+   * The mode the marquee applies, or `null` when there is no marquee.
+   *
+   * The mode chooses the colour of the band and of the pending strokes, so the
+   * four modes are told apart at a glance. Without a mode the frame keeps the
+   * plain selection accent.
+   */
+  readonly mode?: SelectionMode | null;
   /**
    * The transform handles, in document space, or `null` when the selection
    * offers none.

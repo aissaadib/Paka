@@ -116,6 +116,21 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   are one undo step each; the scale multiplies the geometry by 1.5, so using it
   twice gives 2.25, and undo is the exact way back. Selecting is not an
   edit: it adds no history step and never marks the document dirty.
+- **Selection modes**: a marquee can **replace** the selection (the default) or
+  **add** to it, **subtract** from it or **intersect** with it. The four modes
+  are buttons in the toolbar while the select tool is active, and the modifier
+  keys reach the same three: hold `Shift` to add, `Alt` to subtract and
+  `Shift`+`Alt` to intersect. A held key wins over the toolbar for that drag,
+  and the toolbar shows the mode the drag is applying, so the two never
+  disagree. A mode also decides what a drag is: a plain replacement marquee
+  moves the selection when you press inside its frame, while **Add**,
+  **Subtract** and **Intersect** are always marquees - so a stroke *inside* the
+  frame can still be added, subtracted or intersected. While the drag runs, the
+  rubber band and the strokes it meets are drawn in the mode's colour, so the
+  drag says what it is about to do before it does it. The modes work on whole
+  strokes, so they are exact: there is no feathered or expanded selection.
+  `Ctrl+A` selects every stroke of the active layer and `Ctrl+Shift+I` inverts
+  the selection. Like selecting itself, none of this is an edit.
 - **Colour picker** (`I`): samples the composited canvas - paper plus visible
   layers at their opacity - at the pointer and makes it the brush colour, so it
   picks the colour actually on screen rather than the colour a stroke was
@@ -359,7 +374,8 @@ paste-ready version of the same briefing is in
   dropped when you switch layers or switch away from the select tool. It is a
   convenience, not a mask: painting is **not** clipped to a selection, so a
   selection never constrains a brush stroke. The frame is the bounding box of the
-  selected strokes rather than the region you dragged.
+  selected strokes rather than the region you dragged. The marquee's modes work
+  on whole strokes too, so there is no feathered or expanded selection.
 - **Dragging a selection re-rasterizes the whole layer on every pointer move**
   (the stroke list stays authoritative and the pixels are rebuilt from it, so the
   drag can never drift from the committed result). That is fine at the sizes

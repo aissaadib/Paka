@@ -2423,6 +2423,371 @@ function releaseBucket(engine: DrawingEngine, docX: number, docY: number): void 
   );
 }
 
+/**
+ * The selection modes.
+ *
+ * The selection is a set of whole strokes, so a mode is a set operation on
+ * that set. These tests drive the real engine: a press, a drag and a release
+ * with the modifier keys the mode is reached by.
+ */
+describe("DrawingEngine selection modes", () => {
+  function createModeEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Paints one stroke with the brush tool, following the given polyline. */
+  function paintStroke(
+    engine: DrawingEngine,
+    points: ReadonlyArray<readonly [number, number]>,
+  ): void {
+    engine.setTool("brush");
+    const first = points[0];
+    engine.handlePointerSample(createSample({ phase: "down", docX: first[0], docY: first[1] }));
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase: "up", docX: last[0], docY: last[1] }));
+  }
+
+  /** Drags from the first point to the last, with the given keys held. */
+  function drag(
+    engine: DrawingEngine,
+    points: ReadonlyArray<readonly [number, number]>,
+    phase: PointerSample["phase"],
+    modifiers: Partial<PointerSample["modifiers"]> = {},
+  ): void {
+    const held = { shift: false, alt: false, ctrl: false, meta: false, ...modifiers };
+    const first = points[0];
+    engine.handlePointerSample(
+      createSample({ phase: "down", docX: first[0], docY: first[1], modifiers: held }),
+    );
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(
+        createSample({ phase: "move", docX: point[0], docY: point[1], modifiers: held }),
+      );
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(
+      createSample({ phase, docX: last[0], docY: last[1], modifiers: held }),
+    );
+  }
+
+  /** A marquee over the rectangle the two corners describe. */
+  function marquee(
+    engine: DrawingEngine,
+    from: readonly [number, number],
+    to: readonly [number, number],
+    modifiers: Partial<PointerSample["modifiers"]> = {},
+  ): void {
+    drag(engine, [from, to], "up", modifiers);
+  }
+
+  /** Two strokes: one on the left, one on the right. */
+  function paintTwoStrokes(engine: DrawingEngine): void {
+    paintStroke(engine, [
+      [40, 40],
+      [90, 40],
+    ]);
+    paintStroke(engine, [
+      [300, 240],
+      [350, 240],
+    ]);
+  }
+
+  it("adds the strokes a marquee meets to the selection", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+
+    marquee(engine, [10, 10], [150, 120]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    engine.setSelectionMode("add");
+    marquee(engine, [250, 200], [380, 280]);
+    expect(engine.getState().selectedStrokes).toBe(2);
+  });
+
+  it("keeps the selection when an add-mode marquee meets nothing", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 120]);
+
+    engine.setSelectionMode("add");
+    marquee(engine, [200, 150], [240, 190]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("takes the strokes a marquee meets out of the selection", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [380, 280]);
+    expect(engine.getState().selectedStrokes).toBe(2);
+
+    engine.setSelectionMode("subtract");
+    marquee(engine, [10, 10], [150, 120]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("clears the selection when a subtraction takes everything away", () => {
+    const { engine, spy } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [380, 280]);
+
+    engine.setSelectionMode("subtract");
+    marquee(engine, [10, 10], [380, 280]);
+    // An empty selection is no selection: the overlay goes with it.
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+  });
+
+  it("keeps only the strokes that are in both with the intersect mode", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 120]);
+
+    engine.setSelectionMode("intersect");
+    marquee(engine, [10, 10], [380, 280]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // The other stroke was never selected, so intersecting with it leaves
+    // nothing at all.
+    marquee(engine, [250, 200], [380, 280]);
+    expect(engine.getState().selectedStrokes).toBe(0);
+  });
+
+  it("adds a stroke that lies inside the current selection's frame", () => {
+    const { engine } = createModeEngine();
+    // A wide stroke: its painted bounds reach well past its centreline, so
+    // the frame of the selection is much larger than the marquee that made
+    // it, and a thin stroke can sit inside the frame without having been met.
+    engine.setBrush({ size: 100 });
+    paintStroke(engine, [
+      [40, 50],
+      [90, 50],
+    ]);
+    engine.setBrush({ size: 6 });
+    paintStroke(engine, [
+      [60, 90],
+      [70, 90],
+    ]);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 60]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // The thin stroke is inside the frame of the selection but was not met by
+    // the marquee. The add mode says the drag is a marquee, so the stroke
+    // joins the selection instead of sliding it.
+    engine.setSelectionMode("add");
+    marquee(engine, [55, 85], [75, 95]);
+    expect(engine.getState().selectedStrokes).toBe(2);
+  });
+
+  it("moves the selection rather than marqueeing inside it, in replace mode", () => {
+    const { engine, layerId } = createModeEngine();
+    engine.setBrush({ size: 100 });
+    paintStroke(engine, [
+      [40, 50],
+      [90, 50],
+    ]);
+    engine.setBrush({ size: 6 });
+    paintStroke(engine, [
+      [60, 90],
+      [70, 90],
+    ]);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 60]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    const before = [...engine.listStrokes(layerId)[0].xs];
+    // The same press, in replace mode, is a move: the selection slides and
+    // does not grow.
+    drag(engine, [
+      [55, 85],
+      [75, 95],
+    ], "up");
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(engine.listStrokes(layerId)[0].xs[0]).toBe(before[0] + 20);
+  });
+
+  it("asks for add, subtract and intersect with the modifier keys", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 120]);
+
+    // Shift adds the stroke on the right.
+    marquee(engine, [250, 200], [380, 280], { shift: true });
+    expect(engine.getState().selectedStrokes).toBe(2);
+
+    // Alt takes it out again.
+    marquee(engine, [250, 200], [380, 280], { alt: true });
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // Shift+Alt intersects: the stroke on the right is not selected, so
+    // nothing survives.
+    marquee(engine, [10, 10], [380, 280], { shift: true, alt: true });
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("keeps the toolbar and the modifier keys in agreement", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    engine.setSelectionMode("replace");
+    expect(engine.getState().selectionMode).toBe("replace");
+
+    // While a shifted drag runs, the published mode is the one the drag is
+    // applying, so the toolbar shows what is about to happen.
+    engine.handlePointerSample(
+      createSample({
+        phase: "down",
+        docX: 10,
+        docY: 10,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+    expect(engine.getState().selectionMode).toBe("add");
+
+    engine.handlePointerSample(
+      createSample({
+        phase: "up",
+        docX: 150,
+        docY: 120,
+        modifiers: { shift: true, alt: false, ctrl: false, meta: false },
+      }),
+    );
+    // The gesture is over, so the toolbar's own mode is shown again.
+    expect(engine.getState().selectionMode).toBe("replace");
+  });
+
+  it("does not dirty the document when the mode or the selection changes", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    const depth = engine.getState().history.depth;
+    const dirty = engine.getState().file.dirty;
+
+    engine.setSelectionMode("add");
+    marquee(engine, [10, 10], [150, 120]);
+    marquee(engine, [250, 200], [380, 280]);
+
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(dirty);
+  });
+
+  it("leaves the selection alone when a marquee is cancelled", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 120]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    engine.setSelectionMode("subtract");
+    // The press, a move and a cancel: the drag never commits.
+    drag(engine, [[250, 200], [380, 280]], "cancel");
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+
+  it("previews the strokes a marquee meets while the drag runs", () => {
+    const { engine, spy } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    engine.setSelectionMode("add");
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 150, docY: 120 }));
+
+    const overlay = spy.selections[spy.selections.length - 1];
+    expect(overlay?.mode).toBe("add");
+    // The pending set is what the release would add, and the committed
+    // selection is still traced beside it.
+    expect(overlay?.pending).toHaveLength(1);
+    expect(overlay?.strokes).toHaveLength(0);
+  });
+
+  it("selects every stroke of the active layer and inverts the selection", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+
+    expect(engine.selectAll()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+
+    expect(engine.invertSelection()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(0);
+
+    expect(engine.invertSelection()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+  });
+
+  it("refuses to select all or invert under another tool", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    // A selection belongs to the select tool: a selection made under another
+    // tool would imply a constraint that does not exist.
+    engine.setTool("brush");
+    expect(engine.selectAll()).toBe(false);
+    expect(engine.invertSelection()).toBe(false);
+    expect(engine.getState().selectedStrokes).toBe(0);
+  });
+
+  it("does not make selecting or inverting an undo step", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    const depth = engine.getState().history.depth;
+
+    engine.selectAll();
+    engine.invertSelection();
+    engine.invertSelection();
+
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("keeps the selection through an undo that does not touch it", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    // The stroke painted first, so the first undo takes the other one.
+    marquee(engine, [10, 10], [150, 120]);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // Undo removes the *second* stroke, which is not selected: the selection
+    // survives.
+    engine.undo();
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // Undo again removes the selected stroke, so it leaves the selection.
+    engine.undo();
+    expect(engine.getState().selectedStrokes).toBe(0);
+  });
+
+  it("keeps the mode when the tool changes, and drops the selection", () => {
+    const { engine } = createModeEngine();
+    paintTwoStrokes(engine);
+    engine.setTool("select");
+    marquee(engine, [10, 10], [150, 120]);
+    engine.setSelectionMode("intersect");
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    engine.setTool("brush");
+    // The selection belongs to the select tool and goes with it...
+    expect(engine.getState().selectedStrokes).toBe(0);
+    // ...but the mode is a setting of the tool, not of the selection.
+    expect(engine.getState().selectionMode).toBe("intersect");
+  });
+});
+
 describe("DrawingEngine gradients", () => {
   function createGradientEngine() {
     const spy = createSpyRenderer();

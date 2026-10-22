@@ -6,6 +6,7 @@ import { GradientControls } from "../../features/gradient/GradientControls";
 import { GridControls } from "../../features/grid/GridControls";
 import { ToolOptionsPanel } from "../../features/options/ToolOptionsPanel";
 import { toolShowsBrushControls } from "../../features/options/toolOptionSchema";
+import { SelectionModeControl } from "../../features/selection/SelectionModeControl";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
 import { useEditor, useEditorToolId } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
@@ -37,6 +38,12 @@ export function ToolBar() {
       <GridControls />
       {toolShowsBrushControls(toolId) ? <BrushControls /> : null}
       <ToolOptionsPanel />
+      {toolId === "select" ? (
+        <>
+          <div className="toolbar__divider" />
+          <SelectionModeControl />
+        </>
+      ) : null}
       <GradientControls />
       <div className="toolbar__divider" />
       <ColorControls />

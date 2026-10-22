@@ -90,6 +90,22 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     run: ({ actions }) => actions.duplicateSelection(),
   },
   {
+    id: "selectAll",
+    label: "Select All",
+    shortcuts: [mod("a", "KeyA")],
+    // Only the select tool owns a selection, so the shortcut is claimed there
+    // and the key keeps its browser meaning everywhere else.
+    when: ({ engine }) => engine.getState().toolId === "select",
+    run: ({ actions }) => actions.selectAll(),
+  },
+  {
+    id: "invertSelection",
+    label: "Invert Selection",
+    shortcuts: [mod("i", "KeyI", true)],
+    when: ({ engine }) => engine.getState().toolId === "select",
+    run: ({ actions }) => actions.invertSelection(),
+  },
+  {
     id: "flipHorizontal",
     label: "Flip Selection Horizontally",
     shortcuts: [mod("h", "KeyH", true)],

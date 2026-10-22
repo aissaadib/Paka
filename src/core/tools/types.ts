@@ -13,6 +13,7 @@ import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
 import type { Guide, GuideAxis, LayerId } from "../document/types";
 import type { SelectionHandleId } from "../document/selectionHandles";
+import type { SelectionMode } from "../document/selectionModes";
 import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
 
 export interface ToolContext {
@@ -66,6 +67,15 @@ export interface ToolContext {
    * `false`, so "no selection" needs no separate query.
    */
   isInsideSelection(docX: number, docY: number): boolean;
+  /**
+   * The mode the toolbar has set: how a marquee combines with the selection
+   * that is already there.
+   *
+   * Editor state, like `shapeFill`: the engine owns it and publishes it. A
+   * tool reads it together with the modifier keys held at the press, because
+   * a held key asks for one of the modes and the two can never disagree.
+   */
+  getSelectionMode(): SelectionMode;
   /**
    * The transform handle a press grabs, or `null` when it grabs none.
    *

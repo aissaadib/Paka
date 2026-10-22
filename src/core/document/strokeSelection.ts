@@ -110,6 +110,44 @@ export function segmentIntersectsBounds(p0: Point, p1: Point, bounds: Bounds): b
 }
 
 /**
+ * True when the stroke's own bounding box reaches the rectangle.
+ *
+ * A stroke is a polyline, so every point of it lies inside its bounding box:
+ * when the box does not reach the rectangle, no part of the stroke can meet
+ * it either. The check is one cheap pass over the samples, where the segment
+ * test below costs a division per edge per segment, so it is what keeps a
+ * marquee over a busy layer affordable.
+ */
+function boundsMeetStrokeBox(area: Bounds, stroke: StrokeRecord): boolean {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < stroke.xs.length; index += 1) {
+    const x = stroke.xs[index];
+    const y = stroke.ys[index];
+    if (x < minX) {
+      minX = x;
+    }
+    if (x > maxX) {
+      maxX = x;
+    }
+    if (y < minY) {
+      minY = y;
+    }
+    if (y > maxY) {
+      maxY = y;
+    }
+  }
+  return (
+    maxX >= area.x &&
+    minX <= area.x + area.width &&
+    maxY >= area.y &&
+    minY <= area.y + area.height
+  );
+}
+
+/**
  * True when a stroke's centreline, widened by `padding`, meets the rectangle.
  *
  * Single-sample strokes are tested as points; longer ones are tested as a
@@ -126,6 +164,11 @@ export function strokeIntersectsBounds(
     return false;
   }
   const area = padding > 0 ? inflateBounds(bounds, padding) : bounds;
+  // The cheap rejection first: most strokes of a layer are nowhere near the
+  // band, and the box answers that without a segment test.
+  if (!boundsMeetStrokeBox(area, stroke)) {
+    return false;
+  }
 
   if (boundsContainPoint(area, stroke.xs[0], stroke.ys[0])) {
     return true;

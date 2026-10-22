@@ -96,6 +96,14 @@ import {
   type SelectionHandles,
 } from "../document/selectionHandles";
 import {
+  combineSelectionIds,
+  DEFAULT_SELECTION_MODE,
+  invertSelectionIds,
+  isSelectionMode,
+  resolveSelectionMode,
+  type SelectionMode,
+} from "../document/selectionModes";
+import {
   boundsCentre,
   clampScaleFactor,
   createRotateTransform,
@@ -206,6 +214,19 @@ export interface EditorSnapshot {
    * the tool that owns the selection.
    */
   readonly selectedGuideId: string | null;
+  /**
+   * How the next marquee combines with the selection that is already there.
+   *
+   * Editor state, like `shapeFill`: it describes the next gesture, not the
+   * artwork, so choosing a mode is not an edit - no history step, no dirty
+   * flag.
+   *
+   * While a marquee is in flight this is the mode that gesture resolved when
+   * the pointer went down - the one the modifier keys chose - so the toolbar
+   * and the status bar show what the drag is actually doing. The moment the
+   * gesture ends it is the mode the toolbar has set again.
+   */
+  readonly selectionMode: SelectionMode;
   /**
    * Whether the shape tools fill their outline instead of tracing it.
    *
@@ -392,6 +413,20 @@ function boundsOfStrokes(strokes: readonly StrokeRecord[]): Bounds | null {
 }
 
 /**
+ * True when two rectangles are the same rectangle.
+ *
+ * A marquee's rubber band is rebuilt on every pointer move, and a move that
+ * did not change it has nothing to say: the overlay is already right and the
+ * strokes under the band have not changed either.
+ */
+function boundsEqual(a: Bounds | null, b: Bounds | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
+/**
  * A committed selection: whole strokes of one layer.
  *
  * Only *which* strokes are selected is stored, never the rectangle that picked
@@ -421,9 +456,25 @@ interface Selection {
  */
 interface MarqueeGesture {
   readonly mode: "marquee";
+  /**
+   * The mode this gesture applies, resolved when the pointer went down.
+   *
+   * It is fixed for the whole drag: the mode is what the press asked for, and
+   * a key pressed or released while the pointer is down does not change what
+   * the gesture is already doing.
+   */
+  readonly selectionMode: SelectionMode;
   readonly anchor: Point;
   /** The rubber band, replaced on every move. */
   bounds: Bounds | null;
+  /**
+   * The strokes the rubber band meets so far.
+   *
+   * They are the *pending* part of the overlay: what the release would add,
+   * remove or keep, drawn in the mode's colour so the drag says what it is
+   * about to do before it does it.
+   */
+  pending: readonly StrokeRecord[];
 }
 
 interface MoveGesture {
@@ -604,6 +655,14 @@ export class DrawingEngine implements StrokeSource {
   private refusalNoticeShown = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
+  /**
+   * How the next marquee combines with the selection that is there.
+   *
+   * Editor state, like `shapeFill`: it describes the next gesture, not the
+   * artwork. Changing it is not an edit - no history step, no dirty flag - and
+   * it is not persisted, so a fresh session starts in `replace`.
+   */
+  private selectionMode: SelectionMode = DEFAULT_SELECTION_MODE;
   /** The guide the guides tool has selected, or `null`. */
   private selectedGuideId: string | null = null;
   /** The guide gesture in flight, or `null`. */
@@ -687,6 +746,7 @@ export class DrawingEngine implements StrokeSource {
       cancelShape: () => engine.cancelShape(),
       isStrokeActive: () => engine.activeStroke !== null,
       isInsideSelection: (docX, docY) => engine.isInsideSelection(docX, docY),
+      getSelectionMode: () => engine.selectionMode,
       findSelectionHandleAt: (docX, docY) => engine.findSelectionHandleAt(docX, docY),
       beginSelection: (sample) => engine.beginSelection(sample),
       beginSelectionMove: (sample) => engine.beginSelectionMove(sample),
@@ -2138,6 +2198,121 @@ export class DrawingEngine implements StrokeSource {
     return findSelectionHandle(handles, docX, docY, this.handleGrabRadius());
   }
 
+  /**
+   * Chooses how the next marquee combines with the selection that is there.
+   *
+   * Editor state, like the shape options: it describes the next gesture, not
+   * the artwork. Choosing a mode is **not an edit** - no history step, no
+   * dirty flag, nothing reaches an export - and it is not persisted, so a
+   * fresh session starts in `replace`.
+   *
+   * The modifier keys override the mode for the gesture they are held down
+   * for, so the toolbar and the keyboard can never disagree about what a drag
+   * will do: while a marquee is in flight the snapshot carries the mode that
+   * gesture resolved.
+   */
+  setSelectionMode(mode: SelectionMode): void {
+    // The mode can arrive from the UI layer, so an unknown value is refused
+    // rather than stored.
+    if (!isSelectionMode(mode) || this.selectionMode === mode) {
+      return;
+    }
+    this.selectionMode = mode;
+    this.publish();
+  }
+
+  /**
+   * The mode the next marquee will use.
+   *
+   * While a marquee is in flight this is the mode the gesture resolved when
+   * the pointer went down; otherwise it is the mode the toolbar has set.
+   */
+  private effectiveSelectionMode(): SelectionMode {
+    const gesture = this.selectionGesture;
+    if (gesture && gesture.mode === "marquee") {
+      return gesture.selectionMode;
+    }
+    return this.selectionMode;
+  }
+
+  /**
+   * Selects every stroke of the active layer.
+   *
+   * Like every other selection change this is **not an edit**: no history step,
+   * no dirty flag, nothing reaches an export. Only strokes are selected - fill
+   * patches and gradients are not part of the selection model - and only on
+   * the active layer, because a selection belongs to the layer it was made on.
+   *
+   * Returns whether anything was selected, so a caller can tell a no-op (an
+   * empty layer) from a selection.
+   */
+  selectAll(): boolean {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
+      return false;
+    }
+    // A selection belongs to the select tool: a selection made under another
+    // tool would imply a constraint that does not exist, because painting is
+    // not clipped to it.
+    if (this.currentToolId !== "select") {
+      return false;
+    }
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      return false;
+    }
+    const strokeIds = this.strokes.list(layerId).map((stroke) => stroke.id);
+    if (strokeIds.length === 0) {
+      return false;
+    }
+    this.setSelection({ layerId, strokeIds });
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * Inverts the selection on the active layer.
+   *
+   * The inversion of a selection is everything on the layer that is not
+   * selected, and the inversion of nothing is everything: both are ordinary
+   * set operations over the layer's strokes.
+   *
+   * It is **not an edit**: the selection is not document state, so nothing
+   * enters history and nothing becomes dirty. An inversion that leaves nothing
+   * selected clears the selection, because a selection that holds nothing is
+   * not a selection.
+   *
+   * Returns whether the selection changed.
+   */
+  invertSelection(): boolean {
+    if (this.activeStroke || this.activeFill || this.activeGradient || this.selectionGesture) {
+      return false;
+    }
+    // As for `selectAll`: a selection belongs to the select tool.
+    if (this.currentToolId !== "select") {
+      return false;
+    }
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      return false;
+    }
+    const all = this.strokes.list(layerId).map((stroke) => stroke.id);
+    if (all.length === 0) {
+      return false;
+    }
+    const current =
+      this.selection && this.selection.layerId === layerId
+        ? this.selectedStrokes().map((stroke) => stroke.id)
+        : [];
+    const inverted = invertSelectionIds(all, current);
+    this.setSelection(inverted.length > 0 ? { layerId, strokeIds: inverted } : null);
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
   /** Drops the selection and its overlay. Not an edit: nothing enters history. */
   clearSelection(): void {
     this.cancelSelectionGesture();
@@ -2439,12 +2614,19 @@ export class DrawingEngine implements StrokeSource {
     }
     this.cancelSelectionGesture();
     this.beginGesture();
+    // The mode is resolved now, from the keys that are down at the press, so
+    // the drag cannot change its mind half way through.
     this.selectionGesture = {
       mode: "marquee",
+      selectionMode: resolveSelectionMode(this.selectionMode, sample.modifiers),
       anchor: { x: sample.docX, y: sample.docY },
       bounds: { x: sample.docX, y: sample.docY, width: 0, height: 0 },
+      pending: [],
     };
     this.syncSelectionOverlay();
+    // The mode may have changed (a held Shift asks for `add`), so the toolbar
+    // and the status bar are told what this drag is doing.
+    this.publish();
     this.requestRender();
   }
 
@@ -2569,7 +2751,16 @@ export class DrawingEngine implements StrokeSource {
     }
 
     if (gesture.mode === "marquee") {
-      gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      const bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      if (boundsEqual(bounds, gesture.bounds)) {
+        return;
+      }
+      gesture.bounds = bounds;
+      // The strokes the band meets are the pending part of the overlay: the
+      // user sees what the release will add, remove or keep before it does
+      // it. The scan is over the active layer only, and it is the same rule
+      // the release applies, so the preview and the result cannot disagree.
+      gesture.pending = this.marqueeCandidates(bounds);
       this.syncSelectionOverlay();
       this.requestRender();
       return;
@@ -2644,9 +2835,14 @@ export class DrawingEngine implements StrokeSource {
   /**
    * Commits the in-flight gesture.
    *
-   * A marquee selects every stroke of the active layer it meets, or clears the
-   * selection when it meets none - a press that never moved is a zero-size
-   * marquee, so a click selects the strokes under the pointer by the same rule.
+   * A marquee applies its mode to the strokes of the active layer it meets.
+   * In `replace` that means the band *is* the new selection, and a band that
+   * meets nothing clears the selection; a press that never moved is a
+   * zero-size marquee, so a click selects the strokes under the pointer by the
+   * same rule. In `add`, `subtract` and `intersect` the band is combined with
+   * the selection that is there, and a band that meets nothing leaves that
+   * selection alone.
+   *
    * A move records one history step; a press inside the selection that never
    * moved records nothing at all, so a stray click cannot leave an undo step
    * that appears to do nothing.
@@ -2664,8 +2860,9 @@ export class DrawingEngine implements StrokeSource {
     this.selectionGesture = null;
 
     if (gesture.mode === "marquee") {
-      this.selectInBounds(
+      this.applyMarquee(
         gesture.bounds ?? { x: gesture.anchor.x, y: gesture.anchor.y, width: 0, height: 0 },
+        gesture.selectionMode,
       );
       this.syncSelectionOverlay();
       this.publish();
@@ -2709,10 +2906,11 @@ export class DrawingEngine implements StrokeSource {
    * Aborts the in-flight gesture.
    *
    * A marquee simply disappears - the committed selection was never touched, so
-   * there is nothing to put back. A move, a scale and a rotation restore every
-   * stroke's original coordinates and re-rasterize, which is exact because the
-   * originals were copied rather than derived. A cancelled transform records
-   * nothing at all.
+   * there is nothing to put back, and a cancelled drag leaves the selection
+   * exactly as it was whatever mode it was in. A move, a scale and a rotation
+   * restore every stroke's original coordinates and re-rasterize, which is
+   * exact because the originals were copied rather than derived. A cancelled
+   * transform records nothing at all.
    */
   private cancelSelection(): void {
     const gesture = this.selectionGesture;
@@ -2727,6 +2925,9 @@ export class DrawingEngine implements StrokeSource {
       this.refreshStrokeLayers(gesture.entries);
     }
     this.syncSelectionOverlay();
+    // The mode the gesture had chosen is gone, so the toolbar shows the mode it
+    // has set again.
+    this.publish();
     this.requestRender();
   }
 
@@ -2764,22 +2965,71 @@ export class DrawingEngine implements StrokeSource {
     this.commands.breakMerge();
   }
 
-  /** Selects the strokes of the active layer that the marquee meets. */
-  private selectInBounds(bounds: Bounds): void {
+  /**
+   * The strokes of the active layer a marquee meets.
+   *
+   * The rule is the same one the release applies, so the live preview of a
+   * drag and the selection it produces cannot disagree: a stroke counts when
+   * its centreline meets the band, widened by half the stroke's painted width,
+   * so a stroke whose pixels reach into the band is met even when its
+   * centreline stays outside.
+   *
+   * Fill patches and gradients are not in the list: the selection is made of
+   * strokes, so they can never be selected.
+   */
+  private marqueeCandidates(bounds: Bounds): readonly StrokeRecord[] {
+    const layerId = this.doc.activeLayerId;
+    if (!layerId) {
+      return [];
+    }
+    const candidates: StrokeRecord[] = [];
+    for (const stroke of this.strokes.list(layerId)) {
+      if (strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2)) {
+        candidates.push(stroke);
+      }
+    }
+    return candidates;
+  }
+
+  /**
+   * Applies a marquee to the selection, in the gesture's mode.
+   *
+   * The combination is a set operation on stroke ids (see
+   * `core/document/selectionModes.ts`): `replace` throws the old selection
+   * away, `add` joins the two, `subtract` takes the band out and `intersect`
+   * keeps only what is in both.
+   *
+   * The result is put back in the layer's painting order, so the selection
+   * reads the way the layer does and the transforms and the history commands
+   * see the strokes in the order they were drawn.
+   *
+   * An empty result is **no selection**: a selection that holds nothing is not
+   * a selection, and the overlay disappears with it.
+   */
+  private applyMarquee(bounds: Bounds, mode: SelectionMode): void {
     const layerId = this.doc.activeLayerId;
     if (!layerId) {
       this.setSelection(null);
       return;
     }
-    const strokeIds: string[] = [];
-    for (const stroke of this.strokes.list(layerId)) {
-      // Widened by half the stroke's painted width, so a stroke whose pixels
-      // reach into the marquee selects even when its centreline stays outside.
-      if (strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2)) {
-        strokeIds.push(stroke.id);
-      }
-    }
-    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
+    const candidates = this.marqueeCandidates(bounds);
+    // The strokes that are selected *now*, and still exist: a selection whose
+    // strokes an undo removed holds nothing that can be combined.
+    const current =
+      this.selection && this.selection.layerId === layerId
+        ? this.selectedStrokes().map((stroke) => stroke.id)
+        : [];
+    const combined = combineSelectionIds(
+      mode,
+      current,
+      candidates.map((stroke) => stroke.id),
+    );
+    const wanted = new Set(combined);
+    const ordered = this.strokes
+      .list(layerId)
+      .filter((stroke) => wanted.has(stroke.id))
+      .map((stroke) => stroke.id);
+    this.setSelection(ordered.length > 0 ? { layerId, strokeIds: ordered } : null);
   }
 
   /**
@@ -2850,9 +3100,11 @@ export class DrawingEngine implements StrokeSource {
    *
    * While a marquee is dragged the rubber band is live and the previous
    * selection stays traced, which is what lets the user see what they are
-   * about to replace. Otherwise the committed strokes are traced inside their
-   * own bounds. Strokes are passed as data: the renderer traces what it is
-   * given and never looks the selection up itself.
+   * about to replace. The strokes the band meets travel with it as the
+   * **pending** set, in the mode's colour: the drag says what it is about to
+   * add, remove or keep before it does it. Otherwise the committed strokes
+   * are traced inside their own bounds. Strokes are passed as data: the
+   * renderer traces what it is given and never looks the selection up itself.
    *
    * The transform **handles** come with it. They belong to the **committed
    * selection**, never to the marquee's rubber band: while a band is being
@@ -2867,7 +3119,9 @@ export class DrawingEngine implements StrokeSource {
     if (!renderer) {
       return;
     }
-    const marquee = this.selectionGesture?.mode === "marquee" ? this.selectionGesture.bounds : null;
+    const gesture = this.selectionGesture;
+    const marquee = gesture?.mode === "marquee" ? gesture.bounds : null;
+    const pending = gesture?.mode === "marquee" ? gesture.pending : [];
     const strokes = this.selectedStrokes();
     if (marquee === null && strokes.length === 0) {
       renderer.setSelection(null);
@@ -2879,6 +3133,10 @@ export class DrawingEngine implements StrokeSource {
     renderer.setSelection({
       bounds: marquee ?? selectionFrame,
       strokes,
+      pending,
+      // The mode colours the band and the pending strokes. Without a band
+      // there is no pending action, so the frame keeps the plain accent.
+      mode: gesture?.mode === "marquee" ? gesture.selectionMode : null,
       handles: marquee === null ? this.selectionHandleLayout(selectionFrame) : null,
     });
   }
@@ -3489,6 +3747,7 @@ export class DrawingEngine implements StrokeSource {
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
       selectedGuideId: this.selectedGuideId,
+      selectionMode: this.effectiveSelectionMode(),
       shapeFill: this.shapeFill,
       shapeSides: this.shapeSides,
       shapeInnerRatio: this.shapeInnerRatio,
@@ -3519,6 +3778,7 @@ export class DrawingEngine implements StrokeSource {
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
       previous.selectedGuideId === next.selectedGuideId &&
+      previous.selectionMode === next.selectionMode &&
       previous.shapeFill === next.shapeFill &&
       previous.shapeSides === next.shapeSides &&
       previous.shapeInnerRatio === next.shapeInnerRatio &&
