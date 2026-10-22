@@ -126,7 +126,15 @@ import type {
 } from "../document/types";
 import { isFillPatch, isGradient, isStroke } from "../document/types";
 import { cloneFillPatch, createFillPatch } from "../fill/fillPatch";
-import { MAX_FILL_SCAN_PIXELS, floodFill } from "../fill/floodFill";
+import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
+import {
+  DEFAULT_FILL_MODE,
+  DEFAULT_FILL_SAMPLE_SCALE,
+  normalizeFillMode,
+  normalizeFillSampleScale,
+  type FillMode,
+} from "../fill/fillOptions";
+import { scanFill } from "../fill/fillScan";
 import {
   DEFAULT_GRADIENT_END_COLOR,
   cloneGradient,
@@ -249,6 +257,17 @@ export interface EditorSnapshot {
    * fills already committed, which carry their own pixels.
    */
   readonly fillTolerance: number;
+  /**
+   * Whether the next fill paints the whole colour region or only the part
+   * reachable from the seed. Editor state, like the tolerance: a committed
+   * fill stores its pixels, so changing the mode never rewrites one.
+   */
+  readonly fillMode: FillMode;
+  /**
+   * How finely the next fill samples the composite: one document pixel in
+   * `fillSampleScale` is examined. Editor state, like the mode.
+   */
+  readonly fillSampleScale: number;
   /**
    * Gradient shape the next drag commits. Editor state: it describes the next
    * gradient, while a committed gradient carries its own geometry.
@@ -602,6 +621,8 @@ export class DrawingEngine implements StrokeSource {
   private shapeRotation = DEFAULT_SHAPE_ROTATION;
   /** Bucket-fill tolerance in 8-bit channel units. */
   private fillTolerance = 24;
+  private fillMode: FillMode = DEFAULT_FILL_MODE;
+  private fillSampleScale = DEFAULT_FILL_SAMPLE_SCALE;
   private activeFill: ActiveFill | null = null;
   /** Gradient options for the next drag, captured when the gesture starts. */
   private gradientType: "linear" | "radial" = "linear";
@@ -1442,6 +1463,42 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /**
+   * Chooses whether the next fill is the contiguous region around the seed or
+   * every matching pixel in the composite.
+   *
+   * Editor state, like the tolerance: it describes the next fill, and a
+   * committed fill carries its own pixels, so switching modes never rewrites
+   * one and adds no history step.
+   */
+  setFillMode(mode: FillMode): void {
+    const next = normalizeFillMode(mode);
+    if (next === this.fillMode) {
+      return;
+    }
+    this.fillMode = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets how coarsely the next fill samples the composite (`1`, `2`, `4` or
+   * `8` document pixels per examined pixel).
+   *
+   * Editor state, like the mode. The scanner clamps the value to the scales it
+   * supports, so an out-of-range number lands on the nearest real one instead
+   * of becoming a scan that never finishes.
+   */
+  setFillSampleScale(scale: number): void {
+    const next = normalizeFillSampleScale(scale);
+    if (next === this.fillSampleScale) {
+      return;
+    }
+    this.fillSampleScale = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
   /** Chooses linear or radial for the next gradient drag. */
   setGradientType(type: "linear" | "radial"): void {
     if (type !== "linear" && type !== "radial") {
@@ -2044,15 +2101,39 @@ export class DrawingEngine implements StrokeSource {
     const seedX = Math.min(this.doc.width - 1, Math.max(0, Math.floor(sample.docX)));
     const seedY = Math.min(this.doc.height - 1, Math.max(0, Math.floor(sample.docY)));
     const colour = this.brushForSample(sample).color;
-    const region = floodFill(image, seedX, seedY, this.fillTolerance);
-    if (!region) {
+    // The scanner decides the region from the same composite the user sees:
+    // `contiguous` walks out from the seed, `global` takes every matching
+    // pixel, and `sampleScale` trades boundary precision for scan cost.
+    const outcome = scanFill(
+      image,
+      seedX,
+      seedY,
+      {
+        tolerance: this.fillTolerance,
+        mode: this.fillMode,
+        sampleScale: this.fillSampleScale,
+      },
+      MAX_FILL_SCAN_PIXELS,
+    );
+    if (outcome.status === "over-budget") {
+      this.raiseNotice(
+        `Bucket fill would examine ${outcome.pixels.toLocaleString("en-US")} pixels; ` +
+          `the limit is ${outcome.limit.toLocaleString("en-US")}. ` +
+          "Raise the sample scale or fill a smaller document.",
+      );
       return false;
     }
+    if (outcome.status !== "region") {
+      return false;
+    }
+    const region = outcome.region;
 
-    // At tolerance 0 every selected pixel is exactly the seed colour. Painting
-    // that colour back is a no-op, and recording an invisible undo step would
-    // make the history button look broken.
-    if (this.fillTolerance === 0) {
+    // At tolerance 0 and full sampling every selected pixel is exactly the seed
+    // colour. Painting that colour back is a no-op, and recording an invisible
+    // undo step would make the history button look broken. A coarser sample
+    // compares a sampled colour, so the exact seed pixel is no longer the rule
+    // the scan followed and the guard would be wrong.
+    if (this.fillTolerance === 0 && this.fillSampleScale === 1) {
       const offset = (seedY * image.width + seedX) * 4;
       const seedColour = hexToRgb(colour);
       if (
@@ -3669,6 +3750,8 @@ export class DrawingEngine implements StrokeSource {
       shapeInnerRatio: this.shapeInnerRatio,
       shapeRotation: this.shapeRotation,
       fillTolerance: this.fillTolerance,
+      fillMode: this.fillMode,
+      fillSampleScale: this.fillSampleScale,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
       gradientMidStops: this.gradientMidStops,
@@ -3701,6 +3784,8 @@ export class DrawingEngine implements StrokeSource {
       previous.shapeInnerRatio === next.shapeInnerRatio &&
       previous.shapeRotation === next.shapeRotation &&
       previous.fillTolerance === next.fillTolerance &&
+      previous.fillMode === next.fillMode &&
+      previous.fillSampleScale === next.fillSampleScale &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&
       gradientStopsEqual(previous.gradientMidStops, next.gradientMidStops) &&

@@ -13,6 +13,7 @@ import {
   type NewDocumentOptions,
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
+import type { FillMode } from "../core/fill/fillOptions";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
@@ -49,6 +50,10 @@ export interface EditorActions {
   setShapeRotation(degrees: number): void;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   setFillTolerance(tolerance: number): void;
+  /** Whether the next fill is contiguous or matches every pixel of the colour. */
+  setFillMode(mode: FillMode): void;
+  /** How coarsely the next fill samples the composite (1, 2, 4 or 8). */
+  setFillSampleScale(scale: number): void;
   /** Chooses linear or radial for the next gradient drag. */
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
@@ -145,6 +150,8 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),
     setShapeRotation: (degrees) => engine.setShapeRotation(degrees),
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
+    setFillMode: (mode) => engine.setFillMode(mode),
+    setFillSampleScale: (scale) => engine.setFillSampleScale(scale),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
     setGradientMidStops: (stops) => engine.setGradientMidStops(stops),

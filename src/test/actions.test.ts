@@ -50,6 +50,8 @@ beforeEach(() => {
     setShapeInnerRatio: vi.fn(),
     setShapeRotation: vi.fn(),
     setFillTolerance: vi.fn(),
+    setFillMode: vi.fn(),
+    setFillSampleScale: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
     setGradientMidStops: vi.fn(),

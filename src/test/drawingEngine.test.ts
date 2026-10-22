@@ -2836,6 +2836,69 @@ describe("DrawingEngine bucket fill", () => {
     expect(engine.getState().fillTolerance).toBe(13);
   });
 
+  it("fills every matching region when the mode is global", () => {
+    const width = 9;
+    const data = new Uint8ClampedArray(width * 3 * 4).fill(255);
+    // A black background with two white islands of the same colour, far apart.
+    for (let y = 0; y < 3; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (x === 1 || x === 7) {
+          continue;
+        }
+        const offset = (y * width + x) * 4;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+      }
+    }
+    const composite = { data, width, height: 3, colorSpace: "srgb" } as ImageData;
+
+    const contiguous = createBucketEngine({ compositeImage: composite });
+    contiguous.engine.setFillTolerance(0);
+    pressBucket(contiguous.engine, 1, 1);
+    releaseBucket(contiguous.engine, 1, 1);
+    const first = contiguous.engine.listElements(
+      contiguous.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(first) && first.width).toBe(1);
+
+    const global = createBucketEngine({ compositeImage: composite });
+    global.engine.setFillTolerance(0);
+    const depth = global.engine.getState().history.depth;
+    global.engine.setFillMode("global");
+    // The mode describes the next fill: no history step, no dirty document.
+    expect(global.engine.getState().fillMode).toBe("global");
+    expect(global.engine.getState().history.depth).toBe(depth);
+    expect(global.engine.getState().file.dirty).toBe(false);
+
+    pressBucket(global.engine, 1, 1);
+    releaseBucket(global.engine, 1, 1);
+    const patch = global.engine.listElements(
+      global.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(patch) && patch.x).toBe(1);
+    expect(isFillPatch(patch) && patch.width).toBe(7);
+  });
+
+  it("normalizes and applies the sample scale", () => {
+    const { engine } = createBucketEngine({ compositeImage: framedComposite(12, 12) });
+    expect(engine.getState().fillSampleScale).toBe(1);
+    engine.setFillSampleScale(3);
+    expect(engine.getState().fillSampleScale).toBe(2);
+    engine.setFillSampleScale(99);
+    expect(engine.getState().fillSampleScale).toBe(8);
+    engine.setFillSampleScale(Number.NaN);
+    expect(engine.getState().fillSampleScale).toBe(1);
+
+    // A coarser scan still commits real document pixels, in one undo step.
+    engine.setFillSampleScale(2);
+    pressBucket(engine, 6, 6);
+    releaseBucket(engine, 6, 6);
+    const layerId = engine.getState().document.activeLayerId as string;
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
   it("leaves the document untouched for an out-of-bounds press", () => {
     const { engine, spy } = createBucketEngine({ compositeImage: framedComposite() });
     const layerId = engine.getState().document.activeLayerId as string;

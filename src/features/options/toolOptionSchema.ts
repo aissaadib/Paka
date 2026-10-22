@@ -19,7 +19,12 @@ import {
   SHAPE_INNER_RATIO_STEP,
 } from "../../core/tools/shapeGeometry";
 import {
+  FILL_MODES,
+  FILL_SAMPLE_SCALES,
+} from "../../core/fill/fillOptions";
+import {
   registerToolOptions,
+  type SelectToolOption,
   type SliderToolOption,
   type ToggleToolOption,
   type ToolOption,
@@ -111,6 +116,38 @@ const fillToleranceOption: SliderToolOption = {
   write: (actions, value) => actions.setFillTolerance(value),
 };
 
+const fillModeOption: SelectToolOption = {
+  id: "fillMode",
+  kind: "select",
+  label: "Mode",
+  title:
+    "Contiguous fills the region reachable from the click; Global fills every matching pixel in the visible artwork",
+  choices: FILL_MODES.map((mode) => ({
+    value: mode,
+    label: mode === "global" ? "Global" : "Contiguous",
+  })),
+  read: (snapshot) => snapshot.fillMode,
+  write: (actions, value) => {
+    if (value === "contiguous" || value === "global") {
+      actions.setFillMode(value);
+    }
+  },
+};
+
+const fillSampleScaleOption: SelectToolOption = {
+  id: "fillSampleScale",
+  kind: "select",
+  label: "Sample",
+  title:
+    "How finely the fill reads the composite: 1x is exact, coarser scales scan large regions faster",
+  choices: FILL_SAMPLE_SCALES.map((scale) => ({
+    value: String(scale),
+    label: `${scale}x`,
+  })),
+  read: (snapshot) => String(snapshot.fillSampleScale),
+  write: (actions, value) => actions.setFillSampleScale(Number(value)),
+};
+
 /**
  * The option fields for each tool, in toolbar order.
  *
@@ -122,7 +159,7 @@ export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> 
   ellipse: [shapeFillOption],
   polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption],
   star: [shapeSidesOption, shapeInnerRatioOption, shapeRotationOption, shapeFillOption],
-  bucket: [fillToleranceOption],
+  bucket: [fillToleranceOption, fillModeOption, fillSampleScaleOption],
 };
 
 /** Registers the built-in options into the shared per-tool registry. */
