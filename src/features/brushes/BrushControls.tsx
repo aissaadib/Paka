@@ -11,6 +11,7 @@ import {
 } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
+import { BrushPreview } from "./BrushPreview";
 import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
 
@@ -25,6 +26,9 @@ export function BrushControls() {
 
   return (
     <div className="toolbar__group brush-controls">
+      {/* The live swatch: what this brush will paint, painted by the engine's
+          own rasterizer. The size is read from the slider below it. */}
+      <BrushPreview />
       <BrushPresets />
       <SliderField
         label="Size"
