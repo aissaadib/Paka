@@ -73,6 +73,8 @@ architecture by browsing.
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
+`features/options/OptionControl.tsx` (134: the one control for every kind),
+`features/options/toolOptions.css` (161),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
@@ -83,7 +85,9 @@ rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
 (~300: the work-area clamp, the physical-pixel arithmetic and the cases),
 `core/document/grid.ts` (283: the grid lattice, the snap candidates and the
 document-space tolerance), `core/settings/appSettings.ts` (269: the settings
-document, its readers and its per-field validation).
+document, its readers and its per-field validation),
+`core/options/optionControl.ts` (322: the control table for every kind of tool
+option, the exhaustive dispatch and the bar's grouping).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
 shape geometry), `core/rendering/stampCoverage.ts` (533: the dab plan, the
@@ -128,6 +132,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change a tool option or the options bar | `core/shell/toolOptions.ts` (the contract: the kinds, the per-tool registry, the visibility rules), `core/options/optionControl.ts` (the control table for every kind, the exhaustive dispatch, the bar's grouping), `features/options/OptionControl.tsx` (the one control), `features/options/ToolOptionsBar.tsx` (the bar), `features/options/ToolOptionsPanel.tsx` (the toolbar's inline options), `features/options/toolOptionSchema.ts` (the built-in options), `src/test/toolOptions.test.ts` |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
@@ -210,6 +215,10 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
 | `ToolOption`, `registerToolOptions`, `appendToolOptions`, `visibleToolOptions`, `toolOptionLabel` | `core/shell/toolOptions.ts` | grep the symbol |
+| `TOOL_OPTION_KINDS`, `ToolOptionKind` | `core/shell/toolOptions.ts` | grep the symbol |
+| `optionControl`, `sliderControl`, `numberControl`, `toggleControl`, `selectControl`, `colorControl`, `groupControl` | `core/options/optionControl.ts` | grep the symbol |
+| `groupToolOptions`, `ToolOptionGroup` | `core/options/optionControl.ts` | grep the symbol |
+| `optionNumberValue`, `optionStepValue`, `colorInputValue` | `core/options/optionControl.ts` | grep the symbol |
 | `ShellSlotId`, `ShellLayout`, `placePanel`, `movePanel`, `hidePanel`, `normalizeShellLayout` | `core/shell/slots.ts` | grep the symbol |
 | `PanelDefinition`, `registerPanel`, `listPanels`, `panelsInSlot` | `core/shell/panelRegistry.ts` | grep the symbol |
 | `ViewportState`, `viewportStateFrom`, `viewportFromState`, `normalizeViewportState` | `core/shell/viewportState.ts` | grep the symbol |
@@ -218,6 +227,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `ShellPreferences`, `normalizeShellPreferences`, `parseShellPreferences` | `core/shell/preferences.ts` | grep the symbol |
 | `DynamicsModel`, `normalizeDynamicsModel`, `dynamicsSizeFactor`, `registerDynamicsModel` | `core/brushes/dynamics.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
+| `OptionControl`, `OptionControlView` | `features/options/OptionControl.tsx` | grep the symbol |
+| `ToolOptionsBar` | `features/options/ToolOptionsBar.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
 
 ## 6. Docs → section
@@ -256,6 +267,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| Tool options | `toolOptions.test.ts` (the fields each tool shows, the control for every kind, the bar's grouping, and the path a feature takes to add an option to a tool it does not own), `toolOptionsContract.test.ts` (the registry, the visibility rules and the group rules) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
