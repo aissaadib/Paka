@@ -12,6 +12,14 @@
  * (`core/shell/overlayRegistry`), so the renderer paints the list of overlays
  * and this feature never touches the renderer's paint sequence.
  *
+ * **The transform must be in force.** The overlay paints in *document*
+ * coordinates, exactly as the grid and the composition guides do, so the
+ * renderer has to call `paint` with the document transform already set on the
+ * context - the same place in the paint sequence the grid and the guides are
+ * painted. The context's `scale` is what turns a device-pixel measurement
+ * into a document one, so a line of `1 / scale` is one device pixel wide at
+ * any zoom.
+ *
  * Where the axes are comes from the editor's symmetry settings, which the
  * engine owns. The overlay keeps the last settings it was handed - the same
  * way the renderer is handed the grid's settings - and paints from them.
