@@ -32,6 +32,10 @@ import {
   type ShapeOptions,
   type ShapePoint,
 } from "./shapeGeometry";
+// The shape tools bring their own options: the module registers them in the
+// shared per-tool registry when it is loaded, so the options bar shows the
+// controls the one model describes without the options bar knowing about them.
+import "./shapeToolOptions";
 import type { Tool, ToolContext } from "./types";
 
 /** Below this document-space size a shape is treated as a click, not a shape. */
