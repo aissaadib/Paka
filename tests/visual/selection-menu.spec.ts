@@ -52,9 +52,13 @@ async function marqueeSelect(page: Page): Promise<void> {
   await page.mouse.up();
 }
 
-/** Opens the Selection menu. */
+/**
+ * Opens the Selection menu.
+ *
+ * The menu bar is a real menubar: its triggers are menu items, not buttons.
+ */
 async function openSelectionMenu(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Selection", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Selection", exact: true }).click();
 }
 
 test("the fixed-step commands are in the Selection menu", async ({ page }) => {
