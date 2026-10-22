@@ -46,7 +46,15 @@ import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
 import type { SettingsDocument } from "./settingsSection";
 
-/** The version of the settings file this build reads and writes. */
+/**
+ * The version of the settings file this build reads and writes.
+ *
+ * The version is still 1, because the change that made the file a document
+ * of sections is **additive**: a section is a new *key*, and the engine's
+ * own fields keep their names, their defaults and their meanings, so a file
+ * written by the previous build still loads. A section carries a version of
+ * its own, so it can change its shape without the file's version moving.
+ */
 export const SETTINGS_VERSION = 1;
 
 /**

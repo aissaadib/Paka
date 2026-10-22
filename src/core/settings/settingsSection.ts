@@ -249,7 +249,7 @@ export function readSettingsSection<S>(spec: SettingsSectionSpec<S>, value: unkn
 export function writeSettingsSection<S>(
   spec: SettingsSectionSpec<S>,
   state: S,
-): Record<string, unknown> {
+): SettingsDocument {
   const written = asRecord(spec.codec.write(state)) ?? {};
   return { ...written, version: spec.version };
 }

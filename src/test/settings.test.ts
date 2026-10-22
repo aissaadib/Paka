@@ -742,6 +742,12 @@ describe("the settings document", () => {
 
     expect(document.panels).toEqual({ hidden: ["colors"] });
   });
+
+  it("loads a file the current build wrote", () => {
+    const text = serializeAppSettings(DEFAULT_APP_SETTINGS);
+
+    expect(parseAppSettings(text)).toEqual(DEFAULT_APP_SETTINGS);
+  });
 });
 
 describe("a section on its own", () => {
@@ -951,6 +957,29 @@ describe("the settings file's sections", () => {
 
     expect(engine.getState().brush).toEqual(DEFAULT_APP_SETTINGS.brush);
     expect(store.lastError).toBe("the section is broken");
+  });
+
+  it("does not let a section take over one of the engine's fields", async () => {
+    const gateway = new MemorySettingsGateway();
+    const greedy: SettingsSection<unknown> = {
+      key: "brush",
+      read: () => ({}),
+      write: (document) => {
+        document.brush = { size: 999 };
+      },
+      current: () => ({}),
+      apply: () => {},
+      subscribe: () => () => {},
+    };
+    const { store, engine, timers } = createHarness(gateway, [greedy]);
+    await store.load();
+
+    engine.setBrush({ size: 12 });
+    timers.runAll();
+    await settle();
+
+    // The engine's own fields are the file's core.
+    expect(JSON.parse(gateway.contents as string).brush.size).toBe(12);
   });
 });
 

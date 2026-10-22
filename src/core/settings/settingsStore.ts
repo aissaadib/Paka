@@ -298,16 +298,17 @@ export class SettingsStore {
    * The engine's own fields are written over the document that was found on
    * disk, and every section writes its owner's state into it. The keys
    * nobody claims are left exactly as they were found.
+   *
+   * The engine's fields are written last: they are the file's core, and a
+   * section that claimed one of their keys does not take it over.
    */
   private buildDocument(): SettingsDocument {
-    const document: SettingsDocument = {
-      ...this.document,
-      ...settingsDocument(this.settings),
-    };
+    const engine = settingsDocument(this.settings);
+    const document: SettingsDocument = { ...this.document, ...engine };
     for (const section of this.sections) {
       section.write(document, section.current());
     }
-    return document;
+    return { ...document, ...engine };
   }
 
   /** Hands the document's sections to their owners. */
