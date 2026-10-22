@@ -6,6 +6,7 @@ import {
   createDocument,
   duplicateLayer,
   getActiveLayer,
+  getLayer,
   moveLayer,
   nextLayerName,
   removeLayer,
@@ -14,6 +15,7 @@ import {
   isValidDocumentSize,
   updateLayer,
 } from "../core/document/document";
+import { groupLayers } from "../core/document/layerGroups";
 
 const base = createDocument({ name: "Test", width: 800, height: 600 });
 
@@ -153,5 +155,79 @@ describe("uniqueLayerName", () => {
     expect(uniqueLayerName(base, "Sketch")).toBe("Sketch");
     const taken = addLayer(base, "Sketch");
     expect(uniqueLayerName(taken, "Sketch")).toBe("Sketch 2");
+  });
+});
+
+/**
+ * The document's layer tree.
+ *
+ * A layer may sit inside a group, and the document's own operations reach it
+ * there: the panel renames it, the engine moves it, and the file writes it
+ * where it belongs.
+ */
+describe("the layer tree", () => {
+  function grouped() {
+    const document = addLayer(addLayer(base));
+    const [bottom, top] = document.layers;
+    const withGroup = groupLayers(document, [bottom?.id ?? "", top?.id ?? ""]);
+    const group = withGroup.layers[0];
+    return { document: withGroup, group, bottom, top };
+  }
+
+  /** A document whose every layer sits inside one group. */
+  function fullyGrouped() {
+    const document = addLayer(base);
+    const [bottom, top] = document.layers;
+    const withGroup = groupLayers(document, [bottom?.id ?? "", top?.id ?? ""]);
+    return { document: withGroup, group: withGroup.layers[0] };
+  }
+
+  it("finds a layer inside a group", () => {
+    const { document, bottom } = grouped();
+
+    expect(getLayer(document, bottom?.id ?? "")?.id).toBe(bottom?.id);
+    expect(getLayer(document, "missing")).toBeUndefined();
+  });
+
+  it("updates a layer inside a group", () => {
+    const { document, bottom } = grouped();
+
+    const renamed = updateLayer(document, bottom?.id ?? "", { name: "Ink" });
+    expect(getLayer(renamed, bottom?.id ?? "")?.name).toBe("Ink");
+    // The document it was given is untouched.
+    expect(getLayer(document, bottom?.id ?? "")?.name).toBe(bottom?.name);
+  });
+
+  it("moves a layer among its siblings, never out of its group", () => {
+    const { document, group, bottom, top } = grouped();
+
+    const moved = moveLayer(document, bottom?.id ?? "", 1);
+    const movedGroup = moved.layers.find((layer) => layer.id === group?.id);
+    expect(movedGroup?.children.map((child) => child.id)).toEqual([top?.id, bottom?.id]);
+  });
+
+  it("removes a group with the layers it holds", () => {
+    const { document, group, bottom, top } = grouped();
+
+    const removed = removeLayer(document, group?.id ?? "");
+    expect(removed.layers).toHaveLength(1);
+    expect(removed.layers.some((layer) => layer.id === bottom?.id)).toBe(false);
+    expect(removed.layers.some((layer) => layer.id === top?.id)).toBe(false);
+  });
+
+  it("never removes the last layer that paints", () => {
+    const { document, group } = fullyGrouped();
+
+    // The group holds every layer that paints, so removing it would leave
+    // the document with nowhere to draw.
+    expect(removeLayer(document, group?.id ?? "")).toBe(document);
+  });
+
+  it("refuses to duplicate a group", () => {
+    const { document, group } = grouped();
+
+    // A copy of a group is a copy of a whole subtree: the request is refused
+    // rather than half done.
+    expect(duplicateLayer(document, group?.id ?? "")).toBe(document);
   });
 });

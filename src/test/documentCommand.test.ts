@@ -17,8 +17,10 @@ import {
   addLayer,
   createDocument,
   removeLayer,
+  setActiveLayer,
   updateLayer,
 } from "../core/document/document";
+import { groupLayers } from "../core/document/layerGroups";
 import type { DrawingDocument, LayerElement, LayerId, StrokeRecord } from "../core/document/types";
 
 function makeStroke(layerId: LayerId, x: number): StrokeRecord {
@@ -190,5 +192,28 @@ describe("createDocumentCommand", () => {
     merged?.revert();
     expect(harness.getDocument()).toBe(start);
     expect(harness.getDocument().layers[0].opacity).toBe(1);
+  });
+
+  it("keeps an active layer that sits inside a group", () => {
+    const start = addLayer(createDocument({ name: "Test", width: 100, height: 80 }));
+    const [bottom, top] = start.layers;
+    const grouped = groupLayers(start, [bottom?.id ?? "", top?.id ?? ""]);
+    const inner = grouped.layers[0]?.children[0];
+    const active = setActiveLayer(grouped, inner?.id ?? "");
+    const harness = createHost(active);
+
+    const renamed = updateLayer(active, inner?.id ?? "", { name: "Ink" });
+    const command = createDocumentCommand(
+      { label: "Rename Layer", before: active, after: renamed, preserveActiveLayer: true },
+      harness.host,
+    );
+
+    command.apply();
+    // The active layer is inside a group, so it is not in the root list - it
+    // still has to be kept.
+    expect(harness.getDocument().activeLayerId).toBe(inner?.id);
+
+    command.revert();
+    expect(harness.getDocument().activeLayerId).toBe(inner?.id);
   });
 });
