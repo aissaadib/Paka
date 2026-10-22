@@ -282,6 +282,9 @@ result is a branch:
 | `preserve/swarm-working-tree` | `0f47ea6` |
 | Content | 84 files, +10,709 / −372 |
 | Type check | **0 errors** from a clean checkout |
+| Unit + integration | **1500 tests in 69 files, all pass** |
+| Production build | succeeds — 176 modules, `index-K4Ere2ZV.js` 540.20 kB |
+| Visual regression | **56 passed** (33.5 s) |
 | `qa/` | **not in the commit** (0 entries) |
 | `package-lock.json` | not in the commit |
 
@@ -290,6 +293,25 @@ reviewed or integrated by this wave, and it is not on the wave branch. It
 exists so that five hours of eighteen agents' work is recoverable as one
 green commit instead of 75 uncommitted entries in a checkout anybody could
 clobber.
+
+### The two waves, side by side
+
+Both trees are green. Neither has to be discarded.
+
+| | This wave | The concurrent swarm |
+| --- | --- | --- |
+| Branch | `integration/wave-3-shell` | `preserve/swarm-working-tree` |
+| Unit + integration | **2169 tests / 85 files** | 1500 tests / 69 files |
+| Type check | clean | clean |
+| Production build | succeeds, 460.05 kB | succeeds, 540.20 kB |
+| Visual regression | 45 passed | **56 passed** |
+| Committed and integrated? | **yes** — 29 merges, one branch | **no** — 75 entries were uncommitted; now preserved |
+| The shared contracts | the eight modules | adopted two of them byte-identically |
+| Project format | 13 (the tip, the layer groups) | 12 on the branch, 13 in the tree |
+
+The swarm's tree is **bigger in interface** — eleven more visual scenes, a
+larger bundle, a theme and a user interface scale — and this wave's is
+**bigger in tests** and is the one that is actually integrated.
 
 ### What the swarm has that this wave does not
 
