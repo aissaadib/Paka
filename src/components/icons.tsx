@@ -276,3 +276,13 @@ export function IconFile(props: IconProps) {
     </Icon>
   );
 }
+
+/** A compass rose: the navigator panel. */
+export function IconNavigator(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="8" cy="8" r="5.6" />
+      <path d="M10.4 5.6 9.2 9.2 5.6 10.4 6.8 6.8z" />
+    </Icon>
+  );
+}

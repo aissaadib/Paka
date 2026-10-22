@@ -134,6 +134,21 @@ export interface DrawingRenderer {
    * history.
    */
   readCompositeImage(): ImageData | null;
+  /**
+   * Composites a small overview of the document into a **new** canvas, for a
+   * navigator panel.
+   *
+   * The overview is the paper plus every visible layer at its opacity, at the
+   * size asked for. It is display-only: the overview never reaches a layer
+   * surface, the document or `composeDocumentImage`'s output, so it cannot
+   * change what an export contains.
+   *
+   * Optional, because a renderer is free not to be able to make one: the
+   * engine falls back to the document's own composite and scales it down
+   * where it is drawn. A renderer that can make an overview should implement
+   * it, because the composite is expensive to make at document size.
+   */
+  renderOverview?(maxWidth: number, maxHeight: number): HTMLCanvasElement | null;
   render(): void;
   requestRender(): void;
   destroy(): void;
