@@ -1,6 +1,6 @@
 /**
- * Application shell: menu bar, toolbar, tool rail, canvas, layers panel and
- * status bar.
+ * Application shell: menu bar, tool options bar, toolbar, tool rail, canvas,
+ * layers panel and status bar.
  *
  * The state kept here is the workflow the engine deliberately knows nothing
  * about: which dialog is open, and which action is waiting for the user to
@@ -13,6 +13,7 @@ import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
 import { ColorPanel } from "../../features/color/ColorPanel";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
 import { LayersPanel } from "../../features/layers/LayersPanel";
+import { ToolOptionsBar } from "../../features/options/ToolOptionsBar";
 import {
   UnsavedChangesDialog,
   type UnsavedAction,
@@ -114,6 +115,7 @@ export function Workspace() {
         onSaveProjectAs={saveAs}
         onExportPng={exportPng}
       />
+      <ToolOptionsBar />
       <ToolBar />
       <div className="workspace-body">
         <ToolRail />

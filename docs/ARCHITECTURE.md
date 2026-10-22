@@ -1656,6 +1656,52 @@ keep it from churning. Two things deliberately bypass React:
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
 
+### The tool-options strip
+
+The strip under the menu bar shows the **active tool's** options, and nothing
+else. Its shape is fixed - one row, 32 px, always - so switching tools never
+moves the canvas; only the controls inside it change. The document toolbar
+below it holds the controls that belong to the *document* rather than to the
+tool: the history, the zoom, the grid and the colour.
+
+Everything on the strip is described by one declarative schema,
+`src/features/options/toolOptionSchema.ts`. An option says where its value is
+read from (the editor snapshot) and where it is written (an `EditorActions`
+method), so the strip holds no per-tool logic and no second copy of a brush
+value:
+
+| Kind | Reads | Writes |
+| --- | --- | --- |
+| `slider` | a number | a number, through the option's own setter |
+| `toggle` | a flag | a flag |
+| `color` | a hex string | a hex string |
+| `action` | - | runs an editor action |
+
+The options are grouped: the **brush**, the **shape**, the **selection**, the
+**fill** and the **gradient**. A tool names the groups it shows
+(`TOOL_OPTION_GROUP_IDS`), and a control is only in a group when the tool
+really uses it. A gradient has no brush size, and a shape has no stabilizer and
+no dab spacing, so those controls are absent rather than present and inert: a
+slider the user can move but that changes nothing is worse than no slider.
+
+Every option is editor state: it describes the *next* gesture, and the
+committed record keeps the value it was drawn with. Changing one is not an
+edit, so no option writes history or the file's dirty flag, and the values
+survive a tool change - the options are the engine's, not the strip's.
+
+The brush group is split in two: the size and the opacity stay in the strip,
+because they change with every stroke, and the rest - the edge, the sampling,
+the stabilizer, the grain, the dab engine and the pressure response - lives in
+a popover. The popover's panel is `position: fixed`, so the strip's own
+horizontal scroll cannot clip it, and it is placed from the trigger's
+rectangle. `Escape` closes it and puts the focus back on the trigger.
+
+The strip scrolls sideways when the window is too narrow instead of wrapping: a
+wrapped strip would change its height and push the canvas down. The wheel over
+the strip scrolls it, through a native, non-passive listener, so the browser's
+own horizontal-wheel behaviour is refused rather than doubled - and when the
+strip does not overflow, the wheel is left alone.
+
 ## Native boundary (Rust)
 
 `src-tauri` holds the project file I/O: `read_text_file`,

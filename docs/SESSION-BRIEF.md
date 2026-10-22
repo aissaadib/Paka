@@ -53,6 +53,11 @@ visual-regression harness.
   brush engine**, **HSV colour wheel**, **composition guides**, **polygon and
   star** and **scale/rotate** slices. The feature branches remain; nothing was
   rewritten.
+- Measured on this branch: `pnpm test` **1069 tests in 48 files, all pass**;
+  `pnpm typecheck` clean; `pnpm build` succeeds; `pnpm test:visual`
+  **37 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
+  by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
+  commands, the merge SHAs and the ownership of each branch.
 - Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
@@ -85,6 +90,7 @@ visual-regression harness.
 | Commit | Slice |
 | --- | --- |
 | `feat/agent10-brush-cursor` | **Brush cursor, size ring and quick resize** - the brush's real footprint is drawn on the canvas as a **ring** that follows the pointer, sized in **document pixels through the zoom** (so it shrinks and grows with the canvas) and outlined one *device* pixel wide (so it stays a hairline at any density). A **quick resize** - `Ctrl`+`Alt` and drag, up to grow and down to shrink - changes the brush size with the current size in pixels shown beside the ring, and `Esc` cancels it and puts the size back. The gesture is owned by the engine and runs **before** any tool sees the press, so a resize can never leave a stroke behind; it is **relative** (`size = start * e^(-dy/100)`), so the ring does not jump when the drag begins, and it is clamped to the brush's own `1..512` range. The size is written through the ordinary `setBrush`, so the ring, the readout, the toolbar's slider and the next stroke agree - and it is **editor state**: no history step, no dirty flag, nothing in the file. Both the ring and the resize are **views**: the ring is a DOM overlay, a sibling of the canvas, so it never reaches a layer surface, a PNG export, the history or the project file. The gesture is a shortcut, not the only way in: `[` and `]` step the size, `Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's **Size** slider is a labelled range input. **No project-format change.** |
+| `feat/agent02-tool-options-bar` | **Contextual tool-options strip** - a **one-row strip under the menu bar** shows the **active tool's** options and nothing else: the brush for the brush and the eraser, the brush *and* the shape for the shape tools, the selection actions for the select tool, the tolerance for the bucket and the gradient's own controls for the gradient tool. The strip is **32 px tall whatever the tool**, so switching tools never moves the canvas, and a window too narrow for the controls scrolls the strip sideways instead of wrapping it. Every control is described by one **declarative schema** that says where its value is read from and which editor action it writes, so there is no second copy of a brush value, and a control is only offered when the tool **really uses it** - the gradient has no brush size, a shape has no stabilizer and no dab spacing - so nothing on the strip is a decoration. The size and the opacity stay in the strip and the rest of the brush sits behind a **popover**. Every option is editor state: changing one is not an edit, and the values survive a tool change. **No project-format change.** |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -129,6 +135,18 @@ visual-regression harness.
   mode, and releasing the stroke never changes the stacking.
 - **Eraser** (`E`): same footprint, subtracts coverage (`destination-out`);
   one undo step; survives save/reopen.
+- **Tool options** (the strip under the menu bar): a **one-row strip** that
+  shows the **active tool's** controls - the brush for the brush and the eraser,
+  the brush *and* the shape for the shape tools, the selection actions for the
+  select tool, the tolerance for the bucket, the gradient's own controls for
+  the gradient tool - and nothing else. The strip is **32 px tall whatever the
+  tool**, so switching tools never moves the canvas, and a narrow window scrolls
+  it sideways instead of wrapping it. A control is only offered when the tool
+  **really uses it** (the gradient has no brush size, a shape has no stabilizer
+  and no dab spacing), so nothing on it is a decoration; every control writes
+  through the same editor actions the menus use, so choosing one is not an edit.
+  The size and the opacity stay in the strip and the rest of the brush sits
+  behind a **popover**.
 - **Shapes** (`L` line, `R` rectangle, `O` ellipse, `P` polygon, `S` star): live
   preview, one stroke = one undo step; `Shift` constrains (45°, squares, circles,
   a regular polygon or star), `Alt` draws from the centre. Rectangle/ellipse/
@@ -249,6 +267,10 @@ visual-regression harness.
   it the same way. The gesture is offered for the **brush and the eraser**
   only. `[` and `]` step the size, `Alt`+`[` and `Alt`+`]` change it by exactly
   one pixel, and the toolbar's **Size** slider is the accessible control.
+  opacity toggles. All settings are captured per stroke. The **size** and the
+  **opacity** sit in the tool-options strip; the rest sit in its **Brush
+  settings** popover, and a tool that uses only part of the brush sees only
+  that part.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
   unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
@@ -295,7 +317,8 @@ src/
   components/   shell: menu bar, toolbars, panels, icons
   features/     canvas, brushes, colour, layers, history, document,
                 project (file commands/dialogs/title/close guard),
-                shapes, fill, gradient
+                shapes, fill, gradient,
+                options (the contextual tool-options strip and its schema)
   hooks/        React bindings, keyboard shortcuts, native environment
   state/        editorStore (snapshot + intents) and context
   core/

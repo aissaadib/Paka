@@ -27,7 +27,7 @@ export function ColorControls() {
     <div className="toolbar__group color-controls">
       <div className="color-controls__pickers">
         <input
-          className="color-controls__picker"
+          className="color-well"
           type="color"
           value={current}
           onChange={(event) => actions.setBrush({ color: event.target.value })}
@@ -35,7 +35,7 @@ export function ColorControls() {
           title="Primary stroke color (left button)"
         />
         <input
-          className="color-controls__picker color-controls__picker--secondary"
+          className="color-well color-controls__picker--secondary"
           type="color"
           value={secondary}
           onChange={(event) => actions.setSecondaryColor(event.target.value)}

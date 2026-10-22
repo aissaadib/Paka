@@ -1,27 +1,48 @@
-/** Brush size, opacity and pressure mapping controls. */
+/**
+ * The brush group of the options bar.
+ *
+ * The size and the opacity stay in the strip, because they change with every
+ * stroke. The rest of the brush - the edge, the sampling, the stabilizer, the
+ * grain, the dab engine and the pressure response - lives in a popover, so
+ * the strip stays one row tall and every control stays reachable.
+ *
+ * A tool that does not paint with a brush has no brush group at all, and a
+ * tool that uses only part of the brush - a shape, a gradient - shows only
+ * the fields it really reads. A control that cannot change what the tool
+ * draws is not offered.
+ */
 
-import { useState } from "react";
-import {
-  MAX_BRUSH_SIZE,
-  MAX_SPACING,
-  MAX_STAMP_SPACING,
-  MIN_BRUSH_SIZE,
-  MIN_SPACING,
-  MIN_STAMP_SPACING,
-} from "../../core/brushes/defaults";
+import { Popover } from "../../components/toolbar/Popover";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { SliderField } from "../../components/toolbar/SliderField";
+import { OptionControl } from "../options/OptionControl";
+import {
+  toolOptionFields,
+  toolUsesWholeBrush,
+  type ToolOption,
+} from "../options/toolOptionSchema";
 import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
 
-/** Pressure strength applied by the on/off toggles. */
-const PRESSURE_STRENGTH = 0.6;
+function isPopoverOption(option: ToolOption): boolean {
+  return option.placement === "popover";
+}
 
 export function BrushControls() {
   const { actions } = useEditor();
-  const { brush } = useEditorState();
-  const [curveOpen, setCurveOpen] = useState(false);
-  const pressureEnabled = brush.pressureSize > 0 || brush.pressureOpacity > 0;
+  const snapshot = useEditorState();
+  const fields = toolOptionFields("brush", snapshot.toolId, snapshot);
+  const inline = fields.filter((option) => !isPopoverOption(option));
+  const advanced = fields.filter(isPopoverOption);
+
+  // The pressure curve only means something for a tool that reacts to
+  // pressure, and only while pressure is switched on at all.
+  const usesPressure = advanced.some((option) => option.brushField === "pressureSize");
+  const pressureEnabled =
+    snapshot.brush.pressureSize > 0 || snapshot.brush.pressureOpacity > 0;
+  const showCurve = usesPressure && pressureEnabled;
+  // The preset picker replaces the whole brush, so it belongs to the tools that
+  // use the whole brush.
+  const showPresets = toolUsesWholeBrush(snapshot.toolId);
 
   return (
     <div className="toolbar__group brush-controls">
@@ -108,64 +129,36 @@ export function BrushControls() {
             title="Distance between dabs as a percentage of the brush size; this is not the sample density above"
             format={(value) => `${Math.round(value)}%`}
             onChange={(stampSpacing) => actions.setBrush({ stampSpacing: stampSpacing / 100 })}
+    <div className="brush-options">
+      <div className="tool-options__fields">
+        {inline.map((option) => (
+          <OptionControl
+            key={option.id}
+            option={option}
+            snapshot={snapshot}
+            actions={actions}
           />
-          <SliderField
-            label="Stamp hardness"
-            min={0}
-            max={1}
-            step={0.01}
-            value={brush.stampHardness}
-            title="Falloff of a single dab; 100% is a crisp dab edge, lower values soften it towards the centre"
-            format={(value) => `${Math.round(value * 100)}%`}
-            onChange={(stampHardness) => actions.setBrush({ stampHardness })}
-          />
-          <SliderField
-            label="Stamp texture"
-            min={0}
-            max={1}
-            step={0.01}
-            value={brush.stampTexture}
-            title="Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect"
-            format={(value) => `${Math.round(value * 100)}%`}
-            onChange={(stampTexture) => actions.setBrush({ stampTexture })}
-          />
-        </>
-      ) : null}
-      <label
-        className="toggle"
-        title="Pen pressure controls stroke width (ignored by mouse input)"
-      >
-        <input
-          type="checkbox"
-          checked={brush.pressureSize > 0}
-          onChange={(event) =>
-            actions.setBrush({ pressureSize: event.target.checked ? PRESSURE_STRENGTH : 0 })
-          }
-        />
-        Pressure size
-      </label>
-      <label className="toggle" title="Pen pressure controls stroke opacity">
-        <input
-          type="checkbox"
-          checked={brush.pressureOpacity > 0}
-          onChange={(event) =>
-            actions.setBrush({ pressureOpacity: event.target.checked ? PRESSURE_STRENGTH : 0 })
-          }
-        />
-        Pressure opacity
-      </label>
-      {pressureEnabled ? (
-        <button
-          type="button"
-          className="pressure-curve__toggle"
-          aria-expanded={curveOpen}
-          title="Shape how raw pen pressure maps to the size and opacity response"
-          onClick={() => setCurveOpen((open) => !open)}
+        ))}
+      </div>
+      {advanced.length > 0 || showPresets || showCurve ? (
+        <Popover
+          label="Brush settings"
+          title="The rest of the brush: edge, sampling, grain, dabs and pressure"
         >
-          Pressure curve
-        </button>
+          <div className="tool-options__fields tool-options__fields--stacked">
+            {advanced.map((option) => (
+              <OptionControl
+                key={option.id}
+                option={option}
+                snapshot={snapshot}
+                actions={actions}
+              />
+            ))}
+          </div>
+          {showPresets ? <BrushPresets /> : null}
+          {showCurve ? <PressureCurveEditor /> : null}
+        </Popover>
       ) : null}
-      {pressureEnabled && curveOpen ? <PressureCurveEditor /> : null}
     </div>
   );
 }
