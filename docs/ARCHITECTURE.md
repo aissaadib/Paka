@@ -1037,6 +1037,15 @@ Four gestures, chosen on press:
   so the selection keeps its proportions. A stretched side is never squashed to
   nothing - it stops at `MIN_STRETCH_SIZE` (one document pixel) - and it is
   never mirrored, which is a flip and has its own command.
+  The stretch is measured against the **content's** own bounds - the samples',
+  without the paint's padding - and that is what makes the rule above true of
+  the frame the user *sees*: the padding is a constant offset on both sides,
+  so a content edge that stays put keeps its painted edge still, and one that
+  follows the pointer takes its painted edge with it. Measured against the
+  painted frame instead, the padding would be scaled as well and the visible
+  edge would lag the pointer. A selection with no extent on an axis - a
+  single horizontal stroke, stretched from above - has nothing to stretch
+  there, and the drag leaves it alone.
 - **Rotate** - drag the **rotation handle**, the circle above the frame's top
   edge. The rotation is about the same centre, and the angle is the pointer's
   compass angle measured clockwise from "up". The angle **snaps to 15 degrees**

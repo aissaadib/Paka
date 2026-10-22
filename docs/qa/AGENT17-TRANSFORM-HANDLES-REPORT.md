@@ -88,7 +88,34 @@ The uniform scale is the case where both factors are equal and the anchor is
 the centre; the one-axis stretch is the case where one factor is 1. One map
 covers both, so the preview, the commit and the undo all run the same code.
 
-### 2.4 The snapping is the existing one
+### 2.4 A side handle is measured against the **content**, not the paint
+
+This was the one real bug the review found, and it is worth recording.
+
+The stretch was first measured against the selection's **painted** frame - the
+samples' bounds widened by half each stroke's brush diameter. But the
+transform only maps the **samples**, and the padding is not scaled (a
+transform never changes a stroke's brush). So the padding was scaled as a
+side effect, and the frame the user *sees* did not do what the rule said: the
+visible opposite edge slid, and the visible dragged edge lagged the pointer -
+by half the travel for a selection that is thin in the axis being dragged.
+
+The fix is to measure the stretch against the **content's** own bounds - the
+samples', without the padding. The padding is a constant offset on both
+sides, so:
+
+- a content edge that stays put keeps its **painted** edge still, and
+- a content edge that follows the pointer takes its **painted** edge with it.
+
+Measured in the real app (Chromium, the live display canvas): dragging the
+east side handle 60 screen pixels to the right moved the right edge of the
+painted stroke by exactly **60** pixels and the left edge by **0**.
+
+A selection with no extent on an axis - a single horizontal stroke, stretched
+from above - has nothing to stretch there, and the drag now leaves it alone
+instead of sliding the content.
+
+### 2.5 The snapping is the existing one
 
 A dragged handle uses `snapDocumentPoint` - the same call, the same targets
 and the same screen-space magnet radius as a drawing sample. There is no
@@ -113,7 +140,7 @@ The new tests, by area:
 | --- | --- | --- |
 | The stretch geometry | `src/test/selectionTransform.test.ts` | the dragged edge follows the pointer and the opposite edge does not move; the centre anchor grows both sides; the proportional modifier keeps the aspect ratio; a side is never squashed to nothing or mirrored; the opposite corner |
 | The handles | `src/test/selectionHandles.test.ts` | the side handles sit outside the frame; a press inside the frame never grabs one; the side handles are further out than the grab radius; the cursors; the hit test |
-| The engine | `src/test/drawingEngine.test.ts` | the side stretch commits as **one** undo step and undo/redo are exact; `Shift` keeps the proportions; `Alt` anchors a corner at the opposite corner and a side at the centre; a cancel, a tool switch and `Esc` restore the samples **exactly**; the move and resize cursors; the hovered handle; a dragged handle snaps onto the grid |
+| The engine | `src/test/drawingEngine.test.ts` | the side stretch commits as **one** undo step and undo/redo are exact; the **visible** frame's opposite edge stays and its dragged edge follows the pointer; a selection with no extent on an axis is left alone; `Shift` keeps the proportions; `Alt` anchors a corner at the opposite corner and a side at the centre; a cancel, a tool switch and `Esc` restore the samples **exactly**; the move and resize cursors; the hovered handle; a dragged handle snaps onto the grid |
 | The renderer | `src/test/canvas2dRenderer.test.ts` | the side handles are painted; the hovered handle is filled with the accent colour; **none** of it reaches the export |
 
 The base commit did not compile: the merge of `integration/swarm-wave-2` into
@@ -134,9 +161,10 @@ timers (the harness tab is hidden, so the browser suspends it).
 | It is selected | `1 selected` |
 | The **east side handle** is found by the cursor | the cursor reads `ew-resize` at CSS (574, 267) - 12 px outside the frame's right edge |
 | The **interior** of the frame | the cursor reads `move` - a press there moves the content |
-| The side handle is dragged 60 px right | the stroke grows to the right and its **left edge does not move**; the frame's right edge follows |
+| The side handle is dragged 60 px right | the right edge of the **painted** stroke moved by exactly 60 px and its left edge by **0** |
 | The release | `history 2` - **one** undo step for the whole drag |
 | The handle after the stretch | found again, 60 px further right - the handles follow the frame |
+| `Ctrl+Z` after the stretch | `history 1` and the canvas **byte-identical** to the state before the stretch (0 changed pixels) |
 | `Esc` **during** a drag | the canvas is **byte-identical** to the state before the drag (0 changed pixels) and `history` is unchanged |
 
 Images (the display canvas, cropped to the paper):

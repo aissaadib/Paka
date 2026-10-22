@@ -194,17 +194,17 @@ export function edgeAxis(handle: SelectionHandleId): {
  * A frame with no width *and* no height is a single point; there is no
  * corner to pull and no direction to scale along, so there are no handles.
  *
- * `offset` is the distance from the frame's top edge to the rotation handle,
- * in document units. The caller converts it from screen pixels with the
- * live zoom, so the handle keeps its distance on screen at any zoom.
- *
- * `edgeOffset` is the distance the side handles sit outside the frame, in
- * document units, for the same reason.
+ * `offset` is the distance from the frame's top edge to the rotation handle
+ * and `edgeOffset` the distance the side handles sit outside the frame, both
+ * in **document units**. The caller converts them from screen pixels with the
+ * live zoom, so the handles keep their distance on screen at any zoom - which
+ * is why neither has a default here: a screen-pixel constant is not a
+ * document-unit one.
  */
 export function selectionHandles(
   bounds: Bounds,
   offset: number,
-  edgeOffset = EDGE_HANDLE_OFFSET_PX,
+  edgeOffset: number,
 ): SelectionHandles | null {
   if (bounds.width <= 0 && bounds.height <= 0) {
     return null;
@@ -278,35 +278,4 @@ export function cornerOf(
 ): Point | null {
   const index = CORNER_HANDLE_IDS.indexOf(handle);
   return index < 0 ? null : handles.corners[index];
-}
-
-/**
- * The edge handle a side handle stands for.
- *
- * As with the corner, the edge's position at the moment the gesture starts is
- * what the scale is measured against, so it is looked up by name.
- */
-export function edgeOf(
-  handles: SelectionHandles,
-  handle: SelectionHandleId,
-): Point | null {
-  const index = EDGE_HANDLE_IDS.indexOf(handle);
-  return index < 0 ? null : handles.edges[index];
-}
-
-/**
- * The point any handle stands for, or `null` for a handle of another kind.
- *
- * The renderer uses this to paint the handle under the pointer differently
- * from the others, so it must agree with the hit test about where a handle
- * is.
- */
-export function handlePoint(
-  handles: SelectionHandles,
-  handle: SelectionHandleId,
-): Point | null {
-  if (handle === "rotate") {
-    return handles.rotate;
-  }
-  return cornerOf(handles, handle) ?? edgeOf(handles, handle);
 }

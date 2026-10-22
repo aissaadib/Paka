@@ -2248,7 +2248,7 @@ describe("DrawingEngine selection", () => {
   });
 
   it("stretches one side of the selection with a side handle", () => {
-    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    const { engine, spy, layerId, frame, xs, ys, depth } = selectStroke();
     // The east side handle sits just outside the frame's right edge.
     const handle = {
       x: frame.x + frame.width + EDGE_HANDLE_OFFSET_PX,
@@ -2257,14 +2257,23 @@ describe("DrawingEngine selection", () => {
     dragHandle(engine, handle, { x: handle.x + 20, y: handle.y });
 
     const after = engine.listStrokes(layerId)[0];
-    // The width grows by the pointer's travel; the opposite edge is the
-    // anchor, so the samples are measured from it.
-    const factor = 1 + 20 / frame.width;
+    // The width grows by the pointer's travel. The scale is measured from the
+    // **content's** own bounds, because the paint's padding is a constant
+    // offset on both sides: the content's opposite edge stays put and its
+    // dragged edge follows the pointer.
+    const contentLeft = Math.min(...xs);
+    const contentWidth = Math.max(...xs) - contentLeft;
+    const factor = 1 + 20 / contentWidth;
     after.xs.forEach((x, index) => {
-      expect(x).toBeCloseTo(frame.x + (xs[index] - frame.x) * factor, 6);
+      expect(x).toBeCloseTo(contentLeft + (xs[index] - contentLeft) * factor, 6);
     });
     // The other axis is untouched: a side handle stretches one side only.
     expect(after.ys).toEqual(ys);
+    // And the frame the user sees followed the pointer: its left edge did not
+    // move and its right edge moved by exactly the travel.
+    const overlay = spy.selections[spy.selections.length - 1];
+    expect(overlay?.bounds?.x).toBeCloseTo(frame.x, 6);
+    expect(overlay?.bounds?.width).toBeCloseTo(frame.width + 20, 6);
     // One step for the whole drag, and undo puts the samples back exactly.
     expect(engine.getState().history.depth).toBe(depth + 1);
     engine.undo();
@@ -2273,9 +2282,23 @@ describe("DrawingEngine selection", () => {
     // Redo puts the stretch back, and it is the same stretch.
     engine.redo();
     expect(engine.listStrokes(layerId)[0].xs[0]).toBeCloseTo(
-      frame.x + (xs[0] - frame.x) * factor,
+      contentLeft + (xs[0] - contentLeft) * factor,
       6,
     );
+  });
+
+  it("leaves a selection with no extent on an axis alone", () => {
+    const { engine, layerId, frame, xs, ys, depth } = selectStroke();
+    // A single horizontal stroke has no height to stretch: the side handle
+    // above it has nothing to pull, so the drag changes nothing at all.
+    const handle = {
+      x: frame.x + frame.width / 2,
+      y: frame.y - EDGE_HANDLE_OFFSET_PX,
+    };
+    dragHandle(engine, handle, { x: handle.x, y: handle.y + 30 });
+    expect(engine.listStrokes(layerId)[0].xs).toEqual(xs);
+    expect(engine.listStrokes(layerId)[0].ys).toEqual(ys);
+    expect(engine.getState().history.depth).toBe(depth);
   });
 
   it("locks the aspect ratio when Shift is held on a side handle", () => {
@@ -2507,9 +2530,11 @@ describe("DrawingEngine selection", () => {
     dragHandle(engine, handle, { x: 224, y: handle.y });
 
     const after = engine.listStrokes(layerId)[0];
-    const factor = 1 + (225 - handle.x) / frame.width;
+    const contentLeft = Math.min(...xs);
+    const contentWidth = Math.max(...xs) - contentLeft;
+    const factor = 1 + (225 - handle.x) / contentWidth;
     after.xs.forEach((x, index) => {
-      expect(x).toBeCloseTo(frame.x + (xs[index] - frame.x) * factor, 6);
+      expect(x).toBeCloseTo(contentLeft + (xs[index] - contentLeft) * factor, 6);
     });
   });
 

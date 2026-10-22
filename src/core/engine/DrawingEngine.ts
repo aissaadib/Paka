@@ -447,38 +447,31 @@ interface MoveGesture {
   dy: number;
 }
 
-interface ScaleGesture {
+/** The parts of a scale gesture that do not depend on the kind of handle. */
+interface ScaleGestureBase {
   readonly mode: "scale";
   /** The selected strokes and their original coordinates. */
   readonly entries: readonly MoveEntry[];
   /**
-   * The frame the gesture started on.
+   * The frame the gesture started on: the strokes' **painted** bounds.
    *
-   * The frame is captured **now**, so the size an edge handle stretches and
-   * the centre a corner handle scales about cannot drift while the drag runs.
+   * The frame is captured **now**, so the size a handle pulls and the centre
+   * a corner scales about cannot drift while the drag runs. It is the frame
+   * the user sees, and the corner handles sit on it.
    */
   readonly frame: Bounds;
+  /**
+   * The content's own bounds: the samples', without the paint's padding.
+   *
+   * A side handle is measured against **these**, because the padding is a
+   * constant offset on both sides: a content edge that stays put keeps its
+   * painted edge still, and one that follows the pointer takes its painted
+   * edge with it. Measured against the painted frame instead, the padding
+   * would be scaled as well and the visible edge would lag the pointer.
+   */
+  readonly contentFrame: Bounds;
   /** The handle the press grabbed, for the cursor and the overlay. */
   readonly handle: SelectionHandleId;
-  /**
-   * The corner the press grabbed and the point the scale is measured about,
-   * for a corner handle.
-   *
-   * The corner is what the factor is measured against, so it must not move
-   * while the drag runs. The anchor is the point that does not move: the
-   * frame's centre by default, the opposite corner when the press asked for
-   * it.
-   */
-  readonly corner: { readonly point: Point; readonly anchor: Point } | null;
-  /**
-   * The axis an edge handle pulls along, the end of it the handle sits on and
-   * whether the frame's centre is the anchor, for an edge handle.
-   */
-  readonly edge: {
-    readonly axis: ScaleAxis;
-    readonly side: ScaleSide;
-    readonly anchorAtCentre: boolean;
-  } | null;
   /**
    * Where the press landed, in document space.
    *
@@ -486,10 +479,44 @@ interface ScaleGesture {
    * little does not jump the content.
    */
   readonly press: Point;
+  /**
+   * True while the aspect ratio is locked.
+   *
+   * Read live, so `Shift` locks the other axis as soon as it is held - and
+   * kept across the release, so the committed transform is the one the user
+   * was watching.
+   */
+  proportional: boolean;
   /** The scale applied so far. */
   scale: HandleScale;
   /** The pointer's document position, for the handle that follows it. */
   pointer: Point;
+}
+
+/** A scale driven by a **corner** handle. */
+interface ScaleCornerGesture extends ScaleGestureBase {
+  /**
+   * The corner the press grabbed and the point the scale is measured about.
+   *
+   * The corner is what the factor is measured against, so it must not move
+   * while the drag runs. The anchor is the point that does not move: the
+   * frame's centre by default, the opposite corner when the press asked for
+   * it.
+   */
+  readonly corner: { readonly point: Point; readonly anchor: Point };
+}
+
+/** A scale driven by a **side** handle. */
+interface ScaleEdgeGesture extends ScaleGestureBase {
+  /**
+   * The axis an edge handle pulls along, the end of it the handle sits on and
+   * whether the frame's centre is the anchor.
+   */
+  readonly edge: {
+    readonly axis: ScaleAxis;
+    readonly side: ScaleSide;
+    readonly anchorAtCentre: boolean;
+  };
 }
 
 interface RotateGesture {
@@ -513,7 +540,12 @@ interface RotateGesture {
   pointer: Point;
 }
 
-type SelectionGesture = MarqueeGesture | MoveGesture | ScaleGesture | RotateGesture;
+type SelectionGesture =
+  | MarqueeGesture
+  | MoveGesture
+  | ScaleCornerGesture
+  | ScaleEdgeGesture
+  | RotateGesture;
 
 /**
  * The scale that changes nothing.
@@ -1588,17 +1620,9 @@ export class DrawingEngine implements StrokeSource {
     if (!isInsideDocument(this.doc, sample.docX, sample.docY)) {
       return sample;
     }
-    const result = snapDocumentPoint(sample.docX, sample.docY, {
-      enabled: true,
-      guides: this.doc.guides,
-      spacing: this.gridSpacing,
-      zoom: this.viewport.zoom,
-    });
-    const x = result.x >= 0 && result.x <= this.doc.width ? result.x : sample.docX;
-    const y = result.y >= 0 && result.y <= this.doc.height ? result.y : sample.docY;
-    if (!result.snappedX && !result.snappedY) {
-      return sample;
-    }
+    const snapped = this.snapToTargets(sample.docX, sample.docY);
+    const x = snapped.x >= 0 && snapped.x <= this.doc.width ? snapped.x : sample.docX;
+    const y = snapped.y >= 0 && snapped.y <= this.doc.height ? snapped.y : sample.docY;
     if (x === sample.docX && y === sample.docY) {
       return sample;
     }
@@ -1606,22 +1630,16 @@ export class DrawingEngine implements StrokeSource {
   }
 
   /**
-   * The pointer's document position during a transform, with snapping applied.
+   * The document point a pointer snaps to, or the point itself.
    *
-   * The transform uses the **same** snapping the drawing tools use - the same
-   * targets, the same screen-space magnet - so a handle dragged with the snap
-   * on lands on a grid line instead of a few pixels beside it. There is no
-   * second, transform-only snapping: one rule, one magnet radius.
+   * One place builds the snap targets - the grid lines and the composition
+   * guides - so every pointer in the app is pulled by the same magnet with the
+   * same screen-space tolerance. There is no second, transform-only rule.
    *
-   * Two differences from a drawing sample:
-   *
-   *  - a transform pointer is **not** refused outside the paper: a handle is
-   *    often dragged past the edge of the document, and the content follows it
-   *    there;
-   *  - the snap is a magnet, not a lock: a pointer nowhere near a target keeps
-   *    its position.
+   * The snap is a **magnet**, not a lock: a point nowhere near a target keeps
+   * its position, and each axis is decided on its own.
    */
-  private snapTransformPointer(docX: number, docY: number): Point {
+  private snapToTargets(docX: number, docY: number): Point {
     if (!this.gridSnapping) {
       return { x: docX, y: docY };
     }
@@ -1632,6 +1650,21 @@ export class DrawingEngine implements StrokeSource {
       zoom: this.viewport.zoom,
     });
     return { x: result.x, y: result.y };
+  }
+
+  /**
+   * The pointer's document position during a transform, with snapping applied.
+   *
+   * The transform uses the **same** snapping the drawing tools use, so a handle
+   * dragged with the snap on lands on a grid line instead of a few pixels
+   * beside it.
+   *
+   * One difference from a drawing sample: a transform pointer is **not**
+   * refused outside the paper. A handle is often dragged past the edge of the
+   * document, and the content follows it there.
+   */
+  private snapTransformPointer(docX: number, docY: number): Point {
+    return this.snapToTargets(docX, docY);
   }
 
   /** Clears a user-facing notice raised by an editor action. */
@@ -2606,7 +2639,13 @@ export class DrawingEngine implements StrokeSource {
     if (!frame) {
       return;
     }
-    const handles = selectionHandles(frame, this.rotationHandleOffset(), this.edgeHandleOffset());
+    // The content's own bounds, without the paint's padding. A side handle is
+    // measured against these, so the visible edge follows the pointer.
+    const contentFrame = this.selectionContentBounds();
+    if (!contentFrame) {
+      return;
+    }
+    const handles = selectionHandles(frame, this.handleOffset(ROTATION_HANDLE_OFFSET_PX), this.handleOffset(EDGE_HANDLE_OFFSET_PX));
     if (!handles) {
       // A frame with no area has no corner to pull and no direction to turn
       // around, so there is nothing to transform.
@@ -2619,8 +2658,8 @@ export class DrawingEngine implements StrokeSource {
     // The anchor is read from the press, so it cannot change under the
     // pointer while the drag runs.
     const alternativeAnchor = sample.modifiers.alt;
-    this.beginGesture();
     if (handle === "rotate") {
+      this.beginGesture();
       this.selectionGesture = {
         mode: "rotate",
         entries,
@@ -2638,21 +2677,23 @@ export class DrawingEngine implements StrokeSource {
       if (!corner) {
         return;
       }
-      const gesture: ScaleGesture = {
+      const gesture: ScaleCornerGesture = {
         mode: "scale",
         entries,
         frame,
+        contentFrame,
         handle,
         corner: {
           point: corner,
           anchor: alternativeAnchor ? oppositeCorner(frame, corner) : centre,
         },
-        edge: null,
         press: pointer,
+        proportional: false,
         scale: IDENTITY_SCALE,
         pointer,
       };
       gesture.scale = this.scaleFor(gesture, pointer, false);
+      this.beginGesture();
       this.selectionGesture = gesture;
       return;
     }
@@ -2660,18 +2701,20 @@ export class DrawingEngine implements StrokeSource {
     if (!axis) {
       return;
     }
-    const gesture: ScaleGesture = {
+    const gesture: ScaleEdgeGesture = {
       mode: "scale",
       entries,
       frame,
+      contentFrame,
       handle,
-      corner: null,
       edge: { axis: axis.axis, side: axis.side, anchorAtCentre: alternativeAnchor },
       press: pointer,
+      proportional: false,
       scale: IDENTITY_SCALE,
       pointer,
     };
     gesture.scale = this.scaleFor(gesture, pointer, false);
+    this.beginGesture();
     this.selectionGesture = gesture;
   }
 
@@ -2683,24 +2726,21 @@ export class DrawingEngine implements StrokeSource {
    * axis, and `proportional` locks the other axis to the same factor.
    */
   private scaleFor(
-    gesture: ScaleGesture,
+    gesture: ScaleCornerGesture | ScaleEdgeGesture,
     pointer: Point,
     proportional: boolean,
   ): HandleScale {
-    if (gesture.corner) {
+    if ("corner" in gesture) {
       return cornerScale(gesture.corner.point, gesture.corner.anchor, gesture.press, pointer);
     }
-    if (gesture.edge) {
-      return edgeScale(
-        gesture.frame,
-        gesture.edge.axis,
-        gesture.edge.side,
-        gesture.press,
-        pointer,
-        { proportional, fromCentre: gesture.edge.anchorAtCentre },
-      );
-    }
-    return IDENTITY_SCALE;
+    return edgeScale(
+      gesture.contentFrame,
+      gesture.edge.axis,
+      gesture.edge.side,
+      gesture.press,
+      pointer,
+      { proportional, fromCentre: gesture.edge.anchorAtCentre },
+    );
   }
 
   /**
@@ -2737,8 +2777,15 @@ export class DrawingEngine implements StrokeSource {
       const pointer = this.snapTransformPointer(sample.docX, sample.docY);
       // The proportional modifier is read as it is held: pressing Shift after
       // the drag has begun locks the other axis to the same factor.
-      const scale = this.scaleFor(gesture, pointer, sample.modifiers.shift);
+      //
+      // The **release** keeps the modifier the drag was made with, though: a
+      // user who lets go of Shift and the mouse at the same instant would
+      // otherwise see the aspect lock spring back in the last frame, and the
+      // history would record the stretch they did not end with.
+      const proportional = sample.phase === "up" ? gesture.proportional : sample.modifiers.shift;
+      const scale = this.scaleFor(gesture, pointer, proportional);
       gesture.pointer = pointer;
+      gesture.proportional = proportional;
       if (scale.factorX === gesture.scale.factorX && scale.factorY === gesture.scale.factorY) {
         return;
       }
@@ -2835,7 +2882,7 @@ export class DrawingEngine implements StrokeSource {
       // made with.
       const transform =
         gesture.mode === "scale"
-          ? createStretchTransform(gesture.scale)
+          ? createStretchTransform(gesture.scale, "corner" in gesture ? "Scale" : "Stretch")
           : createRotateTransform(gesture.centre, gesture.angle);
       if (!transformChangesSamples(gesture.entries, transform)) {
         this.syncSelectionOverlay();
@@ -2993,6 +3040,18 @@ export class DrawingEngine implements StrokeSource {
     return boundsOfStrokes(this.selectedStrokes());
   }
 
+  /**
+   * The selected strokes' own bounds, without the paint's padding.
+   *
+   * The frame the user sees is the *painted* bounds, but a side handle is
+   * measured against the content: the padding is a constant offset on both
+   * sides, so a content edge that stays put keeps its painted edge still and
+   * one that follows the pointer takes its painted edge with it.
+   */
+  private selectionContentBounds(): Bounds | null {
+    return selectionFrame(this.selectedStrokes(), () => 0);
+  }
+
   /** Re-rasterizes every layer an edit touched, once each. */
   private refreshStrokeLayers(entries: readonly MoveEntry[]): void {
     const seen = new Set<LayerId>();
@@ -3028,11 +3087,20 @@ export class DrawingEngine implements StrokeSource {
     if (!renderer) {
       return;
     }
-    // The highlighted handle is recomputed here, because the frame can move
-    // without the pointer moving - a nudge, a flip - and the highlight
-    // follows the pointer, not the selection.
+    // The highlighted handle and the cursor are recomputed here, because the
+    // frame can move without the pointer moving - a nudge, a flip - and both
+    // follow the pointer, not the selection. A pointer outside the canvas is
+    // over no handle at all.
     const cursor = this.cursor;
-    this.hoveredHandle = cursor === null ? null : this.hoverHandleAt(cursor.docX, cursor.docY);
+    const inside = cursor !== null && cursor.inside;
+    this.hoveredHandle = inside ? this.hoverHandleAt(cursor.docX, cursor.docY) : null;
+    if (cursor) {
+      const next = this.cursorFor(cursor.docX, cursor.docY, this.hoveredHandle);
+      if (next !== cursor.cursor) {
+        this.cursor = { ...cursor, cursor: next };
+        this.emitCursor(this.cursor);
+      }
+    }
     const marquee = this.selectionGesture?.mode === "marquee" ? this.selectionGesture.bounds : null;
     const strokes = this.selectedStrokes();
     if (marquee === null && strokes.length === 0) {
@@ -3060,7 +3128,11 @@ export class DrawingEngine implements StrokeSource {
     if (!bounds) {
       return null;
     }
-    const handles = selectionHandles(bounds, this.rotationHandleOffset(), this.edgeHandleOffset());
+    const handles = selectionHandles(
+      bounds,
+      this.handleOffset(ROTATION_HANDLE_OFFSET_PX),
+      this.handleOffset(EDGE_HANDLE_OFFSET_PX),
+    );
     if (!handles) {
       return null;
     }
@@ -3072,7 +3144,7 @@ export class DrawingEngine implements StrokeSource {
     if (gesture.mode === "rotate") {
       return { corners: handles.corners, edges: handles.edges, rotate: gesture.pointer };
     }
-    if (gesture.corner) {
+    if ("corner" in gesture) {
       const index = CORNER_HANDLE_IDS.indexOf(gesture.handle);
       if (index < 0) {
         return handles;
@@ -3084,7 +3156,7 @@ export class DrawingEngine implements StrokeSource {
     // An edge handle follows the pointer while the drag runs, exactly as a
     // corner handle does: the drag has to feel attached to the cursor.
     const index = EDGE_HANDLE_IDS.indexOf(gesture.handle);
-    if (index < 0 || !gesture.edge) {
+    if (index < 0) {
       return handles;
     }
     const edges = [...handles.edges];
@@ -3092,37 +3164,23 @@ export class DrawingEngine implements StrokeSource {
     return { corners: handles.corners, edges, rotate: handles.rotate };
   }
 
-  /** The rotation handle's distance above the frame, in document units. */
-  private rotationHandleOffset(): number {
-    const zoom = this.viewport.zoom;
-    if (!Number.isFinite(zoom) || zoom <= 0) {
-      return ROTATION_HANDLE_OFFSET_PX;
-    }
-    return ROTATION_HANDLE_OFFSET_PX / zoom;
-  }
-
   /**
-   * The side handles' distance outside the frame, in document units.
+   * A handle's distance from the frame, in document units.
    *
-   * The handles sit outside the frame so a press inside it always moves the
-   * content, so their distance is a **screen** distance, converted with the
-   * live zoom like every other handle size.
+   * The handles' distances are **screen** distances, so they keep their size
+   * on screen at any zoom; the live zoom converts them.
    */
-  private edgeHandleOffset(): number {
+  private handleOffset(pixels: number): number {
     const zoom = this.viewport.zoom;
     if (!Number.isFinite(zoom) || zoom <= 0) {
-      return EDGE_HANDLE_OFFSET_PX;
+      return pixels;
     }
-    return EDGE_HANDLE_OFFSET_PX / zoom;
+    return pixels / zoom;
   }
 
   /** The grab radius of a handle, in document units. */
   private handleGrabRadius(): number {
-    const zoom = this.viewport.zoom;
-    if (!Number.isFinite(zoom) || zoom <= 0) {
-      return HANDLE_GRAB_RADIUS_PX;
-    }
-    return HANDLE_GRAB_RADIUS_PX / zoom;
+    return this.handleOffset(HANDLE_GRAB_RADIUS_PX);
   }
 
   /**
@@ -3583,6 +3641,10 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.cursor = { ...cursor, inside };
+    // The pointer is outside the canvas, so it is over no handle at all.
+    if (!inside) {
+      this.applyHoveredHandle(null);
+    }
     this.emitCursor(this.cursor);
   }
 

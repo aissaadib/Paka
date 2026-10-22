@@ -166,7 +166,9 @@ visual-regression harness.
   **stretch** pulls one axis only: the dragged edge follows the pointer and the
   **opposite edge stays put**, `Shift` locks the aspect ratio (the other axis
   grows by the same factor), and a side is never squashed to nothing (one
-  document pixel is the floor) or mirrored. A
+  document pixel is the floor) or mirrored. The stretch is measured against
+  the **content's** own bounds, so the frame the user sees follows the pointer
+  exactly even though the paint's padding is not scaled. A
   **rotation** is about the same centre; the angle is the pointer's compass
   angle clockwise from "up", it **snaps to 15 degrees** while the pointer is
   held down, and **`Shift` turns the snap off** for a free turn. All three are

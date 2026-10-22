@@ -255,6 +255,26 @@ export function cornerScale(
 }
 
 /**
+ * The point an axis is measured from when a side handle pulls it.
+ *
+ * The **opposite edge** is the anchor by default: the side the user did not
+ * drag stays where it is. The **centre** of the axis is the alternative: the
+ * frame grows on both sides instead.
+ */
+function anchorOnAxis(
+  low: number,
+  high: number,
+  centre: number,
+  side: ScaleSide,
+  fromCentre: boolean,
+): number {
+  if (fromCentre) {
+    return centre;
+  }
+  return side === "end" ? low : high;
+}
+
+/**
  * The scale an **edge** handle asks for.
  *
  * A side handle pulls one axis and leaves the other alone, so the frame gets
@@ -274,6 +294,14 @@ export function cornerScale(
  *
  * The factor is measured **from where the press landed**, so a press that
  * misses the handle by a little does not jump the content.
+ *
+ * `frame` is the **content's** own bounds - the samples', without the paint's
+ * padding - and that is what makes the rule above true of the frame the user
+ * sees. The padding is a constant offset on both sides, so a content edge
+ * that stays put keeps its painted edge still, and a content edge that
+ * follows the pointer takes its painted edge with it. A selection with no
+ * extent on an axis (a single horizontal stroke, stretched from above) has
+ * nothing to stretch there, and the drag leaves it alone.
  */
 export function edgeScale(
   frame: Bounds,
@@ -293,13 +321,7 @@ export function edgeScale(
   const high = axis === "x" ? frame.x + frame.width : frame.y + frame.height;
   // The anchor is the point that does not move: the opposite edge by default,
   // the centre of the axis when the frame is to grow on both sides.
-  const anchor = options.fromCentre
-    ? axis === "x"
-      ? centreX
-      : centreY
-    : side === "end"
-      ? low
-      : high;
+  const anchor = anchorOnAxis(low, high, axis === "x" ? centreX : centreY, side, options.fromCentre);
 
   // How far the dragged edge travelled **away from the anchor**: the east and
   // south handles travel with the pointer, the west and north ones against

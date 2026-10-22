@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 import {
   cornerOf,
   edgeAxis,
-  edgeOf,
   EDGE_HANDLE_OFFSET_PX,
   findSelectionHandle,
   handleKind,
@@ -66,11 +65,11 @@ describe("the handle layout", () => {
   });
 
   it("has no handles for a frame with no area", () => {
-    expect(selectionHandles({ x: 5, y: 5, width: 0, height: 0 }, OFFSET)).toBeNull();
+    expect(selectionHandles({ x: 5, y: 5, width: 0, height: 0 }, OFFSET, EDGE_OFFSET)).toBeNull();
   });
 
   it("has handles for a frame that is only wide", () => {
-    const layout = selectionHandles({ x: 5, y: 5, width: 10, height: 0 }, OFFSET);
+    const layout = selectionHandles({ x: 5, y: 5, width: 10, height: 0 }, OFFSET, EDGE_OFFSET);
     expect(layout).not.toBeNull();
     expect(layout?.corners).toHaveLength(4);
   });
@@ -82,15 +81,6 @@ describe("the handle layout", () => {
     expect(cornerOf(layout, "scale-se")).toEqual({ x: 110, y: 60 });
     expect(cornerOf(layout, "scale-sw")).toEqual({ x: 10, y: 60 });
     expect(cornerOf(layout, "rotate")).toBeNull();
-  });
-
-  it("names the edge a side handle stands for", () => {
-    const layout = handles();
-    expect(edgeOf(layout, "scale-n")).toEqual({ x: 60, y: 20 - EDGE_OFFSET });
-    expect(edgeOf(layout, "scale-e")).toEqual({ x: 110 + EDGE_OFFSET, y: 40 });
-    expect(edgeOf(layout, "scale-s")).toEqual({ x: 60, y: 60 + EDGE_OFFSET });
-    expect(edgeOf(layout, "scale-w")).toEqual({ x: 10 - EDGE_OFFSET, y: 40 });
-    expect(edgeOf(layout, "scale-nw")).toBeNull();
   });
 
   it("says what each handle does", () => {

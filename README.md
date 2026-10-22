@@ -95,8 +95,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **stretch** one side of it (the dragged edge follows the pointer and the
   opposite edge stays put; hold `Shift` to lock the aspect ratio, so the other
   side grows by the same amount and the proportions are kept), and drag the
-  rotation handle to
-  **rotate** it about the same centre. The rotation **snaps to 15 degrees**
+  rotation handle to **rotate** it about the same centre. The rotation **snaps to 15 degrees**
   while the pointer is held down; hold `Shift` to turn the snap **off** and
   rotate freely. All of them are measured **from where you pressed**, so grabbing a
   handle slightly off its centre does not jump the content. The **anchor** - the
