@@ -384,6 +384,18 @@ bounding box because the colour function covers the whole surface; an opaque
 gradient therefore covers earlier elements on the same layer. Reopening or redoing
 re-creates it from geometry and stops - there is no pixel snapshot in the file.
 
+Editing a gradient changes its geometry or its stops, and **both are fields this
+file already carries**, so an edited gradient needs no version bump of its own: a
+reader that accepts the file reads the same geometry and the same stops into the
+same record and paints the same pixels. There is no wrong look for an older
+reader to draw, and so nothing for it to refuse. What the editor must guarantee
+is the opposite - that it never writes a ramp the reader would refuse. The
+offsets stay strictly ascending and inside `0..1`, the ramp keeps at least two
+stops and every colour is a hex colour, so `core/gradient/gradientRecord.ts`
+**rejects** a malformed gradient rather than repairing it, and the reader
+**refuses** a file whose gradient is malformed rather than quietly drawing a
+different ramp. A gradient is refused, not repaired, in both places.
+
 ### `brush`
 
 | Field | Range | Meaning |
