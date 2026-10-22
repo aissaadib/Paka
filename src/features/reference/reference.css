@@ -1,0 +1,155 @@
+/**
+ * The reference images panel.
+ *
+ * The list reads like the layers list: a thumbnail, a name, and the two
+ * buttons that act on the row. The placement controls of the selected
+ * reference sit below the list, because they only mean something for one
+ * reference at a time.
+ */
+
+.reference__file {
+  display: none;
+}
+
+.reference__empty {
+  margin: 4px 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.reference__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 4px 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.reference__notice-text {
+  flex: 1 1 auto;
+}
+
+.reference__notice-dismiss {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-decoration: underline;
+}
+
+.reference__notice-dismiss:hover {
+  color: var(--text-strong);
+}
+
+.reference__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.reference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reference-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.reference-row.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.reference-row__select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 0 2px;
+  text-align: left;
+}
+
+.reference-row__thumb {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: var(--bg-inset);
+  object-fit: contain;
+}
+
+.reference-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.reference-controls__position {
+  display: flex;
+  gap: 8px;
+}
+
+.reference-controls__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+.reference-controls__field-label {
+  font-size: 11px;
+}
+
+.reference-controls__field .text-input {
+  width: 52px;
+}
+
+.reference-controls__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.reference-controls__button {
+  height: var(--control-height-sm);
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+}
+
+.reference-controls__button:hover {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}

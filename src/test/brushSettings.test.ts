@@ -52,6 +52,7 @@ describe("brush configuration", () => {
       minSizeRatio: 0,
       spacing: 100,
       stabilizer: -4,
+      stabilizerMode: "pull",
       texture: 9,
       stamp: true,
       stampSpacing: 9,

@@ -161,7 +161,11 @@ describe("registry shape", () => {
     const ids = ACTION_DEFINITIONS.map((action) => action.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const action of ACTION_DEFINITIONS) {
-      expect(action.shortcuts.length).toBeGreaterThan(0);
+      // A command-only action is reached by name, from the canvas menu or the
+      // command palette; every other action has a key.
+      if (action.commandOnly !== true) {
+        expect(action.shortcuts.length).toBeGreaterThan(0);
+      }
       expect(action.label.length).toBeGreaterThan(0);
     }
   });

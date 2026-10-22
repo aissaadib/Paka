@@ -32,6 +32,11 @@ import {
 } from "../brushes/defaults";
 import { normalizePressureCurve } from "../brushes/pressureCurve";
 import {
+  DEFAULT_STABILIZER_MODE,
+  isStabilizerMode,
+  STABILIZER_MODES,
+} from "../brushes/stabilizer";
+import {
   DEFAULT_DOCUMENT_BACKGROUND,
   DOCUMENT_SIZE_LIMIT_DESCRIPTION,
   isValidDocumentSize,
@@ -52,7 +57,7 @@ import type {
 import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
-import type { BrushSettings } from "../../types/brush";
+import type { BrushSettings, StabilizerMode } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -123,10 +128,14 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * version 6. That is why the version was not bumped for them. A file without
  * the field opens with no guides at all.
  *
+ * Within version 12, `brush.stabilizerMode` is **additive** for the same
+ * reason: the mode shapes the samples captured at draw time, and the stored
+ * samples already describe the picture, so a file without the field opens with
+ * the default mode and draws exactly what it always drew.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
 export const PROJECT_VERSION = 12;
-export const PROJECT_VERSION = 11;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -304,6 +313,21 @@ function readNumber(value: unknown, label: string, min: number, max: number): nu
 function readAnyNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     fail(`${label} must be a finite number.`);
+  }
+  return value;
+}
+
+/**
+ * Reads the stabilizer's mode.
+ *
+ * The mode is a closed set of names, so a value outside it is a file that
+ * cannot be read rather than one to be repaired: an unknown mode would mean
+ * a filter this build does not know, and the samples of the stroke are the
+ * record, so the picture must not depend on guessing what it did.
+ */
+function readStabilizerMode(value: unknown, label: string): StabilizerMode {
+  if (!isStabilizerMode(value)) {
+    fail(`${label} must be one of ${STABILIZER_MODES.join(", ")}.`);
   }
   return value;
 }
@@ -850,6 +874,14 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
       record.stabilizer === undefined
         ? 0
         : readNumber(record.stabilizer, `${label} brush stabilizer`, 0, 1),
+    // Additive within version 12, like `stabilizer` within version 6: the
+    // mode shapes the samples captured at draw time, and the stored samples
+    // already describe the picture, so a file without the field opens with
+    // the default mode and draws exactly what it always drew.
+    stabilizerMode:
+      record.stabilizerMode === undefined
+        ? DEFAULT_STABILIZER_MODE
+        : readStabilizerMode(record.stabilizerMode, `${label} brush stabilizer mode`),
     // Texture changes how stored samples are rasterized, so it became a
     // required field in version 7; earlier files had no texture.
     texture:

@@ -39,15 +39,21 @@ export class BrushTool implements Tool {
     context.extendStroke(sample);
   }
 
-  onPointerUp(context: ToolContext): void {
+  onPointerUp(context: ToolContext, sample: PointerSample): void {
     if (context.isStrokeActive()) {
-      context.finishStroke();
+      // The release sample is where the stroke ends, so a stabilized path is
+      // caught up on it rather than on the last position the pointer moved
+      // through.
+      context.finishStroke(sample);
     }
   }
 
-  onPointerCancel(context: ToolContext): void {
+  onPointerCancel(context: ToolContext, sample: PointerSample): void {
     if (context.isStrokeActive()) {
-      context.finishStroke();
+      // The ink is already on the canvas, so a cancelled gesture commits what
+      // was drawn - as one history step - and ends on the last position the
+      // pointer reported.
+      context.finishStroke(sample);
     }
   }
 

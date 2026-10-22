@@ -1,14 +1,16 @@
 /**
- * Named brush presets: apply, save, rename, duplicate and delete.
+ * The quick preset picker in the toolbar.
+ *
+ * The toolbar row is a switcher: it picks the brush the next stroke is drawn
+ * with, and it saves the current brush under a name. The rest of the library
+ * - searching, renaming, overwriting, duplicating, deleting, starring and
+ * importing - lives in the Brushes panel, where a deletion can be confirmed
+ * and a built-in brush is protected. One place does each job, so the two
+ * cannot disagree.
  *
  * The picker applies the preset it selects to the live brush, so the next
- * stroke is drawn with it. The management actions work on the preset the
- * picker has selected and never apply it first, so renaming, duplicating or
- * deleting one leaves the current brush exactly as it was.
- *
- * The name field is empty until something is typed, and the button that uses
- * it is the one the user presses: "Save" stores the current brush as a new
- * preset under that name, "Rename" gives the selected preset that name.
+ * stroke is drawn with it. "Custom / unsaved" leaves the brush as it is and
+ * says that it is no longer based on a preset.
  *
  * Every action is editor state only: applying a preset goes through the
  * engine's `setBrush`, and none of the preset operations touch history or the
@@ -17,27 +19,19 @@
 
 import { useState } from "react";
 import { brushSettingsEqual } from "../../core/brushes/defaults";
-import {
-  MAX_PRESET_NAME_LENGTH,
-  normalizePresetName,
-} from "../../core/brushes/presets";
+import { MAX_PRESET_NAME_LENGTH, normalizePresetName } from "../../core/brushes/presets";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 
 export function BrushPresets() {
   const { actions } = useEditor();
-  const { brush, presets } = useEditorState();
-  // `undefined` means "the user has not picked one yet", so the picker shows
-  // the preset the current brush matches - the brush the settings file
-  // restored, after a restart. `null` means the user picked "Custom / unsaved".
-  const [selectedId, setSelectedId] = useState<string | null | undefined>(undefined);
+  const { brush, presets, activePresetId } = useEditorState();
   const [name, setName] = useState("");
 
-  const matching = presets.find((preset) => brushSettingsEqual(preset.brush, brush)) ?? null;
-  const chosen =
-    selectedId === undefined
-      ? null
-      : (presets.find((preset) => preset.id === selectedId) ?? null);
-  const current = selectedId === undefined ? matching : chosen;
+  // The preset the brush is based on. The engine owns it, so the picker, the
+  // reset button and the preview cannot disagree about which preset is in
+  // effect; `null` means the brush is custom.
+  const current =
+    activePresetId === null ? null : (presets.find((preset) => preset.id === activePresetId) ?? null);
   const typed = normalizePresetName(name);
   // The brush may have been changed after the preset was applied; the picker
   // says so rather than claiming the brush is still the preset.
@@ -46,35 +40,6 @@ export function BrushPresets() {
   const save = () => {
     const preset = actions.saveBrushPreset(name);
     if (preset) {
-      setSelectedId(preset.id);
-      setName("");
-    }
-  };
-
-  const rename = () => {
-    if (!current) {
-      return;
-    }
-    const renamed = actions.renameBrushPreset(current.id, name);
-    if (renamed) {
-      setName("");
-    }
-  };
-
-  const duplicate = () => {
-    if (!current) {
-      return;
-    }
-    const copy = actions.duplicateBrushPreset(current.id);
-    if (copy) {
-      setSelectedId(copy.id);
-      setName("");
-    }
-  };
-
-  const remove = () => {
-    if (current && actions.deleteBrushPreset(current.id)) {
-      setSelectedId(null);
       setName("");
     }
   };
@@ -97,12 +62,12 @@ export function BrushPresets() {
           onChange={(event) => {
             const id = event.target.value;
             if (id === "") {
-              setSelectedId(null);
+              // "Custom / unsaved": the brush stays as it is, but it is no
+              // longer tied to a preset.
+              actions.setActivePreset(null);
               return;
             }
-            if (actions.applyBrushPreset(id)) {
-              setSelectedId(id);
-            }
+            actions.applyBrushPreset(id);
           }}
         >
           <option value="">
@@ -110,6 +75,7 @@ export function BrushPresets() {
           </option>
           {presets.map((preset) => (
             <option key={preset.id} value={preset.id}>
+              {preset.favorite ? "★ " : ""}
               {preset.name}
             </option>
           ))}
@@ -128,11 +94,7 @@ export function BrushPresets() {
             return;
           }
           event.preventDefault();
-          if (current) {
-            rename();
-          } else {
-            save();
-          }
+          save();
         }}
       />
       <button
@@ -143,33 +105,6 @@ export function BrushPresets() {
         onClick={save}
       >
         Save
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null || typed === "" || typed === current?.name}
-        title="Rename the selected preset to this name"
-        onClick={rename}
-      >
-        Rename
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null}
-        title="Duplicate the selected preset"
-        onClick={duplicate}
-      >
-        Duplicate
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null}
-        title="Delete the selected preset"
-        onClick={remove}
-      >
-        Delete
       </button>
     </div>
   );

@@ -67,9 +67,18 @@ export function EditorProvider({ children, editor }: EditorProviderProps) {
 
   useEffect(() => {
     return () => {
-      // Every open document has an engine of its own, and every engine has
-      // to let go of its renderer and its listeners.
-      value.sessions.destroy();
+      // React StrictMode mounts the provider twice in development, and the
+      // editor lives in state, so the remount reuses the very same editor.
+      // Releasing its documents here would leave the second mount with no
+      // document to show - the registry would have no active session and the
+      // canvas would never paint.
+      //
+      // What a canvas that goes away needs is for its engines to let go of
+      // their renderer and their input, and that is what detaching does; the
+      // documents themselves stay open, as they were before the remount.
+      for (const session of value.sessions.list) {
+        session.engine.detach();
+      }
     };
   }, [value]);
 

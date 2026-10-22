@@ -19,6 +19,7 @@ import type { PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardE
 import { Panel } from "../../components/panels/Panel";
 import { registerPanel } from "../../core/shell/panelRegistry";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { formatZoomPercent } from "../view/viewNavigation";
 import type { Point, Size } from "../../types/geometry";
 import {
   navigatorCorners,
@@ -287,7 +288,8 @@ export function NavigatorPanel() {
     [actions, viewport, viewportSize],
   );
 
-  const zoomPercent = `${Math.round(viewport.zoom * 100)}%`;
+  // The zoom is written the way the rest of the app writes it.
+  const zoomPercent = formatZoomPercent(viewport.zoom);
 
   return (
     <Panel

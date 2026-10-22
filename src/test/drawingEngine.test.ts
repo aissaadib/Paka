@@ -105,13 +105,18 @@ function createSpyRenderer(
     setSelection: (selection) => {
       selections.push(selection);
     },
+    setGradientOverlay: () => {},
     setSelectedGuide: (guideId) => {
       selectedGuides.push(guideId);
     },
     setGrid: () => {},
+    setRulers: () => {},
+    setSymmetry: () => {},
+    setReferenceOverlay: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
+    renderOverview: () => null,
     readCompositePixel: (docX, docY) => {
       sampled.push({ x: docX, y: docY });
       return compositePixel;
@@ -386,15 +391,37 @@ describe("DrawingEngine stroke capture", () => {
       createSample({ phase: "down", docX: 10, docY: 10, pressure: 0.2, timeStamp: 0 }),
     );
     engine.extendStroke(createSample({ docX: 110, docY: 10, pressure: 1, timeStamp: 16 }));
-    engine.finishStroke();
+    engine.finishStroke(createSample({ phase: "up", docX: 110, docY: 10, pressure: 1, timeStamp: 32 }));
 
-    // follow = 0.25: 10 -> 35, then finish settles on the raw release point.
+    // The captured point trails the pointer, and the catch-up lands the
+    // stroke on the release point exactly.
     const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs).toEqual([10, 35, 110]);
-    expect(stroke.pressures).toEqual([0.2, 0.4, 1]);
+    expect(stroke.xs[0]).toBe(10);
+    expect(stroke.xs[1]).toBeGreaterThan(10);
+    expect(stroke.xs[1]).toBeLessThan(110);
+    expect(stroke.xs[stroke.xs.length - 1]).toBe(110);
+    expect(stroke.ys[stroke.ys.length - 1]).toBe(10);
+    // The pressure is the device's own, not a smoothed one.
+    expect(stroke.pressures[0]).toBe(0.2);
+    expect(stroke.pressures[stroke.pressures.length - 1]).toBe(1);
     // The settle was previewed through the renderer before the stroke ended.
-    expect(spy.extended.map((entry) => entry.fromIndex)).toEqual([0, 1, 2]);
+    expect(spy.extended[spy.extended.length - 1].fromIndex).toBeGreaterThan(0);
     expect(spy.ended[0]).toBe(stroke);
+  });
+
+  it("ends a stroke exactly on the release point it is given", () => {
+    const engine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.beginStroke(createSample({ phase: "down", docX: 10, docY: 10 }));
+    engine.extendStroke(createSample({ docX: 60, docY: 10, timeStamp: 16 }));
+    engine.finishStroke(createSample({ phase: "up", docX: 95, docY: 42, timeStamp: 32 }));
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs[stroke.xs.length - 1]).toBe(95);
+    expect(stroke.ys[stroke.ys.length - 1]).toBe(42);
   });
 
   it("does not append a settle point when the pointer stopped exactly on the path", () => {
@@ -503,6 +530,64 @@ describe("DrawingEngine stroke capture", () => {
 
     expect(engine.listStrokes(layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
+  });
+
+  it("commits a lost pointer capture as one history step", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 60, docY: 20, timeStamp: 16 }),
+    );
+    // The browser took the pointer away: the ink is already on the canvas,
+    // so the stroke is committed rather than thrown away.
+    engine.handlePointerSample(
+      createSample({ phase: "cancel", docX: 80, docY: 20, timeStamp: 32 }),
+    );
+
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.getState().history).toMatchObject({ depth: 1, undoLabel: "Stroke" });
+  });
+
+  it("ends a stroke cancelled by a lost capture on the last position it saw", () => {
+    const engine = new DrawingEngine({
+      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
+    });
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: 60, docY: 20, timeStamp: 16 }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "cancel", docX: 95, docY: 20, timeStamp: 32 }),
+    );
+
+    const stroke = engine.listStrokes(layerId)[0];
+    expect(stroke.xs[stroke.xs.length - 1]).toBe(95);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("records a whole stroke as a single history step", () => {
+    const engine = createEngine();
+    const layerId = engine.getState().document.activeLayerId as string;
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    for (let index = 1; index <= 20; index += 1) {
+      engine.handlePointerSample(
+        createSample({ phase: "move", docX: 20 + index * 5, docY: 20, timeStamp: index * 8 }),
+      );
+    }
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: 120, docY: 20, timeStamp: 168 }),
+    );
+
+    // Twenty samples, one stroke, one undo step.
+    expect(engine.listStrokes(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listStrokes(layerId)).toHaveLength(0);
   });
 
   it("ignores a second begin without a finish", () => {

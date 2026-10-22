@@ -57,6 +57,7 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   minSizeRatio: 0.55,
   spacing: 0.44,
   stabilizer: 0.33,
+  stabilizerMode: "pull",
   texture: 0.22,
   stamp: true,
   stampSpacing: 0.15,
@@ -73,7 +74,8 @@ function distinctiveValue(
     return !fallback;
   }
   if (typeof fallback === "string") {
-    return "#0a1b2c";
+    // The stabilizer's mode is a closed set of names, not a free string.
+    return field === "stabilizerMode" ? "pull" : "#0a1b2c";
   }
   if (Array.isArray(fallback) || typeof fallback === "object") {
     return BENT_CURVE;
@@ -122,6 +124,26 @@ function createEngine(): DrawingEngine {
   });
 }
 
+/**
+ * The user's own presets.
+ *
+ * The library always holds the built-in brushes as well - they are code, and
+ * every install has them - so the assertions about what the *user* saved look
+ * at this list rather than at the whole one.
+ */
+function userPresets(presets: readonly BrushPreset[]): BrushPreset[] {
+  return presets.filter((preset) => !preset.builtin);
+}
+
+/** A preset as it is written by hand in a test. */
+function aPreset(
+  id: string,
+  name: string,
+  brush: BrushSettings = DEFAULT_BRUSH,
+): BrushPreset {
+  return { id, name, brush, favorite: false, builtin: false, lastUsedAt: null };
+}
+
 describe("preset names", () => {
   it("trims, collapses whitespace and caps the length", () => {
     expect(normalizePresetName("  soft   ink  ")).toBe("soft ink");
@@ -131,7 +153,7 @@ describe("preset names", () => {
   });
 
   it("rejects an empty name and suffixes a duplicate deliberately", () => {
-    const existing: BrushPreset[] = [{ id: "a", name: "Ink", brush: DEFAULT_BRUSH }];
+    const existing: BrushPreset[] = [aPreset("a", "Ink")];
 
     expect(uniquePresetName("   ", existing)).toBe("");
     expect(uniquePresetName("Ink", existing)).toBe("Ink (2)");
@@ -141,7 +163,7 @@ describe("preset names", () => {
 
   it("keeps a suffixed name inside the length cap", () => {
     const base = "x".repeat(MAX_PRESET_NAME_LENGTH);
-    const existing: BrushPreset[] = [{ id: "a", name: base, brush: DEFAULT_BRUSH }];
+    const existing: BrushPreset[] = [aPreset("a", base)];
 
     const unique = uniquePresetName(base, existing);
     expect(unique.length).toBeLessThanOrEqual(MAX_PRESET_NAME_LENGTH);
@@ -159,10 +181,10 @@ describe("saving, applying, renaming and deleting presets", () => {
     const state = engine.getState();
 
     expect(preset?.name).toBe("Ink");
-    expect(state.presets).toHaveLength(1);
-    expect(state.presets[0].name).toBe("Ink");
-    expect(state.presets[0].brush).toEqual(state.brush);
-    expect(state.presets[0].brush.stampTexture).toBe(0.5);
+    expect(userPresets(state.presets)).toHaveLength(1);
+    expect(userPresets(state.presets)[0].name).toBe("Ink");
+    expect(userPresets(state.presets)[0].brush).toEqual(state.brush);
+    expect(userPresets(state.presets)[0].brush.stampTexture).toBe(0.5);
     expect(state.file.dirty).toBe(false);
     expect(state.history.depth).toBe(before.history.depth);
   });
@@ -170,7 +192,7 @@ describe("saving, applying, renaming and deleting presets", () => {
   it("rejects an empty name", () => {
     const engine = createEngine();
     expect(engine.saveBrushPreset("   ")).toBeNull();
-    expect(engine.getState().presets).toHaveLength(0);
+    expect(userPresets(engine.getState().presets)).toHaveLength(0);
   });
 
   it("applies a preset through the normal brush setter", () => {
@@ -208,7 +230,9 @@ describe("saving, applying, renaming and deleting presets", () => {
 
     expect(engine.deleteBrushPreset("missing")).toBe(false);
     expect(engine.deleteBrushPreset(first?.id ?? "")).toBe(true);
-    expect(engine.getState().presets.map((preset) => preset.name)).toEqual(["Ink (2)"]);
+    expect(userPresets(engine.getState().presets).map((preset) => preset.name)).toEqual([
+      "Ink (2)",
+    ]);
 
     const state = engine.getState();
     expect(state.file.dirty).toBe(false);
@@ -227,20 +251,23 @@ describe("saving, applying, renaming and deleting presets", () => {
     engine.deleteBrushPreset(preset?.id ?? "");
 
     expect(engine.getState().brush).toEqual(before);
-    expect(engine.getState().presets).toHaveLength(1);
+    expect(userPresets(engine.getState().presets)).toHaveLength(1);
   });
 
   it("loads a preset library without a document edit", () => {
     const engine = createEngine();
     engine.setPresets([
-      { id: "preset-9", name: "Loaded", brush: { ...DEFAULT_BRUSH, size: 31 } },
-      { id: "preset-9", name: "Duplicate id", brush: DEFAULT_BRUSH },
+      aPreset("preset-9", "Loaded", { ...DEFAULT_BRUSH, size: 31 }),
+      aPreset("preset-9", "Duplicate id"),
     ]);
 
     const state = engine.getState();
-    expect(state.presets.map((preset) => preset.name)).toEqual(["Loaded", "Duplicate id"]);
-    expect(state.presets[0].id).not.toBe(state.presets[1].id);
-    expect(state.presets[0].brush.size).toBe(31);
+    expect(userPresets(state.presets).map((preset) => preset.name)).toEqual([
+      "Loaded",
+      "Duplicate id",
+    ]);
+    expect(userPresets(state.presets)[0].id).not.toBe(userPresets(state.presets)[1].id);
+    expect(userPresets(state.presets)[0].brush.size).toBe(31);
     expect(state.file.dirty).toBe(false);
     expect(state.history.depth).toBe(0);
   });
@@ -293,7 +320,7 @@ describe("presets in the settings file", () => {
   it("is part of settings equality, so a change to a preset is written", () => {
     const withPreset = {
       ...DEFAULT_APP_SETTINGS,
-      presets: [{ id: "preset-1", name: "Ink", brush: DEFAULT_BRUSH }],
+      presets: [aPreset("preset-1", "Ink")],
     };
 
     expect(settingsEqual(DEFAULT_APP_SETTINGS, withPreset)).toBe(false);
@@ -313,7 +340,7 @@ describe("no brush field is dropped", () => {
   it("keeps every field of the brush through a saved preset", () => {
     const settings = {
       ...DEFAULT_APP_SETTINGS,
-      presets: [{ id: "preset-1", name: "Ink", brush: BRUSH_WITH_EVERY_FIELD_SET }],
+      presets: [aPreset("preset-1", "Ink", BRUSH_WITH_EVERY_FIELD_SET)],
     };
     const parsed = parseAppSettings(serializeAppSettings(settings));
 
@@ -403,7 +430,7 @@ describe("no brush field is dropped", () => {
       const withPreset = parseAppSettings(
         JSON.stringify({
           version: 1,
-          presets: [{ id: "preset-1", name: "Ink", brush: { [field]: raw } }],
+          presets: [aPreset("preset-1", "Ink", { [field]: raw } as unknown as BrushSettings)],
         }),
       );
       expect(
@@ -419,7 +446,7 @@ describe("no brush field is dropped", () => {
     const parsed = parseAppSettings(
       JSON.stringify({
         version: 1,
-        presets: [{ id: "preset-1", name: "Ink", brush: { size: 20, stamp: true } }],
+        presets: [aPreset("preset-1", "Ink", { ...DEFAULT_BRUSH, size: 20, stamp: true })],
       }),
     );
 
@@ -453,7 +480,7 @@ describe("duplicating a preset", () => {
     expect(copy?.id).not.toBe(first?.id);
     expect(copy?.name).toBe("Ink (2)");
     expect(copy?.brush).toEqual(first?.brush);
-    expect(engine.getState().presets).toHaveLength(2);
+    expect(userPresets(engine.getState().presets)).toHaveLength(2);
     expect(engine.duplicateBrushPreset("missing")).toBeNull();
   });
 
@@ -528,17 +555,18 @@ describe("the preset library in the settings store", () => {
 
     // What is on disk is the whole brush, not a summary of it.
     const written = JSON.parse(gateway.contents ?? "{}");
-    expect(written.presets).toHaveLength(1);
-    expect(written.presets[0].name).toBe("Ink");
-    expect(written.presets[0].brush.stampTexture).toBe(0.4);
-    expect(written.presets[0].brush.size).toBe(33);
+    const writtenUser = written.presets.filter((preset: BrushPreset) => !preset.builtin);
+    expect(writtenUser).toHaveLength(1);
+    expect(writtenUser[0].name).toBe("Ink");
+    expect(writtenUser[0].brush.stampTexture).toBe(0.4);
+    expect(writtenUser[0].brush.size).toBe(33);
 
     // A second editor reads the same file and finds the library again.
     const second = createEngine();
     const secondStore = new SettingsStore({ engine: second, gateway });
     await secondStore.load();
 
-    const presets = second.getState().presets;
+    const presets = userPresets(second.getState().presets);
     expect(presets.map((preset) => preset.name)).toEqual(["Ink"]);
     expect(presets[0].brush.stampTexture).toBe(0.4);
     expect(presets[0].brush.size).toBe(33);
@@ -558,7 +586,7 @@ describe("the preset library in the settings store", () => {
     await store.flush();
 
     const written = JSON.parse(gateway.contents ?? "{}");
-    expect(written.presets).toHaveLength(1);
+    expect(written.presets.filter((preset: BrushPreset) => !preset.builtin)).toHaveLength(1);
     expect(engine.getState().file.dirty).toBe(false);
     expect(engine.getState().history.depth).toBe(0);
 

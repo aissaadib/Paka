@@ -34,6 +34,7 @@ import {
   canModifyPreset,
   groupPresets,
   nextSelectionId,
+  presetListIntent,
   runPresetAction,
   type PresetFilter,
   type PresetLibraryPort,
@@ -59,6 +60,13 @@ export function BrushPresetPanel() {
 
   const groups = useMemo(() => groupPresets(presets, filter), [presets, filter]);
   const visible = useMemo(() => [...groups.user, ...groups.builtin], [groups]);
+  // The row the list points at. A selection the search has filtered out is
+  // not in the list, so it cannot be the active descendant: the attribute
+  // would name an element that is not there.
+  const activeOptionId =
+    selectedId !== null && visible.some((preset) => preset.id === selectedId)
+      ? `brush-option-${selectedId}`
+      : undefined;
 
   // The selection follows the live brush when the user picks a preset
   // somewhere else, and falls back to it when the selected preset is gone.
@@ -106,12 +114,32 @@ export function BrushPresetPanel() {
     if (result.selection !== null) {
       setSelectedId(result.selection);
     }
+    // The name has done its work: leaving it in the box would offer the same
+    // name again, and the next Save would store a second copy of it.
+    if (result.ok && (action.kind === "save" || action.kind === "rename")) {
+      setName("");
+    }
     return result;
   };
 
   const apply = (id: string) => {
     setSelectedId(id);
     run({ kind: "apply", id });
+  };
+
+  /**
+   * Asks for a deletion.
+   *
+   * A built-in brush is code, so it is never asked about: the refusal is
+   * reported rather than a confirmation that could not be carried out.
+   */
+  const requestDelete = (id: string) => {
+    const preset = presets.find((candidate) => candidate.id === id) ?? null;
+    if (!canModifyPreset(preset)) {
+      setMessage("A built-in brush cannot be deleted - duplicate it instead.");
+      return;
+    }
+    setConfirmingId(id);
   };
 
   const move = (direction: 1 | -1) => {
@@ -284,7 +312,7 @@ export function BrushPresetPanel() {
                       ? "A built-in brush cannot be deleted"
                       : "Delete the selected preset"
                   }
-                  onClick={() => selected && setConfirmingId(selected.id)}
+                  onClick={() => selected && requestDelete(selected.id)}
                 >
                   Delete
                 </button>
@@ -358,41 +386,42 @@ export function BrushPresetPanel() {
           className="brush-browser__list"
           role="listbox"
           aria-label="Brush presets"
-          aria-activedescendant={selectedId === null ? undefined : `brush-option-${selectedId}`}
+          aria-activedescendant={activeOptionId}
           tabIndex={0}
           onKeyDown={(event) => {
-            if (event.key === "ArrowDown") {
-              event.preventDefault();
-              move(1);
+            const intent = presetListIntent(event.key, selectedId !== null);
+            if (intent === null) {
               return;
             }
-            if (event.key === "ArrowUp") {
-              event.preventDefault();
-              move(-1);
+            // The list owns the key. Delete is a global shortcut in the editor
+            // - it deletes the selected strokes - and Backspace is the
+            // browser's own "go back", so neither may travel past the list
+            // while the brushes are being browsed.
+            event.preventDefault();
+            event.stopPropagation();
+            if (intent.kind === "move") {
+              move(intent.direction);
               return;
             }
-            if (event.key === "Home") {
-              event.preventDefault();
+            if (intent.kind === "first") {
               setSelectedId(visible[0]?.id ?? null);
               return;
             }
-            if (event.key === "End") {
-              event.preventDefault();
+            if (intent.kind === "last") {
               setSelectedId(visible[visible.length - 1]?.id ?? null);
               return;
             }
-            if (event.key === "Enter" && selectedId !== null) {
-              event.preventDefault();
+            if (intent.kind === "apply" && selectedId !== null) {
               apply(selectedId);
+              return;
+            }
+            if (intent.kind === "delete" && selectedId !== null) {
+              requestDelete(selectedId);
             }
           }}
         >
           {groups.user.length === 0 ? (
-            <p className="brush-browser__empty">
-              {filter.query === ""
-                ? "No saved brushes yet. Adjust the brush and press Save."
-                : "No saved brush matches the search."}
-            </p>
+            <p className="brush-browser__empty">{emptyText(filter, "user")}</p>
           ) : null}
           {groups.user.length > 0 ? (
             <PresetGroup
@@ -407,7 +436,7 @@ export function BrushPresetPanel() {
             />
           ) : null}
           {groups.builtin.length === 0 ? (
-            <p className="brush-browser__empty">No built-in brush matches the search.</p>
+            <p className="brush-browser__empty">{emptyText(filter, "builtin")}</p>
           ) : null}
           {groups.builtin.length > 0 ? (
             <PresetGroup
@@ -461,6 +490,30 @@ interface PresetGroupProps {
   readonly background: string;
   readonly onSelect: (id: string) => void;
   readonly onToggleFavorite: (id: string) => void;
+}
+
+/**
+ * What an empty list says.
+ *
+ * The three reasons a list is empty are told apart, because they ask
+ * different things of the user: a search that found nothing is fixed by
+ * typing something else, an empty favourites filter by starring a brush, and
+ * an empty library by saving one.
+ */
+function emptyText(filter: PresetFilter, group: "user" | "builtin"): string {
+  if (filter.query !== "") {
+    return group === "user"
+      ? "No saved brush matches the search."
+      : "No built-in brush matches the search.";
+  }
+  if (filter.favoritesOnly) {
+    return group === "user"
+      ? "None of your own brushes is starred."
+      : "No built-in brush is starred.";
+  }
+  return group === "user"
+    ? "No saved brushes yet. Adjust the brush and press Save."
+    : "No built-in brush is available.";
 }
 
 function PresetGroup({

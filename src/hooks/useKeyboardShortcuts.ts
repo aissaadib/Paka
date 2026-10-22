@@ -26,6 +26,10 @@
  *   Ctrl+= / -     zoom in / out
  *   Ctrl+1         actual size
  *   Ctrl+0         fit to window
+ *   Ctrl+Shift+0   reset the view (whole document, upright)
+ *   Shift+R        rotate the view 90° clockwise
+ *   Shift+M        mirror the view left to right
+ *   Space (held)   drag to pan the view instead of drawing
  *   Ctrl+'         show / hide the grid
  *   Ctrl+Shift+'   turn snapping to guides and grid lines on / off
  *   Ctrl+S         save
@@ -51,6 +55,7 @@ export function useKeyboardShortcuts(
   onSave?: () => void,
   onSaveAs?: () => void,
   onOpen?: () => void,
+  onOpenCommandPalette?: () => void,
 ): void {
   const { actions, engine } = useEditor();
 
@@ -63,7 +68,12 @@ export function useKeyboardShortcuts(
 
       const match = dispatchKeyboardEvent(
         event,
-        { engine, actions, file: { save: onSave, saveAs: onSaveAs, open: onOpen } },
+        {
+          engine,
+          actions,
+          file: { save: onSave, saveAs: onSaveAs, open: onOpen },
+          ui: { openCommandPalette: onOpenCommandPalette },
+        },
         platform,
       );
       if (match) {
@@ -73,5 +83,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [actions, engine, onSave, onSaveAs, onOpen]);
+  }, [actions, engine, onSave, onSaveAs, onOpen, onOpenCommandPalette]);
 }

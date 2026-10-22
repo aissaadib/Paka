@@ -20,6 +20,18 @@ export interface PressureCurvePoint {
   readonly y: number;
 }
 
+/**
+ * How the stabilizer treats the pointer path.
+ *
+ * - `off` stores the pointer's own path, sample for sample.
+ * - `smooth` filters the path adaptively: heavily while the pointer is slow,
+ *   which is where hand tremor lives, and almost not at all while it is
+ *   fast, so a flick and a corner survive.
+ * - `pull` drags the line behind the pointer by a fixed fraction of the
+ *   remaining distance: the path is smooth, and it lags.
+ */
+export type StabilizerMode = "off" | "smooth" | "pull";
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
   readonly size: number;
@@ -69,14 +81,25 @@ export interface BrushSettings {
   /**
    * Pointer smoothing strength in `[0, 1]`.
    *
-   * `0` follows the pointer exactly. Higher values apply an exponential average
-   * to the incoming path before samples are captured: the line lags behind the
-   * pointer while moving and settles to the release point on `finish()`. The
-   * stored samples are the smoothed path, so live drawing, undo/redo, reopen and
-   * export all replay exactly what was shown. It affects the brush and eraser,
-   * not shape tools, whose geometry comes from the drag rather than the path.
+   * `0` follows the pointer exactly. Higher values apply the filter named by
+   * {@link stabilizerMode} to the incoming path before the samples are
+   * captured: the line lags behind the pointer while it moves and is caught up
+   * to the release point on `finish()`. The stored samples are the smoothed
+   * path, so live drawing, undo/redo, reopen and export all replay exactly
+   * what was shown. It affects the brush and the eraser, not the shape tools,
+   * whose geometry comes from the drag rather than from the path.
    */
   readonly stabilizer: number;
+  /**
+   * How the pointer path is filtered before the samples are captured.
+   *
+   * The mode decides *what* the smoothing does and {@link stabilizer} decides
+   * *how much*: `off` stores the raw path, `smooth` filters it adaptively
+   * (quietly while the pointer is slow, almost not at all while it is fast)
+   * and `pull` drags the line behind the pointer. The mode is captured per
+   * stroke, like the rest of the brush.
+   */
+  readonly stabilizerMode: StabilizerMode;
   /**
    * Deterministic grain over the finished stroke coverage, in `[0, 1]`.
    *

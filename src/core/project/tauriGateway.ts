@@ -18,29 +18,41 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { bytesToBase64 } from "../../utils/base64";
+import { PRESET_LIBRARY_EXTENSION } from "../brushes/presetTransfer";
 import { PROJECT_FILE_EXTENSION } from "./projectFormat";
 import type { ProjectFileGateway } from "./projectGateway";
 
 const PROJECT_FILTER = { name: "Paka project", extensions: [PROJECT_FILE_EXTENSION] };
 const PNG_FILTER = { name: "PNG image", extensions: ["png"] };
+const PRESET_LIBRARY_FILTER = {
+  name: "Paka brush library",
+  extensions: [PRESET_LIBRARY_EXTENSION],
+};
 
-async function openPath(title: string): Promise<string | null> {
+async function openPath(
+  title: string,
+  filter?: { name: string; extensions: string[] },
+): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const selected = await open({
     title,
     multiple: false,
     directory: false,
-    filters: [PROJECT_FILTER],
+    filters: filter ? [filter] : [PROJECT_FILTER],
   });
   return typeof selected === "string" ? selected : null;
 }
 
-async function savePath(title: string, suggestedName: string, png: boolean): Promise<string | null> {
+async function savePath(
+  title: string,
+  suggestedName: string,
+  filter: { name: string; extensions: string[] },
+): Promise<string | null> {
   const { save } = await import("@tauri-apps/plugin-dialog");
   const selected = await save({
     title,
     defaultPath: suggestedName,
-    filters: [png ? PNG_FILTER : PROJECT_FILTER],
+    filters: [filter],
   });
   return selected ?? null;
 }
@@ -49,9 +61,15 @@ export function createTauriProjectGateway(): ProjectFileGateway {
   return {
     pickProjectToOpen: () => openPath("Open project"),
 
-    pickProjectToSave: (suggestedName) => savePath("Save project", suggestedName, false),
+    pickProjectToSave: (suggestedName) => savePath("Save project", suggestedName, PROJECT_FILTER),
 
-    pickPngToSave: (suggestedName) => savePath("Export PNG", suggestedName, true),
+    pickPngToSave: (suggestedName) => savePath("Export PNG", suggestedName, PNG_FILTER),
+
+    pickPresetLibraryToOpen: () =>
+      openPath("Import brushes", PRESET_LIBRARY_FILTER),
+
+    pickPresetLibraryToSave: (suggestedName) =>
+      savePath("Export brushes", suggestedName, PRESET_LIBRARY_FILTER),
 
     readTextFile: (path) => invoke<string>("read_text_file", { path }),
 
