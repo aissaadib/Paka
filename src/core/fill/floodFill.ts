@@ -13,6 +13,10 @@
  * every channel together. The mask is binary by design - see
  * `FillPatchRecord` for why an invented feathered edge would break exact
  * save/reopen.
+ *
+ * The colour rule lives in {@link createColorMatch} so that every part of the
+ * fill - the scan itself and the gap closing that runs before it - measures
+ * "the same colour" in exactly the same way.
  */
 
 /** Pixel source accepted by the scanner (`ImageData` satisfies it). */
@@ -47,18 +51,30 @@ export interface FloodFillRegion {
 export const MAX_FILL_SCAN_PIXELS = 16_777_216;
 
 /**
- * Selects the contiguous region around `(seedX, seedY)` and returns its mask,
- * or `null` when the seed is outside the buffer or nothing matches.
+ * The colour rule a scan runs on.
  *
- * `tolerance` is clamped to `0..255` and rounded. The returned mask is cropped
- * to the region's bounding box, so a small fill stores only its own pixels.
+ * A pixel matches the seed when no 8-bit channel differs by more than the
+ * tolerance. Two fully transparent pixels always match each other: their
+ * hidden RGB bytes carry no colour, and a canvas is free to leave anything
+ * there.
  */
-export function floodFill(
+export interface ColorMatch {
+  /** Whether the pixel at `(x, y)` counts as the seed's colour. */
+  matches(x: number, y: number): boolean;
+}
+
+/**
+ * Builds the colour rule for a seed, or `null` when the seed is unusable.
+ *
+ * The seed's own colour is the reference, exactly as before: a fill grows the
+ * colour under the pointer, not the colour of the paper or of the layer.
+ */
+export function createColorMatch(
   source: PixelBuffer,
   seedX: number,
   seedY: number,
   tolerance: number,
-): FloodFillRegion | null {
+): ColorMatch | null {
   const { data, width, height } = source;
   if (width <= 0 || height <= 0 || data.length < width * height * 4) {
     return null;
@@ -83,26 +99,58 @@ export function floodFill(
   const targetA = data[seed + 3];
   const limit = Math.min(255, Math.max(0, Math.round(tolerance)));
 
-  const matches = (x: number, y: number): boolean => {
-    const offset = (y * width + x) * 4;
-    const alpha = data[offset + 3];
-    // Fully transparent pixels have no visible colour, so their hidden RGB
-    // bytes must not split a region. Canvas implementations are free to leave
-    // arbitrary values there (and often leave the last colour's channels).
-    if (targetA === 0 && alpha === 0) {
-      return true;
-    }
-    return (
-      Math.abs(data[offset] - targetR) <= limit &&
-      Math.abs(data[offset + 1] - targetG) <= limit &&
-      Math.abs(data[offset + 2] - targetB) <= limit &&
-      Math.abs(alpha - targetA) <= limit
-    );
+  return {
+    matches(x: number, y: number): boolean {
+      const offset = (y * width + x) * 4;
+      const alpha = data[offset + 3];
+      // Fully transparent pixels have no visible colour, so their hidden RGB
+      // bytes must not split a region. Canvas implementations are free to leave
+      // arbitrary values there (and often leave the last colour's channels).
+      if (targetA === 0 && alpha === 0) {
+        return true;
+      }
+      return (
+        Math.abs(data[offset] - targetR) <= limit &&
+        Math.abs(data[offset + 1] - targetG) <= limit &&
+        Math.abs(data[offset + 2] - targetB) <= limit &&
+        Math.abs(alpha - targetA) <= limit
+      );
+    },
   };
+}
+
+/**
+ * Selects the contiguous region around `(seedX, seedY)` and returns its mask,
+ * or `null` when the seed is outside the buffer or nothing matches.
+ *
+ * `tolerance` is clamped to `0..255` and rounded. The returned mask is cropped
+ * to the region's bounding box, so a small fill stores only its own pixels.
+ *
+ * `blocked` is an optional extra boundary: a pixel it rejects never joins the
+ * region even when its colour matches. The gap closing uses it to seal a
+ * narrow passage before the scan runs, so the fill cannot leak through a
+ * break in the line art.
+ */
+export function floodFill(
+  source: PixelBuffer,
+  seedX: number,
+  seedY: number,
+  tolerance: number,
+  blocked?: (x: number, y: number) => boolean,
+): FloodFillRegion | null {
+  const { width, height } = source;
+  const match = createColorMatch(source, seedX, seedY, tolerance);
+  if (!match) {
+    return null;
+  }
+  const matches =
+    blocked === undefined
+      ? match.matches
+      : (x: number, y: number): boolean => !blocked(x, y) && match.matches(x, y);
 
   const visited = new Uint8Array(width * height);
   // Flat `[x, y, x, y, ...]` stack: no per-pixel object allocation in the scan.
-  const stack: number[] = [sx, sy];
+  const stack: number[] = [Math.floor(seedX), Math.floor(seedY)];
   let pixels = 0;
   let minX = width;
   let minY = height;

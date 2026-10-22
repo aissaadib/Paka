@@ -61,14 +61,23 @@ work as a project file or a PNG**. Several things are explicitly missing; see
 - **Bucket fill** (`F`): click a region to flood-fill it with the current colour.
   The scan reads the **merged visible composite** - paper plus all visible layers
   - so line art on another layer bounds the fill, while the committed pixels go
-  to the **active layer**. The toolbar's **Tolerance** slider (0-255, max
-  per-channel difference) widens what counts as the same region; fully
-  transparent pixels always match each other. The result is a bounded,
-  pixel-exact patch with a binary coverage mask, not a traced contour, so it is
-  identical after undo/redo and save/reopen. One successful fill is one undo
-  step; cancelling the press (lost capture, tool switch, `pointercancel`)
-  removes the preview and records nothing. A document over 16,777,216 pixels
-  refuses the scan with a status-bar message instead of freezing.
+  to the **active layer**. The **Sample** control narrows that to the **active
+  layer** alone or to **one chosen layer**; a hidden layer never bounds a
+  region, so the `one layer` mode refuses it with a notice. The toolbar's
+  **Tolerance** slider (0-255, max per-channel difference) widens what counts
+  as the same region; fully transparent pixels always match each other.
+  **Grow / shrink** (-32 to +32 pixels) takes in or drops the pixels around the
+  region, measured from its boundary, and **Soft edge** (0-8 pixels) turns the
+  boundary into a coverage ramp so the fill does not stair-step along a
+  diagonal. **Close gaps** (0-16 pixels) seals a passage too narrow for the
+  fill to leak through, so a one-pixel break in a line of line art no longer
+  ruins the fill. The result is a bounded, pixel-exact patch with a coverage
+  mask, not a traced contour, so it is identical after undo/redo and
+  save/reopen. One successful fill is one undo step; cancelling the press (lost
+  capture, tool switch, `pointercancel`) removes the preview and records
+  nothing, and a fill that would change nothing is dropped rather than
+  recorded as an invisible undo step. A document over 16,777,216 pixels refuses
+  the scan with a status-bar message instead of freezing.
 - **Gradient** (`G`): drag across the canvas to paint a **linear** gradient from
   the current brush colour to the toolbar's **To** colour. The **Radial** switch
   makes the press point the centre and the drag length the outer radius. The
@@ -142,7 +151,31 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   reports the selected guide and its position. Every change is one undo step.
   A guide is part of the document, but it is **display-only**: it is drawn over
   the artwork and never reaches a PNG export, so an exported picture is
-  exactly the artwork.
+  exactly the artwork. Each guide also carries a **position label**, so the
+  user can read where it sits, and the guides tool's **Clear guides** button
+  removes them all in one undo step.
+- **Rulers**: a **Rulers** switch (`Ctrl+Alt+R`) draws measuring strips along
+  the top and the left edge of the canvas. The ticks are **document
+  coordinates**, so they pan and zoom with the paper, and the distance between
+  two labelled ticks is chosen from the live zoom, so the numbers stay
+  readable at 2 % and at 6400 %. The rulers are **view state**: they change no
+  pixels, add no history step, never reach an export and are remembered in
+  the per-user settings file. With the rulers on, the **Guides** tool can pull
+  a guide straight out of a ruler: the top ruler measures x and makes a
+  vertical guide, the left ruler measures y and makes a horizontal one, and
+  the drag carries the guide along that axis.
+- **Symmetry**: a **Symmetry** switch in the tool's own options repeats the
+  next stroke around a centre. **Mirror V** reflects it across a vertical axis
+  (the classic left/right symmetry), **Mirror H** across a horizontal one, and
+  **Radial** repeats it **2 to 12** times evenly around the centre. The
+  centre is a marker on the canvas: drag it to move the symmetry, `Esc`
+  abandons the drag, and the **Centre** button puts it back in the middle of
+  the paper. The copies are **ordinary strokes** - the same brush, the same
+  samples, mapped through the symmetry - so they can be edited, moved and
+  deleted like any other artwork, and a reopened project shows exactly what
+  was drawn. The whole set is **one undo step**: the user drew one thing, not
+  six. The symmetry itself is editor state: it never reaches a PNG export, and
+  the copies it produces do.
 - **Grid and snapping**: a **Grid** switch draws a lattice over the paper, a
   **Snap** switch makes the drawing follow the guides and the grid lines, and a
   **Spacing** control sets the distance between the lines in **document
@@ -153,7 +186,7 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   stays on - and both have shortcuts (`Ctrl+'` and `Ctrl+Shift+'`). The grid
   and the snapping are **view state**: they change no pixels, add no history
   step, never mark the document dirty and never reach an export, and they are
-  remembered in the per-user settings file. There are no rulers yet.
+  remembered in the per-user settings file.
 - **HSV colour wheel**: a **Colour** panel beside the layers. The disc picks a
   hue (the angle) and a saturation (the distance from the centre), the value
   slider picks the brightness, and the three sliders name the same numbers and
@@ -182,6 +215,16 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   restored at startup. The file holds preferences only - never a drawing - and
   changing one is not an edit, so it adds no history step and never marks the
   document unsaved.
+- **Brush library**: a **Brushes** panel lists the saved brushes and the
+  built-in ones, with a search box, an order (name, recent use, size) and a
+  **starred** filter. Each row shows the mark the preset paints - drawn by the
+  renderer's own code, so it is the brush and not a picture of one - plus its
+  name, whether it is the brush in effect and whether the brush has been
+  changed since it was applied. A brush can be saved, renamed, overwritten
+  (**update**), duplicated, deleted (after a confirmation), starred, and
+  exported to or imported from a library file. A **built-in brush is code**:
+  it cannot be renamed, overwritten or deleted, but it can be starred and
+  duplicated. Applying a brush is not an edit: no history step, no dirty flag.
 - **Brush controls**: size (1-512 px, in document pixels), opacity, **hardness**
   (0-100 %, where 100 % is the crisp edge and lower values soften the stroke's
   outer edge), **sampling** (2-200 % of the brush diameter: how densely fast
@@ -228,6 +271,18 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the document's pixels are never touched, they add no undo step and they never
   mark the drawing unsaved, so turning the paper over to look at something
   leaves the file saved. The status bar names the view while it is not upright.
+- **A second view of the canvas** (`View → New View of Canvas`): a second
+  canvas beside the main one, showing the *same* drawing through a transform of
+  its own - its own zoom, pan, rotation and mirror, with **Fit** and **100 %**
+  buttons of its own. It is a second *window* on one document, not a second
+  document: a stroke drawn in either view is one stroke in one document, it
+  shows up in both views at once, and undo from either view undoes that one
+  step. Opening or closing the second view changes no pixel, adds no undo step
+  and never marks the drawing unsaved, and a PNG export is the document rather
+  than a view. The two views share the rasterized artwork, so the second one
+  costs a projection of pixels that are already drawn rather than a second copy
+  of them. The zoom, the fit and the rotation act on the view you last
+  pressed in, and the status bar says which one that is.
 - **Navigator**: a panel under the layers shows the whole document with the
   visible area marked. Click or drag in it to move the canvas' view - a click
   outside the marked area jumps the view there, a drag inside it keeps the
@@ -376,10 +431,17 @@ paste-ready version of the same briefing is in
   picker** and **guides** tools exist, plus
   pan. There is no text tool.
 - **Guides are axis-only.** A guide is vertical or horizontal, a second guide on
-  the same position is refused, the colour is fixed, and there is no position
-  label. The guides *do* take part in the snapping (the **Snap** switch), but
-  the snapping is a magnet with a 6 screen pixel radius, not a lock: a guide
-  pulls a point that comes close to it and nothing else. There are no rulers.
+  the same position is refused, the colour is fixed, and the label is the
+  guide's position. The guides *do* take part in the snapping (the **Snap**
+  switch), but the snapping is a magnet with a 6 screen pixel radius, not a
+  lock: a guide pulls a point that comes close to it and nothing else.
+- **Symmetry is a stroke aid, not a drawing mode.** It repeats the brush and
+  the shape tools, but not the eraser, the bucket or the gradient, and the
+  copies are separate strokes: the select tool can move one half without the
+  other. The centre is remembered per session, not per project, and the
+  mirrored half's grain (the **Texture** and **Stamp texture** brushes) shows
+  the mirrored pattern while it is being drawn and the document-anchored
+  pattern once it is committed.
 - **The navigator is an overview, not a map.** It draws the document at the
   panel's size, so it shows where the artwork is rather than what is in it,
   and it has no zoom control of its own - the **Fit** and **Centre** buttons
@@ -395,11 +457,14 @@ paste-ready version of the same briefing is in
   flipped, and its **stops** can only be edited before it is drawn - the stop
   editor describes the *next* gradient, not one already on the canvas.
 - **A bucket fill is a committed raster patch, not an editable region.** The
-  mask is binary, so there is no feathering and no gap-closing; the slider only
-  affects the next fill, and the fill is scanned at click time (no pre-commit
-  region preview). Fills are not selectable, so they can be undone but not
-  moved, duplicated or flipped. The scan samples the merged composite including
-  the paper, and documents above 16,777,216 pixels refuse a fill with a notice.
+  mask is a coverage byte per pixel - binary for a hard edge, a ramp for a soft
+  one - so there is no feathering at the *region* level and no contour to
+  edit; the sliders only affect the next fill, and the fill is scanned at click
+  time (no pre-commit region preview). Fills are not selectable, so they can be
+  undone but not moved, duplicated or flipped. The scan samples the **merged**
+  composite including the paper by default; the **Sample** control can narrow
+  it to the active layer or to one chosen layer, and documents above 16,777,216
+  pixels refuse a fill with a notice.
 - **Selection is stroke-level and has no boundary yet.** A marquee selects whole
   strokes (never part of one), only on the **active layer**, and the selection is
   dropped when you switch layers or switch away from the select tool. It is a

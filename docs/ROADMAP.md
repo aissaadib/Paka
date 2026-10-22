@@ -154,19 +154,29 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       [ARCHITECTURE.md](ARCHITECTURE.md#the-polygon-and-the-star).
 - [x] Bucket (flood) fill (`F`): a press flood-fills the contiguous region under
       the pointer and writes it to the active layer as a bounded, pixel-exact
-      patch. The scan samples the **merged visible composite** (paper plus every
-      visible layer at its opacity), so line art on another layer defines the
-      boundary the user sees; the committed pixels go to the active layer. The
-      toolbar's **Tolerance** slider (`0`-`255`, max per-channel `R`/`G`/`B`/`A`
-      difference) widens what counts as the same region; fully transparent pixels
-      always match one another. The patch stores an ordered, tightly cropped
-      coverage mask - not a traced contour - so save/reopen, undo and redo
-      reproduce exactly the pixels the user saw. Undo removes the patch; redo
-      replays the committed mask instead of re-running the scan. One successful
-      fill is one undo step; a cancelled press (lost capture, tool switch,
-      `pointercancel`) removes the preview and records nothing. A document above
-      the scan ceiling (16,777,216 pixels) refuses the fill with a status-bar
-      message instead of attempting it. See
+      patch. The scan samples the **reference** the options name: the **merged**
+      visible composite (paper plus every visible layer at its opacity), the
+      **active** layer alone, or **one chosen layer** - so line art on another
+      layer defines the boundary the user sees by default, and a hidden layer
+      never defines one at all. The committed pixels go to the active layer.
+      The toolbar's **Tolerance** slider (`0`-`255`, max per-channel
+      `R`/`G`/`B`/`A` difference) widens what counts as the same region; fully
+      transparent pixels always match one another. **Grow / shrink**
+      (`-32` to `+32` pixels) takes in or drops the pixels around the region,
+      measured from its boundary with an exact Euclidean distance transform, and
+      **Soft edge** (`0`-`8` pixels) turns that boundary into a coverage ramp so
+      the fill does not stair-step along a diagonal. **Close gaps** (`0`-`16`
+      pixels) seals a passage too narrow for the fill to pass through, so a
+      one-pixel break in a line of line art no longer ruins the fill. The patch
+      stores an ordered, tightly cropped coverage mask - not a traced contour -
+      so save/reopen, undo and redo reproduce exactly the pixels the user saw.
+      Undo removes the patch; redo replays the committed mask instead of
+      re-running the scan. One successful fill is one undo step; a cancelled
+      press (lost capture, tool switch, `pointercancel`) removes the preview and
+      records nothing, and a fill that would change nothing is dropped rather
+      than recorded as an invisible undo step. A document above the scan
+      ceiling (16,777,216 pixels) refuses the fill with a status-bar message
+      instead of attempting it. See
       [ARCHITECTURE.md](ARCHITECTURE.md#bucket-flood-fill) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills).
 - [x] Gradients (`G`): a drag paints a **linear** or **radial** gradient on the
@@ -301,6 +311,36 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       panel is not an edit - and it rides along in the per-user settings file
       as a section, so there is one settings file and one writer. See
       [ARCHITECTURE.md](ARCHITECTURE.md#the-panel-manager).
+- [x] **Status bar and view navigation**: the status bar reports what the
+      engine actually holds - the file name and its unsaved marker, the
+      document's size, the active tool, the active layer, the zoom, the history
+      depth, the selection, the guides and the cursor's position in document
+      coordinates - and every field is read from the engine's own state, so no
+      field can drift away from the canvas. The zoom is a bounded, editable
+      field: it shows the zoom the canvas really has and takes a typed one
+      (`150`, `150%` or `1.5x`), clamped to the range the viewport supports.
+      The canvas can be zoomed (buttons, `Ctrl+Wheel`, `Ctrl+=`/`Ctrl+-`),
+      fitted, reset and panned (wheel, middle-drag, the `Pan` tool, or the
+      space bar held down), and it can be **turned**: a 90° rotation and a
+      left-right mirror, with a reset that puts the view back upright. The
+      view's orientation is *display only*: it moves the canvas and nothing
+      else, so it adds no history step, bumps no revision and never marks the
+      file unsaved. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#view-navigation-and-the-status-bar).
+- [x] **Reference images**: a **References** panel imports a local image and
+      places it beside the canvas, where it can be moved, scaled, shown, hidden
+      and removed. A reference lives in **workspace space** - the canvas' own
+      pixels, not document pixels - so it stays where the artist put it while
+      the artwork is zoomed and panned underneath, and moving or scaling it can
+      never disturb the drawing. A reference is **session state**: it is drawn
+      over the workspace and never becomes document content, so it never
+      reaches a project file or an export and never makes a drawing unsaved.
+      The **colour picker** samples a reference under the pointer - the pixel is
+      read through the reference's own placement, so a scaled reference is
+      sampled at the pixel the artist is really pointing at - and `Alt` puts
+      the sampled colour into the background colour. One decoded copy is kept
+      per reference, and the session shares a pixel budget. See
+      [ARCHITECTURE.md](ARCHITECTURE.md#reference-images).
 - [ ] Rulers.
 - [ ] Adjustment layers / non-destructive effects.
 

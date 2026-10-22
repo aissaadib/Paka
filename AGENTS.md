@@ -61,10 +61,16 @@ architecture by browsing.
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
-`floodFill`, `document/types.ts`, `document/guides.ts`,
+`core/engine/canvasViews.ts` (the view registry: the identities, the active
+view, the summaries),
+`features/view/SecondaryViewPanel.tsx` (the second view's panel),
+`floodFill`, `fillScan` (the scan pipeline: the gap closing, the distance
+field, the growth and the soft edge), `fillOptions` (the bucket's options),
+`document/types.ts`, `document/guides.ts`,
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`,
+`core/brushes/stabilizer.ts` (369: the filter, the modes and the catch-up),
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
@@ -107,9 +113,13 @@ fill/gradient commands, tool definitions, `editorStore.ts`,
 `features/color/wheelState.ts`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
+`features/view/viewNavigation.ts`, `features/view/ZoomField.tsx`,
+`features/view/ViewControls.tsx`, `hooks/usePanModifier.ts`,
 `core/brushes/brushProperties.ts`, `core/brushes/numericInput.ts`,
 `features/brushes/BrushPreview.tsx`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
+`core/workspace/workspaceSettingsSection.ts`, `state/workspaceContext.ts`,
+`hooks/useWorkspace.ts`,
 `core/autosave/recovery.ts`,
 Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 `scripts/generate-app-icon.mjs`,
@@ -124,11 +134,13 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
+| Change the status bar or the view controls | `features/canvas/CanvasStatusBar.tsx` (the fields), `features/view/viewNavigation.ts` (the zoom format and the typed zoom), `features/view/ZoomField.tsx` (the editable zoom), `features/view/ViewControls.tsx` (the rotate/mirror/reset buttons), `core/rendering/viewport.ts` (the transform), `core/engine/DrawingEngine.ts` (`zoomIn`/`zoomOut`/`zoomTo`/`zoomToFit`/`rotateView`/`toggleViewMirror`/`resetView`/`setPanModifier`), `core/actions/registry.ts` (the chords) |
+| Change the second view of the canvas | `core/engine/canvasViews.ts` (the view registry: the identities, the active view, the summaries), `core/engine/DrawingEngine.ts` (`openSecondaryView`/`closeSecondaryView`/`attachSecondaryView`/`detachSecondaryView`/`setSecondaryViewSize`/`focusView`/`fitView`/`actualSizeView`), `core/rendering/types.ts` (`DisplayTargetOptions` and the optional display-target methods), `core/rendering/Canvas2DRenderer.ts` (`addDisplayTarget`/`removeDisplayTarget`/`renderTarget`), `features/view/SecondaryViewPanel.tsx` (the panel), `src/test/secondaryView.test.ts` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
 | Change texture / grain | `canvas2dStroke.ts` `textureCoverage`/`TEXTURE_TILE_SIZE` (L52-65), `Canvas2DRenderer.ts` `applyStrokeTexture`/`textureTile` (L1324/L1350), `types/brush.ts`, `BrushControls.tsx`, format v7 |
-| Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
+| Change brush sampling (spacing/stabilizer) | `core/brushes/stabilizer.ts` (the filter, the modes and the catch-up), `core/brushes/strokeBuilder.ts` (`addSample`/`finish`), `DrawingEngine.ts` `finishStroke`, `types/brush.ts`, `features/options/toolOptionSchema.ts` (the mode control), tests in `stabilizer.test.ts`/`strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`, `mergeBundledPresets`), `core/brushes/bundledPresets.ts` (the built-in brushes), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`updateBrushPreset`/`duplicateBrushPreset`/`deleteBrushPreset`/`toggleBrushPresetFavorite`/`importBrushPresets`/`applyBrushPreset`/`resetBrush`), `features/brushes/BrushPresetPanel.tsx`, `state/editorStore.ts` |
 | Change the brush controls | `features/options/toolOptionSchema.ts` (the brush group's fields, their bounds and their per-tool visibility), `features/options/OptionControl.tsx` (how a field is rendered), `components/toolbar/SliderField.tsx` (the slider, the number box and the keyboard steps), `core/brushes/numericInput.ts` (the number box's rules), `core/brushes/brushProperties.ts` (the properties the engine does *not* have), `features/brushes/BrushControls.tsx` (the group: the preview, the picker, the reset) |
@@ -139,17 +151,21 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Undo/redo behaviour | `core/commands/commandStack.ts`, the command in `core/commands/`, `engine.executeDocumentCommand`/`recordHistoryChange` |
 | Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
 | File open/save orchestration | `core/project/projectFiles.ts`, `projectGateway.ts`, `tauriGateway.ts`, `features/project/useFileCommands.ts` |
+| Change the open documents (the tabs) | `core/documents/sessionRegistry.ts` (one engine per document, the active session, the tab strip's view, the close decision), `core/documents/documentWorkspace.ts` (open, save and close across the documents), `core/documents/recentFiles.ts` (the recent list and its settings section), `features/tabs/DocumentTabs.tsx` (the strip), `components/layout/Workspace.tsx` (the close-tab flow), `state/editorStore.ts` (the session-aware editor) |
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Edit a gradient's geometry | `core/gradient/gradientHandles.ts` (the pure handle geometry and the geometry hit test), `core/commands/gradientEditCommand.ts` (the record replacement), `core/tools/gradientTool.ts` (the press resolution), `DrawingEngine.ts` (`selectGradientAt`, `beginGradientHandleDrag`, `updateGradientHandleDrag`, `finishGradientHandleDrag`, `cancelGradientHandleDrag`, `nudgeGradientHandle`, `syncGradientOverlay`), `core/rendering/Canvas2DRenderer.ts` (`paintGradientOverlay`), `core/rendering/types.ts` (`RendererGradientOverlay`), `src/test/gradientEditing.test.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the navigator | `features/navigator/navigatorGeometry.ts` (the pure mapping between navigator, canvas and document pixels), `features/navigator/NavigatorPanel.tsx` (the panel and its pointer/keyboard gestures), `core/rendering/types.ts` (`renderOverview`), `core/rendering/Canvas2DRenderer.ts` (`renderOverview`), `DrawingEngine.ts` (`getOverview`, `centerViewportOn`, `centerViewport`, `viewportSize` in the snapshot), `src/test/navigator.test.ts` |
+| Change the reference images | `core/reference/types.ts` (the model and the engine's seam), `core/reference/geometry.ts` (the pure workspace-space transform), `core/reference/decode.ts` (the safe decode, the pixel budget), `core/reference/store.ts` (the state, the one decoded copy, the sampling), `features/reference/ReferencePanel.tsx` (the panel), `core/rendering/Canvas2DRenderer.ts` (`paintReferences`), `DrawingEngine.ts` (`setReferenceSource`/`syncReferenceOverlay`/`pickColor`), `src/test/referenceImages.test.ts` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
 | Add or change a side panel | `core/shell/panelRegistry.ts` (the shared contract: a panel registers itself), `core/shell/slots.ts` (the slots), `core/panels/panelRegistry.ts` (the panel manager's adapter: the side slot, the known ids), `core/panels/panelLayout.ts` (the layout rules), `core/panels/panelLayoutSection.ts` (the settings section), `state/panelStore.ts` (the live layout), `components/panels/PanelStack.tsx` (the stack that renders the registry), `components/panels/Panel.tsx` (the chrome), `components/panels/panelChrome.ts` (hidden/folded state), `components/layout/AppMenuBar.tsx` (the Panels menu) |
 | Change what the settings file carries | `core/settings/appSettings.ts` (`settingsDocument`, `serializeSettingsDocument`, `parseSettingsDocument`), `core/settings/settingsSection.ts` (the section contract), `core/settings/settingsStore.ts` (the `sections` option) |
+| Change the workspace (the window's arrangement) | `core/workspace/workspaceSettings.ts` (the schema, the defaults, the tolerant reader), `core/workspace/workspaceProfiles.ts` (the presets and the profile a layout matches), `core/workspace/workspaceSettingsSection.ts` (the settings section), `state/workspaceStore.ts` (the live workspace), `app/WorkspaceProvider.tsx` (the provider, the theme and the scale on the root element), `hooks/useWorkspace.ts`, `components/layout/AppMenuBar.tsx` (the Workspace menu), `src/styles/theme.css` (the tokens and the light scheme), `src/app/app.css` (the shell rows) |
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
+| Change the bucket fill | `core/fill/fillOptions.ts` (the options and their bounds), `core/fill/fillScan.ts` (the scan: the gap closing, the distance field, the growth, the soft edge), `core/fill/floodFill.ts` (the contiguous scan), `core/engine/DrawingEngine.ts` (`beginFill`/`finishFill`/`cancelFill`, the setters), `core/rendering/types.ts` (`readCompositeImage` and the layer subset), `features/options/toolOptionSchema.ts` (the fill group), `src/test/fillScan.test.ts`, `src/test/bucketFill.test.ts` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
 | Window sizing / DPI | `src-tauri/src/window_fit.rs` (the clamp), `src-tauri/src/lib.rs` (`.setup`), `src-tauri/tauri.conf.json` (the default size), `docs/qa/PACKAGED-TAURI-NIGHT-SHIFT-ERRATUM.md` (the measurement rule) |
@@ -184,7 +200,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `PresetLibraryFiles`, `PresetLibraryOutcome` | `core/brushes/presetLibraryFiles.ts` | grep the symbol |
 | `BrushPresetPanel`, `PresetRow`, `BrushTipPreview` | `features/brushes/BrushPresetPanel.tsx`, `features/brushes/PresetRow.tsx`, `features/brushes/BrushTipPreview.tsx` | grep the symbol |
 | `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 46, 71, 86 |
-| `STABILIZER_MAX_LAG`, `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | 39, 114, 193 |
+| `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | grep the symbol |
+| `StrokeStabilizer`, `STABILIZER_MODES`, `SMOOTH_MAX_TAU`, `PULL_MAX_TAU`, `SPEED_WINDOW`, `tauAlpha` | `core/brushes/stabilizer.ts` | grep the symbol |
 | `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
 | `SOFT_EDGE_RADIUS_RATIO`, `strokeFeatherRadius` | `core/rendering/canvas2dStroke.ts` | 32, 43 |
 | `paintStrokeCoverage`, `featherStroke`, `compositeStrokeBuffer` | `core/rendering/Canvas2DRenderer.ts` | 1263, 1389, 1227 |
@@ -200,6 +217,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
+| `scanFill` (the scan pipeline) | `core/fill/fillScan.ts` | grep the symbol |
+| `FillReferenceMode`, `fillReferenceLayers`, the option normalizers | `core/fill/fillOptions.ts` | grep the symbol |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `GradientHandleId`, `gradientHandles`, `findGradientHandle`, `moveGradientHandle`, `gradientGeometryHit`, `GRADIENT_HANDLE_CURSORS` | `core/gradient/gradientHandles.ts` | grep the symbol |
 | `createGradientEditCommand`, `GradientEditHost` | `core/commands/gradientEditCommand.ts` | grep the symbol |
@@ -220,13 +239,27 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 992, 1004 / 1022 / 1039 |
 | `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
 | `EditorActions` | `state/editorStore.ts` | 24 |
+| `CanvasViewRegistry`, `CanvasView`, `ViewSummary`, `summarizeView`, `viewOrientation` | `core/engine/canvasViews.ts` | grep the symbol |
+| `openSecondaryView`, `closeSecondaryView`, `attachSecondaryView`, `detachSecondaryView`, `setSecondaryViewSize`, `focusView`, `fitView`, `actualSizeView` | `core/engine/DrawingEngine.ts` | grep the symbol |
+| `addDisplayTarget`, `removeDisplayTarget`, `setDisplayTargetViewport`, `setDisplayTargetSize` | `core/rendering/types.ts`, `core/rendering/Canvas2DRenderer.ts` | grep the symbol |
+| `SecondaryViewPanel` | `features/view/SecondaryViewPanel.tsx` | grep the symbol |
 | `createDocument` | `core/document/document.ts` | 183 |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
+| `DocumentSessionRegistry`, `DocumentSession`, `DocumentSessionSummary`, `samePath`, `tabCloseDecision` | `core/documents/sessionRegistry.ts` | grep the symbol |
+| `DocumentWorkspace` | `core/documents/documentWorkspace.ts` | grep the symbol |
+| `RecentFilesStore`, `createRecentFilesSection`, `normalizeRecentFiles`, `recentFilesWith` | `core/documents/recentFiles.ts` | grep the symbol |
+| `DocumentTabs` | `features/tabs/DocumentTabs.tsx` | grep the symbol |
+| `useDocumentSessions`, `useActiveEngine`, `useRecentFiles` | `hooks/useDocumentSessions.ts`, `hooks/useEditor.ts`, `hooks/useRecentFiles.ts` | grep the symbol |
 | `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
 | `asRecord` (an untrusted value as a record) | `utils/record.ts` | 12 |
 | `AppSettings`, `DEFAULT_APP_SETTINGS`, `normalizeAppSettings`, `parseAppSettings`, `serializeAppSettings` | `core/settings/appSettings.ts` | grep the symbol |
 | `SettingsStore` (read, apply, watch, persist) | `core/settings/settingsStore.ts` | grep the symbol |
+| `WorkspaceSettings`, `DEFAULT_WORKSPACE_SETTINGS`, `normalizeWorkspaceSettings`, `parseWorkspaceSettings`, `workspaceSettingsDocument`, `workspaceSettingsEqual`, `normalizeUiScale` | `core/workspace/workspaceSettings.ts` | grep the symbol |
+| `WORKSPACE_PROFILES`, `findWorkspaceProfile`, `profilePanelLayout`, `profileWorkspaceSettings`, `resolveWorkspaceProfile` | `core/workspace/workspaceProfiles.ts` | grep the symbol |
+| `createWorkspaceSettingsSection`, `WORKSPACE_SETTINGS_KEY` | `core/workspace/workspaceSettingsSection.ts` | grep the symbol |
+| `createWorkspaceStore`, `WorkspaceActions` | `state/workspaceStore.ts` | grep the symbol |
+| `useWorkspaceSettings`, `useWorkspaceActions` | `hooks/useWorkspace.ts` | grep the symbol |
 | `AutosaveService` (the invariants), `recoveryPathFor`, `isRecoveryPath` | `core/autosave/autosaveService.ts`, `core/autosave/recovery.ts` | grep the symbol |
 | `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 47, 66, 92 |
 | `createWheelState`, `reduceWheelState` | `features/color/wheelState.ts` | 41, 53 |
@@ -240,6 +273,15 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
+| `ReferenceImage`, `ReferenceState`, `ReferenceOverlay`, `ReferenceSource` | `core/reference/types.ts` | grep the symbol |
+| `referenceRect`, `referenceContains`, `referenceSourcePoint`, `referenceScale`, `moveReference`, `scaleReference`, `setReferenceScale`, `fitReference`, `centerReference` | `core/reference/geometry.ts` | grep the symbol |
+| `decodeReferenceImage`, `ReferenceDecodeError`, `MAX_REFERENCE_PIXELS`, `MAX_TOTAL_REFERENCE_PIXELS` | `core/reference/decode.ts` | grep the symbol |
+| `ReferenceImageStore` (the state, the decoded copies, the sampling) | `core/reference/store.ts` | grep the symbol |
+| `ReferencePanel` | `features/reference/ReferencePanel.tsx` | grep the symbol |
+| `useReferenceState`, `useReferenceStore` | `hooks/useReferences.ts` | grep the symbol |
+| `formatZoomPercent`, `zoomPercentText`, `parseZoomPercent`, `describeViewTransform`, `VIEW_ROTATION_DEGREES` | `features/view/viewNavigation.ts` | grep the symbol |
+| `ZoomField`, `ViewControls` | `features/view/ZoomField.tsx`, `features/view/ViewControls.tsx` | grep the symbol |
+| `usePanModifier` (the space bar pans) | `hooks/usePanModifier.ts` | grep the symbol |
 | `panelDefinitions`, `sidePanelDefinitions`, `findPanelDefinition`, `isPanelId`, `defaultVisiblePanelIds` | `core/panels/panelRegistry.ts` | grep the symbol |
 | `PanelLayoutState`, `normalizePanelLayoutState`, `setPanelVisibility`, `togglePanelVisibility`, `setPanelCollapsed`, `showAllPanels`, `hideAllPanels`, `resetPanelLayout`, `shouldMountPanel` | `core/panels/panelLayout.ts` | grep the symbol |
 | `createPanelLayoutSection`, `PANEL_LAYOUT_KEY` | `core/panels/panelLayoutSection.ts` | grep the symbol |
@@ -291,13 +333,15 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush controls and the live preview | `brushControls.test.ts` (the number box's rules, the keyboard steps, the bounds the engine honours, the properties it does not, and the preview's agreement with the rasterizer), `brushOrigin.test.ts` (the preset the brush came from, and the reset) |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
-| The brush browser | `presetBrowser.test.ts` (the built-in brushes and their protection, the search, the order, the favourites, the selection, the actions, the library file, the malformed file, the duplicate names, the import and the reload) |
+| The brush browser | `presetBrowser.test.ts` (the built-in brushes and their protection, the search, the order, the favourites, the selection, the actions, the library file, the malformed file, the duplicate names, the import and the reload), `tests/visual/preset-browser.spec.ts` (the browser in a real browser: the built-in brushes, applying one, the search, the deletion confirmation, the protection of a built-in brush and the keyboard) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
 | Colour input formats | `colorInput.test.ts` (8-digit hex, `hsl()`, `oklch()`, the gamut clamp, the round trip, garbage and translucent input) |
 | Settings persistence | `settings.test.ts` (the round trip, the defaults, the malformed and future-versioned file, the clamping, the no-dirty contract, a failed write) |
+| The workspace (the window's arrangement) | `workspaceSettings.test.ts` (the schema and its tolerant reader, the clamping, the profiles and the layout they imply, the derived profile, the store, the settings section, the restart, the broken file, and the separation from the drawing) |
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |
 | Brush spacing / stabilizer | `strokeBuilder.test.ts`, `drawingEngine.test.ts`, `projectFormat.test.ts`, `projectLifecycle.test.ts` |
+| The stroke stabilizer | `stabilizer.test.ts` (the modes, the time constant, the tremor rejection, the corner, the endpoint, the catch-up, the measured lag and the frame-rate independence) |
 | Brush texture / grain | `canvas2dStroke.test.ts` (`textureCoverage`), `canvas2dRenderer.test.ts` (pattern pass), `projectFormat.test.ts`, `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
 | Stamp (dab) engine | `stampCoverage.test.ts` (dab plan, per-dab texture, union, budget), `canvas2dRenderer.test.ts` (stamped pixels, parity), `projectFormat.test.ts` (v9/v10), `drawingEngine.test.ts`, `projectLifecycle.test.ts` |
 | Fixed-step transforms (the Selection menu) | `fixedStepTransform.test.ts` (the pivot, both directions, undo/redo, the two non-exact inverses), `tests/visual/selection-menu.spec.ts` (the menu in a real browser) |
@@ -308,7 +352,8 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Engine gestures, history, selection | `drawingEngine.test.ts` (grep `it(`) |
 | Format | `projectFormat.test.ts` |
 | Save/open lifecycle | `projectLifecycle.test.ts`, `projectFiles.test.ts` |
-| Bucket fill | `floodFill.test.ts`, `fillCommand.test.ts` |
+| The open documents (the tabs) | `documentSessions.test.ts` (the registry, one engine per document, the independent history, selection and viewport, the close decision, the workspace's open/save/close, the duplicate path and the recent list) |
+| Bucket fill | `floodFill.test.ts`, `fillCommand.test.ts`, `fillScan.test.ts` (the region, the growth, the soft edge and the gap closing), `bucketFill.test.ts` (the engine seam: the reference modes, the hidden layer, the cancel and the no-op) |
 | Gradients | `gradient.test.ts`, `gradientEditing.test.ts` (the handle geometry, the selection, the live preview, the cancel, the single undo step, the nudge and the overlay) |
 | Layer blend modes | `blendModes.test.ts` (the formulas and their boundaries), `canvas2dRenderer.test.ts` (the canvas operation mapping, exact pixels, alpha, preview and export) |
 | Selection math | `strokeSelection.test.ts` |
@@ -316,10 +361,13 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
+| View navigation | `viewNavigation.test.ts` (the zoom field's parse and clamp, the zoom bounds, the screen-to-document mapping under a rotation and a mirror, the pan modifier, the view-only dirty state and the reset) |
+| The second view of the canvas | `secondaryView.test.ts` (the view registry, the shared document identity, the history coherence, the dirty state, the viewport independence, and the renderer's shared display targets) |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
 | Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |
 | Navigator | `navigator.test.ts` (the layout and the mapping between navigator, canvas and document pixels, the grab and jump rules, the engine's centring intents and the overview cache) |
+| Reference images | `referenceImages.test.ts` (the workspace-space transform, the decode - a malformed file, a file that is too large, an enormous image downscaled while it decodes - the store and its one decoded copy, a failed import, the session budget, the sampled pixel through the placement, the picker's foreground and background sampling, the cursor feedback, and that a reference never reaches the export) |
 | Panel manager | `panelLayout.test.ts` (the registry, the layout rules, the store, the mounting policy, the settings section and the round trip through the settings file), `menuNavigation.test.ts` (the menu's keyboard rules) |
 
 ## 9. Keep this file useful

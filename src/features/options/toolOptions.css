@@ -1,0 +1,251 @@
+/**
+ * The contextual tool-options strip.
+ *
+ * One row, always the same height: the controls change with the active tool,
+ * but the strip's height does not, so switching tools never moves the canvas.
+ * A window too narrow for the controls scrolls the strip sideways rather than
+ * wrapping it - a wrapped strip would change the height and push the canvas
+ * down.
+ */
+
+.tool-options-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  /* The gutter is reserved whether or not the strip overflows, so the
+     controls never shift by a few pixels when a scrollbar appears. */
+  scrollbar-gutter: stable;
+}
+
+.tool-options-bar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.tool-options-bar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tool-options-bar::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+/* The active tool, so the strip says whose options it is showing. */
+.tool-options-bar__tool {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-strong);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tool-options-bar__tool-icon {
+  display: inline-flex;
+  color: var(--text);
+}
+
+/* What a tool with no options does, instead of a row of dead controls. */
+.tool-options-bar__hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.tool-options__group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.tool-options__fields {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The popover's fields stack, so each slider gets the panel's full width. */
+.tool-options__fields--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* The strip is compact: the sliders are narrower than the ones in the
+   document toolbar, and the formatted value is dropped because the number
+   box already carries the number. */
+.tool-options-bar .slider-field__range {
+  width: 72px;
+}
+
+.tool-options-bar .slider-field__value {
+  width: 46px;
+}
+
+.tool-options-bar .slider-field__display {
+  min-width: 34px;
+}
+
+.brush-options,
+.gradient-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The live brush preview: what the current brush draws, on the document's
+   own paper. It is a fixed size so the strip never changes height. */
+.brush-preview {
+  display: block;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+/* The preset picker is a strip of its own on the document toolbar; in the
+   options bar it is one row of the strip, like everything else. */
+.tool-options-bar .brush-presets {
+  width: auto;
+  flex-wrap: nowrap;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.brush-controls__reset {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+/* An action button: it runs a real editor action, and it is disabled while
+   that action cannot run. */
+.option-action {
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.option-action:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+  color: var(--text-strong);
+}
+
+.option-action:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.option-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-height);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.option-color:hover {
+  color: var(--text);
+}
+
+/* A drop-down: the bucket's reference mode and its layer picker. */
+.option-select {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: var(--control-height);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.option-select:hover {
+  color: var(--text);
+}
+
+.option-select__control {
+  height: var(--control-height);
+  max-width: 140px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------------ popover */
+
+.popover {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.popover__trigger {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.popover__trigger:hover,
+.popover__trigger[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+/* The panel is `fixed`, so the strip's horizontal scroll cannot clip it. */
+.popover__panel {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 280px;
+  max-width: min(440px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.popover__panel:focus {
+  outline: none;
+}
+
+.popover__panel .slider-field__range {
+  width: 140px;
+}
+
+.popover__panel .slider-field__value {
+  width: 56px;
+}

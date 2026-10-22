@@ -31,22 +31,25 @@ export const DEFAULT_DOCUMENT_BACKGROUND = "#ffffff";
  *   by construction: an eraser previews by mutating its own layer surface, so
  *   the renderer passes no preview for it and never builds the group scratch
  *   while the erase snapshot exists.
- * - **One** transient scan buffer: a bucket scan (composite + `ImageData` +
- *   visited bitmap + mask) costs about 10 bytes per document pixel (~170 MB at
- *   the cap); the PNG export composite is 4 bytes per document pixel at 1x, so
- *   the scan allowance covers it.
+ * - **One** transient scan buffer: a bucket scan costs about 15 bytes per
+ *   document pixel (~240 MB at the cap). The composite and its `ImageData`
+ *   copy are 8 of those bytes; the rest is the scan's own bookkeeping - the
+ *   visited bitmap, the mask the region is cropped into, the map the gap
+ *   closing seals its passages in, and the distance field the growth and the
+ *   soft edge are measured from. The PNG export composite is 4 bytes per
+ *   document pixel at 1x, so the scan allowance covers it.
  *
- * That is `3 * 4 * 2^2 + 10 = 58` bytes per document pixel of peak surface,
- * i.e. 973,078,528 bytes (928 MiB) at the cap below, inside the 1 GiB budget.
- * The cap of 16,777,216 document pixels (4096x4096) keeps a single 2x surface
- * at 256 MiB, instead of the roughly 1.07 GB an 8192x8192 document would need
- * for one surface.
+ * That is `3 * 4 * 2^2 + 15 = 63` bytes per document pixel of peak surface,
+ * i.e. 1,056,964,608 bytes (1008 MiB) at the cap below, inside the 1 GiB
+ * budget. The cap of 16,777,216 document pixels (4096x4096) keeps a single 2x
+ * surface at 256 MiB, instead of the roughly 1.07 GB an 8192x8192 document
+ * would need for one surface.
  *
  * The one-surface rule is a **requirement of the renderer**, not a hope: the
  * grouped-preview scratch must be released when no preview is active, or a
  * preview followed by an eraser keeps both it and the erase snapshot alive and
- * the peak becomes `4 * 4 * 2^2 + 10 = 74` bytes per document pixel
- * (1,241,213,984 bytes, 1.16 GiB) - over the 1 GiB budget below.
+ * the peak becomes `4 * 4 * 2^2 + 15 = 79` bytes per document pixel
+ * (1,325,363,584 bytes, 1.23 GiB) - over the 1 GiB budget below.
  *
  * Every additional layer adds one more full-resolution surface: the model
  * covers a one-layer document plus its working buffers, not an unbounded layer
@@ -62,8 +65,8 @@ export const RASTER_SURFACE_BYTES_PER_PIXEL = 4;
 export const BUDGETED_RASTER_SCALE = 2;
 /** Layer surface + stroke buffer + one of {erase snapshot, preview scratch}. */
 export const BUDGETED_FULL_RES_SURFACES = 3;
-/** A bucket scan's composite + ImageData + visited bitmap + mask. */
-export const BUDGETED_SCAN_BYTES_PER_PIXEL = 10;
+/** A bucket scan's composite, bookkeeping and distance field. */
+export const BUDGETED_SCAN_BYTES_PER_PIXEL = 15;
 export const DOCUMENT_RASTER_BUDGET_BYTES = 1024 * 1024 * 1024;
 /** Peak bytes per document pixel: three 2x surfaces plus one scan buffer. */
 export const PEAK_BYTES_PER_DOCUMENT_PIXEL =

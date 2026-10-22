@@ -99,13 +99,23 @@ Four distinct spaces exist, and every conversion happens in a named function.
 | --- | --- | --- | --- |
 | Document | logical px | `screenToDoc` | Stroke data and brush size live here. Independent of zoom and DPR. |
 | Screen | canvas-local CSS px | `PointerEvent.clientX - canvasRect.left` | Relative to the canvas element, never the window. |
+| Workspace | canvas-local CSS px | the same as screen, unrounded | Where the reference images live: they do not move when the view moves. |
 | Device | backing-store px | `css * devicePixelRatio` | Only the display canvas uses this. |
 | Surface | raster px | `doc * rasterScale` | Only per-layer surfaces use this. |
 
-The viewport is a plain value, `{ zoom, offsetX, offsetY }`, with
-`screen = doc * zoom + offset`. All of its math is in
+The viewport is a plain value, `{ zoom, offsetX, offsetY }` plus an optional
+**view transform** (a rotation and a mirror), and all of its math is in
 `core/rendering/viewport.ts`, free of DOM and renderer state, so it can be unit
-tested directly.
+tested directly. The mapping is one affine:
+
+```
+screen = R(rotation) · F(mirrored) · (zoom · doc) + offset
+```
+
+With no rotation and no mirror that is the familiar `screen = doc * zoom +
+offset`; the rotation is clockwise (the screen's y axis points down) and the
+mirror flips the x axis. The scale stays uniform under both, so a turned view
+keeps the document's proportions and its strokes' widths.
 
 `rasterScale` is a *supersampling* factor for layer surfaces (`clamp(dpr, 1, 2)`
 in the app). Raising it makes strokes crisper on HiDPI displays at the cost of
@@ -596,6 +606,59 @@ The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
 and there is nothing to finish or cancel - and it stays selected afterwards,
 consistent with the eraser. `B` returns to the brush.
 
+### Reference images
+
+A **reference image** is a picture the artist keeps beside the canvas: a
+photograph to trace from, a colour chart to pick from, a sketch to check a
+drawing against. It is deliberately *not* document content.
+
+The rules that make it a reference rather than an import:
+
+- **It never becomes pixels.** A reference is painted on the display canvas
+  only. It is not a layer element, it is not in the project file, and it never
+  reaches `composeDocumentImage`, so a PNG export of the same drawing is
+  identical with and without a reference.
+- **It never dirties the document.** Importing, moving, scaling, hiding or
+  removing a reference changes no stroke, adds no history entry and bumps no
+  revision. The references are **session state**: they live in their own store
+  (`core/reference/store.ts`), outside the editor's snapshot, and they are
+  gone when the app closes.
+- **It lives in workspace space.** A reference's rectangle is in the canvas'
+  own CSS pixels, not in document pixels, so it stays where the artist put it
+  while the artwork is zoomed and panned underneath it. Moving or scaling a
+  reference therefore cannot disturb the drawing, and the transform does not
+  depend on the document at all.
+
+The placement is a rectangle in workspace space plus the natural size of the
+decoded image. The one piece of arithmetic worth reading is the inverse of
+that placement, in `core/reference/geometry.ts`:
+
+```
+u = (x - reference.x) / reference.width  * reference.naturalWidth
+```
+
+`u` is the pixel of the *decoded image* under the pointer, and it is what the
+colour picker reads. A reference drawn at half its own size is therefore
+sampled at the pixel the artist is really pointing at, not at the pixel that
+happens to share the coordinates in the original file.
+
+**Sampling a reference.** A reference is drawn *over* the artwork, so a
+reference under the pointer is what the artist is pointing at. The picker
+therefore samples the reference first and the document composite only when
+the pointer is not over one. `Alt` puts the sampled colour into the secondary
+colour instead of the brush colour, the convention every art application
+uses. The pointer asks for the magnifier cursor over a reference, and the
+reference under the pointer is outlined, so the artist can see what a press
+will read.
+
+**Memory.** The store keeps exactly **one decoded copy** per reference: the
+file is decoded once into a canvas, and that canvas is both what the renderer
+draws and what the picker samples. Scaling a reference decodes nothing again
+- the canvas is simply drawn at another size. A file that cannot be decoded is
+refused with a message; a file that is enormous is downscaled *during* the
+decode, and the session shares one pixel budget so it cannot fill the memory
+with a dozen huge images.
+
 ### The colour wheel
 
 The **Colour** panel holds an HSV wheel: a disc where the angle of the pointer
@@ -678,6 +741,62 @@ debounced, so a brush-slider drag is one write rather than sixty. A file that
 cannot be read or written is recorded and forgotten - it is a minor
 inconvenience, not something the user has to act on.
 
+### The brush library
+
+A **brush preset** is an id, a name and a snapshot of the brush settings
+(`core/brushes/presets.ts`). It is editor preference, not document state:
+applying one goes through `setBrush`, and saving, renaming or deleting one
+never adds a history entry, bumps the revision or dirties the drawing. The
+same contract the brush itself has always had.
+
+**The built-in brushes are code.** `core/brushes/bundledPresets.ts` holds
+them, so a new build can improve one and every install gets the same brush.
+They are therefore *protected*: they cannot be renamed, overwritten or
+deleted, because deleting one would take the feature away rather than the
+user's data. Duplicating one is how the user gets a version they own. What
+the settings file may hold about a built-in brush is the user's own state -
+whether it is starred and when it was last used - and
+`mergeBundledPresets` joins the two: the brush comes from the code, the
+favourite and the timestamp come from the file. A hand-edited file therefore
+cannot make a user's brush protected, nor make a protected one editable.
+
+The **browser** (`features/brushes/BrushPresetPanel.tsx`) is the panel that
+lists them: a search, an order, a favourites filter, and the operations -
+create, rename, overwrite, duplicate, delete, star, import, export. Its rules
+are plain functions over plain data (`core/brushes/presetBrowser.ts`), so
+the whole of it - what the search finds, how the order reads, which key does
+what, what each button asks the editor for - is exercised in Node without a
+DOM, a canvas or React. The component holds the little state the browser
+owns and calls the editor for everything else.
+
+**The swatch is the brush.** A row's tip is drawn by the renderer's own
+primitives (`core/rendering/brushPreview.ts`), from the preset's own brush
+settings, so a property that changes a stroke changes the swatch with it.
+
+**The selection and the live brush are two things.** The engine remembers
+which preset the brush came from (`activePresetId`), so the panel, the
+toolbar picker and the reset button cannot disagree about which brush is in
+effect. Editing a brush field changes the brush and leaves the preset alone:
+the panel says the brush has changed since the preset was applied, and the
+stored copy is only changed when it is written back.
+
+The list **owns the keyboard**: the arrows, Home, End, Enter and Delete act
+on the selection. Delete is among them because the editor has a global
+Delete shortcut - it deletes the selected strokes - so the list has to claim
+it before the drawing sees it.
+
+**The library file** (`core/brushes/presetTransfer.ts`) is Paka's own small
+JSON document: the user's brushes, so they can be shared or backed up. It is
+validated on the way in, because it comes from outside: a file that is not
+JSON, or not a library, or that was written by a newer version, is refused
+with a message the user can act on rather than read as an empty library. A
+file that is too large, or that holds more brushes than the browser takes, is
+refused before anything is read into memory. A malformed *entry* is skipped
+and the rest of the file is still imported, and the number skipped is
+reported. The ids and the last-used stamps of the source machine do not
+travel: an imported brush is a new entry here, with a fresh id and a name
+that does not clash with the ones already in the library.
+
 ### The panel manager
 
 The side panels - the brush library, the colour wheel, the layers, the
@@ -744,6 +863,75 @@ the registry knows are offered, so the menu can never show a panel that does
 not exist. The menu bar is keyboard driven: the arrow keys open a menu and
 walk its items, the disabled items are skipped, Home and End jump to the ends
 and Escape closes the menu and puts the focus back where it came from.
+
+### The workspace layout
+
+The **workspace** is the window's own arrangement: which panels are up, how
+big the interface is, which colour scheme it wears and how dense the brush
+panel is. It is shell state, so it follows the same contract every other
+preference follows - rearranging the window is not an edit, so it pushes no
+history entry, bumps no revision and never makes a document dirty.
+
+It is a **second section of the settings file** (`core/workspace/
+workspaceSettingsSection.ts`), under the `workspace` key, for the same reason
+the panel layout is: the settings store owns the file, so the workspace hands
+its state over rather than writing a second file of its own. One file, one
+writer.
+
+**The schema is tolerant in the same way the rest of the file is**
+(`core/workspace/workspaceSettings.ts`): a missing field takes its default, an
+out-of-range interface scale is clamped rather than rejected, a malformed
+value takes its default, and a document from a newer version is ignored
+wholesale. A corrupt workspace therefore cannot stop the editor from starting,
+and a half-written file costs the user their arrangement, not their session.
+
+**A profile is an arrangement, not a label.** `core/workspace/workspaceProfiles.ts`
+holds the presets - *Painting* and *Compact Canvas* - and each one is a
+complete answer to "what does the window look like": the side panels, the
+shell's own rows, the interface scale and the brush panel's density. Applying
+one puts the shell into that arrangement and the settings file keeps it, so the
+window comes back the way the user left it.
+
+Two rules keep a profile honest:
+
+- **A profile touches the whole shell, including the panels.** The panel
+  layout belongs to the panel manager, so the profile *computes* the layout it
+  wants and hands it over; it never keeps a second copy of it. That is why
+  *Compact Canvas* really does give the canvas the space the panels were
+  taking.
+- **A profile never touches the colour scheme.** The scheme is a preference
+  the user chose on purpose, so applying a profile leaves it alone.
+  *Restore Workspace Defaults* is the one action that does change it, because
+  the user asked for "as if nothing had been changed".
+
+**The profile on offer is computed, never trusted.** The store compares the
+live workspace and the live panel layout against every profile and names the
+one that matches; a workspace the user has arranged by hand matches none of
+them and is honestly called *Custom*. The menu can therefore never claim a
+preset that does not match what is on screen.
+
+**The interface scale and the colour scheme are the stylesheet's business.**
+The scale is a `--ui-scale` custom property on the root element and every
+metric follows from it - the control heights, the type size, the shell's rows
+and columns - so the whole interface grows and shrinks together instead of one
+control at a time. The scheme is a `data-theme` attribute and a second set of
+tokens; the light scheme keeps the same token names, so no component knows
+which scheme is on. The area around the paper stays a shade darker than the
+panels in the light scheme: the paper is white, and a white sheet on a white
+workspace would have no edge to read.
+
+**The status bar is not hideable.** It carries the outcome of the last file
+operation - a save that failed is reported nowhere else - so a preference that
+could swallow an error is not a preference, it is a lost message. The tool
+rail is hideable, and every tool has a keyboard shortcut, so the rail is a
+convenience rather than the only way through.
+
+**Reference images are not part of the workspace.** A reference image is
+session state by design: its placement is in workspace pixels, its pixels
+belong to the store, and the file it came from is deliberately not kept. There
+is nothing meaningful to persist without the pixels - restoring the placement
+alone would put empty rectangles on the canvas - so the references are left
+alone and the workspace persists the window, not the window's contents.
 
 ### The autosave seam (not enabled)
 
@@ -943,30 +1131,74 @@ The gesture is a press, not a drag:
 
 1. On pointer-down the engine rejects a point outside the paper, a document
    larger than `MAX_FILL_SCAN_PIXELS` (16,777,216 pixels) and a missing
-   renderer. It then asks the renderer for the **merged visible composite** -
-   paper plus every visible layer at its opacity - at document resolution and
-   runs `core/fill/floodFill` from the floored document point.
+   renderer. It then asks the renderer for the **reference** the options name
+   and runs `core/fill/fillScan` from the floored document point.
 2. The scan is **4-connected** and compares each pixel to the seed with the
    largest absolute difference across `R`, `G`, `B` and `A`, in 8-bit units,
    against the toolbar's tolerance (`0`-`255`; default `24`). Raising it admits
    anti-aliased boundary pixels; it never interpolates a colour. Two fully
    transparent pixels always match each other regardless of their hidden RGB
    bytes, because those bytes have no visible meaning.
-3. The selected pixels are cropped to their bounding box and stored as a binary
-   mask (`0` or `255`). A pixel either matches the tolerance and is filled or it
-   does not - there is no feathered edge invented at commit time. That is what
-   lets a save/reopen and an undo/redo reproduce the same bytes.
+3. The selected pixels are cropped to their bounding box and stored as a
+   coverage mask (`0` outside, `255` inside, and a ramp between the two on a
+   feathered edge). The renderer writes the coverage as the patch's alpha, so
+   a soft edge blends with the layer underneath - and a hard edge is still a
+   step, which is what lets a save/reopen and an undo/redo reproduce the same
+   bytes.
 4. The patch is inserted on the **active layer** at the end of its element list,
    immediately, so the preview is the real result. Nothing has entered history
    and the revision has not moved yet.
+
+#### What the region is measured against
+
+The **reference mode** decides which layers the region is measured against, and
+the renderer reads exactly those layers - no more:
+
+| Mode | The sample is |
+| --- | --- |
+| `merged` | the paper plus **every visible layer**, at its opacity and blend mode |
+| `active` | the paper plus the **active layer** alone |
+| `layer` | the paper plus **one chosen layer** |
+
+A hidden layer never contributes, whatever the mode says: the user cannot see
+it, so it cannot bound a region either. The `layer` mode therefore refuses the
+press with a status-bar notice when the chosen layer is hidden or gone, rather
+than silently sampling the paper alone and filling the whole canvas.
+
+#### Growing, shrinking and softening the region
+
+The region the scan returns is a set of pixels, and the options reshape it
+before it is committed:
+
+- **Grow / shrink** (`-32` to `+32` document pixels) measures the distance from
+  the region's **boundary** and takes in or drops every pixel within that
+  distance. The distance is an exact Euclidean distance transform
+  (Felzenszwalb and Huttenlocher), so the growth is round rather than square
+  and the numbers mean the same thing at every zoom. The transform runs over
+  the region's own bounding box, never over the whole document.
+- **Soft edge** (`0`-`8` document pixels) turns the boundary into a ramp: a
+  pixel just inside keeps most of its coverage, a pixel just outside keeps a
+  little, and the ramp reaches zero `antialias` pixels out. The coverage byte
+  is what the renderer writes as the patch's alpha, so the edge blends with
+  whatever is underneath it.
+- **Close gaps** (`0`-`16` document pixels) seals a passage too narrow for the
+  fill to pass through. A matching pixel is sealed when the scan line through
+  it has a barrier within `radius` steps on **both** sides and the passage
+  between the two barriers is no wider than `radius` steps: that is the shape
+  of a break in a wall. The rule is deliberately simple, and it has one
+  visible consequence - a region narrower than `radius` is itself a passage,
+  so it is sealed too. The control therefore measures *how narrow a passage
+  has to be before it stops letting the fill through*, and a one-pixel break
+  in a line of line art is sealed at `1`. Only the rows and the columns are
+  scanned: two walls meeting at a corner look like a one-pixel diagonal
+  passage, and sealing that would cut the corners off every boxy shape.
 
 On pointer-up `finishFill` bumps the revision and pushes one `FillCommand`
 carrying the patch and its index. On `pointercancel`, lost pointer capture, a
 tool switch or an abort, `cancelFill` removes the same patch and invalidates
 the layer; no history entry or revision change is left behind. A click that
-would change nothing - a tolerance-0 fill whose seed already has the brush
-colour at full alpha - is dropped rather than recorded as an invisible undo
-step.
+would change nothing - a fill whose region already carries the brush colour -
+is dropped rather than recorded as an invisible undo step.
 
 Redo and reopen replay the **stored mask**; neither re-runs flood fill against a
 composite that may have changed since. That is the reason the patch is the
@@ -984,13 +1216,19 @@ one function, so they cannot disagree.
 Memory stays proportional to the job: a small fill stores only its own
 bounding-box mask, never a full-canvas copy. The scan itself is bounded by the
 document-pixel ceiling because it needs the RGBA composite, an `ImageData` copy,
-a visited bitmap and the coverage mask; at the ceiling that is roughly 170 MB
-transiently. A larger document is still editable - only a bucket press is
-refused, with a status-bar notice rather than a freeze.
+a visited bitmap, the coverage mask, the map the gap closing seals its
+passages in and the distance field the growth and the soft edge are measured
+from; at the ceiling that is roughly 240 MB transiently. A larger document is
+still editable - only a bucket press is refused, with a status-bar notice
+rather than a freeze.
 
-Tolerance lives in the editor snapshot (`setFillTolerance`) and describes the
-next fill, like `shapeFill`; it is not serialized. A committed patch carries its
-own pixels, so changing the slider never rewrites one.
+The tolerance, the reference mode, the growth, the soft edge and the gap
+closing live in the editor snapshot (`setFillTolerance`, `setFillReference`,
+`setFillExpand`, `setFillAntialias`, `setFillCloseGaps`) and describe the next
+fill, like `shapeFill`; they are not serialized into a project. A committed
+patch carries its own pixels, so changing a slider never rewrites one. The
+preferences survive a restart through the per-user settings file; the layer the
+`layer` mode names does not, because a layer belongs to a document.
 
 ### Gradients
 
@@ -1502,6 +1740,94 @@ pointer or a key. It never writes one in response to a snapshot change, so the
 two cannot chase each other: the rectangle is drawn *from* the view, never
 *pushed* into it.
 
+### View navigation and the status bar
+
+The **status bar** is the app's readout of what the engine actually holds. Every
+field is read from the engine's snapshot: the file name and its unsaved marker,
+the document's size, the active tool, the active layer, the zoom, the history
+depth, the selection's size, the guides, the grid and the live cursor position.
+Nothing in it is a constant that could drift away from the canvas, and a field
+that is not true is not shown at all (the guides, the grid and the view's
+orientation only appear when they apply).
+
+**The zoom field is editable.** It shows the zoom the canvas really has, and it
+takes a typed one: `150`, `150%` or `1.5x`. The parse lives in
+`features/view/viewNavigation.ts` and clamps to the range the viewport
+supports, so the field can never ask for a zoom the canvas cannot show. While
+the field has the focus it shows what the user is typing; `Enter` commits and
+releases the focus, `Escape` throws the typing away, and losing the focus
+returns the field to the canvas' own zoom.
+
+**A zoom keeps the point under the pointer.** `zoomIn`, `zoomOut` and `zoomTo`
+anchor on the pointer's last position while it is over the canvas, and on the
+middle of the window otherwise. The anchor is a *document* point, so it holds
+under a rotation and a mirror as well.
+
+**The view's orientation is view state.** A rotation (`Shift+R`) and a mirror
+(`Shift+M`) live in the viewport, not in the document: they move the canvas and
+nothing else, so they add no history step, bump no revision and never mark the
+file unsaved. `Reset View` (`Ctrl+Shift+0`) puts the view back the way it was
+found - the whole document, upright and unmirrored. The renderer applies the
+whole view as one affine, so the paper, the grid, the guides and the selection
+overlay all turn with it, and the overlays that clip themselves to the paper
+clip against the *visible* document rectangle rather than against a rectangle
+assumed to be axis-aligned.
+
+**Panning has three answers.** The `Pan` tool, a middle-button drag (which
+pans whatever the active tool is) and the **space bar**: while it is held, a
+drag moves the view instead of drawing. The modifier decides what a *new* press
+does - a stroke that is already in flight keeps drawing - so a stray key press
+can never lose artwork. The modifier lives in the engine
+(`setPanModifier`), and the keyboard layer only reports the key.
+
+### The second view of the canvas
+
+A **view** is a window on the document, not a copy of it. `View → New View of
+Canvas` opens a second one: a canvas beside the main one that shows the same
+artwork through a transform of its own.
+
+**One document, many windows.** The document, its history, its dirty flag and
+its rasterized pixels belong to the engine. A view owns exactly three things:
+its canvas, its transform (zoom, pan, rotation, mirror) and its size. So:
+
+- a stroke drawn in either view is **one** stroke in **one** document, and it
+  shows up in both views at once;
+- undo from either view undoes the same single step;
+- opening or closing a view is **not an edit**: it adds no history step, bumps
+  no revision and never marks the file unsaved;
+- a PNG export is the document, not a view: the transform is display only.
+
+**The two views are two display targets of one renderer.** The renderer owns
+the layer surfaces, the stroke buffer and the in-progress stroke; a display
+target owns a canvas and a view transform. Rendering paints every target from
+the same surfaces, so the second view costs a projection of pixels that are
+already rasterized rather than a second copy of the artwork. The layer
+surfaces are therefore allocated once, and a stroke in flight is previewed in
+both windows.
+
+**A view owns its own input.** Each view has its own input binder, because a
+pointer position only means something relative to the canvas it happened in:
+the binder asks the engine for *its* view's viewport on every event, and the
+engine maps the sample through that view's transform. A wheel over the second
+view moves the second view; a press in a view makes it the **active** view.
+
+**The active view is the one the commands act on.** `zoomIn`, `zoomToFit`,
+`rotateView` and the rest turn the view the user is working in, and the
+toolbar shows which one that is. A press focuses its own view, so the user
+never has to say which window they meant.
+
+**The overlay is drawn in every view.** The selection, the guide selection and
+the gradient handles are *one* thing: the engine owns a single selection and
+projects it into each view. There is no second selection to fall out of step
+with the first. (The transform *handles* are the one exception to "each view
+draws what it sees": their positions are computed once, with the active view's
+zoom, so the rotation handle's stem is the same length above the frame in both
+windows.)
+
+The view registry itself lives in `core/engine/canvasViews.ts`; the panel that
+draws the second canvas is `features/view/SecondaryViewPanel.tsx`, and the
+tests are in `src/test/secondaryView.test.ts`.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its element list:
@@ -1720,29 +2046,69 @@ existing work, and neither creates a history entry or dirties the document.
   for jumps beyond `MAX_INTERPOLATION_DISTANCE`. It therefore controls sample
   density and pressure-ramp smoothness, not brush width; the renderer still
   draws segments between samples.
-- **Stabilizer** (`0..1`, default `0`, shown as 0-100 %) applies an exponential
-  follow to incoming x, y and pressure: `follow = 1 - 0.75 * strength`. The
-  first sample is exact; each later captured point moves that fraction of the
-  way from the previous captured point to the raw pointer. At `0` the follow
-  factor is exactly `1`, preserving the raw path byte for byte.
-- **The release point is part of the path.** Smoothing lags the pointer while it
-  moves, so `finish()` appends the last raw point when it differs from the
-  captured tail. The engine feeds that final point to the renderer before
-  `endStroke`, which means the settled segment is previewed, committed and later
-  replayed like any other sample. There is no hidden post-process and no lost
-  start or end.
-- **Brush and eraser only.** Shapes derive their geometry from the drag corners,
-  not the freehand path, so the stabilizer is deliberately not applied to them.
-- **Additive in the file.** Stabilizer changes only the samples captured at draw
-  time; a reader that ignores the field still replays those samples and produces
-  the same picture. It was therefore added within format version 6, and a
-  missing field reads as `0` (see
-  [PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
+- **The stabilizer** filters the *path*, and only the path. It lives in
+  `core/brushes/stabilizer.ts` and is a capture-time filter: what it produces
+  is what the stroke stores, so live drawing, undo/redo, a reopened file and a
+  PNG export all replay exactly what was shown. The brush and the eraser use
+  it; the shape tools do not, because their geometry comes from the drag and
+  not from a sampled path.
 
-The trade-off is honest: at high strength the line visibly trails the pointer
-and closes with one settle segment on release. There is no look-ahead, rope
-physics or time-based catch-up, and the stored smoothed samples mean undo,
-reopen and export replay exactly the previewed path.
+**Three modes, one strength.** The mode says *what* the filter does and the
+strength says *how much*:
+
+| Mode | What it does |
+| --- | --- |
+| `off` | The pointer's own path, sample for sample. |
+| `smooth` | An adaptive first-order lag: heavily smoothed while the pointer is slow, almost transparent while it is fast. |
+| `pull` | A rubber band: the captured point trails the pointer by a fixed *time*, so the distance it trails grows with the pointer's speed. |
+
+The strength is `0..1` and is a **time constant**, not a share of the
+distance: at `0` the filter is transparent, and at `1` the captured point
+takes 133 ms (`smooth`) or 50 ms (`pull`) to close most of the gap to the
+pointer. A time constant is a duration, so the same gesture is filtered the
+same way at 60 Hz and at 240 Hz - measured at 100 px/s, the captured path
+trails the pointer by 4.43 px at 60, 120 and 240 Hz alike.
+
+**The speed term is what keeps the corners.** The `smooth` mode shortens its
+time constant as the pointer speeds up (`tau / (1 + 0.02 * speed)`), so a slow
+gesture is smoothed hard and a fast one is followed closely. The speed is the
+**median of the recent steps** over a bounded window of six raw samples, not
+their average: a hand that trembles while it draws makes long and short steps
+in turn, and the median is the one of them that does not move. A single step
+that is much larger than the recent travel is a movement of its own - a flick -
+and the filter opens for it at once, so the first flick of a stroke is not
+rounded into a swoop.
+
+**What it does not touch.** The pressure and the timestamp of a sample are the
+device's own: the stored pressure is what the device measured, and the
+brush's pressure curve is applied later, when the stroke is rasterized. The
+filter moves the point, not the pressure, so a pressure ramp stays a pressure
+ramp and the curve is never applied twice.
+
+**The release point is part of the path.** A causal filter lags, so the last
+captured point is behind the pointer. The release runs a short **catch-up**:
+a curve of at most four points from the captured point to the release point,
+whose last point is the release point **exactly**. The curve leaves the stroke
+along the direction the pointer was travelling, so the tail continues the line
+instead of cutting across it, and the engine feeds the tail to the renderer
+before `endStroke`, which means it is previewed, committed and later replayed
+like any other sample. There is no hidden post-process and no lost start or
+end.
+
+**What it costs.** The trade-off is measured, not asserted. With the
+`smooth` mode at full strength, a straight drag trails the pointer by 1.9 px
+at 20 px/s, 4.4 px at 100 px/s and 6.3 px at 1000 px/s - the trail grows
+with the speed and then saturates, so it never runs away. A 1 px tremor at
+10 Hz on a 50 px/s line keeps 37 % of its amplitude (the `pull` mode keeps
+more, at the cost of a trail that grows with the speed without a bound). The
+`off` mode is the raw path, byte for byte.
+
+**Additive in the file.** The stabilizer and its mode change only the samples
+captured at draw time; a reader that ignores the fields still replays those
+samples and produces the same picture. They were therefore added additively -
+`stabilizer` within format version 6 and `stabilizerMode` within version 12 -
+and a missing field reads as `0` and `smooth` (see
+[PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
 
 ## React integration
 
@@ -1766,8 +2132,42 @@ keep it from churning. Two things deliberately bypass React:
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
 
-## Native boundary (Rust)
+### The brush controls and the live preview
 
+The brush's properties are described **once**, in the options schema
+(`features/options/toolOptionSchema.ts`), and the brush group renders that
+schema. The schema says which field a control reads and writes, and the
+options bar filters the group by the fields the *active tool* consumes: a
+shape traces an outline, so it has no sample density, no stabilizer and no
+dabs, and a control that changes nothing is worse than no control at all.
+
+Two rules make the controls safe to type into:
+
+- **A number box is a text field first.** `core/brushes/numericInput.ts` holds
+  the rules: an empty or half-typed value is *not* a value, so it never
+  reaches the editor, and a value outside the range is clamped and corrected in
+  place. Clearing the box to type a new number no longer snaps the brush to
+  its minimum.
+- **The keyboard moves in three steps.** An arrow key moves by the field's own
+  step, `Shift`+arrow by a tenth of it, `Page Up`/`Page Down` by ten times it.
+  The brush size supplies its own step, because a pixel is the right step at
+  6 px and a tenth of the size is the right step at 100 px.
+
+The **live preview** (`core/rendering/brushPreview.ts`) draws one synthetic
+stroke with the engine's own primitives - the segment rasterizer, the stamp
+engine's dab plan, the hardness feather and the grain - so a property that
+changes a stroke changes the swatch the same way. It is drawn into a canvas of
+its own when the brush changes and at no other time: it never touches the
+document, and no pointer sample reaches it. The swatch is zoomed so the brush
+fits it, so it shows the *shape* of the mark rather than its size.
+
+The **brush's origin** is the preset the brush was applied from. It is engine
+state (`activePresetId`), kept apart from the brush's edited values, so the
+picker, the preview and the reset button cannot disagree about which preset is
+in effect, and the reset can restore a preset's defaults after the brush has
+been changed.
+
+## Native boundary (Rust)
 `src-tauri` holds the project file I/O: `read_text_file`,
 `write_text_file_atomic`, `write_binary_file_atomic` (all path-validating,
 extension-restricted and size-capped) plus `native_environment()`, which returns

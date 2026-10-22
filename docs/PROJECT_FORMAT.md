@@ -341,9 +341,7 @@ visibly different drawing - so it must refuse the file rather than mis-read it
 
 Byte `i` of the decoded mask is the coverage of pixel
 `(x + i % width, y + floor(i / width))`. `0` leaves the layer alone and `255`
-paints the colour at full coverage; the current engine writes only those two
-values (a binary mask), so a region's anti-aliased boundary is either selected
-or not - no invented feathering. The mask is cropped to the filled pixels'
+paints the colour at full coverage. The mask is cropped to the filled pixels'
 bounding box, so a small fill on a large canvas stores only its own pixels.
 
 A fill's pixels are the result, not a seed and tolerance. Reopening or redoing
@@ -353,10 +351,14 @@ under it changes later. A fill element is opaque in the file's model (its
 `color` has no alpha field), and its patch is painted in element order like a
 stroke.
 
-The parser accepts any byte value in the mask (the renderer uses it as alpha)
-but the engine only creates `0`/`255`. This leaves room for a future
-anti-aliased patch without another format version, while a binary mask remains
-the current guarantee.
+The coverage is a byte per pixel, not a bit: the renderer writes it as the
+patch's alpha, so a value between `0` and `255` is a partially covered pixel.
+The engine writes `0` and `255` for a hard edge and a ramp for a **soft edge**
+(the bucket's optional feather), and the ramp is what lets a fill's edge blend
+with the layer underneath instead of stair-stepping along a diagonal. Because
+the mask has always been read as an alpha, a reader that ignores the ramp
+renders the same picture - so **no format version change is needed** for a
+soft-edged fill.
 
 #### Gradients
 
@@ -398,6 +400,7 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
+| `stabilizerMode` | `off` \| `smooth` \| `pull` | How the pointer path is filtered before the samples are captured: `off` stores the pointer's own path, `smooth` filters it adaptively and `pull` drags the line behind the pointer. It changes the samples captured at draw time and not the rendering of stored samples, so it is additive within version 12: a missing field reads as `smooth`, and a value outside the three is refused. |
 | `texture` | 0-1 | Strength of the deterministic, document-anchored grain applied once to the finished stroke coverage. `0` is the plain coverage. Required in version 7; version-1 to -6 files have no field and read as `0`. |
 | `stamp` | boolean | Whether the stroke is rasterized as a chain of round dabs instead of round-capped segments. `false` is the legacy segment path. Required in version 9; version-1 to -8 files have no field and read as `false`. |
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
@@ -527,6 +530,12 @@ Two further guarantees:
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
   as `0`; when present it must still be a number in `0..1`.
+- **`stabilizerMode` is additive within version 12, for the same reason.** It
+  chooses *how* the pointer path is filtered before the samples are captured,
+  and the stored samples already describe the picture, so a reader that skips
+  the field draws the identical picture. Missing reads as `smooth`; when
+  present it must be one of `off`, `smooth` or `pull`, and anything else is
+  refused rather than guessed at.
 - **`document.guides` is additive within version 9 and later.** The composition
   guides are display-only: they are painted over the artwork and never reach a
   layer surface or a PNG export. A reader that skips the field draws the

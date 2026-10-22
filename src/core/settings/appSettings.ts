@@ -31,6 +31,15 @@ import {
 } from "../brushes/presets";
 import { DEFAULT_GRID_SETTINGS, normalizeGridSpacing } from "../document/grid";
 import {
+  DEFAULT_RULER_SETTINGS,
+} from "../rendering/rulers";
+import {
+  DEFAULT_SYMMETRY_SETTINGS,
+  normalizeSymmetryCount,
+  normalizeSymmetryMode,
+  type SymmetryMode,
+} from "../document/symmetry";
+import {
   DEFAULT_FILL_ANTIALIAS,
   DEFAULT_FILL_CLOSE_GAPS,
   DEFAULT_FILL_EXPAND,
@@ -106,6 +115,24 @@ export interface AppSettings {
   readonly gridSpacing: number;
   /** Whether a drawing sample follows the guides and the grid lines. */
   readonly gridSnapping: boolean;
+  /**
+   * Whether the ruler strips are drawn.
+   *
+   * A view preference, like the grid: the rulers measure the view, not the
+   * document, so they are never part of a project file.
+   */
+  readonly rulersVisible: boolean;
+  /**
+   * Whether the next stroke is repeated around the symmetry centre.
+   *
+   * The copies a symmetric stroke produces are ordinary strokes in the
+   * document, so the symmetry itself is a preference and not content.
+   */
+  readonly symmetryEnabled: boolean;
+  /** Which symmetry the copies use. */
+  readonly symmetryMode: SymmetryMode;
+  /** How many copies the radial symmetry draws (`2..12`). */
+  readonly symmetryCount: number;
 }
 
 /** The settings a fresh installation starts from. */
@@ -128,6 +155,10 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   gridVisible: DEFAULT_GRID_SETTINGS.visible,
   gridSpacing: DEFAULT_GRID_SETTINGS.spacing,
   gridSnapping: DEFAULT_GRID_SETTINGS.snap,
+  rulersVisible: DEFAULT_RULER_SETTINGS.visible,
+  symmetryEnabled: DEFAULT_SYMMETRY_SETTINGS.enabled,
+  symmetryMode: DEFAULT_SYMMETRY_SETTINGS.mode,
+  symmetryCount: DEFAULT_SYMMETRY_SETTINGS.count,
 };
 
 const TOOL_IDS = new Set<string>(TOOL_DEFINITIONS.map((definition) => definition.id));
@@ -239,6 +270,16 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       numberOr(record.gridSpacing, DEFAULT_APP_SETTINGS.gridSpacing),
     ),
     gridSnapping: booleanOr(record.gridSnapping, DEFAULT_APP_SETTINGS.gridSnapping),
+    // The ruler and symmetry fields are additive, like the grid's: a settings
+    // file written before them simply has none of them.
+    rulersVisible: booleanOr(record.rulersVisible, DEFAULT_APP_SETTINGS.rulersVisible),
+    symmetryEnabled: booleanOr(record.symmetryEnabled, DEFAULT_APP_SETTINGS.symmetryEnabled),
+    symmetryMode: normalizeSymmetryMode(
+      typeof record.symmetryMode === "string" ? record.symmetryMode : DEFAULT_APP_SETTINGS.symmetryMode,
+    ),
+    symmetryCount: normalizeSymmetryCount(
+      numberOr(record.symmetryCount, DEFAULT_APP_SETTINGS.symmetryCount),
+    ),
   };
 }
 
@@ -292,6 +333,10 @@ export function settingsDocument(settings: AppSettings): Record<string, unknown>
     gridVisible: settings.gridVisible,
     gridSpacing: settings.gridSpacing,
     gridSnapping: settings.gridSnapping,
+    rulersVisible: settings.rulersVisible,
+    symmetryEnabled: settings.symmetryEnabled,
+    symmetryMode: settings.symmetryMode,
+    symmetryCount: settings.symmetryCount,
   };
 }
 
@@ -338,6 +383,10 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
     a.gradientEndColor === b.gradientEndColor &&
     a.gridVisible === b.gridVisible &&
     a.gridSpacing === b.gridSpacing &&
-    a.gridSnapping === b.gridSnapping
+    a.gridSnapping === b.gridSnapping &&
+    a.rulersVisible === b.rulersVisible &&
+    a.symmetryEnabled === b.symmetryEnabled &&
+    a.symmetryMode === b.symmetryMode &&
+    a.symmetryCount === b.symmetryCount
   );
 }

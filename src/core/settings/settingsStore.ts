@@ -93,6 +93,10 @@ export function applyToEngine(engine: DrawingEngine, settings: AppSettings): voi
   engine.setGridVisible(settings.gridVisible);
   engine.setGridSpacing(settings.gridSpacing);
   engine.setGridSnapping(settings.gridSnapping);
+  engine.setRulersVisible(settings.rulersVisible);
+  engine.setSymmetryEnabled(settings.symmetryEnabled);
+  engine.setSymmetryMode(settings.symmetryMode);
+  engine.setSymmetryCount(settings.symmetryCount);
 }
 
 /** Reads the preferences the editor currently holds. */
@@ -117,6 +121,10 @@ export function readFromEngine(engine: DrawingEngine): AppSettings {
     gridVisible: snapshot.gridVisible,
     gridSpacing: snapshot.gridSpacing,
     gridSnapping: snapshot.gridSnapping,
+    rulersVisible: snapshot.rulersVisible,
+    symmetryEnabled: snapshot.symmetryEnabled,
+    symmetryMode: snapshot.symmetryMode,
+    symmetryCount: snapshot.symmetryCount,
   };
 }
 
