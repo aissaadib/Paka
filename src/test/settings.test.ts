@@ -116,6 +116,7 @@ const NON_DEFAULT_BRUSH_VALUES: Record<
   minSizeRatio: 0.55,
   spacing: 0.34,
   stabilizer: 0.66,
+  stabilizerMode: "pull",
   texture: 0.47,
   stamp: true,
   stampSpacing: 0.28,
@@ -266,7 +267,14 @@ describe("every brush field survives the settings file", () => {
 
   it("round-trips a preset whose brush has every field set", () => {
     const brush = nonDefaultBrush();
-    const preset = { id: "preset-every-field", name: "Every field", brush };
+    const preset = {
+      id: "preset-every-field",
+      name: "Every field",
+      brush,
+      favorite: false,
+      builtin: false,
+      lastUsedAt: null,
+    };
 
     const text = serializeAppSettings({
       ...DEFAULT_APP_SETTINGS,
@@ -362,6 +370,51 @@ describe("the preferences survive a restart", () => {
     expect(state.gridSnapping).toBe(DEFAULT_APP_SETTINGS.gridSnapping);
   });
 
+  it("restores the rulers and the symmetry", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setRulersVisible(true);
+    first.engine.setSymmetryEnabled(true);
+    first.engine.setSymmetryMode("radial");
+    first.engine.setSymmetryCount(8);
+    first.timers.runAll();
+    await settle();
+
+    // The rulers and the symmetry are view preferences, so they belong in the
+    // settings file.
+    const written = JSON.parse(gateway.contents as string);
+    expect(written.rulersVisible).toBe(true);
+    expect(written.symmetryEnabled).toBe(true);
+    expect(written.symmetryMode).toBe("radial");
+    expect(written.symmetryCount).toBe(8);
+
+    // And a restart puts them back into the editor.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const state = second.engine.getState();
+    expect(state.rulersVisible).toBe(true);
+    expect(state.symmetryEnabled).toBe(true);
+    expect(state.symmetryMode).toBe("radial");
+    expect(state.symmetryCount).toBe(8);
+  });
+
+  it("defaults the rulers and the symmetry for a settings file written before them", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({ version: SETTINGS_VERSION, toolId: "brush" });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    const state = engine.getState();
+    expect(state.rulersVisible).toBe(DEFAULT_APP_SETTINGS.rulersVisible);
+    expect(state.symmetryEnabled).toBe(DEFAULT_APP_SETTINGS.symmetryEnabled);
+    expect(state.symmetryMode).toBe(DEFAULT_APP_SETTINGS.symmetryMode);
+    expect(state.symmetryCount).toBe(DEFAULT_APP_SETTINGS.symmetryCount);
+  });
+
   it("restores the directional stamp texture", async () => {
     const gateway = new MemorySettingsGateway();
 
@@ -413,14 +466,19 @@ describe("the preferences survive a restart", () => {
     expect(gateway.writes).toHaveLength(1);
     const file = JSON.parse(gateway.writes[0]);
     expect(file.version).toBe(SETTINGS_VERSION);
-    expect(file.presets).toHaveLength(1);
-    expect(file.presets[0].brush.stampTexture).toBe(0.35);
+    // The file holds the built-in brushes as well; the user's own are the
+    // ones that are not built in.
+    const written = file.presets.filter((preset: { builtin: boolean }) => !preset.builtin);
+    expect(written).toHaveLength(1);
+    expect(written[0].brush.stampTexture).toBe(0.35);
 
     // A restart: a new engine, a new store, the same file.
     const second = createHarness(gateway);
     await second.store.load();
 
-    const presets = second.engine.getState().presets;
+    const presets = second.engine
+      .getState()
+      .presets.filter((preset) => !preset.builtin);
     expect(presets).toHaveLength(1);
     expect(presets[0].name).toBe("Ink");
     expect(presets[0].brush).toEqual(first.engine.getState().brush);
