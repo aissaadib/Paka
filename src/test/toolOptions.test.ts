@@ -15,7 +15,25 @@ import {
   toolOptionLabel,
   toolShowsBrushControls,
   visibleToolOptions,
+  type SliderToolOption,
+  type ToggleToolOption,
+  type ToolOption,
 } from "../features/options/toolOptionSchema";
+
+/** Narrows an option to the kind a test expects, so a wrong kind fails loudly. */
+function asSlider(option: ToolOption): SliderToolOption {
+  if (option.kind !== "slider") {
+    throw new Error(`expected a slider, got "${option.kind}"`);
+  }
+  return option;
+}
+
+function asToggle(option: ToolOption): ToggleToolOption {
+  if (option.kind !== "toggle") {
+    throw new Error(`expected a toggle, got "${option.kind}"`);
+  }
+  return option;
+}
 
 function snapshotFor(toolId: ToolId): EditorSnapshot {
   return {
@@ -82,11 +100,11 @@ describe("tool option reads and writes", () => {
   it("reads the current snapshot values", () => {
     const snapshot = snapshotFor("star");
     const [sides, inner, rotation, fill] = visibleToolOptions("star", snapshot);
-    expect(sides.read(snapshot)).toBe(7);
-    expect(inner.read(snapshot)).toBe(0.42);
-    expect(rotation.read(snapshot)).toBe(33);
-    expect(fill.read(snapshot)).toBe(true);
-    expect(visibleToolOptions("bucket", snapshot)[0].read(snapshot)).toBe(19);
+    expect(asSlider(sides).read(snapshot)).toBe(7);
+    expect(asSlider(inner).read(snapshot)).toBe(0.42);
+    expect(asSlider(rotation).read(snapshot)).toBe(33);
+    expect(asToggle(fill).read(snapshot)).toBe(true);
+    expect(asSlider(visibleToolOptions("bucket", snapshot)[0]).read(snapshot)).toBe(19);
   });
 
   it("writes through the matching editor action", () => {
@@ -96,7 +114,7 @@ describe("tool option reads and writes", () => {
       if (option.kind === "toggle") {
         option.write(actions, false);
       } else {
-        option.write(actions, option.id === "shapeSides" ? 5 : 0.25);
+        asSlider(option).write(actions, option.id === "shapeSides" ? 5 : 0.25);
       }
     }
     expect(calls).toEqual([

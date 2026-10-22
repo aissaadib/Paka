@@ -209,6 +209,14 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
+| `ToolOption`, `registerToolOptions`, `appendToolOptions`, `visibleToolOptions`, `toolOptionLabel` | `core/shell/toolOptions.ts` | grep the symbol |
+| `ShellSlotId`, `ShellLayout`, `placePanel`, `movePanel`, `hidePanel`, `normalizeShellLayout` | `core/shell/slots.ts` | grep the symbol |
+| `PanelDefinition`, `registerPanel`, `listPanels`, `panelsInSlot` | `core/shell/panelRegistry.ts` | grep the symbol |
+| `ViewportState`, `viewportStateFrom`, `viewportFromState`, `normalizeViewportState` | `core/shell/viewportState.ts` | grep the symbol |
+| `OverlayDefinition`, `registerOverlay`, `listOverlays`, `overlaysForLayer` | `core/shell/overlayRegistry.ts` | grep the symbol |
+| `HistoryEntry`, `HistoryState`, `describeHistory`, `canUndo`, `canRedo` | `core/shell/historyModel.ts` | grep the symbol |
+| `ShellPreferences`, `normalizeShellPreferences`, `parseShellPreferences` | `core/shell/preferences.ts` | grep the symbol |
+| `DynamicsModel`, `normalizeDynamicsModel`, `dynamicsSizeFactor`, `registerDynamicsModel` | `core/brushes/dynamics.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
 
