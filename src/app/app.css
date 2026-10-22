@@ -32,6 +32,25 @@
   min-height: 0;
 }
 
+/* The columns keep their tracks even when a column's content is not rendered.
+   The tool rail is a workspace preference, and a rail that is not drawn must
+   not slide the canvas into its column: without this the canvas would take
+   the rail's zero-width column and the panels would take the canvas'. */
+.workspace-body > .tool-rail {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.workspace-body > .canvas-views {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.workspace-body > .side-panels {
+  grid-column: 3;
+  grid-row: 1;
+}
+
 /* The right-hand column: the panel stack. The panels are the ones the panel
    manager knows about, in registry order; the one that grows takes the rest
    of the column, and the column itself scrolls when they do not fit. */

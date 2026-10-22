@@ -19,8 +19,11 @@
   border-left: 1px solid var(--border);
 }
 
-/* A hidden panel keeps its place in the stack but takes no space. */
-.panel--hidden {
+/* A hidden panel keeps its place in the stack but takes no space.
+   The rule is deliberately specific: a feature's own stylesheet may repeat
+   the shared `.panel` rule, and a plain `.panel--hidden` would lose to it on
+   source order and leave the panel on screen. */
+.panel.panel--hidden {
   display: none;
 }
 
