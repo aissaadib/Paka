@@ -404,7 +404,16 @@ export interface ShortcutGateway {
 const DEFAULT_DEBOUNCE_MS = 300;
 
 export interface ShortcutStoreOptions {
-  readonly gateway: ShortcutGateway;
+  /**
+   * Where the chords document lives.
+   *
+   * It is optional, because the chords do not have to live in a file of their
+   * own: when they live in the **settings file**, the settings store owns
+   * that file and writes them back, and the store only holds them. A store
+   * without a gateway never writes anything - it is the settings store that
+   * persists the chords, so the two writers cannot race for the same file.
+   */
+  readonly gateway?: ShortcutGateway;
   /** The commands the chords are checked against. */
   readonly actions?: readonly ActionDefinition[];
   /** The platform the chords are read and written for. */
@@ -431,7 +440,7 @@ function describe(error: unknown): string {
  * document is read once at startup and written when the user changes a chord.
  */
 export class ShortcutStore {
-  private readonly gateway: ShortcutGateway;
+  private readonly gateway: ShortcutGateway | null;
   private readonly actions: readonly ActionDefinition[];
   private readonly platform: KeyboardPlatform;
   private readonly debounceMs: number;
@@ -449,7 +458,7 @@ export class ShortcutStore {
   private writeError: string | null = null;
 
   constructor(options: ShortcutStoreOptions) {
-    this.gateway = options.gateway;
+    this.gateway = options.gateway ?? null;
     this.actions = options.actions ?? ACTION_DEFINITIONS;
     this.platform = options.platform ?? "other";
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
@@ -463,6 +472,14 @@ export class ShortcutStore {
     return this.shortcuts;
   }
 
+  /**
+   * The chords the store holds, for a reader that wants a snapshot.
+   *
+   * The same object is returned until the chords change, so a reader can
+   * compare it by identity.
+   */
+  readonly getSnapshot = (): ShortcutOverrides => this.shortcuts;
+
   /** The last read or write failure, or `null`. Recorded, never raised. */
   get lastError(): string | null {
     return this.readError ?? this.writeError;
@@ -474,8 +491,15 @@ export class ShortcutStore {
    * A document that cannot be read, cannot be parsed, or holds a chord that
    * clashes with a built-in one yields the chords that can be honoured. None
    * of them is an error, and none of them stops the editor.
+   *
+   * A store without a gateway has no document of its own: the chords live in
+   * the settings file and are handed over by {@link apply}, so there is
+   * nothing to read here.
    */
   async load(): Promise<ShortcutOverrides> {
+    if (this.gateway === null) {
+      return this.shortcuts;
+    }
     let text: string | null = null;
     try {
       text = await this.gateway.read();
@@ -490,6 +514,23 @@ export class ShortcutStore {
     this.written = serializeUserShortcuts(this.shortcuts);
     this.publish();
     return this.shortcuts;
+  }
+
+  /**
+   * Hands the store the chords that were read from the settings file.
+   *
+   * The chords are a preference, so nothing here touches the document, the
+   * history or the dirty flag. A chord that cannot be honoured - one that
+   * clashes with a built-in chord another command still holds - is dropped
+   * rather than allowed to shadow it.
+   */
+  apply(shortcuts: ShortcutOverrides): void {
+    const next = sanitizeUserShortcuts(shortcuts, this.actions, this.platform);
+    if (userShortcutsEqual(next, this.shortcuts)) {
+      return;
+    }
+    this.shortcuts = next;
+    this.publish();
   }
 
   /**
@@ -523,16 +564,30 @@ export class ShortcutStore {
     return this.shortcuts;
   }
 
-  /** Watches the chords. Returns the function that stops watching. */
-  subscribe(listener: (shortcuts: ShortcutOverrides) => void): () => void {
+  /**
+   * Watches the chords. Returns the function that stops watching.
+   *
+   * The listener is told the chords, so a reader that wants to know what
+   * changed does not have to ask again.
+   */
+  readonly subscribe = (listener: (shortcuts: ShortcutOverrides) => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
-  }
+  };
 
-  /** Writes the document now, without waiting for the debounce. */
+  /**
+   * Writes the document now, without waiting for the debounce.
+   *
+   * A store without a gateway writes nothing: the settings store owns the
+   * settings file and writes the chords back, so there is one writer per
+   * file and the two cannot race.
+   */
   async flush(): Promise<void> {
+    if (this.gateway === null) {
+      return;
+    }
     if (this.writing) {
       this.queued = true;
       return;
@@ -579,6 +634,11 @@ export class ShortcutStore {
   }
 
   private scheduleWrite(): void {
+    if (this.gateway === null) {
+      // The settings store owns the file: it writes the chords back when it
+      // is told that they changed.
+      return;
+    }
     if (this.pending !== null) {
       this.cancel(this.pending);
       this.pending = null;
