@@ -183,6 +183,42 @@ describe("the engine keeps the recent colours", () => {
     expect(engine.getState().colorHistory).toEqual([]);
   });
 
+  it("records nothing for a colour that is written but not picked", () => {
+    const engine = createEngine();
+
+    // A drag on the wheel writes a colour on every pointer move, and the
+    // colours in between are not colours the artist chose.
+    engine.setBrush({ color: "#ff0000" }, { record: false });
+    engine.setBrush({ color: "#00ff00" }, { record: false });
+    engine.setSecondaryColor("#0000ff", { record: false });
+
+    expect(engine.getState().brush.color).toBe("#00ff00");
+    expect(engine.getState().secondaryColor).toBe("#0000ff");
+    expect(engine.getState().colorHistory).toEqual([]);
+  });
+
+  it("records the colour a drag settles on, and only that one", () => {
+    const engine = createEngine();
+
+    engine.setBrush({ color: "#ff0000" }, { record: false });
+    engine.setBrush({ color: "#00ff00" }, { record: false });
+    engine.recordColor("#00ff00");
+
+    expect(engine.getState().colorHistory).toEqual(["#00ff00"]);
+  });
+
+  it("records nothing when the settled colour is already the newest", () => {
+    const engine = createEngine();
+    engine.setBrush({ color: "#ff0000" });
+
+    const before = engine.getState();
+    engine.recordColor("#ff0000");
+
+    expect(engine.getState().colorHistory).toEqual(["#ff0000"]);
+    // The list did not change, so the editor did not publish a change for it.
+    expect(engine.getState().colorHistory).toBe(before.colorHistory);
+  });
+
   it("records the colour the canvas picker samples", () => {
     const engine = new DrawingEngine({
       document: createDocument({ name: "Test", width: 40, height: 40 }),

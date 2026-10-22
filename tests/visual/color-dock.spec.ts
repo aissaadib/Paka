@@ -118,6 +118,53 @@ test("the recent colours remember what was picked, newest first", async ({ page 
   await expect(recent.getByText("Colours you pick appear here", { exact: false })).toBeVisible();
 });
 
+test("an adjustment of the wheel is one colour in the history, not a trail", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.locator("canvas.canvas-stage__surface").waitFor();
+
+  const swatches = page.locator(".color-recent .swatch-grid button");
+  const hue = page.getByLabel("Hue", { exact: true });
+
+  // Nudging the slider writes a colour on every step.
+  await hue.focus();
+  for (let step = 0; step < 5; step += 1) {
+    await hue.press("ArrowRight");
+  }
+
+  // None of the steps is a colour the artist chose on its own, so none of them
+  // is in the list yet.
+  await expect(swatches).toHaveCount(0);
+
+  // The colour they settled on is one entry, whatever the number of steps.
+  await field(page, "Ink colour value").click();
+  await expect(swatches).toHaveCount(1);
+});
+
+test("the palette's own keys do not reach the editor's shortcuts", async ({ page }) => {
+  await page.goto("/");
+  await page.locator("canvas.canvas-stage__surface").waitFor();
+
+  const palette = page.locator(".color-palette");
+  const swatch = palette.getByRole("button", { name: "Red, #e5484d" });
+
+  // F2 renames the focused swatch in place.
+  await swatch.focus();
+  await swatch.press("F2");
+  const rename = page.getByLabel("Rename Red");
+  await expect(rename).toBeVisible();
+  await rename.fill("Warm red");
+  await rename.press("Enter");
+  await expect(palette.getByRole("button", { name: "Warm red, #e5484d" })).toBeVisible();
+
+  // Delete removes the swatch - and not the selection in the document, which
+  // is what the editor's own Delete would do.
+  await palette.getByRole("button", { name: "Warm red, #e5484d" }).focus();
+  await palette.getByRole("button", { name: "Warm red, #e5484d" }).press("Delete");
+  await expect(palette.getByRole("button", { name: "Warm red, #e5484d" })).toHaveCount(0);
+});
+
 test("the palette and the alt colour are session state in the browser preview", async ({
   page,
 }) => {

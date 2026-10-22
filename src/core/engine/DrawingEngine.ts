@@ -41,6 +41,7 @@ import {
   colorHistoryEqual,
   normalizeColorHistory,
   pushColorHistory,
+  type ColorPickOptions,
 } from "../color/history";
 import {
   brushPresetsEqual,
@@ -1150,7 +1151,7 @@ export class DrawingEngine implements StrokeSource {
     this.setBrush({ color: rgbToHex(color) });
   }
 
-  setBrush(patch: Partial<BrushSettings>): void {
+  setBrush(patch: Partial<BrushSettings>, options: ColorPickOptions = {}): void {
     const next = updateBrushSettings(this.brush, patch);
     if (brushSettingsEqual(this.brush, next)) {
       return;
@@ -1163,7 +1164,11 @@ export class DrawingEngine implements StrokeSource {
     // brush from drifting apart: the wheel, the swatches, the text field and
     // the canvas picker all land here. A brush change that leaves the colour
     // alone is not a new colour and is not recorded.
-    if (next.color !== previousColor) {
+    //
+    // A write that is not a pick says so: the wheel writes the colour it is
+    // dragging to, and the settings store restores a colour from another
+    // session. Neither is a colour the artist chose here.
+    if (next.color !== previousColor && options.record !== false) {
       this.rememberColor(next.color);
     }
     this.commands.breakMerge();
@@ -1176,8 +1181,12 @@ export class DrawingEngine implements StrokeSource {
    * Editor state, not a document edit: it describes the *next* gesture. The
    * colour is resolved once at press time, so a stroke keeps the colour it was
    * started with even if this changes before release.
+   *
+   * `options.record` says whether the colour counts as one the artist picked;
+   * the settings store restores the alt colour with it off, because the
+   * recent-colours list is session state.
    */
-  setSecondaryColor(color: string): void {
+  setSecondaryColor(color: string, options: ColorPickOptions = {}): void {
     const normalized = hexToRgb(color);
     if (!normalized) {
       return;
@@ -1187,7 +1196,9 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.secondaryColor = next;
-    this.rememberColor(next);
+    if (options.record !== false) {
+      this.rememberColor(next);
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -1237,13 +1248,33 @@ export class DrawingEngine implements StrokeSource {
   /**
    * Records a colour as recently used.
    *
-   * The history is a session convenience, not a preference: it is bounded,
-   * newest first, and it is not written to the settings file. The array is
-   * replaced only when it really changed, so the snapshot's identity check
-   * still works.
+   * The recent-colours history is a session convenience, not a preference: it
+   * is bounded, newest first, and it is not written to the settings file.
+   *
+   * This is the seam for a colour that is written but not picked - the colour
+   * a drag settles on, for instance. The colour goes to the front of the
+   * list, and a colour that is already the newest changes nothing.
    */
-  private rememberColor(color: string): void {
-    this.colorHistory = pushColorHistory(this.colorHistory, color);
+  recordColor(color: string): void {
+    if (this.rememberColor(color)) {
+      this.publish();
+    }
+  }
+
+  /**
+   * Records a colour as recently used, without publishing.
+   *
+   * The caller publishes its own change, so a colour that arrives with
+   * another change costs one notification and not two. Returns whether the
+   * list really changed: a colour that is already the newest does not.
+   */
+  private rememberColor(color: string): boolean {
+    const next = pushColorHistory(this.colorHistory, color);
+    if (next === this.colorHistory) {
+      return false;
+    }
+    this.colorHistory = next;
+    return true;
   }
 
   /**

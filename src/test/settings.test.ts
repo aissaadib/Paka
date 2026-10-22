@@ -357,6 +357,28 @@ describe("the preferences survive a restart", () => {
     expect(written.palette).toBeDefined();
   });
 
+  it("starts the session with an empty colour history", async () => {
+    const gateway = new MemorySettingsGateway();
+
+    const first = createHarness(gateway);
+    await first.store.load();
+    first.engine.setBrush({ color: "#123456" });
+    first.engine.setSecondaryColor("#654321");
+    first.timers.runAll();
+    await settle();
+
+    // A restart: a new engine, a new store, the same file. The colours come
+    // back, because they are preferences; the recent-colours list does not,
+    // because it is session state and the file never held it.
+    const second = createHarness(gateway);
+    await second.store.load();
+
+    const state = second.engine.getState();
+    expect(state.brush.color).toBe("#123456");
+    expect(state.secondaryColor).toBe("#654321");
+    expect(state.colorHistory).toEqual([]);
+  });
+
   it("restores the grid and the snapping", async () => {
     const gateway = new MemorySettingsGateway();
 

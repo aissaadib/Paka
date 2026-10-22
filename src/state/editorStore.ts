@@ -17,6 +17,7 @@ import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
 import type { BrushPreset } from "../core/brushes/presets";
+import type { ColorPickOptions } from "../core/color/history";
 import type { PaletteSwatch } from "../core/color/palette";
 import type { BrushSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
@@ -25,9 +26,18 @@ import type { Listener } from "../utils/store";
 
 export interface EditorActions {
   setTool(toolId: ToolId): void;
-  setBrush(patch: Partial<BrushSettings>): void;
+  /**
+   * Sets the brush.
+   *
+   * `options.record` says whether a colour change counts as the artist
+   * picking that colour: a colour that is dragged to, or restored from
+   * another session, is written with it off.
+   */
+  setBrush(patch: Partial<BrushSettings>, options?: ColorPickOptions): void;
   /** Sets the colour a right-button gesture paints with. */
-  setSecondaryColor(color: string): void;
+  setSecondaryColor(color: string, options?: ColorPickOptions): void;
+  /** Records a colour as recently used, without changing the brush. */
+  recordColor(color: string): void;
   /** Exchanges the primary and secondary colours. */
   swapColors(): void;
   /** Puts both colours back to the ones a fresh session starts with. */
@@ -141,8 +151,9 @@ export function createEditor(options: EditorOptions = {}): Editor {
 
   const actions: EditorActions = {
     setTool: (toolId) => engine.setTool(toolId),
-    setBrush: (patch) => engine.setBrush(patch),
-    setSecondaryColor: (color) => engine.setSecondaryColor(color),
+    setBrush: (patch, options) => engine.setBrush(patch, options),
+    setSecondaryColor: (color, options) => engine.setSecondaryColor(color, options),
+    recordColor: (color) => engine.recordColor(color),
     swapColors: () => engine.swapColors(),
     resetColors: () => engine.resetColors(),
     addPaletteSwatch: (color, name) => engine.addPaletteSwatch(color, name),

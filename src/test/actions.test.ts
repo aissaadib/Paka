@@ -39,6 +39,7 @@ beforeEach(() => {
     setTool: vi.fn(),
     setBrush: vi.fn(),
     setSecondaryColor: vi.fn(),
+    recordColor: vi.fn(),
     swapColors: vi.fn(),
     resetColors: vi.fn(),
     addPaletteSwatch: vi.fn(),

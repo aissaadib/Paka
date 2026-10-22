@@ -29,6 +29,25 @@ import { hexToRgb, rgbToHex } from "../../utils/color";
  */
 export const COLOR_HISTORY_LIMIT = 24;
 
+/**
+ * Whether a colour change counts as the artist *picking* that colour.
+ *
+ * Two writes are not picks:
+ *
+ *  - the colour wheel writes the colour it is dragging to on every pointer
+ *    move, and the colours in between are not colours the artist chose; the
+ *    one they settle on is recorded when the drag ends;
+ *  - the settings store restores a colour that was picked in another
+ *    session, and the recent-colours list is session state - it starts empty.
+ *
+ * Both write the colour with `record: false` and record what they mean to
+ * record themselves.
+ */
+export interface ColorPickOptions {
+  /** False when the colour is written but not chosen. */
+  readonly record?: boolean;
+}
+
 /** A colour as a lowercase `#rrggbb`, or `null` when it is not a colour. */
 function normalizeHistoryColor(color: unknown): string | null {
   if (typeof color !== "string") {
@@ -45,6 +64,10 @@ function normalizeHistoryColor(color: unknown): string | null {
  * colour is dropped, and the list is trimmed to {@link COLOR_HISTORY_LIMIT}.
  * A colour that is not a colour is refused and the list is returned unchanged
  * - the same array, so a caller can compare by identity.
+ *
+ * A colour that is already the newest is left alone, and the same array comes
+ * back: picking the colour that is already in hand is not a new choice, and
+ * the caller should not publish a change for it.
  */
 export function pushColorHistory(
   history: readonly string[],
@@ -52,6 +75,9 @@ export function pushColorHistory(
 ): readonly string[] {
   const normalized = normalizeHistoryColor(color);
   if (normalized === null) {
+    return history;
+  }
+  if (history[0] === normalized) {
     return history;
   }
   const next = [normalized, ...history.filter((entry) => entry !== normalized)];
