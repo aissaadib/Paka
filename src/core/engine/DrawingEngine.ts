@@ -30,7 +30,6 @@ import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
 import {
   addPaletteSwatch,
-  findPaletteSwatch,
   normalizePalette,
   paletteEqual,
   removePaletteSwatch,
@@ -38,7 +37,11 @@ import {
   DEFAULT_PALETTE,
   type PaletteSwatch,
 } from "../color/palette";
-import { pushColorHistory } from "../color/history";
+import {
+  colorHistoryEqual,
+  normalizeColorHistory,
+  pushColorHistory,
+} from "../color/history";
 import {
   brushPresetsEqual,
   createPresetId,
@@ -1317,9 +1320,22 @@ export class DrawingEngine implements StrokeSource {
     return true;
   }
 
-  /** The swatch with this id, or `null`. */
-  findPaletteSwatch(id: string): PaletteSwatch | null {
-    return findPaletteSwatch(this.palette, id);
+  /**
+   * Replaces the recent-colours history.
+   *
+   * The list is session state, so nothing calls this today: the colours are
+   * recorded as they are picked. It is here so the seam exists for whoever
+   * decides whether a session's colours should be restored - the reader is
+   * `normalizeColorHistory`, the same one the model uses, so an untrusted
+   * list is handled the same way wherever it comes from.
+   */
+  setColorHistory(colours: readonly string[]): void {
+    const next = normalizeColorHistory(colours);
+    if (colorHistoryEqual(this.colorHistory, next)) {
+      return;
+    }
+    this.colorHistory = next;
+    this.publish();
   }
 
   /**

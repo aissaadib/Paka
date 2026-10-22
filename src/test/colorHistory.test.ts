@@ -207,6 +207,14 @@ describe("the engine keeps the recent colours", () => {
     expect(engine.getState().brush.color).toBe("#ff0000");
   });
 
+  it("reads a list handed to it through the same reader the model uses", () => {
+    const engine = createEngine();
+
+    engine.setColorHistory(["#111111", "not a colour", "#222222", "#111111"]);
+
+    expect(engine.getState().colorHistory).toEqual(["#111111", "#222222"]);
+  });
+
   it("does not add a history step or dirty the file", () => {
     const engine = createEngine();
 

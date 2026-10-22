@@ -37,6 +37,15 @@ import type { ColorPairReport } from "../../utils/colorPair";
 /** The word shown in place of a number the readout does not have. */
 const UNKNOWN = "unknown";
 
+/**
+ * The colour the native picker shows for a value it cannot read.
+ *
+ * A project file may hold any non-empty string as a colour, and the native
+ * control accepts only `#rrggbb`, so it needs a value it can show. White is
+ * the paper the readout measures against, so it is the honest fallback.
+ */
+const UNREADABLE = "#ffffff";
+
 /** Why a pair could not be measured, in words the panel can show. */
 function pairFailure(pair: ColorPairReport): string {
   const reasons: string[] = [];
@@ -88,12 +97,12 @@ export function ContrastReadout() {
           <span className="color-readout__field-label">Ink</span>
           <span
             className="color-readout__picker-wrap"
-            style={{ backgroundColor: colorInputValue(state.brush.color) }}
+            style={{ backgroundColor: colorInputValue(state.brush.color, UNREADABLE) }}
           >
             <input
               className="color-readout__picker"
               type="color"
-              value={colorInputValue(state.brush.color)}
+              value={colorInputValue(state.brush.color, UNREADABLE)}
               aria-label="Ink colour"
               onChange={(event) => actions.setBrush({ color: event.target.value })}
             />
@@ -106,12 +115,12 @@ export function ContrastReadout() {
           <span className="color-readout__field-label">Against</span>
           <span
             className="color-readout__picker-wrap"
-            style={{ backgroundColor: colorInputValue(against) }}
+            style={{ backgroundColor: colorInputValue(against, UNREADABLE) }}
           >
             <input
               className="color-readout__picker"
               type="color"
-              value={colorInputValue(against)}
+              value={colorInputValue(against, UNREADABLE)}
               aria-label="Comparison colour"
               onChange={(event) => setComparison(event.target.value)}
             />
