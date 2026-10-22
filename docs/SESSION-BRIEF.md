@@ -609,6 +609,16 @@ Product:
 
 Verification gaps:
 
+- The transform handles were checked in the browser app on the **live display
+  canvas** (Chromium through Playwright, synthetic pointer events): the side
+  handle is found with the resize cursor 12 px outside the frame's right edge,
+  the interior of the frame shows the move cursor, dragging the side handle
+  stretches the selection with its **left edge staying put**, the release is
+  **one** undo step, and `Esc` during a drag puts the canvas back
+  **byte-identically** (0 changed pixels). The geometry, the anchors, the
+  clamps, the aspect-ratio lock, the undo/redo and the cancel are covered by
+  Vitest. The **packaged Tauri window is not verified** for this slice; see
+  `docs/qa/AGENT17-TRANSFORM-HANDLES-REPORT.md`.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's
