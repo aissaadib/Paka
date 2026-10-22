@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
+import { DEFAULT_STABILIZER_MODE } from "../core/brushes/stabilizer";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
@@ -532,6 +533,62 @@ describe("parseProject round trip", () => {
     expect(payload.version).toBe(PROJECT_VERSION);
   });
 
+  it("round-trips the stabilizer's mode", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, stabilizer: 0.6, stabilizerMode: "pull" },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.stabilizerMode).toBe("pull");
+
+    // The mode is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stabilizerMode).toBe("pull");
+  });
+
+  it("opens a file without the stabilizer's mode with the default one", () => {
+    // The mode is additive within the current version, like the stabilizer
+    // itself: a file written before it existed opens unchanged, because the
+    // stored samples already describe the picture.
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stabilizer: 0.6 } });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    delete payload.layers[0].elements[0].brush.stabilizerMode;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.stabilizerMode).toBe(DEFAULT_STABILIZER_MODE);
+    expect(legacy.project.strokes[0].brush.stabilizer).toBe(0.6);
+  });
+
+  it("refuses a stroke brush with an unknown stabilizer mode", () => {
+    const message = rejectionOf(
+      mutate((project) => {
+        const brush = project.layers[0].elements[0].brush as Record<string, unknown>;
+        brush.stabilizerMode = "rubber";
+      }),
+    );
+    expect(message).toContain("brush stabilizer mode");
+  });
+
   it("round-trips the stamp engine's settings at version 9", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -762,7 +819,6 @@ describe("parseProject round trip", () => {
   });
 
   it("a version-10 reader refuses a newer file instead of compositing it normally", () => {
-  it("a version-10 reader refuses a version-11 file instead of compositing it normally", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     // `overlay` is the first mode a version-10 build does not know. A version-10
@@ -773,7 +829,6 @@ describe("parseProject round trip", () => {
       serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
     ) as { version: number };
     expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.version).toBe(11);
 
     // The current build reads it...
     expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
@@ -1495,9 +1550,6 @@ describe("the composition guides in the project file", () => {
     // bumps was for the guides, and a version-9 file that carries them still
     // opens.
     expect(PROJECT_VERSION).toBe(12);
-    // the extra blend modes, and neither bump was for the guides; a version-9
-    // file that carries them still opens.
-    expect(PROJECT_VERSION).toBe(11);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),
