@@ -237,7 +237,128 @@ concept, in at least two places.
 
 ---
 
-## 7. `qa/` is preserved exactly
+## 6a. The concurrent swarm, measured
+
+The section above records what the concurrent swarm *was*. This section
+records what it *is*, measured.
+
+**It stopped.** Its last commit is `3f9072b` at 02:48 and its last write to
+`src/` is 02:53. It has been idle since. It left the shared checkout on
+`feat/agent04-panel-manager` with **75 changed entries uncommitted**.
+
+**Its committed integration branch does not compile.**
+`feat/agent04-panel-manager` at `3f9072b` is the swarm's integration branch:
+61 new files, absorbing every agent's work, including **two of this wave's
+contract modules byte-identically** (`src/core/shell/slots.ts` and
+`src/core/shell/panelRegistry.ts`).
+
+With the broken wave-2 merge repaired, that branch has **101 type errors**,
+spread across the engine (23), the preset browser's test (20), the preset
+browser (6), the tool-option schema (6), the shell (5), the status bar (5),
+the preset row (5) and the renderer (4). It is broken in many places, not in
+one.
+
+**Its five repair commits are on individual branches, and none of them is in
+its own integration branch**: `8a2e027`, `5a11ccb`, `65f96d9`, `6c4bc3a` and
+`a988000` are all *not* ancestors of `3f9072b`. The repair the swarm made
+four times over never reached the branch it was making.
+
+**Its working tree typechecks clean — 0 errors.** And the two states are
+**incompatible with each other**: restoring the working tree's missing files
+into the branch *raised* the error count from 101 to 113, because the tree is
+from a later point in time and expects a newer preset model (`favorite`,
+`lastUsedAt`, `builtin`) than the branch carries. The swarm never converged:
+its branch and its tree are two different designs.
+
+### The working tree is now preserved, without touching the checkout
+
+The converged working tree was taken with a **throwaway index** — a
+temporary `GIT_INDEX_FILE`, a `write-tree` and a `commit-tree` — so the
+shared checkout's own index, HEAD and files were **not** modified. The
+result is a branch:
+
+| | |
+| --- | --- |
+| `preserve/swarm-working-tree` | `0f47ea6` |
+| Content | 84 files, +10,709 / −372 |
+| Type check | **0 errors** from a clean checkout |
+| `qa/` | **not in the commit** (0 entries) |
+| `package-lock.json` | not in the commit |
+
+This is a **preservation record, not a merge**. Nothing in it has been
+reviewed or integrated by this wave, and it is not on the wave branch. It
+exists so that five hours of eighteen agents' work is recoverable as one
+green commit instead of 75 uncommitted entries in a checkout anybody could
+clobber.
+
+### What the swarm has that this wave does not
+
+Its unique capability, measured from the preserved tree:
+
+- **Multi-document tabs** — `core/documents/sessionRegistry.ts`,
+  `documentWorkspace.ts`, `recentFiles.ts`, `features/tabs/DocumentTabs.tsx`.
+  One engine per document, the tab strip, the close decision, the recent
+  list. This wave has nothing like it.
+- **A colour history and a palette manager** — `core/color/history.ts`,
+  `palette.ts`, `PalettePanel`, `RecentColors`.
+- **A polyline tool** — `core/tools/polylineTool.ts`, with three visual
+  scenes.
+- **A stroke taper** — `core/brushes/taper.ts`, `core/rendering/taperStroke.ts`.
+- **A layer tree with locking** — `core/document/layerTree.ts`,
+  `core/commands/groupCommand.ts`.
+- **A per-dab texture profile** (its agent14 branch), **the shortcut bindings
+  with suspension** (`core/actions/suspension.ts`, `bindingStore.ts`), and
+  **a display scale** (`core/rendering/displayScale.ts`).
+
+So the two waves are **not** in competition: they overlap on the panel
+manager, the brush tips, the layer groups, the toolbox, the shortcut editor,
+the pointer ownership, the colour dock, the brush cursor and the symmetry, and
+they are **complementary** on the tabs, the palettes, the polyline, the taper,
+the layer locking and the texture profile.
+
+**Two paths carry a different API on each side**, and that is where a merge
+would hurt: `src/core/workspace/workspaceProfiles.ts` (its preset profiles —
+theme, ui scale, brush density — against this wave's named shell layouts) and
+`src/core/document/symmetry.ts` (its centre-based model with a "radial" mode
+against this wave's axis-based model, where the mirror is about the axis and
+not about the document's centre).
+
+**The recommendation is a merge, in that order**: take the swarm's unique
+capability (the tabs, the palettes, the polyline, the taper) and this wave's
+contracts and discipline, and reconcile the two colliding paths by hand. Both
+trees are green once their own repair is applied, so neither side has to be
+discarded. That is the owner's decision, and this wave has left both sides
+whole.
+
+---
+
+## 6b. Wave 4 — the follow-up ladder
+
+Wave 3 is integrated and green, and every wave-3 builder named the next rung
+of its own ladder. Those rungs are wave 4: 29 tasks, one per builder, each
+the concrete follow-up its builder wrote down.
+
+| | |
+| --- | --- |
+| Task table | `D:/Dev/Paka-overnight-worktrees/wave4-tasks.ps1` |
+| Base | `629e168` — the wave-3 tip |
+| Worktrees | `D:/Dev/Paka-overnight-worktrees/Bxx-...`, 29 of them, each with its own real install |
+| Branches | `feat/wave4/Bxx-...` |
+| Brief | `D:/Dev/Paka-overnight-worktrees/BUILDER-BRIEF.md` |
+
+The first dispatch of 20 builders was **cancelled before any of them wrote a
+line** — every Bxx worktree is still clean and every Bxx branch is still at
+the base. Nothing was lost. The wave was then resumed in smaller batches,
+the first of which is the eight builders whose slices touch no engine method
+at all: B29, B22, B21, B11, B12, B17, B18 and B20.
+
+The engine lane (B01, B02, B03, B04, B05, B06, B07, B08, B13, B14, B15, B16,
+B23, B25 and B28) all edit `src/core/engine/DrawingEngine.ts` or
+`src/core/rendering/Canvas2DRenderer.ts`. They run in parallel in their own
+worktrees, and they are **merged one builder at a time**, in the order the
+ledger's integration table gives.
+
+---
 
 The mission's hard requirement.
 
