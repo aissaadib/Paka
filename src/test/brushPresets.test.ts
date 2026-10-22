@@ -62,6 +62,10 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   stampSpacing: 0.15,
   stampHardness: 0.85,
   stampTexture: 0.65,
+  stampTip: "ellipse",
+  stampAspect: 0.4,
+  stampAngle: 30,
+  stampAngleFollow: false,
 };
 
 /** A value for one field that is neither its default nor its default again. */

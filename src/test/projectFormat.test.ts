@@ -730,8 +730,159 @@ describe("parseProject round trip", () => {
     ).toContain("brush stamp texture");
   });
 
-  it("round-trips every layer blend mode at version 11", () => {
+  it("round-trips the tip at version 13", () => {
     const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        stamp: true,
+        stampTip: "ellipse",
+        stampAspect: 0.4,
+        stampAngle: 30,
+        stampAngleFollow: false,
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const brush = parsed.project.strokes[0].brush;
+    expect(brush.stampTip).toBe("ellipse");
+    expect(brush.stampAspect).toBe(0.4);
+    expect(brush.stampAngle).toBe(30);
+    expect(brush.stampAngleFollow).toBe(false);
+
+    // The values are written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.stampTip).toBe("ellipse");
+    expect(payload.layers[0].elements[0].brush.stampAspect).toBe(0.4);
+  });
+
+  it("round-trips every tip shape", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    for (const tip of ["round", "ellipse", "square"] as const) {
+      const stroke = strokeFor(layerId, {
+        brush: { ...DEFAULT_BRUSH, stamp: true, stampTip: tip },
+      });
+      const parsed = parseProject(serializeProject(document, storeOf([[layerId, [stroke]]])));
+      expect(parsed.ok, tip).toBe(true);
+      if (parsed.ok) {
+        expect(parsed.project.strokes[0].brush.stampTip, tip).toBe(tip);
+      }
+    }
+  });
+
+  it("opens version 12 files with the round tip, which is the disc they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stamp: true } });
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [stroke]]])),
+    ) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 12;
+    delete payload.layers[0].elements[0].brush.stampTip;
+    delete payload.layers[0].elements[0].brush.stampAspect;
+    delete payload.layers[0].elements[0].brush.stampAngle;
+    delete payload.layers[0].elements[0].brush.stampAngleFollow;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    const brush = legacy.project.strokes[0].brush;
+    expect(brush.stampTip).toBe("round");
+    expect(brush.stampAspect).toBe(1);
+    expect(brush.stampAngle).toBe(0);
+    expect(brush.stampAngleFollow).toBe(true);
+  });
+
+  it("refuses a version-13 stroke brush without the tip", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).stampTip;
+        }),
+      ),
+    ).toContain("brush stamp tip");
+  });
+
+  it("refuses a version-13 stroke brush with an unknown tip", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            stampTip: "felt",
+          } as unknown as Record<string, unknown>;
+        }),
+      ),
+    ).toContain("brush stamp tip");
+  });
+
+  it("refuses a version-13 stroke brush with an invalid aspect", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampAspect: 2 };
+        }),
+      ),
+    ).toContain("brush stamp aspect");
+
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampAspect: 0 };
+        }),
+      ),
+    ).toContain("brush stamp aspect");
+  });
+
+  it("refuses a version-13 stroke brush with an invalid angle", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = { ...DEFAULT_BRUSH, stampAngle: 400 };
+        }),
+      ),
+    ).toContain("brush stamp angle");
+  });
+
+  it("refuses a version-13 file at a version-12 reader", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const payload = JSON.parse(
+      serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]])),
+    ) as { version: number };
+    expect(payload.version).toBe(PROJECT_VERSION);
+
+    // The current build reads it...
+    expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
+
+    // ... while a reader that accepts no higher than version 12 refuses it at
+    // the version gate, before any stroke is rasterized: a version-12 reader
+    // would draw the same dabs as plain discs, which is a different picture.
+    const older = parseProject(JSON.stringify(payload), { maxVersion: 12 });
+    expect(older.ok).toBe(false);
+    if (!older.ok) {
+      expect(older.error).toContain("newer version of Paka");
+      expect(older.error).toContain("reads up to 12");
+    }
+  });
+
+  it("round-trips every layer blend mode at version 11", () => {    const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const elements = storeOf([[layerId, [strokeFor(layerId)]]]);
 
@@ -1489,10 +1640,10 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
-    // the extra blend modes and version 12 on the pressure curve; none of those
-    // bumps was for the guides, and a version-9 file that carries them still
-    // opens.
-    expect(PROJECT_VERSION).toBe(12);
+    // the extra blend modes, version 12 on the pressure curve and version 13 on
+    // the stamp tip; none of those bumps was for the guides, and a version-9
+    // file that carries them still opens.
+    expect(PROJECT_VERSION).toBeGreaterThanOrEqual(12);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),

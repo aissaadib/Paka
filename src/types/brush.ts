@@ -20,6 +20,23 @@ export interface PressureCurvePoint {
   readonly y: number;
 }
 
+/**
+ * The shape of a dab's tip.
+ *
+ * A tip is the mask a stamped stroke is drawn with. Every kind is a bounded,
+ * procedural shape described by a couple of numbers - never a blob of pixels -
+ * so a project file stays small and the parser can validate what it reads.
+ *
+ * - `round` is the plain disc the stamp engine has always drawn. It is the
+ *   default, and it is byte for byte the picture every earlier file produced.
+ * - `ellipse` is a stretched disc: the brush's size is the **major** axis and
+ *   {@link BrushSettings.stampAspect} shortens the minor one, so the tip can
+ *   be long and narrow.
+ * - `square` is a rectangle with the same two axes: a chisel mark rather than
+ *   a round one.
+ */
+export type StampTipKind = "round" | "ellipse" | "square";
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
   readonly size: number;
@@ -139,4 +156,46 @@ export interface BrushSettings {
    * and in a PNG export, at every zoom and `rasterScale`.
    */
   readonly stampTexture: number;
+  /**
+   * The shape of a dab's tip.
+   *
+   * `round` is the plain disc the stamp engine has always drawn, and it is
+   * the default: a stroke drawn with it is byte for byte the stroke every
+   * earlier file produced. `ellipse` and `square` are the tipped shapes - the
+   * tip is the *mask* the dabs are painted with, so a tipped stroke is a
+   * different picture and the field is required from project format 13.
+   *
+   * A tip only applies to a stamped stroke: the plain segment path has no
+   * dabs to tip.
+   */
+  readonly stampTip: StampTipKind;
+  /**
+   * The tip's minor axis as a fraction of its major axis, in `(0, 1]`.
+   *
+   * `1` is a tip as wide as it is long - a disc, or a square. Lower values
+   * make the tip long and narrow, which is what a flat or chisel brush does.
+   * The brush's `size` is the **major** axis, so a tip with a smaller aspect
+   * paints a stroke narrower along its length than the size suggests.
+   *
+   * A round tip ignores it: a disc has no minor axis to shorten.
+   */
+  readonly stampAspect: number;
+  /**
+   * The tip's angle, in degrees.
+   *
+   * With `stampAngleFollow` off it is the tip's absolute angle: the tip points
+   * that way whatever the stroke does. With `stampAngleFollow` on it is the
+   * **offset** from the stroke's direction, so `0` points the tip along the
+   * path and `90` turns it across it.
+   */
+  readonly stampAngle: number;
+  /**
+   * Whether the tip turns with the stroke.
+   *
+   * `true` points the tip along the path (plus the `stampAngle` offset),
+   * which is what a flat or chisel brush does: the mark is long along the
+   * stroke and narrow across it. `false` keeps the tip at a fixed angle, so a
+   * stroke that turns draws the same mark throughout.
+   */
+  readonly stampAngleFollow: boolean;
 }

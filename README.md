@@ -180,7 +180,8 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   **texture** (0-100 %: deterministic grain over the finished coverage), a
   **stamp** switch with its own **stamp spacing** (2-100 % of the brush size:
   how far apart the dabs sit), **stamp hardness** (the falloff of a single
-  dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
+  dab), **stamp texture** (0-100 %: the strength of the bristle lanes) and a
+  **tip** (round, ellipse or square, with a roundness and an angle),
   colour (primary and secondary pickers, an 8-swatch palette and the colour
   wheel), and toggles for pressure-driven size and pressure-driven opacity. Once
   either pressure toggle is on, a **Pressure curve** editor shapes how raw pen
@@ -205,6 +206,16 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the picture does not change when a stroke is drawn backwards, and against the
   brush's nominal size, so the pattern is the same in document pixels at every
   zoom.
+- **Brush tips**: a stamped stroke can be drawn with a **tipped** dab instead of
+  a round disc - an **ellipse** or a **rectangle** - with a **roundness** (how
+  wide the tip is across its length) and an **angle**. The tip either follows
+  the stroke, the way a flat or chisel brush does, or stays at a fixed angle.
+  The brush's size is the tip's long axis, so a narrow tip paints a narrower
+  mark than the size suggests. The tip is a mask rather than a picture: it is a
+  name and two numbers, so the project file stays small and the parser can
+  check it. The default tip is the round disc, so every stroke drawn before the
+  tip existed is unchanged, and the tip changes the mark's shape, never where
+  the dabs are placed.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.
@@ -414,14 +425,14 @@ paste-ready version of the same briefing is in
   follow filter**: at high strength the line visibly lags the pointer and
   settles with one final segment on release; it has no look-ahead or rope-style
   catch-up, and shape tools ignore it.
-- **The stamp engine is round dabs only.** There is no brush **tip** - a felt
-  tip, a dry ink blot, a stamped bitmap - no scatter, rotation or jitter, and
-  no per-dab opacity
-  (a stroke still gets one alpha). The per-dab texture is a procedural
-  bristle pattern, not a picture. A stamped stroke's cost grows with the
-  square of the brush radius, so a very large brush with a fine dab spacing is
-  expensive to re-rasterize; the planner stops after a fixed amount of work, so
-  an extreme stroke is cut short rather than stalling the app.
+- **The tip is procedural, not a picture.** There is no stamped bitmap, no
+  scatter, no jitter and no per-dab opacity (a stroke still gets one alpha).
+  The tip is an ellipse or a rectangle described by a ratio and an angle, and
+  the per-dab texture is a procedural bristle pattern, not an image. A stamped
+  stroke's cost grows with the square of the brush radius, so a very large
+  brush with a fine dab spacing is expensive to re-rasterize; the planner stops
+  after a fixed amount of work, so an extreme stroke is cut short rather than
+  stalling the app.
 - Strokes are rasterized per segment on the CPU. It holds up at the sizes
   tested; it is the first thing to move behind the renderer interface if it does
   not.
@@ -432,11 +443,12 @@ paste-ready version of the same briefing is in
   megabytes in size, and a large fill can add several megabytes. A compressed or
   binary container is the natural next container (the format is versioned, and
   the parser refuses versions it does not know).
-- **The current project version is `10`** (`version: 1` to `9` files still
-  open and are written back as 10; their strokes default to a hard edge, texture
+- **The current project version is `13`** (`version: 1` to `12` files still
+  open and are written back as 13; their strokes default to a hard edge, texture
   0, a missing stabilizer reads as 0 because it was added additively within
-  version 6, the stamp is off because it did not exist before version 9, and
-  the per-dab texture is off because it did not exist before version 10).
+  version 6, the stamp is off because it did not exist before version 9, the
+  per-dab texture is off because it did not exist before version 10, and the tip
+  is the round disc because it did not exist before version 13).
   Unknown versions, wrong formats and unreadable files are rejected with a
   message instead of being partially loaded.
 - Undo history is **not** part of the file. Reopening a project rebuilds one

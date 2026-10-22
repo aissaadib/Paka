@@ -6,10 +6,13 @@ import {
   MIN_STAMP_SPACING_PX,
   StampCoverage,
   StampDabCursor,
+  isRoundTip,
   stampDabCoverage,
   stampDabs,
   stampSpacing,
   stampTextureLaneWidth,
+  stampTipCoverage,
+  stampTipOf,
   unionStampRect,
 } from "../core/rendering/stampCoverage";
 import type { BrushSettings } from "../types/brush";
@@ -699,5 +702,177 @@ describe("stamp rectangle union", () => {
       { left: 20, top: 4, width: 5, height: 5 },
     );
     expect(merged).toEqual({ left: 10, top: 4, width: 15, height: 11 });
+  });
+});
+
+describe("stamp tips", () => {
+  /** Reads the coverage of one device pixel. */
+  function coverageAt(map: StampCoverage, x: number, y: number): number {
+    const data = new Uint8ClampedArray(4);
+    map.writeRect(data, 1, { left: x, top: y, width: 1, height: 1 }, { r: 0, g: 0, b: 0 });
+    return data[3];
+  }
+
+  /** The dab's centre, on a pixel boundary so the geometry is exact. */
+  const CENTRE = 20.5;
+  const RADIUS = 10;
+
+  it("keeps the round tip the plain disc, byte for byte", () => {
+    // The tip is additive: a brush with no tip is the disc the stamp engine
+    // has always painted, so every stroke drawn before the tip existed keeps
+    // its exact pixels.
+    const plain = new StampCoverage();
+    plain.paintDab(CENTRE, CENTRE, RADIUS, 1);
+    const round = new StampCoverage();
+    round.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "round", aspect: 1 });
+    const wide = new StampCoverage();
+    wide.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "ellipse", aspect: 1 });
+
+    for (let y = 0; y < 48; y += 1) {
+      for (let x = 0; x < 48; x += 1) {
+        expect(coverageAt(round, x, y)).toBe(coverageAt(plain, x, y));
+        // An ellipse as wide as it is long is a disc, and takes the same path.
+        expect(coverageAt(wide, x, y)).toBe(coverageAt(plain, x, y));
+      }
+    }
+  });
+
+  it("reads a tip off the brush, and nothing for a round one", () => {
+    expect(stampTipOf(brush())).toBeNull();
+    expect(stampTipOf(brush({ stampTip: "round" }))).toBeNull();
+    expect(stampTipOf(brush({ stampTip: "ellipse", stampAspect: 0.4 }))).toEqual({
+      kind: "ellipse",
+      aspect: 0.4,
+    });
+    expect(isRoundTip(null)).toBe(true);
+    expect(isRoundTip({ kind: "round", aspect: 1 })).toBe(true);
+    expect(isRoundTip({ kind: "ellipse", aspect: 1 })).toBe(true);
+    expect(isRoundTip({ kind: "ellipse", aspect: 0.5 })).toBe(false);
+    expect(isRoundTip({ kind: "square", aspect: 1 })).toBe(false);
+  });
+
+  it("stretches the ellipse along its major axis and stops at the minor one", () => {
+    const map = new StampCoverage();
+    map.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "ellipse", aspect: 0.5 });
+
+    // Along the major axis the dab is as long as its radius says.
+    expect(coverageAt(map, 29, 20)).toBe(255);
+    // Across the minor axis it is half as wide: the boundary is at five
+    // pixels, so the pixel on it is half covered and the one beyond is bare.
+    expect(coverageAt(map, 20, 25)).toBeGreaterThan(0);
+    expect(coverageAt(map, 20, 25)).toBeLessThan(255);
+    expect(coverageAt(map, 20, 26)).toBe(0);
+    // The plain disc reaches all of that.
+    const disc = new StampCoverage();
+    disc.paintDab(CENTRE, CENTRE, RADIUS, 1);
+    expect(coverageAt(disc, 20, 26)).toBe(255);
+  });
+
+  it("turns the tip with its angle", () => {
+    const turned = new StampCoverage();
+    turned.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "ellipse", aspect: 0.5 }, Math.PI / 2);
+
+    // A quarter turn puts the long axis across the path.
+    expect(coverageAt(turned, 20, 29)).toBe(255);
+    expect(coverageAt(turned, 26, 20)).toBe(0);
+    // And the other way round it is the other way.
+    const flat = new StampCoverage();
+    flat.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "ellipse", aspect: 0.5 });
+    expect(coverageAt(flat, 29, 20)).toBe(255);
+    expect(coverageAt(flat, 20, 29)).toBe(0);
+  });
+
+  it("gives the square tip corners a disc does not have", () => {
+    const square = new StampCoverage();
+    square.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind: "square", aspect: 1 });
+    const disc = new StampCoverage();
+    disc.paintDab(CENTRE, CENTRE, RADIUS, 1);
+
+    // The pixel on the square's corner is on its boundary, so it is half
+    // covered; the disc's own edge is well inside that.
+    expect(coverageAt(square, 30, 30)).toBeGreaterThan(0);
+    expect(coverageAt(disc, 30, 30)).toBe(0);
+  });
+
+  it("paints the same coverage the reference says it should", () => {
+    // The painter's fast path and the reference function have to agree pixel
+    // for pixel: a change to only one of them would show up here.
+    for (const kind of ["ellipse", "square"] as const) {
+      const aspect = 0.5;
+      const angle = 0.6;
+      const map = new StampCoverage();
+      map.paintDab(CENTRE, CENTRE, RADIUS, 1, null, { kind, aspect }, angle);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      for (let y = 8; y < 34; y += 1) {
+        for (let x = 8; x < 34; x += 1) {
+          const dx = x + 0.5 - CENTRE;
+          const dy = y + 0.5 - CENTRE;
+          const along = dx * cos + dy * sin;
+          const across = -dx * sin + dy * cos;
+          const expected = Math.round(
+            stampTipCoverage(along, across, RADIUS, RADIUS * aspect, kind === "square", 1) * 255,
+          );
+          expect(coverageAt(map, x, y)).toBe(expected);
+        }
+      }
+    }
+  });
+
+  it("keeps the union a maximum, so a tipped stroke cannot darken", () => {
+    const once = new StampCoverage();
+    once.paintDab(CENTRE, CENTRE, RADIUS, 0.5, null, { kind: "ellipse", aspect: 0.5 });
+    const twice = new StampCoverage();
+    twice.paintDab(CENTRE, CENTRE, RADIUS, 0.5, null, { kind: "ellipse", aspect: 0.5 });
+    twice.paintDab(CENTRE, CENTRE, RADIUS, 0.5, null, { kind: "ellipse", aspect: 0.5 });
+    for (let y = 8; y < 34; y += 1) {
+      for (let x = 8; x < 34; x += 1) {
+        expect(coverageAt(twice, x, y)).toBe(coverageAt(once, x, y));
+      }
+    }
+  });
+
+  it("points the tip along the path when the tip follows it", () => {
+    const settings = brush({ stampTip: "ellipse", stampAngleFollow: true, stampAngle: 0 });
+    const dabs = stampDabs(path([0, 50, 100], [0, 50, 100]), settings);
+    expect(dabs.length).toBeGreaterThan(1);
+    // The first dab has no direction yet - the path has not continued - so it
+    // carries the offset on its own.
+    expect(dabs[0].tipAngle).toBe(0);
+    for (const dab of dabs.slice(1)) {
+      expect(dab.tipAngle).toBeCloseTo(Math.PI / 4, 6);
+    }
+  });
+
+  it("keeps a fixed tip at its own angle, whatever the path does", () => {
+    const settings = brush({
+      stampTip: "ellipse",
+      stampAngleFollow: false,
+      stampAngle: 30,
+    });
+    const dabs = stampDabs(path([0, 50, 100], [0, 50, 100]), settings);
+    expect(dabs.length).toBeGreaterThan(1);
+    for (const dab of dabs) {
+      expect(dab.tipAngle).toBeCloseTo((30 * Math.PI) / 180, 6);
+    }
+  });
+
+  it("turns the tip by the brush's offset when it follows the path", () => {
+    const settings = brush({ stampTip: "ellipse", stampAngleFollow: true, stampAngle: 90 });
+    const dabs = stampDabs(path([0, 50, 100], [0, 50, 100]), settings);
+    for (const dab of dabs.slice(1)) {
+      expect(dab.tipAngle).toBeCloseTo(Math.PI / 4 + Math.PI / 2, 6);
+    }
+  });
+
+  it("places the dabs of a tipped stroke exactly where a plain one goes", () => {
+    // The tip is a mask, not a placement: the dabs are still placed by the
+    // path, so a tipped stroke covers the same stretch of the path.
+    const settings = brush({ stampTip: "ellipse", stampAspect: 0.4 });
+    const plain = stampDabs(path([0, 100], [0, 0]), brush({ size: 100, stampSpacing: 0.25 }));
+    const tipped = stampDabs(path([0, 100], [0, 0]), { ...settings, size: 100, stampSpacing: 0.25 });
+    expect(tipped.map((dab) => [dab.x, dab.y, dab.radius])).toEqual(
+      plain.map((dab) => [dab.x, dab.y, dab.radius]),
+    );
   });
 });

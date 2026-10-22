@@ -321,6 +321,33 @@
   width: 150px;
 }
 
+.brush-tip__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.brush-tip__label {
+  color: var(--text-dim);
+  min-width: 46px;
+}
+
+.brush-tip__select {
+  width: 110px;
+  height: var(--control-height);
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+.brush-tip__select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .brush-presets__action {
   padding: 0 8px;
 }

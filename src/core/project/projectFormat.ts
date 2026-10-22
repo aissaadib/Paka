@@ -52,7 +52,12 @@ import type {
 import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
-import type { BrushSettings } from "../../types/brush";
+import {
+  MAX_STAMP_ASPECT,
+  MIN_STAMP_ASPECT,
+  STAMP_TIP_KINDS,
+} from "../brushes/defaults";
+import type { BrushSettings, StampTipKind } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -117,6 +122,16 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
+ * Version 13: a stroke's `brush` carries `stampTip`, `stampAspect`,
+ * `stampAngle` and `stampAngleFollow`: the mask a stamped stroke's dabs are
+ * painted with. A tip changes how stored samples are rasterized, so a
+ * version-12 reader would draw the same dabs as plain discs - a different
+ * picture - and the version was bumped with the fields required. Version-1 to
+ * -12 files open unchanged with the round tip, which is exactly the disc they
+ * were written by. The tip is a name out of a closed list, so a file that
+ * names a tip this build does not know is refused rather than drawn as
+ * something else.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -125,7 +140,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 12;
+export const PROJECT_VERSION = 13;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -884,7 +899,43 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // curve, which is the linear response they were written by.
     pressureCurve:
       version >= 12 ? normalizePressureCurve(record.pressureCurve) : DEFAULT_PRESSURE_CURVE,
+    // The tip changes how a stamped stroke's samples are rasterized, so it
+    // became a required field in version 13: a version-12 reader ignores it
+    // and draws the same dabs as plain discs, which is a different picture.
+    // Earlier files had no tip at all, and the round disc is exactly the
+    // coverage they were written by.
+    stampTip: version >= 13 ? readStampTip(record.stampTip, `${label} brush stamp tip`) : "round",
+    stampAspect:
+      version >= 13
+        ? readNumber(
+            record.stampAspect,
+            `${label} brush stamp aspect`,
+            MIN_STAMP_ASPECT,
+            MAX_STAMP_ASPECT,
+          )
+        : 1,
+    stampAngle:
+      version >= 13 ? readNumber(record.stampAngle, `${label} brush stamp angle`, 0, 360) : 0,
+    stampAngleFollow:
+      version >= 13
+        ? readBoolean(record.stampAngleFollow, `${label} brush stamp angle follow`)
+        : true,
   });
+}
+
+/**
+ * A tip shape out of an untrusted value.
+ *
+ * The list of shapes is closed, so a file that names a tip this build does not
+ * know is refused: drawing it as something else would change the picture
+ * without saying so, and refusing it says the file needs a newer Paka.
+ */
+function readStampTip(value: unknown, label: string): StampTipKind {
+  const tip = readString(value, label);
+  if (!STAMP_TIP_KINDS.includes(tip as StampTipKind)) {
+    fail(`${label} uses the unsupported tip "${tip}".`);
+  }
+  return tip as StampTipKind;
 }
 
 function resolveActiveLayer(

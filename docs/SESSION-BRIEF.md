@@ -45,7 +45,7 @@ visual-regression harness.
   **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
   by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
   commands, the merge SHAs and the ownership of each branch.
-- Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
+- Project file format **version 13** (`PROJECT_VERSION = 13`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
   `stampSpacing` and `stampHardness` are required from v9. `stampTexture` is
@@ -53,6 +53,10 @@ visual-regression harness.
   `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and
   `exclusion` join `normal` / `multiply` / `screen`, and a v10 reader
   refuses a v11 file rather than rendering an unknown mode as `normal`.
+  `pressureCurve` is required from v12. **v13 adds the brush tip**:
+  `stampTip` (`round` / `ellipse` / `square`), `stampAspect`, `stampAngle`
+  and `stampAngleFollow` are required from v13, and a v12 reader refuses a v13
+  file rather than drawing the same dabs as plain discs.
   `document.guides` is **additive within v9 and later** (missing = no guides),
   because the guides are display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
@@ -63,8 +67,9 @@ visual-regression harness.
   Automation (see [docs/qa/T06-IMPLEMENTATION-REPORT.md](qa/T06-IMPLEMENTATION-REPORT.md)).
 - Phase 2 (illustration tools) is complete. Phase 3 has hardness, spacing +
   stabilizer, grain texture, the stamp (dab) engine, the per-dab directional
-  texture, the **brush preset library** and the **grid and snapping** shipped;
-  brush-tip and image-based stamp textures remain. Phase 4 has the eleven layer
+  texture, the **brush preset library**, the **grid and snapping** and the
+  **brush tip** (round, ellipse or square, with an aspect and an angle)
+  shipped; image-based stamp textures remain. Phase 4 has the eleven layer
   blend modes (`normal` / `multiply` / `screen` plus eight separable modes),
   masks and groups remain. The colour panel gained the **contrast and
   colour-difference readout** and **wider input formats** (8-digit hex, `hsl()`,
@@ -76,6 +81,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent14-brush-tips` | **Brush tips** - a stamped stroke can be drawn with a **tipped** dab instead of a round disc: an **ellipse** or a **rectangle**, with an aspect ratio and an angle that either follows the stroke or stays fixed. The tip is a **mask, not a picture** - a name out of a closed list and two numbers - so the project file stays small and the parser can validate it; a file that names a tip this build does not know is refused. The brush's size is the tip's **major** axis, so a narrow tip paints a narrower mark than the size suggests. The tip changes the mark's shape and never where the dabs are placed, so the dab spacing means the same thing, the union is still a maximum and a stroke still cannot darken where it crosses itself. The default tip is the round disc and takes the plain round path, so every stroke drawn before the tip existed is unchanged pixel for pixel. Format v13. |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -289,23 +295,23 @@ src-tauri/      Rust shell: environment probe, scoped project/PNG I/O
 docs/           architecture, format, roadmap, handoff, this brief
 ```
 
-Key files for the next slice (directional / per-dab stamp textures):
+Key files for the next slice (image-based stamp textures):
 
 - `src/core/rendering/stampCoverage.ts` — the dab plan (`stampDabs`, the cursor),
-  the coverage union (`StampCoverage.paintDab`) and the per-dab texture
-  (`STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`); a brush **tip** would
-  replace the radial profile inside `paintDab`, and the tile upload has to
-  stay bounded.
+  the coverage union (`StampCoverage.paintDab`), the per-dab texture
+  (`STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`) and the **tip**
+  (`stampTipOf`, `isRoundTip`, `stampTipCoverage`); a picture tip replaces the
+  tip's mask inside `paintDab`, and the tile upload has to stay bounded.
 - `src/core/rendering/Canvas2DRenderer.ts` — `rasterizeStampStroke`,
   `extendStampStroke`, `writeStampCoverage`; the coverage buffer, the
   single-alpha composite and the post-dab grain are the invariants a brush tip
   must keep.
 - `src/types/brush.ts` / `src/core/brushes/defaults.ts` — brush fields
-  (a tip descriptor) and defaults/clamping/equality.
+  (the tip descriptor) and defaults/clamping/equality.
 - `src/features/brushes/BrushControls.tsx` — controls for real tip settings.
 - `src/core/document/types.ts` — `StrokeRecord`/`brush`, the authoritative record.
 - `src/core/project/projectFormat.ts` — `PROJECT_VERSION`, `readBrush`,
-  serializer; a tip descriptor that changes the pixels needs v11.
+  serializer; a tip descriptor that changes the pixels needs v14 now.
 - Tests: `stampCoverage.test.ts`, `canvas2dRenderer.test.ts`,
   `projectFormat.test.ts`, `drawingEngine.test.ts`.
 - `src/test/support/recordingCanvas.ts` — fake canvas used by renderer tests.
@@ -552,8 +558,10 @@ Product:
 - Texture: one grain post-pass over the finished coverage, not an image-based
   texture. The stamp engine's own `stampTexture` is a per-dab texture, but it
   is a *procedural* bristle pattern, not a picture.
-- The stamp engine: round dabs only - no elongated, offset or tip shapes, no
-  scatter, rotation or jitter, and no per-dab opacity (a
+- The stamp engine: the dab's shape is a **tip** - round, an ellipse or a
+  rectangle, with an aspect ratio and an angle - but there is no **picture** tip
+  (a felt tip or a dry ink blot loaded from a user-owned image), no scatter,
+  rotation or jitter, and no per-dab opacity (a
   stroke still gets one alpha). A stamped stroke's cost grows with the square of
   the brush radius, so a very large brush with a fine dab spacing is expensive
   to re-rasterize; the planner stops after a fixed work budget, so an extreme
@@ -704,15 +712,33 @@ Verification gaps:
   `-C link-arg=-Wl,--exclude-all-symbols` (do not override `RUSTFLAGS`). A cold
   release build takes ~5 minutes.
 
-## 9. Next slice — brush-tip and image-based stamp textures (Phase 3)
+## 9. Next slice — image-based stamp textures (Phase 3)
 
 `docs/ROADMAP.md` "Next slice" is the authority. Hardness, sampling, stabilizer,
-grain texture, the stamp (dab) engine and the per-dab **directional texture**
-have shipped; the **shape** of a dab is the remaining Phase 3 item.
+grain texture, the stamp (dab) engine, the per-dab **directional texture** and
+the **brush tip** have shipped; a tip loaded from a **picture** is the remaining
+Phase 3 item.
 
-The goal: let a stroke be stamped with a **tip** that is not a round disc - a
-felt tip, a dry ink blot, a bristle bundle - so the dab's coverage is the tip's
+The goal: let a stroke be stamped with a tip that comes from a **user-owned
+image** - a felt tip, a dry ink blot - so the dab's coverage is the picture's
 mask rather than a radial falloff.
+
+### What the tip slice already settles
+
+The procedural tip shipped in `feat/agent14-brush-tips` and answers most of the
+questions a picture tip raises:
+
+- The tip is a **mask on the dab's coverage**, multiplied in **before** the
+  union, so the union is still a maximum and a stroke still cannot darken.
+- The tip is captured **per stroke**, so undo, reopen and export reproduce it.
+- The tip is **deterministic from the document and the dab's direction**: no
+  clock, no `Math.random()`, the same picture at every zoom and `rasterScale`.
+- The tip is **bounded and validated**: a name out of a closed list plus two
+  numbers, never a blob of pixels. A picture tip has to keep that property -
+  a file may carry a reference to an image, not the image's pixels, and the
+  reader must refuse a picture it cannot validate.
+- The **round disc is the default** and keeps the plain round path, so every
+  stroke drawn before the tip existed is unchanged pixel for pixel.
 
 ### Constraints to keep
 
@@ -730,31 +756,35 @@ mask rather than a radial falloff.
    follows the path, from the dab's own direction), so live, rebuild,
    undo/redo, reopen and PNG export agree at every zoom and `rasterScale`. No
    `Math.random()` in a repaint path.
-5. Capture the tip per stroke. Appearance-changing fields that a v10 reader
-   cannot ignore require **format version 11**; prove it with tests.
+5. Capture the tip per stroke. Appearance-changing fields that a v13 reader
+   cannot ignore require **format version 14**; prove it with tests.
 6. Keep `spacing` (sample density) distinct from the stamp's dab spacing.
 7. The coverage map stays footprint-bounded and the upload stays one tile at a
    time: the raster budget's 58 bytes per document pixel must not move.
 8. A tip in the project file inflates the JSON, so the tip must be a **mask**
    and not a colour, and it must not be an arbitrary blob of pixels: a bounded,
-   documented shape the parser can validate.
+   documented shape the parser can validate. A picture tip is a **reference** to
+   an image the user owns, plus the parameters that place it - never the
+   image's pixels in the drawing file, and never a copied proprietary texture.
+9. The union still has to hold: a picture tip that differs from dab to dab
+   would be filled in by the per-pixel maximum, so the picture has to be
+   anchored to the document (like the grain pass) or to the stroke's centre
+   line (like the bristle lanes), not to the dab's own frame.
 
 ### Implementation checklist
 
-- [ ] `src/types/brush.ts` / `defaults.ts`: the tip fields, defaults, clamp
-      and equality.
-- [ ] `src/core/rendering/stampCoverage.ts`: the tip's mask replacing the
-      radial profile inside `paintDab`, deterministic from the document and the
-      dab's direction.
-- [ ] `src/core/rendering/Canvas2DRenderer.ts`: wire the tip through the
-      stamp path; the segment path and the grain post-pass stay untouched.
-- [ ] `src/features/brushes/BrushControls.tsx`: real tip controls, no
-      placeholders.
-- [ ] `src/core/project/projectFormat.ts`: format v11 if the appearance changes,
-      validate the new fields, read v1-v10 unchanged.
-- [ ] Tests: default parity, deterministic tip at different zoom/scale, the
-      union still holds, live/commit/rebuild/export parity, format round-trip
-      and old-file defaults.
+- [ ] The tip model: a picture tip is a **reference** (a path or an id) plus
+      the scale, angle and strength that place it, validated by the parser.
+- [ ] `src/core/rendering/stampCoverage.ts`: the picture's mask multiplied into
+      a dab's coverage, anchored so the union preserves it.
+- [ ] `src/core/rendering/Canvas2DRenderer.ts`: the image's pixels are read
+      once and cached, so a re-rasterize does not read the disk again.
+- [ ] `src/features/brushes/BrushControls.tsx`: real controls - pick the image,
+      its scale, its strength - and no placeholders.
+- [ ] `src/core/project/projectFormat.ts`: format v14 if the appearance
+      changes, validate the new fields, read v1-v13 unchanged.
+- [ ] Tests: default parity, the mask survives the union, live/commit/rebuild/
+      export parity, format round-trip and old-file defaults.
 - [ ] Docs in the same commit: README, ARCHITECTURE, PROJECT_FORMAT, ROADMAP,
       HANDOFF + this brief.
 - [ ] Browser check: the default strokes unchanged, the tip visible, one
@@ -772,8 +802,10 @@ mask rather than a radial falloff.
   darken.
 - The tip is anchored to the document, not to the frame: the same stroke
   renders the same at every zoom and `rasterScale`.
-- Old projects open unchanged; a v11 file requires the new fields and an older
+- Old projects open unchanged; a v14 file requires the new fields and an older
   reader refuses it rather than drawing the wrong look.
+- No third-party brush texture is copied into the app or its assets: a picture
+  tip is a file the **user** owns and points at.
 
 ## 10. First ten minutes of a new session
 

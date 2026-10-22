@@ -204,9 +204,17 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       (no history step, no dirty flag), a preset stores every `BrushSettings`
       field, and a table-driven guard over the default brush prevents a field
       from being silently dropped by the settings reader. Settings stay v1.
-- [ ] Image-based or brush-tip stamp textures: a tip that is a mask rather than
-      a round disc, so a stroke can be stamped with a felt tip or a dry ink
-      blot. The per-dab machinery FF-01 added is what a tip would build on.
+- [x] Brush tips: a stamped stroke can be drawn with a **tipped** dab instead of
+      a round disc - an **ellipse** or a **rectangle**, with an aspect ratio and
+      an angle that either follows the stroke or stays fixed. The tip is a
+      **mask, not a picture**: a name out of a closed list and two numbers, so
+      the file stays small and the parser can validate it. The default tip is
+      the round disc, so every earlier stroke is unchanged pixel for pixel, and
+      the tip changes the mark's shape, never where the dabs are placed.
+      Format v13.
+- [ ] Image-based stamp textures: a tip loaded from a **user-owned image** (a
+      felt tip or a dry ink blot) rather than from the procedural shapes above.
+      The per-dab machinery FF-01 added is what a tip builds on.
 
 ## Phase 4 - Layer system
 

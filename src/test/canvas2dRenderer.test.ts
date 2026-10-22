@@ -58,6 +58,10 @@ const BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  stampTip: "round",
+  stampAspect: 1,
+  stampAngle: 0,
+  stampAngleFollow: true,
   pressureCurve: DEFAULT_PRESSURE_CURVE,
 };
 
@@ -3256,6 +3260,116 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
     checkEveryPathAgrees(STAMP_BRUSH);
   });
 
+  it("agrees across rebuild, live, release and export with a tip", () => {
+    checkEveryPathAgrees({ ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.4 });
+  });
+
+  it("shows the tip: a tipped stroke is not the plain stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const surface = harness.surfaces[0] as unknown as { pixels: Float32Array };
+
+        const plain = createStampStroke(layerId, STAMP_BRUSH, "plain");
+        harness.elements.set(layerId, [plain]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const plainPixels = Array.from(surface.pixels);
+
+        const tipped = createStampStroke(
+          layerId,
+          { ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.4 },
+          "tipped",
+        );
+        harness.elements.set(layerId, [tipped]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        const tippedPixels = Array.from(surface.pixels);
+
+        // The tip is a narrower mark, so the picture really changes.
+        expect(tippedPixels).not.toEqual(plainPixels);
+        // And it only ever takes ink away: the ellipse is inside the disc.
+        let removed = 0;
+        for (let index = 0; index < plainPixels.length; index += 1) {
+          expect(tippedPixels[index]).toBeLessThanOrEqual(plainPixels[index]);
+          if (tippedPixels[index] < plainPixels[index]) {
+            removed += 1;
+          }
+        }
+        expect(removed).toBeGreaterThan(0);
+      },
+    );
+  });
+
+  it("turns the tip with the stroke when the tip follows it", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const surface = harness.surfaces[0] as unknown as { pixels: Float32Array };
+
+        // A diagonal stroke: the tip's direction is the path's direction.
+        const diagonal = (
+          brush: BrushSettings,
+          id: string,
+        ): StrokeRecord => ({
+          ...createStampStroke(layerId, brush, id),
+          xs: [6, 16, 26],
+          ys: [6, 14, 22],
+        });
+
+        const following = diagonal(
+          { ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.4, stampAngleFollow: true },
+          "following",
+        );
+        const fixed = diagonal(
+          { ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.4, stampAngleFollow: false },
+          "fixed",
+        );
+
+        const picture = (stroke: StrokeRecord): number[] => {
+          harness.elements.set(layerId, [stroke]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+          return Array.from(surface.pixels);
+        };
+
+        const followed = picture(following);
+        const held = picture(fixed);
+        // The tip points along the path in one and across it in the other, so
+        // the two marks are not the same picture.
+        expect(followed).not.toEqual(held);
+      },
+    );
+  });
+
+  it("does not darken a self-crossing tipped stroke", () => {
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // The stroke runs over the same pixels twice. The dabs are unioned, so
+        // the crossing keeps the brush's own opacity instead of stacking.
+        const crossing: StrokeRecord = {
+          ...createStampStroke(
+            layerId,
+            { ...STAMP_BRUSH, opacity: 0.5, stampTip: "ellipse", stampAspect: 0.4 },
+            "cross",
+          ),
+          xs: [6, 26, 6],
+          ys: [14, 14, 14],
+        };
+        harness.elements.set(layerId, [crossing]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        // Black at 50 % over white paper is 128; stacking it twice would be 64.
+        expectPixel(harness.display, 16, 14, [128, 128, 128], 1);
+      },
+    );
+  });
+
   it("agrees for a soft dab", () => {
     checkEveryPathAgrees({ ...STAMP_BRUSH, stampHardness: 0.25 });
   });
@@ -3682,5 +3796,155 @@ describe("Canvas2DRenderer stamp engine (real pixels)", () => {
     // profile at its centre at scale 1 and the average of four device pixels
     // at scale 2, which differ by a few levels.
     expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
+  });
+
+  it("rasterizes a tipped stroke the same way at raster scale 1 and 2", () => {
+    // The tip is anchored to the document: the same dabs are placed at both
+    // scales and the tip's shape is the same in document pixels, so the two
+    // pictures agree the way the plain one does.
+    const surfaceAt = (rasterScale: number): Float32Array => {
+      let pixels: Float32Array = new Float32Array(0);
+      withPixels(
+        (doc) => doc,
+        (harness) => {
+          const layerId = harness.doc.layers[0].id;
+          const stroke = createStampStroke(
+            layerId,
+            {
+              ...STAMP_BRUSH,
+              stampHardness: 0.25,
+              stampTip: "ellipse",
+              stampAspect: 0.4,
+            },
+            "scaled",
+          );
+          harness.elements.set(layerId, [stroke]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+          pixels = harness.surfaces[0].pixels.slice();
+        },
+        { rasterScale },
+      );
+      return pixels;
+    };
+
+    const atOne = surfaceAt(1);
+    const atTwo = surfaceAt(2);
+    const width = 32;
+    const sample = (pixels: Float32Array, stride: number, x: number, y: number): number =>
+      pixels[(y * stride + x) * 4 + 3];
+
+    let totalOne = 0;
+    let totalTwo = 0;
+    for (let y = 0; y < width; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        totalOne += sample(atOne, width, x, y);
+        totalTwo +=
+          (sample(atTwo, width * 2, x * 2, y * 2) +
+            sample(atTwo, width * 2, x * 2 + 1, y * 2) +
+            sample(atTwo, width * 2, x * 2, y * 2 + 1) +
+            sample(atTwo, width * 2, x * 2 + 1, y * 2 + 1)) /
+          4;
+      }
+    }
+    expect(totalOne).toBeGreaterThan(0);
+    expect(Math.abs(totalOne - totalTwo) / totalOne).toBeLessThan(0.02);
+
+    // The middle of the stroke is covered at both scales, to the same degree.
+    // The tip is narrower than the brush, so the sample sits on the tip's
+    // soft edge rather than in its opaque core.
+    const scaledMiddle =
+      (sample(atTwo, width * 2, STAMP_X * 2, STAMP_Y * 2) +
+        sample(atTwo, width * 2, STAMP_X * 2 + 1, STAMP_Y * 2) +
+        sample(atTwo, width * 2, STAMP_X * 2, STAMP_Y * 2 + 1) +
+        sample(atTwo, width * 2, STAMP_X * 2 + 1, STAMP_Y * 2 + 1)) /
+      4;
+    expect(sample(atOne, width, STAMP_X, STAMP_Y)).toBeGreaterThan(0.8);
+    expect(Math.abs(sample(atOne, width, STAMP_X, STAMP_Y) - scaledMiddle)).toBeLessThan(0.05);
+  });
+
+  it("covers the same stretch of the path whatever the tip", () => {
+    // The tip is a mask, not a placement: the dabs are still placed by the
+    // path, so a tipped stroke runs as far as a plain one along the path.
+    const extent = (brush: BrushSettings): { first: number; last: number } => {
+      let found = { first: -1, last: -1 };
+      withPixels(
+        (doc) => doc,
+        (harness) => {
+          const layerId = harness.doc.layers[0].id;
+          const stroke: StrokeRecord = {
+            ...createStampStroke(layerId, brush, "extent"),
+            xs: [10, 40, 70],
+            ys: [20, 20, 20],
+          };
+          harness.elements.set(layerId, [stroke]);
+          harness.renderer.invalidateLayer(layerId);
+          harness.renderer.render();
+
+          const buffer = harness.strokeBuffer;
+          let first = -1;
+          let last = -1;
+          for (let column = 0; column < buffer.width; column += 1) {
+            for (let row = 0; row < buffer.height; row += 1) {
+              if (buffer.pixels[(row * buffer.width + column) * 4 + 3] > 0) {
+                if (first < 0) {
+                  first = column;
+                }
+                last = column;
+                break;
+              }
+            }
+          }
+          found = { first, last };
+        },
+      );
+      return found;
+    };
+
+    const plain = extent(STAMP_BRUSH);
+    const tipped = extent({ ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.4 });
+    expect(plain.first).toBeGreaterThanOrEqual(0);
+    // The same stretch of the path: the tip changes the mark's width, not
+    // where the dabs are put.
+    expect(Math.abs(tipped.first - plain.first)).toBeLessThanOrEqual(1);
+    expect(Math.abs(tipped.last - plain.last)).toBeLessThanOrEqual(1);
+  });
+
+  it("antialiases the tip's edge", () => {    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        // A tipped stroke on a half-pixel centre, so the tip's boundary falls
+        // between two pixels and one of them is partly covered.
+        const stroke = createStampStroke(
+          layerId,
+          { ...STAMP_BRUSH, stampTip: "ellipse", stampAspect: 0.5 },
+          "edge",
+        );
+        const onHalfPixel: StrokeRecord = {
+          ...stroke,
+          xs: [6.5, 16.5, 26.5],
+          ys: [6.5, 14.5, 6.5],
+        };
+        harness.elements.set(layerId, [onHalfPixel]);
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+
+        const buffer = harness.strokeBuffer;
+        const alphas: number[] = [];
+        for (let row = 0; row < buffer.height; row += 1) {
+          for (let column = 0; column < buffer.width; column += 1) {
+            const alpha = buffer.pixels[(row * buffer.width + column) * 4 + 3];
+            if (alpha > 0) {
+              alphas.push(alpha);
+            }
+          }
+        }
+        expect(alphas.length).toBeGreaterThan(0);
+        // The edge is a ramp, not a step: some covered pixels are partly
+        // covered, which is what keeps the tip's outline from looking jagged.
+        expect(alphas.some((alpha) => alpha > 0 && alpha < 255)).toBe(true);
+      },
+    );
   });
 });

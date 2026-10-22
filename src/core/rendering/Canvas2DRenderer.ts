@@ -45,8 +45,10 @@ import {
   StampDabCursor,
   stampDabs,
   stampTextureLaneWidth,
+  stampTipOf,
   unionStampRect,
   type StampRect,
+  type StampTip,
 } from "./stampCoverage";
 import type {
   DrawingRenderer,
@@ -238,6 +240,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private stampCoverage: StampCoverage | null = null;
   /** Places the dabs of the in-flight stroke as its path grows. */
   private stampCursor: StampDabCursor | null = null;
+  /**
+   * The mask the in-flight stroke's dabs are painted with, or `null`.
+   *
+   * `null` is the plain round disc: the stamp engine's own default, and the
+   * path every stroke drawn before the tip existed takes. The tip is read
+   * from the stroke's own brush, so it is captured per stroke like every
+   * other brush field.
+   */
+  private stampTip: StampTip | null = null;
   /** The reused upload buffer: one coverage tile, never larger. */
   private stampUpload: ImageData | null = null;
   /** Scratch coverage map used when a committed stroke is re-rasterized. */
@@ -370,6 +381,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const stamped = this.isStamped(stroke);
     this.stampCoverage = stamped ? new StampCoverage() : null;
     this.stampCursor = stamped ? new StampDabCursor(stroke.brush) : null;
+    this.stampTip = stamped ? stampTipOf(stroke.brush) : null;
     this.clearStrokeBuffer();
     if (stroke.erase === true) {
       // The erase snapshot and the grouped-preview scratch are mutually
@@ -390,6 +402,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.activeStroke = stroke;
       this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
       this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
+      this.stampTip = this.isStamped(stroke) ? stampTipOf(stroke.brush) : null;
       if (stroke.erase === true) {
         this.beginErase(stroke.layerId);
       }
@@ -445,6 +458,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     // with the plain segment path), but the branch keeps the two paths apart.
     this.stampCoverage = this.isStamped(stroke) ? new StampCoverage() : null;
     this.stampCursor = this.isStamped(stroke) ? new StampDabCursor(stroke.brush) : null;
+    this.stampTip = this.isStamped(stroke) ? stampTipOf(stroke.brush) : null;
     this.clearStrokeBuffer();
     this.prepareStrokeBuffer();
     if (this.stampCoverage !== null) {
@@ -1244,6 +1258,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The texture rides on the dab's own direction, so the live path and
         // the rebuild path lay the same lanes out over the same pixels.
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        this.stampTip,
+        dab.tipAngle,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -1269,6 +1285,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const scale = this.rasterScale;
     const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
     const strength = stroke.brush.stampTexture;
+    const tip = stampTipOf(stroke.brush);
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -1277,6 +1294,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.radius * scale,
         stroke.brush.stampHardness,
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        tip,
+        dab.tipAngle,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -1341,6 +1360,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private dropStampCoverage(): void {
     this.stampCoverage = null;
     this.stampCursor = null;
+    this.stampTip = null;
   }
 
   /** Clears the part of the stroke buffer a stroke is about to ink. */

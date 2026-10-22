@@ -20,7 +20,7 @@
  * strategy, not a new kind of content.
  */
 
-import type { BrushSettings } from "../../types/brush";
+import type { BrushSettings, StampTipKind } from "../../types/brush";
 import type { Rgb } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { MAX_STAMP_SPACING, MIN_STAMP_SPACING } from "../brushes/defaults";
@@ -54,6 +54,52 @@ export const MAX_STAMP_COVERAGE_WORK = 16_777_216;
 /** Edge length of one coverage tile, in device pixels. */
 export const COVERAGE_TILE_SIZE = 64;
 
+/**
+ * The shape of a dab's tip.
+ *
+ * The tip is the mask a dab is painted with. It is described by a shape and a
+ * ratio rather than by pixels, so it costs a few numbers in a project file
+ * and the parser can validate it.
+ *
+ * `aspect` is the tip's minor axis as a fraction of its major axis: `1` is a
+ * tip as wide as it is long, and a smaller value makes it long and narrow.
+ * A round tip ignores it - a disc has no minor axis to shorten.
+ */
+export interface StampTip {
+  /** The shape of the tip. */
+  readonly kind: StampTipKind;
+  /** The minor axis as a fraction of the major axis, in `(0, 1]`. */
+  readonly aspect: number;
+}
+
+/**
+ * The tip a brush's dabs use, or `null` for the plain round disc.
+ *
+ * `null` is the fast path: a round dab is the disc the stamp engine has
+ * always painted, and it keeps its own arithmetic, so a stroke without a tip
+ * is byte for byte the stroke every earlier file produced.
+ */
+export function stampTipOf(brush: BrushSettings): StampTip | null {
+  if (brush.stampTip === "round") {
+    return null;
+  }
+  return { kind: brush.stampTip, aspect: brush.stampAspect };
+}
+
+/**
+ * True when a tip is really a disc.
+ *
+ * An ellipse as wide as it is long is a disc, and a round tip is a disc, so
+ * both take the plain round path: the picture is the same and the plain path
+ * is the cheaper one.
+ */
+export function isRoundTip(tip: StampTip | null): boolean {
+  if (tip === null || tip.kind === "round") {
+    return true;
+  }
+  return tip.kind === "ellipse" && tip.aspect >= 0.999;
+}
+
 /** A dab placed on a stroke's path. */
 export interface StampDab {
   /** Centre of the dab, in document pixels. */
@@ -72,6 +118,17 @@ export interface StampDab {
    * direction must not depend on samples that arrive later.
    */
   readonly angle: number;
+  /**
+   * The tip's direction at the dab, in radians.
+   *
+   * This is the angle the tip's major axis points at, and it is what makes a
+   * tipped stroke directional: with the tip following the path it is the
+   * path's direction plus the brush's offset, and with a fixed tip it is the
+   * brush's angle whatever the stroke does. The first dab carries the same
+   * angle as the others of a fixed tip, and the offset of a following one -
+   * the path has not continued yet, so it has no direction to follow.
+   */
+  readonly tipAngle: number;
 }
 
 /** The part of a stroke the dabs are placed along. */
@@ -135,6 +192,10 @@ export function stampDabs(path: StampPath, brush: BrushSettings): StampDab[] {
  */
 export class StampDabCursor {
   private readonly brush: BrushSettings;
+  /** The tip's offset from the path's direction, in radians. */
+  private readonly tipOffset: number;
+  /** Whether the tip turns with the path. */
+  private readonly tipFollows: boolean;
   private sampleIndex = 0;
   private carried = 0;
   private started = false;
@@ -145,6 +206,8 @@ export class StampDabCursor {
 
   constructor(brush: BrushSettings) {
     this.brush = brush;
+    this.tipOffset = (brush.stampAngle * Math.PI) / 180;
+    this.tipFollows = brush.stampAngleFollow === true;
   }
 
   /** Forgets the path, so the cursor can follow another one. */
@@ -169,7 +232,15 @@ export class StampDabCursor {
       this.previousX = path.xs[0];
       this.previousY = path.ys[0];
       const radius = strokeDiameter(this.brush, path.pressures[0] ?? 1) / 2;
-      dabs.push({ x: this.previousX, y: this.previousY, radius, angle: 0 });
+      dabs.push({
+        x: this.previousX,
+        y: this.previousY,
+        radius,
+        angle: 0,
+        // The path has not continued, so there is no direction to follow yet:
+        // the first dab carries the tip's offset on its own.
+        tipAngle: this.tipOffset,
+      });
       this.work += dabWork(radius);
       this.sampleIndex = 1;
     }
@@ -208,6 +279,7 @@ export class StampDabCursor {
           y: this.previousY + dy * t,
           radius,
           angle,
+          tipAngle: this.tipFollows ? angle + this.tipOffset : this.tipOffset,
         });
       }
       this.carried += segment - travelled;
@@ -249,6 +321,53 @@ export function stampDabCoverage(distance: number, radius: number, hardness: num
     return 1;
   }
   const t = clamp((radius + 0.5 - distance) / (band + 1), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * The coverage a tipped dab has at a point, in `[0, 1]`.
+ *
+ * The point is given in the tip's own frame: `along` is the distance along the
+ * tip's major axis and `across` the distance along its minor one, and `major`
+ * and `minor` are the tip's half axes in the same units. A square tip reaches
+ * its boundary along the axes and an elliptical one along an ellipse.
+ *
+ * This is the reference the painter's fast path implements: the two have to
+ * agree pixel for pixel, and the test that says so is the one that catches a
+ * change to only one of them.
+ */
+export function stampTipCoverage(
+  along: number,
+  across: number,
+  major: number,
+  minor: number,
+  square: boolean,
+  hardness: number,
+): number {
+  if (major <= 0) {
+    return 0;
+  }
+  const clamped = clamp(hardness, 0, 1);
+  const u = along / major;
+  const v = across / minor;
+  const shapeDistance = square
+    ? Math.max(Math.abs(u), Math.abs(v))
+    : Math.sqrt(u * u + v * v);
+  if (shapeDistance <= 0) {
+    // The tip's centre: the whole of it is covered.
+    return 1;
+  }
+  const distance = Math.sqrt(along * along + across * across);
+  const reach = distance / shapeDistance;
+  const outer = reach + 0.5;
+  if (distance >= outer) {
+    return 0;
+  }
+  const core = Math.max(reach * clamped - 0.5, 0);
+  if (distance <= core) {
+    return 1;
+  }
+  const t = clamp((outer - distance) / (reach * (1 - clamped) + 1), 0, 1);
   return t * t * (3 - 2 * t);
 }
 
@@ -335,6 +454,14 @@ export class StampCoverage {
    * A `texture` modulates the dab's coverage **before** it is unioned, so the
    * union is still a maximum and the stroke still cannot darken where its
    * dabs overlap. A texture can therefore only ever remove ink.
+   *
+   * A `tip` is the mask the dab is painted with. `null` - and a tip that is
+   * really a disc - keeps the plain round path, so a stroke without a tip is
+   * byte for byte the stroke every earlier file produced. A tipped dab is
+   * painted in the tip's own frame: `tipAngle` is the direction its major axis
+   * points at, and the coverage falls off from the tip's boundary the same
+   * way it does from a disc's, scaled by how far that boundary is along the
+   * pixel's own ray.
    */
   paintDab(
     centerX: number,
@@ -342,16 +469,45 @@ export class StampCoverage {
     radius: number,
     hardness: number,
     texture: StampTexture | null = null,
+    tip: StampTip | null = null,
+    tipAngle = 0,
   ): StampRect | null {
     if (radius <= 0 || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
       return null;
     }
-    const left = Math.floor(centerX - radius - 0.5);
-    const right = Math.ceil(centerX + radius + 0.5);
-    const top = Math.floor(centerY - radius - 0.5);
-    const bottom = Math.ceil(centerY + radius + 0.5);
+    const hardnessValue = clamp(hardness, 0, 1);
+    const shaped = !isRoundTip(tip);
+    const square = shaped && tip !== null && tip.kind === "square";
+    // The tip's own axes, in device pixels: the major one is the dab's radius
+    // and the minor one is that radius times the tip's aspect.
+    const aspect = shaped && tip !== null ? clamp(tip.aspect, 0, 1) : 1;
+    const major = radius;
+    const minor = radius * aspect;
+    // The tip's frame, turned once per dab rather than once per pixel.
+    const tipCos = shaped ? Math.cos(tipAngle) : 1;
+    const tipSin = shaped ? Math.sin(tipAngle) : 0;
+    const inverseMajor = 1 / major;
+    const inverseMinor = 1 / minor;
 
-    const band = radius * (1 - clamp(hardness, 0, 1));
+    // The box the dab can reach. A round dab reaches its radius in every
+    // direction; a tipped one reaches its own shape's extent, turned by the
+    // tip's angle.
+    const halfWidth = shaped
+      ? square
+        ? major * Math.abs(tipCos) + minor * Math.abs(tipSin)
+        : Math.sqrt(major * major * tipCos * tipCos + minor * minor * tipSin * tipSin)
+      : radius;
+    const halfHeight = shaped
+      ? square
+        ? major * Math.abs(tipSin) + minor * Math.abs(tipCos)
+        : Math.sqrt(major * major * tipSin * tipSin + minor * minor * tipCos * tipCos)
+      : radius;
+    const left = Math.floor(centerX - halfWidth - 0.5);
+    const right = Math.ceil(centerX + halfWidth + 0.5);
+    const top = Math.floor(centerY - halfHeight - 0.5);
+    const bottom = Math.ceil(centerY + halfHeight + 0.5);
+
+    const band = radius * (1 - hardnessValue);
     const coreLimit = Math.max(radius - band - 0.5, 0);
     const outerLimit = radius + 0.5;
     const bandWidth = band + 1;
@@ -399,17 +555,52 @@ export class StampCoverage {
               continue;
             }
             const dx = x + 0.5 - centerX;
-            const distanceSquared = dx * dx + dySquared;
-            if (distanceSquared >= outerLimit * outerLimit) {
-              continue;
-            }
             let coverage: number;
-            if (distanceSquared <= coreLimit * coreLimit) {
-              coverage = 1;
+            if (shaped) {
+              // The pixel in the tip's own frame: `along` runs down the tip's
+              // major axis and `across` across its minor one.
+              const along = dx * tipCos + dy * tipSin;
+              const across = -dx * tipSin + dy * tipCos;
+              // The tip's shape distance: 1 on the boundary, less inside.
+              const u = along * inverseMajor;
+              const v = across * inverseMinor;
+              const shapeDistance = square
+                ? Math.max(Math.abs(u), Math.abs(v))
+                : Math.sqrt(u * u + v * v);
+              if (shapeDistance <= 0) {
+                // The tip's centre: the whole of it is covered.
+                coverage = 1;
+              } else {
+                const distance = Math.sqrt(along * along + across * across);
+                // How far the tip's boundary is along this pixel's own ray.
+                // The falloff is measured against it, so a long tip falls off
+                // over a long stretch and a short one over a short stretch -
+                // the same softness everywhere on the tip.
+                const reach = distance / shapeDistance;
+                const outer = reach + 0.5;
+                if (distance >= outer) {
+                  continue;
+                }
+                const core = Math.max(reach * hardnessValue - 0.5, 0);
+                if (distance <= core) {
+                  coverage = 1;
+                } else {
+                  const t = clamp((outer - distance) / (reach * (1 - hardnessValue) + 1), 0, 1);
+                  coverage = t * t * (3 - 2 * t);
+                }
+              }
             } else {
-              const distance = Math.sqrt(distanceSquared);
-              const t = clamp((outerLimit - distance) / bandWidth, 0, 1);
-              coverage = t * t * (3 - 2 * t);
+              const distanceSquared = dx * dx + dySquared;
+              if (distanceSquared >= outerLimit * outerLimit) {
+                continue;
+              }
+              if (distanceSquared <= coreLimit * coreLimit) {
+                coverage = 1;
+              } else {
+                const distance = Math.sqrt(distanceSquared);
+                const t = clamp((outerLimit - distance) / bandWidth, 0, 1);
+                coverage = t * t * (3 - 2 * t);
+              }
             }
             let value: number;
             if (textured) {

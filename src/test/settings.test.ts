@@ -121,6 +121,10 @@ const NON_DEFAULT_BRUSH_VALUES: Record<
   stampSpacing: 0.28,
   stampHardness: 0.61,
   stampTexture: 0.52,
+  stampTip: "square",
+  stampAspect: 0.45,
+  stampAngle: 75,
+  stampAngleFollow: false,
 };
 
 function nonDefaultBrush(): BrushSettings {

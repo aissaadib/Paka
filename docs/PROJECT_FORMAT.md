@@ -403,6 +403,10 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+| `stampTip` | `"round"`, `"ellipse"` or `"square"` | The **mask a dab is painted with**. `round` is the plain disc every earlier version produced; `ellipse` and `square` are the tipped shapes, described by `stampAspect` and `stampAngle` rather than by pixels. Only a stamped stroke is affected. Required in version 13; version-1 to -12 files have no field and read as `"round"`. A name outside the list is refused. |
+| `stampAspect` | 0.05-1 | The tip's minor axis as a fraction of its major axis: `1` is a tip as wide as it is long, lower values make it long and narrow. The brush's `size` is the **major** axis. A round tip ignores it. Required in version 13; version-1 to -12 files read as `1`. |
+| `stampAngle` | 0-360 | The tip's angle in degrees. With `stampAngleFollow` off it is the tip's absolute angle; with it on it is the **offset** from the stroke's direction. Required in version 13; version-1 to -12 files read as `0`. |
+| `stampAngleFollow` | boolean | Whether the tip turns with the stroke. `true` points it along the path (plus the offset), which is what a flat or chisel brush does. Required in version 13; version-1 to -12 files read as `true`. |
 
 ## Validation policy
 
@@ -428,8 +432,10 @@ looks like:
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
   a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
-  missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
-  `stampSpacing`/`stampHardness` that is missing or outside its range;
+  missing or outside `0..1`, a version-9 `stamp` that is not a boolean or a
+  `stampSpacing`/`stampHardness` that is missing or outside its range, and a
+  version-13 `stampTip` that is missing or names a tip outside the closed list,
+  a `stampAspect` outside `0.05..1` or a `stampAngle` outside `0..360`;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -467,6 +473,10 @@ looks like:
 - a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
   texture did not exist before version 10, and the texture off is exactly the
   coverage those files were written by;
+- a missing `stampTip` in a version-1 to -12 file → `"round"`, and missing
+  `stampAspect`/`stampAngle`/`stampAngleFollow` → their defaults. The tip did
+  not exist before version 13, and the round disc is exactly the coverage those
+  files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -512,8 +522,8 @@ Two further guarantees:
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
-| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
+| 13 | Requires `stampTip`, `stampAspect`, `stampAngle` and `stampAngleFollow` on every stroke brush; reads version-1 to -12 files unchanged and defaults their strokes to the round tip (the disc they were written by). | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -553,6 +563,14 @@ Two further guarantees:
   version-11 reader that ignored it would draw the linear profile instead, which
   is a different picture. Version-1 to -11 files read with the identity curve,
   which is exactly the linear response they were written by.
+- **`stampTip` required version 13**, for the same reason. It changes how a
+  stamped stroke's samples are rasterized - the dabs are painted with a tipped
+  mask instead of a disc - so a version-12 reader that ignored it would draw the
+  same stroke as a plain chain of dabs, which is a different picture.
+  Version-1 to -12 files read with the round tip, which is exactly the disc they
+  were written by. The tip is a **name out of a closed list**, not a blob of
+  pixels: a file that names a tip this build does not know is refused rather
+  than drawn as something else.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

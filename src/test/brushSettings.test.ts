@@ -3,6 +3,7 @@ import {
   brushSettingsEqual,
   DEFAULT_BRUSH,
   MAX_BRUSH_SIZE,
+  MAX_STAMP_ASPECT,
   MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   DEFAULT_PRESSURE_CURVE,
@@ -57,6 +58,10 @@ describe("brush configuration", () => {
       stampSpacing: 9,
       stampHardness: -2,
       stampTexture: 4,
+      stampTip: "ellipse",
+      stampAspect: 4,
+      stampAngle: -30,
+      stampAngleFollow: false,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -71,6 +76,11 @@ describe("brush configuration", () => {
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
     expect(normalized.stampTexture).toBe(1);
+    expect(normalized.stampTip).toBe("ellipse");
+    expect(normalized.stampAspect).toBe(MAX_STAMP_ASPECT);
+    // The angle is a direction: it is wrapped, not clamped away.
+    expect(normalized.stampAngle).toBe(330);
+    expect(normalized.stampAngleFollow).toBe(false);
   });
 
   it("applies a patch without mutating the current settings", () => {

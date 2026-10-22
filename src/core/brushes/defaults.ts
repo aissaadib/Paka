@@ -1,6 +1,6 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
+import type { BrushSettings, PressureCurvePoint, StampTipKind } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
@@ -30,6 +30,27 @@ export const MIN_STAMP_SPACING = 0.02;
 export const MAX_STAMP_SPACING = 1;
 
 /**
+ * The tip's minor axis as a fraction of its major axis: 5 % to 100 %.
+ *
+ * The floor keeps a tip from collapsing into a line: a dab thinner than a
+ * twentieth of its length stops reading as a mark and starts reading as a
+ * scratch.
+ */
+export const MIN_STAMP_ASPECT = 0.05;
+export const MAX_STAMP_ASPECT = 1;
+
+/**
+ * The tip shapes a brush can use.
+ *
+ * A closed list, so a file that names a tip this build does not know falls
+ * back to the round one instead of being drawn as something else.
+ */
+export const STAMP_TIP_KINDS: readonly StampTipKind[] = ["round", "ellipse", "square"];
+
+/** The tip every brush starts with: the plain round disc. */
+export const DEFAULT_STAMP_TIP: StampTipKind = "round";
+
+/**
  * Defaults are tuned for mouse and pen input on a white document:
  * a small dark stroke whose width follows pressure when a pen provides it.
  */
@@ -49,6 +70,10 @@ export const DEFAULT_BRUSH: BrushSettings = {
   stampSpacing: 0.1,
   stampHardness: 1,
   stampTexture: 0,
+  stampTip: DEFAULT_STAMP_TIP,
+  stampAspect: 1,
+  stampAngle: 0,
+  stampAngleFollow: true,
 };
 
 /** Clamps and validates a brush configuration. */
@@ -69,13 +94,48 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     stampSpacing: clamp(brush.stampSpacing, MIN_STAMP_SPACING, MAX_STAMP_SPACING),
     stampHardness: clamp(brush.stampHardness, 0, 1),
     stampTexture: clamp(brush.stampTexture, 0, 1),
+    stampTip: normalizeStampTip(brush.stampTip),
+    stampAspect: clamp(brush.stampAspect, MIN_STAMP_ASPECT, MAX_STAMP_ASPECT),
+    stampAngle: normalizeStampAngle(brush.stampAngle),
+    stampAngleFollow: brush.stampAngleFollow === true,
   };
+}
+
+/**
+ * A tip shape out of an untrusted value, or the fallback.
+ *
+ * The list of shapes is closed, so a name this build does not know - a file
+ * written by a newer Paka, or a hand-edited one - falls back to the round
+ * disc rather than being drawn as an unknown shape.
+ */
+export function normalizeStampTip(
+  value: unknown,
+  fallback: StampTipKind = DEFAULT_STAMP_TIP,
+): StampTipKind {
+  return typeof value === "string" && (STAMP_TIP_KINDS as readonly string[]).includes(value)
+    ? (value as StampTipKind)
+    : fallback;
+}
+
+/**
+ * An angle in degrees, wrapped into `[0, 360)`.
+ *
+ * The tip's angle is a direction, not a magnitude: `-90` and `270` are the
+ * same direction, and a tip that has been turned round twice is back where it
+ * started.
+ */
+export function normalizeStampAngle(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  const wrapped = value % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
 }
 
 /* --------------------------------------------------------------------------
  * The brush's fields.
  *
- * Every field of a brush is claimed by exactly one of the three lists below,
+ * Every field of a brush is claimed by exactly one of the lists below,
  * and `readBrushSettings` walks the lists instead of reading properties one
  * by one. That is deliberate: a hand-written list of property reads is how
  * `stampTexture` was written to the settings file and then read back as the
@@ -93,9 +153,28 @@ type FlagBrushField = {
   [K in keyof BrushSettings]: BrushSettings[K] extends boolean ? K : never;
 }[keyof BrushSettings];
 
-/** The fields whose value is a colour. */
+/**
+ * The fields whose value is a colour.
+ *
+ * The tip's name is a string too, but it is a closed set of shapes rather than
+ * a colour, so it is excluded here and read by the tip list below.
+ */
 type ColorBrushField = {
-  [K in keyof BrushSettings]: BrushSettings[K] extends string ? K : never;
+  [K in keyof BrushSettings]: BrushSettings[K] extends string
+    ? BrushSettings[K] extends StampTipKind
+      ? never
+      : K
+    : never;
+}[keyof BrushSettings];
+
+/**
+ * The fields whose value is a tip shape.
+ *
+ * A tip is one name out of a closed list, so it is read by its own reader
+ * rather than by the colour one, which would reject every name but a hex.
+ */
+type TipBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends StampTipKind ? K : never;
 }[keyof BrushSettings];
 
 /** Every numeric field of a brush. */
@@ -112,10 +191,15 @@ export const BRUSH_NUMBER_FIELDS = [
   "stampSpacing",
   "stampHardness",
   "stampTexture",
+  "stampAspect",
+  "stampAngle",
 ] as const satisfies readonly NumericBrushField[];
 
 /** Every flag field of a brush. */
-export const BRUSH_FLAG_FIELDS = ["stamp"] as const satisfies readonly FlagBrushField[];
+export const BRUSH_FLAG_FIELDS = [
+  "stamp",
+  "stampAngleFollow",
+] as const satisfies readonly FlagBrushField[];
 
 /** Every colour field of a brush. */
 export const BRUSH_COLOR_FIELDS = ["color"] as const satisfies readonly ColorBrushField[];
@@ -130,12 +214,16 @@ export const BRUSH_CURVE_FIELDS = [
   "pressureCurve",
 ] as const satisfies readonly CurveBrushField[];
 
+/** Every tip field of a brush. */
+export const BRUSH_TIP_FIELDS = ["stampTip"] as const satisfies readonly TipBrushField[];
+
 /** Every field a brush has, according to the lists above. */
 type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
   | (typeof BRUSH_COLOR_FIELDS)[number]
-  | (typeof BRUSH_CURVE_FIELDS)[number];
+  | (typeof BRUSH_CURVE_FIELDS)[number]
+  | (typeof BRUSH_TIP_FIELDS)[number];
 
 /** A brush field that no list above claims. */
 type UnlistedBrushField = Exclude<keyof BrushSettings, ListedBrushField>;
@@ -209,6 +297,9 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_CURVE_FIELDS) {
     assign(merged, field, normalizePressureCurve(record[field]));
   }
+  for (const field of BRUSH_TIP_FIELDS) {
+    assign(merged, field, normalizeStampTip(record[field], DEFAULT_BRUSH[field]));
+  }
   return normalizeBrush(merged);
 }
 
@@ -236,7 +327,11 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.stamp === b.stamp &&
     a.stampSpacing === b.stampSpacing &&
     a.stampHardness === b.stampHardness &&
-    a.stampTexture === b.stampTexture
+    a.stampTexture === b.stampTexture &&
+    a.stampTip === b.stampTip &&
+    a.stampAspect === b.stampAspect &&
+    a.stampAngle === b.stampAngle &&
+    a.stampAngleFollow === b.stampAngleFollow
   );
 }
 

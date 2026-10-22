@@ -4,18 +4,28 @@ import { useState } from "react";
 import {
   MAX_BRUSH_SIZE,
   MAX_SPACING,
+  MAX_STAMP_ASPECT,
   MAX_STAMP_SPACING,
   MIN_BRUSH_SIZE,
   MIN_SPACING,
+  MIN_STAMP_ASPECT,
   MIN_STAMP_SPACING,
 } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 import { BrushPresets } from "./BrushPresets";
 import { PressureCurveEditor } from "./PressureCurveEditor";
+import type { StampTipKind } from "../../types/brush";
 
 /** Pressure strength applied by the on/off toggles. */
 const PRESSURE_STRENGTH = 0.6;
+
+/** The tips a brush can be stamped with, in the order the picker shows them. */
+const TIP_CHOICES: readonly { readonly value: StampTipKind; readonly label: string }[] = [
+  { value: "round", label: "Round" },
+  { value: "ellipse", label: "Ellipse" },
+  { value: "square", label: "Square" },
+];
 
 export function BrushControls() {
   const { actions } = useEditor();
@@ -128,6 +138,63 @@ export function BrushControls() {
             format={(value) => `${Math.round(value * 100)}%`}
             onChange={(stampTexture) => actions.setBrush({ stampTexture })}
           />
+          <label
+            className="brush-tip__field"
+            title="The shape of the dab's tip: a round disc, an ellipse or a square"
+          >
+            <span className="brush-tip__label">Tip</span>
+            <select
+              className="brush-tip__select"
+              aria-label="Stamp tip"
+              value={brush.stampTip}
+              onChange={(event) =>
+                actions.setBrush({ stampTip: event.target.value as StampTipKind })
+              }
+            >
+              {TIP_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {brush.stampTip === "round" ? null : (
+            <>
+              <SliderField
+                label="Tip roundness"
+                min={MIN_STAMP_ASPECT * 100}
+                max={MAX_STAMP_ASPECT * 100}
+                step={1}
+                value={brush.stampAspect * 100}
+                title="The tip's short axis as a percentage of its long one; the brush size is the long axis"
+                format={(value) => `${Math.round(value)}%`}
+                onChange={(stampAspect) => actions.setBrush({ stampAspect: stampAspect / 100 })}
+              />
+              <SliderField
+                label="Tip angle"
+                min={0}
+                max={359}
+                step={1}
+                value={brush.stampAngle}
+                title="The tip's angle in degrees; with 'Follow direction' on it is the angle away from the stroke's direction"
+                format={(value) => `${Math.round(value)}°`}
+                onChange={(stampAngle) => actions.setBrush({ stampAngle })}
+              />
+              <label
+                className="toggle"
+                title="Turn the tip with the stroke, the way a flat or chisel brush does"
+              >
+                <input
+                  type="checkbox"
+                  checked={brush.stampAngleFollow}
+                  onChange={(event) =>
+                    actions.setBrush({ stampAngleFollow: event.target.checked })
+                  }
+                />
+                Follow direction
+              </label>
+            </>
+          )}
         </>
       ) : null}
       <label

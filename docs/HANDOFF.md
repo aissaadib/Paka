@@ -531,13 +531,16 @@ The real plan lives in [ROADMAP.md](ROADMAP.md) (phases, status legend, and a
 
 ## 9. Next move
 
-**Brush-tip and image-based stamp textures** (the rest of the Phase 3 work).
+**Image-based stamp textures** (the rest of the Phase 3 work).
 The stamp engine has shipped: a stroke can be drawn as a chain of round dabs
 placed along its path, unioned so it never darkens where it crosses
 itself, with a true per-dab hardness curve (format version 9). The per-dab
 **directional texture** has shipped with it: bristle lanes that run along the
 path, multiplied into a dab's coverage before the union (format version 10).
-The grain is still one document-anchored post-pass over the finished coverage.
+The **brush tip** has shipped with them: a dab's mask is a round disc, an
+ellipse or a rectangle, with an aspect ratio and an angle that either follows
+the stroke or stays fixed (format version 13). The grain is still one
+document-anchored post-pass over the finished coverage.
 The "Next slice" section of [ROADMAP.md](ROADMAP.md) is kept current and is the
 authority.
 
@@ -545,18 +548,21 @@ The constraints that matter:
 
 - keep `DrawingRenderer`/`StrokeRecord` as the boundary; samples stay the
   authoritative record for undo, reopen and export;
-- keep the segment path, the grain pass, the stamp engine and the per-dab
-  texture as the defaults and preserve hard/soft/grain/stamped output;
+- keep the segment path, the grain pass, the stamp engine, the per-dab texture
+  and the **round tip** as the defaults and preserve hard/soft/grain/stamped
+  output;
 - a tip multiplies a dab's coverage **before** the union, so the
   union stays a maximum and a stroke still cannot darken;
 - keep the tip deterministic from document coordinates (and from the dab's
   own direction, if it follows the path) so live, rebuild, undo/redo, reopen and
   PNG export agree at every zoom and `rasterScale`;
-- a non-default tip appearance cannot be ignored by a v10 reader without
-  changing the picture, so expect **format version 11** if fields change
+- a non-default tip appearance cannot be ignored by a v13 reader without
+  changing the picture, so expect **format version 14** if fields change
   output;
 - a tip in the project file inflates the JSON, so it must be a **mask** and not
   a colour, and it must be a bounded shape the parser can validate;
+- a picture tip is a **reference** to an image the user owns, never a copied
+  proprietary texture and never the image's pixels in the drawing file;
 - keep `spacing` (sample density) distinct from the stamp's dab spacing;
 - the coverage map stays footprint-bounded and the upload stays one tile at a
   time: the raster budget's 58 bytes per document pixel must not move.
@@ -639,8 +645,9 @@ Optional polish, deliberately not done yet:
   spacing controls sample density rather than stamp spacing; the stabilizer is an
   exponential follow filter with visible lag and no look-ahead/rope catch-up;
   texture is a single grain pass, not an image texture; the stamp engine's own
-  per-dab texture is a procedural bristle pattern, not a picture, and there is
-  no brush tip; blend modes are limited to `normal`, `multiply`
+  per-dab texture is a procedural bristle pattern, not a picture, and the brush
+  tip is a procedural ellipse or rectangle rather than a picture; blend modes are
+  limited to `normal`, `multiply`
   and `screen`, composited against the paper and lower layers with no group or
   clipping context.
 

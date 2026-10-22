@@ -508,6 +508,77 @@ The texture costs no extra allocation: it reuses the dab's own pixel loop and
 the coverage map's existing tiles, so the raster budget's 58 bytes per
 document pixel still holds.
 
+### Brush tips
+
+`BrushSettings.stampTip` replaces the dab's **disc** with a **mask**: the shape
+a dab is painted with. The tip is a rasterization strategy like the stamp
+itself - the stored samples stay authoritative for undo, reopen and export -
+and it is captured per stroke like every other brush field.
+
+The tip is three numbers and a name, never a blob of pixels:
+
+| Field | Meaning |
+| --- | --- |
+| `stampTip` | `round` (the plain disc), `ellipse` or `square`. |
+| `stampAspect` | The tip's minor axis as a fraction of its major axis, `0.05..1`. |
+| `stampAngle` | The tip's angle in degrees. |
+| `stampAngleFollow` | Whether the tip turns with the stroke. |
+
+`round` is the default and is the **plain round path**, bit for bit: the tip
+only reaches the pixel loop when it is really a different shape, so a stroke
+without a tip is the stroke every earlier file produced. An ellipse as wide as
+it is long is a disc and takes the same path.
+
+The **brush's size is the tip's major axis**. A tip with a smaller aspect is
+long and narrow, so a stroke drawn with it is narrower *across* the path than
+the size suggests - the way a flat or chisel brush behaves. The angle says
+which way the long axis points:
+
+- with `stampAngleFollow` on, the tip points **along the path**, plus the
+  `stampAngle` offset. This is the classic elongated brush: the mark is long
+  along the stroke and narrow across it.
+- with it off, the tip keeps the `stampAngle` whatever the stroke does, so a
+  stroke that turns draws the same mark throughout.
+
+The coverage of a tipped dab is the same profile a disc has, measured against
+the tip's own boundary:
+
+```
+pixel -> the tip's frame (rotate by the tip's angle)
+      -> the shape's distance d (1 on the boundary: an ellipse, a rectangle)
+      -> the boundary's distance R along the pixel's own ray
+      -> the same falloff a disc has, with R in place of the radius
+```
+
+So the softness is the **same everywhere on the tip**, scaled by how far that
+boundary is along the pixel's ray: a long tip falls off over a long stretch and
+a short one over a short stretch, and the antialiased rim is a half pixel
+either way. The reference implementation is `stampTipCoverage`, and a test
+compares it with the painter's fast path pixel for pixel.
+
+The tip changes **nothing** about the placement: the dabs are still placed by
+arc length along the path, so a tipped stroke runs exactly as far as a plain
+one and the spacing control means the same thing. The tip changes the mask, not
+the plan.
+
+Three properties keep the feature inside the existing engine:
+
+- **The union is still a maximum.** A tipped dab is painted with its own
+  coverage, so overlapping dabs still cannot darken and the stroke's opacity
+  is still applied once.
+- **It is anchored to the document.** The tip's shape is a ratio and an angle,
+  and the dabs are placed in document pixels, so the same stroke renders the
+  same at every zoom and `rasterScale`.
+- **It costs no extra memory.** The tipped dab reuses the coverage map's own
+  tiles and the dab's own pixel loop, so the raster budget's 58 bytes per
+  document pixel still holds.
+
+The tip is **required from project format 13**: a version-12 reader would draw
+the same dabs as plain discs, which is a different picture. Version-1 to -12
+files open with the round tip, which is exactly the disc they were written by.
+The tip's name is a closed list, so a file that names a tip this build does not
+know is refused rather than drawn as something else.
+
 ### Eraser strokes
 
 An eraser is a brush whose strokes **subtract** coverage instead of adding it.
