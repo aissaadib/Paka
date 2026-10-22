@@ -205,6 +205,19 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   the picture does not change when a stroke is drawn backwards, and against the
   brush's nominal size, so the pattern is the same in document pixels at every
   zoom.
+- **The left tool rail**: the tools are grouped the way an artist reaches for
+  them - **draw** (brush, eraser), **shapes** (line, rectangle, ellipse,
+  polygon, star), **fill** (bucket, gradient), **select & transform**,
+  **colour** (picker), **navigate** (pan) and **assist** (guides). The five
+  shape tools share one slot that opens a flyout, because they are one family
+  with one gesture; every other tool is one click away. The active tool is
+  marked, every button carries its name and its shortcut, and the arrow keys
+  walk the rail. The **pan** tool is temporary navigation: clicking it while
+  it is already active returns to the tool you came from, so a stray pan never
+  leaves the app in a mode that cannot paint. The tooltips belong to the rail
+  and are anchored beside their button, so they never follow the pointer and
+  never cover the canvas. A short window tightens the rail and lets it scroll
+  rather than clipping the tools away.
 - **Navigation**: wheel scrolls, `Shift+Wheel` scrolls horizontally,
   `Ctrl`/`Alt+Wheel` zooms around the cursor, `Pan` tool or middle-mouse drag
   moves the canvas. Zoom buttons, actual size and fit-to-window.

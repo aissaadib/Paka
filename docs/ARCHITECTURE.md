@@ -1590,6 +1590,36 @@ keep it from churning. Two things deliberately bypass React:
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
 
+### The left tool rail
+
+The rail is the palette, and its rules live in a DOM-free module
+(`core/tools/toolRail.ts`) so they can be tested without a browser:
+
+- **The groups.** The registered tools are arranged into draw (brush,
+  eraser), shapes (line, rectangle, ellipse, polygon, star), fill (bucket,
+  gradient), select & transform, colour (picker), navigate (pan) and assist
+  (guides). A tool in no group would be a tool the rail cannot show, so the
+  grouping is closed over the registry and the test says so.
+- **The collapsed slot.** Only the shape family collapses into one slot with a
+  flyout: it is one family with one gesture, and a collapsed tool is one click
+  further away. Every other tool keeps its own button.
+- **The active state.** A slot is active when its tool is the active tool. The
+  collapsed slot shows the shape that is armed, so the rail says which one.
+- **The temporary navigation tool.** The pan tool is navigation, not a place
+  to stay: clicking it while it is already active returns to the tool the
+  artist came from. The rail remembers that tool (`rememberTool`), so the way
+  back survives a tool change made by a shortcut.
+
+The rail is a `role="toolbar"` with a roving tab stop: `Tab` reaches it once
+and the arrow keys walk it. The arrow keys stop the event, so they cannot
+nudge a selection at the same time.
+
+The tooltips are the rail's own rather than the browser's `title`: a `title`
+follows the pointer, so it opens under the cursor and can cover the canvas the
+artist is aiming at. The rail's tooltip is anchored to its button, opens to
+the right of the rail and takes no pointer event. The flyout is portalled to
+the body, so the rail's own scrolling never clips it.
+
 ## Native boundary (Rust)
 
 `src-tauri` holds the project file I/O: `read_text_file`,

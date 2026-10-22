@@ -276,3 +276,13 @@ export function IconFile(props: IconProps) {
     </Icon>
   );
 }
+
+/** A square and a circle: the shape family, shown while no shape is armed. */
+export function IconShapes(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.2" y="3.6" width="7.2" height="7.2" rx="0.8" />
+      <circle cx="10.2" cy="10.4" r="3.4" />
+    </Icon>
+  );
+}

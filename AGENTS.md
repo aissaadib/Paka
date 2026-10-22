@@ -58,6 +58,7 @@ architecture by browsing.
 | 1752 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
 | 890 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
+| 328 | `src/components/toolbar/ToolRail.tsx` | the rail: the groups, the active state, the flyout and the tooltips |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
@@ -67,6 +68,8 @@ architecture by browsing.
 `canvas2dStroke`,
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
+`core/tools/toolRail.ts` (the rail's groups, slots and routing),
+`components/toolbar/ToolRailMenu.tsx` (the flyout),
 `features/color/wheelGeometry.ts` (102),
 `core/brushes/presets.ts` (161: the preset model, its validation and its equality),
 `features/brushes/BrushPresets.tsx` (176),
@@ -96,6 +99,8 @@ and the budget).
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
+`components/toolbar/ToolRailButton.tsx`, `components/toolbar/ToolRailTooltip.tsx`,
+`components/toolbar/toolIcons.tsx`,
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
@@ -113,6 +118,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
+| Change the tool rail (the groups, the flyout, the tooltips) | `core/tools/toolRail.ts` (the groups, the slots, the routing rule and the memory), `components/toolbar/ToolRail.tsx` (the rail), `components/toolbar/ToolRailButton.tsx` (the button), `components/toolbar/ToolRailMenu.tsx` (the flyout), `components/toolbar/ToolRailTooltip.tsx` (the tooltip), `components/toolbar/toolIcons.tsx` (the icons), `src/app/app.css` (the tool-rail section), `src/test/toolRail.test.ts` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
@@ -190,6 +196,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `rotateAboutCentre`, `polygonOutline`, `starOutline` (private) | `core/tools/shapeGeometry.ts` | 305, 349, 378 |
 | `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 992, 1004 / 1022 / 1039 |
 | `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
+| `TOOL_GROUPS`, `toolRailSlots`, `railToolTarget`, `rememberTool`, `toolGroupOf`, `ungroupedToolIds` | `core/tools/toolRail.ts` | grep the symbol |
 | `EditorActions` | `state/editorStore.ts` | 24 |
 | `createDocument` | `core/document/document.ts` | 183 |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
@@ -248,6 +255,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| The tool rail | `toolRail.test.ts` (the groups, the slots, the active state, the routing rule, the way back from the pan tool, the shortcut hints), `tests/visual/tool-rail.spec.ts` (the rail in a real browser: the buttons, the flyout, the tooltip, the arrow keys, the short window) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
