@@ -45,6 +45,7 @@ import {
   type TextEntryTargetLike,
 } from "../core/actions/keyboard";
 import { dispatchKeyboardEvent } from "../core/actions/registry";
+import { shortcutsSuspended } from "../core/actions/suspension";
 import { useEditor } from "./useEditor";
 
 export function useKeyboardShortcuts(
@@ -57,6 +58,16 @@ export function useKeyboardShortcuts(
   useEffect(() => {
     const platform = currentPlatform();
     const handleKeyDown = (event: KeyboardEvent) => {
+      // A key that something else has already handled - the shortcut editor
+      // capturing a combination, for instance - is not the app's to run.
+      if (event.defaultPrevented) {
+        return;
+      }
+      // A modal dialog owns the keyboard: the shortcut editor is about the
+      // shortcuts, so the commands it lists must not fire behind it.
+      if (shortcutsSuspended()) {
+        return;
+      }
       if (isTextEntryTarget(event.target as TextEntryTargetLike | null)) {
         return;
       }

@@ -58,6 +58,8 @@ architecture by browsing.
 | 1752 | `src/core/rendering/Canvas2DRenderer.ts` | buffers, compositing, feather scratch, rebuilds |
 | 890 | `src/core/project/projectFormat.ts` | serialize/parse/validate |
 | 355 | `src/core/commands/strokeEditCommand.ts` | move/delete/nudge/flip/duplicate |
+| 624 | `src/core/actions/registry.ts` | the action table, the effective chords, the conflict rule, the overrides |
+| 371 | `src/features/shortcuts/ShortcutEditor.tsx` | the editor dialog: the list, the capture, the conflict prompt |
 
 **Medium (100-250) - read targeted windows:** `AppMenuBar`, `icons`,
 `document.ts`, `recordingCanvas.ts`, `canvasInputBinder`, `useKeyboardShortcuts`,
@@ -68,6 +70,9 @@ architecture by browsing.
 `strokeBuilder`, `strokeSelection`, `commandStack`,
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
+`core/actions/shortcuts.ts` (245: the capture rules and the reserved chords),
+`core/actions/bindingStore.ts` (174: the user's shortcut overrides),
+`features/shortcuts/shortcutEditorModel.ts` (96: the grouping and the search),
 `core/brushes/presets.ts` (161: the preset model, its validation and its equality),
 `features/brushes/BrushPresets.tsx` (176),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
@@ -134,6 +139,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the persisted preferences | `core/settings/appSettings.ts` (the schema, the defaults, `normalizeAppSettings`), `core/settings/settingsStore.ts` (read, apply, watch, persist), `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`, `src-tauri/src/settings_io.rs` (the two commands) |
+| Change a shortcut or the shortcut editor | `core/actions/registry.ts` (the effective chords, the conflict rule, the apply/swap/reset), `core/actions/shortcuts.ts` (the capture rules, the reserved chords), `core/actions/bindingStore.ts` (the user's overrides), `features/shortcuts/ShortcutEditor.tsx` (the dialog), `core/settings/shortcutsSection.ts` (persistence) |
 | Change the autosave machinery | `core/autosave/autosaveService.ts` (the invariants), `core/autosave/recovery.ts` (where a copy goes). **Not enabled** - the policy is the owner's; see `docs/qa/T06-IMPLEMENTATION-REPORT.md` |
 | Export | `core/export/pngExport.ts`, `DrawingEngine.renderDocumentImage` (L755) |
 | Native I/O | `src-tauri/src/project_io.rs` (230), `lib.rs`, `core/project/tauriGateway.ts` |
@@ -205,8 +211,13 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `wheelPointToHsv`, `hsvToWheelPoint`, `resolveWheelHsv` | `features/color/wheelGeometry.ts` | 47, 66, 92 |
 | `createWheelState`, `reduceWheelState` | `features/color/wheelState.ts` | 41, 53 |
 | `ACTION_DEFINITIONS`, `findActionForEvent`, `dispatchKeyboardEvent`, `validateRegistry` | `core/actions/registry.ts` | grep the symbol |
+| `effectiveShortcuts`, `actionCatalog`, `findBindingConflict`, `setActionChord`, `swapActionChords`, `resetActionShortcuts`, `resetAllShortcuts`, `shortcutLabel`, `normalizeShortcutOverrides`, `applyShortcutOverrides` | `core/actions/registry.ts` | grep the symbol |
 | `matchesShortcut`, `logicalKey`, `isTextEntryTarget`, `formatShortcut` | `core/actions/keyboard.ts` | grep the symbol |
-| `ActionDefinition`, `ActionContext`, `ShortcutSpec`, `ActionId` | `core/actions/types.ts` | grep the symbol |
+| `captureShortcut`, `reservedReason`, `normalizeShortcut`, `RESERVED_CHORDS` | `core/actions/shortcuts.ts` | grep the symbol |
+| `ShortcutBindingStore`, `shortcutBindings`, `readShortcutOverrides`, `serializeShortcutOverrides` | `core/actions/bindingStore.ts` | grep the symbol |
+| `createShortcutOverridesSection` | `core/settings/shortcutsSection.ts` | grep the symbol |
+| `ShortcutEditor`, `filterActions`, `groupActions` | `features/shortcuts/ShortcutEditor.tsx`, `features/shortcuts/shortcutEditorModel.ts` | grep the symbol |
+| `ActionDefinition`, `ActionContext`, `ShortcutSpec`, `ActionId`, `ActionCategory` | `core/actions/types.ts` | grep the symbol |
 | `normalizePressureCurve`, `evaluatePressureCurve`, `pressureCurvesEqual` | `core/brushes/pressureCurve.ts` | grep the symbol |
 | `DEFAULT_PRESSURE_CURVE`, `DEFAULT_SECONDARY_COLOR`, `BRUSH_CURVE_FIELDS` | `core/brushes/defaults.ts` | 14, 17, grep |
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
@@ -286,6 +297,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |
 | Colour wheel (HSV) | `color.test.ts` (conversions, boundaries), `colorWheel.test.ts` (disc geometry, which colour the wheel shows) |
+| Shortcut editor | `shortcutEditor.test.ts` (the capture rules, the reserved chords, the conflicts, the rebind, the swap, the reset, the round trip through the settings file), `actions.test.ts` (the registry's own contract), `tests/visual/shortcut-editor.spec.ts` (the editor in a real browser) |
 
 ## 9. Keep this file useful
 

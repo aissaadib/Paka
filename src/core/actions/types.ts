@@ -41,7 +41,23 @@ export interface ShortcutSpec {
   readonly mod?: boolean;
   readonly shift?: boolean;
   readonly alt?: boolean;
+  /**
+   * The physical Control key, and never the platform's primary modifier.
+   *
+   * Only macOS needs it: there Ctrl is a second modifier, not the primary one.
+   * Elsewhere Ctrl *is* the primary modifier, so a chord written with `ctrl`
+   * and one written with `mod` are the same chord.
+   */
+  readonly ctrl?: boolean;
 }
+
+/**
+ * The groups the action registry is listed in.
+ *
+ * The category lives on the action itself, so the shortcut editor groups the
+ * actions without keeping a second list of them anywhere.
+ */
+export type ActionCategory = "file" | "edit" | "selection" | "view" | "tools" | "brush";
 
 export type ActionId =
   | "undo"
@@ -72,6 +88,8 @@ export type ActionId =
 export interface ActionDefinition {
   readonly id: ActionId;
   readonly label: string;
+  /** The group the action is listed under in the shortcut editor. */
+  readonly category: ActionCategory;
   readonly shortcuts: readonly ShortcutSpec[];
   /** False when the action cannot run in the current state; it then claims no key. */
   readonly when?: (context: ActionContext) => boolean;

@@ -7,6 +7,11 @@
  * action that cannot run. The file entries are
  * callbacks rather than direct service calls because discarding unsaved work
  * needs a confirmation the workspace owns.
+ *
+ * The shortcut an entry shows is the one the **registry** holds, not a string
+ * written here, so a rebound shortcut is shown as the shortcut the app really
+ * answers to. An entry with no registry action - "New Document", "Export PNG" -
+ * shows no shortcut, because there is none.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -14,13 +19,18 @@ import {
   FIXED_ROTATION_DEGREES,
   FIXED_SCALE_FACTOR,
 } from "../../core/document/selectionTransform";
+import { currentPlatform } from "../../core/actions/keyboard";
+import { shortcutLabel } from "../../core/actions/registry";
+import type { ActionId } from "../../core/actions/types";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { useShortcutBindings } from "../../hooks/useShortcutBindings";
 import { IconChevronDown } from "../icons";
 
 interface MenuItemSpec {
   readonly type: "item";
   readonly label: string;
-  readonly shortcut?: string;
+  /** The registry action the entry runs; its shortcut is read from there. */
+  readonly actionId?: ActionId;
   readonly disabled?: boolean;
   readonly onSelect: () => void;
 }
@@ -43,6 +53,7 @@ export interface AppMenuBarProps {
   readonly onSaveProject: () => void;
   readonly onSaveProjectAs: () => void;
   readonly onExportPng: () => void;
+  readonly onOpenShortcutEditor: () => void;
 }
 
 export function AppMenuBar({
@@ -51,11 +62,15 @@ export function AppMenuBar({
   onSaveProject,
   onSaveProjectAs,
   onExportPng,
+  onOpenShortcutEditor,
 }: AppMenuBarProps) {
   const { actions } = useEditor();
   const { history, document: drawingDocument, selectedStrokes } = useEditorState();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const platform = currentPlatform();
+  // The menu shows the shortcuts the app answers to, so it follows a rebind.
+  useShortcutBindings();
 
   useEffect(() => {
     if (openMenu === null) {
@@ -88,10 +103,10 @@ export function AppMenuBar({
       label: "File",
       entries: [
         { type: "item", label: "New Document…", onSelect: onNewDocument },
-        { type: "item", label: "Open…", shortcut: "Ctrl+O", onSelect: onOpenProject },
+        { type: "item", label: "Open…", actionId: "open", onSelect: onOpenProject },
         { type: "separator" },
-        { type: "item", label: "Save", shortcut: "Ctrl+S", onSelect: onSaveProject },
-        { type: "item", label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveProjectAs },
+        { type: "item", label: "Save", actionId: "save", onSelect: onSaveProject },
+        { type: "item", label: "Save As…", actionId: "saveAs", onSelect: onSaveProjectAs },
         { type: "separator" },
         { type: "item", label: "Export PNG…", onSelect: onExportPng },
       ],
@@ -103,14 +118,14 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Undo",
-          shortcut: "Ctrl+Z",
+          actionId: "undo",
           disabled: !history.canUndo,
           onSelect: actions.undo,
         },
         {
           type: "item",
           label: "Redo",
-          shortcut: "Ctrl+Shift+Z",
+          actionId: "redo",
           disabled: !history.canRedo,
           onSelect: actions.redo,
         },
@@ -118,7 +133,7 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Duplicate Layer",
-          shortcut: "Ctrl+J",
+          actionId: "duplicateLayer",
           disabled: drawingDocument.activeLayerId === null,
           onSelect: () => {
             const activeLayerId = drawingDocument.activeLayerId;
@@ -136,7 +151,7 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Duplicate",
-          shortcut: "Ctrl+D",
+          actionId: "duplicateSelection",
           disabled: selectedStrokes === 0,
           onSelect: actions.duplicateSelection,
         },
@@ -144,28 +159,28 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Nudge Left",
-          shortcut: "←",
+          actionId: "nudgeLeft",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.nudgeSelection(-1, 0),
         },
         {
           type: "item",
           label: "Nudge Right",
-          shortcut: "→",
+          actionId: "nudgeRight",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.nudgeSelection(1, 0),
         },
         {
           type: "item",
           label: "Nudge Up",
-          shortcut: "↑",
+          actionId: "nudgeUp",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.nudgeSelection(0, -1),
         },
         {
           type: "item",
           label: "Nudge Down",
-          shortcut: "↓",
+          actionId: "nudgeDown",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.nudgeSelection(0, 1),
         },
@@ -192,14 +207,14 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Flip Horizontal",
-          shortcut: "Ctrl+Shift+H",
+          actionId: "flipHorizontal",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.flipSelection("horizontal"),
         },
         {
           type: "item",
           label: "Flip Vertical",
-          shortcut: "Ctrl+Shift+V",
+          actionId: "flipVertical",
           disabled: selectedStrokes === 0,
           onSelect: () => actions.flipSelection("vertical"),
         },
@@ -207,14 +222,14 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Delete Selected",
-          shortcut: "Delete",
+          actionId: "delete",
           disabled: selectedStrokes === 0,
           onSelect: actions.deleteSelection,
         },
         {
           type: "item",
           label: "Clear Selection",
-          shortcut: "Esc",
+          actionId: "escape",
           disabled: selectedStrokes === 0,
           onSelect: actions.clearSelection,
         },
@@ -224,16 +239,23 @@ export function AppMenuBar({
       id: "view",
       label: "View",
       entries: [
-        { type: "item", label: "Zoom In", shortcut: "Ctrl+=", onSelect: actions.zoomIn },
-        { type: "item", label: "Zoom Out", shortcut: "Ctrl+-", onSelect: actions.zoomOut },
+        { type: "item", label: "Zoom In", actionId: "zoomIn", onSelect: actions.zoomIn },
+        { type: "item", label: "Zoom Out", actionId: "zoomOut", onSelect: actions.zoomOut },
         { type: "separator" },
         {
           type: "item",
           label: "Actual Size",
-          shortcut: "Ctrl+1",
+          actionId: "zoomActual",
           onSelect: () => actions.zoomTo(1),
         },
-        { type: "item", label: "Fit to Window", shortcut: "Ctrl+0", onSelect: actions.zoomToFit },
+        { type: "item", label: "Fit to Window", actionId: "zoomFit", onSelect: actions.zoomToFit },
+      ],
+    },
+    {
+      id: "help",
+      label: "Help",
+      entries: [
+        { type: "item", label: "Keyboard Shortcuts…", onSelect: onOpenShortcutEditor },
       ],
     },
   ];
@@ -257,10 +279,13 @@ export function AppMenuBar({
             </button>
             {isOpen ? (
               <div className="menu__popup" role="menu">
-                {menu.entries.map((entry, index) =>
-                  entry.type === "separator" ? (
-                    <div className="menu__separator" key={`separator-${index}`} />
-                  ) : (
+                {menu.entries.map((entry, index) => {
+                  if (entry.type === "separator") {
+                    return <div className="menu__separator" key={`separator-${index}`} />;
+                  }
+                  const shortcut =
+                    entry.actionId === undefined ? null : shortcutLabel(entry.actionId, platform);
+                  return (
                     <button
                       type="button"
                       role="menuitem"
@@ -273,10 +298,12 @@ export function AppMenuBar({
                       }}
                     >
                       <span>{entry.label}</span>
-                      {entry.shortcut ? <span className="menu__shortcut">{entry.shortcut}</span> : null}
+                      {shortcut === null ? null : (
+                        <span className="menu__shortcut">{shortcut}</span>
+                      )}
                     </button>
-                  ),
-                )}
+                  );
+                })}
               </div>
             ) : null}
           </div>

@@ -22,6 +22,7 @@ import { useCloseGuard } from "../../features/project/useCloseGuard";
 import { useDocumentTitle } from "../../features/project/useDocumentTitle";
 import { useFileCommands } from "../../features/project/useFileCommands";
 import { closeWindowNow } from "../../features/project/windowControls";
+import { ShortcutEditor } from "../../features/shortcuts/ShortcutEditor";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import { fileNameOf } from "../../utils/path";
@@ -33,6 +34,7 @@ export function Workspace() {
   const { actions, files } = useEditor();
   const { document: drawingDocument, file } = useEditorState();
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
+  const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
   const [pending, setPending] = useState<UnsavedAction | null>(null);
 
   const {
@@ -114,6 +116,7 @@ export function Workspace() {
         onSaveProject={save}
         onSaveProjectAs={saveAs}
         onExportPng={exportPng}
+        onOpenShortcutEditor={() => setShortcutEditorOpen(true)}
       />
       <ToolOptionsBar />
       <ToolBar />
@@ -140,6 +143,9 @@ export function Workspace() {
             setNewDocumentOpen(false);
           }}
         />
+      ) : null}
+      {shortcutEditorOpen ? (
+        <ShortcutEditor onClose={() => setShortcutEditorOpen(false)} />
       ) : null}
       {pending === null ? null : (
         <UnsavedChangesDialog

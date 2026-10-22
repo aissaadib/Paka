@@ -121,6 +121,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
+| `src/core/actions` | The action registry, the pure keyboard matching, the shortcut capture rules and the user's shortcut overrides | core/brushes, core/tools, types |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
@@ -1635,6 +1636,54 @@ wrapped strip would change its height and push the canvas down. The wheel over
 the strip scrolls it, through a native, non-passive listener, so the browser's
 own horizontal-wheel behaviour is refused rather than doubled - and when the
 strip does not overflow, the wheel is left alone.
+## Keyboard actions
+
+`core/actions` is the one registry of what a key can do. `ACTION_DEFINITIONS`
+lists every global command and derives one tool-select action per tool from
+`TOOL_DEFINITIONS`, so a tool's shortcut is written once. Each action carries
+a label, a category, its chords and the handler that runs it, and the registry
+refuses an ambiguous chord at load time: guessing between two actions is how a
+shortcut silently stops working.
+
+`core/actions/keyboard.ts` is the pure matching - the exact modifier state,
+the platform's primary modifier (Ctrl, or Cmd on macOS) and the physical code
+as the fallback for a layout that does not produce the Latin key.
+
+### The shortcut editor
+
+`features/shortcuts/ShortcutEditor.tsx` is a dialog that lists the actions the
+registry holds - there is no second list of them - grouped by category, with a
+search over the name, the category and the chord. Choosing a chord starts a
+capture: the editor listens in the capture phase, so the pressed key reaches
+neither the app's own shortcut handler nor the button that was clicked.
+
+Three rules decide what may be stored (`core/actions/shortcuts.ts`):
+
+- a **bare modifier** is not a chord yet: the user is still holding it down;
+- a **reserved** chord belongs to the operating system, the web view or the app
+  itself (`Ctrl+W`, `Ctrl+Shift+I`, `F12`, `Esc`, ...), and is refused with
+  the reason;
+- an **unsupported** chord is one the runtime never delivers (the Windows key,
+  the screenshot key), so storing it would be a promise the app cannot keep.
+
+A chord another action already claims is a **conflict**, not a tie-break: the
+editor names the action that holds it and offers to exchange the two chords or
+to leave them alone. The conflict is checked on both platforms, because a chord
+that is free on one of them can still be ambiguous on the other.
+
+The chords the user changed live in the binding store
+(`core/actions/bindingStore.ts`), beside the registry rather than inside it: an
+action's effective chords are its override when it has one and its default when
+it does not, so a reset is "forget the override" and the defaults survive every
+change. Everything that reads a chord - the keyboard hook, the menu bar, the
+tool rail - reads the *effective* chords, so a rebound shortcut is the
+shortcut the app really answers to and the shortcut it advertises.
+
+The overrides are a **section** of the settings file
+(`core/settings/shortcutsSection.ts`): the store owns the file, the section
+hands it its state under the `shortcuts` key, and a file that names an action
+that does not exist, or a chord another action already claims, loses that
+entry and nothing else.
 
 ## Native boundary (Rust)
 

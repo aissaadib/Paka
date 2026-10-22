@@ -72,6 +72,19 @@ const PHYSICAL_KEYS: Readonly<Record<string, string>> = {
   Minus: "-",
   Quote: "'",
   Semicolon: ";",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+  Backslash: "\\",
+  Backquote: "`",
+  Space: "space",
+  Tab: "tab",
+  Enter: "enter",
+  Home: "home",
+  End: "end",
+  PageUp: "pageup",
+  PageDown: "pagedown",
+  Insert: "insert",
   Backspace: "backspace",
   Delete: "delete",
   Escape: "escape",
@@ -79,13 +92,52 @@ const PHYSICAL_KEYS: Readonly<Record<string, string>> = {
   ArrowRight: "arrowright",
   ArrowUp: "arrowup",
   ArrowDown: "arrowdown",
+  F1: "f1",
+  F2: "f2",
+  F3: "f3",
+  F4: "f4",
+  F5: "f5",
+  F6: "f6",
+  F7: "f7",
+  F8: "f8",
+  F9: "f9",
+  F10: "f10",
+  F11: "f11",
+  F12: "f12",
 };
 
 const LOGICAL_KEYS = new Set(Object.values(PHYSICAL_KEYS));
 
+/**
+ * The canonical physical code of a logical key.
+ *
+ * A chord stores the code as well as the key, so a non-Latin layout can still
+ * reach it. The code is the canonical one, not the one the press happened to
+ * report, so the same chord is written the same way everywhere.
+ */
+const CANONICAL_CODES: Readonly<Record<string, string>> = (() => {
+  const codes: Record<string, string> = {};
+  for (const [code, key] of Object.entries(PHYSICAL_KEYS)) {
+    if (!(key in codes)) {
+      codes[key] = code;
+    }
+  }
+  return codes;
+})();
+
 /** The physical key a code stands for, or `null` when Paka does not bind it. */
 export function keyFromCode(code: string): string | null {
   return PHYSICAL_KEYS[code] ?? null;
+}
+
+/** The canonical physical code of a logical key, or `null`. */
+export function codeFromKey(key: string): string | null {
+  return CANONICAL_CODES[key.toLowerCase()] ?? null;
+}
+
+/** True when a key is one Paka can write a chord with. */
+export function isBindableKey(key: string): boolean {
+  return LOGICAL_KEYS.has(key.toLowerCase());
 }
 
 /** True when a `KeyboardEvent.key` value is one Paka can write a chord with. */
@@ -125,7 +177,13 @@ export function currentPlatform(): KeyboardPlatform {
 /** True when the event is the exact chord described by `shortcut`. */
 export function matchesShortcut(
   event: KeyboardEventLike,
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
+  shortcut: {
+    readonly key: string;
+    readonly mod?: boolean;
+    readonly shift?: boolean;
+    readonly alt?: boolean;
+    readonly ctrl?: boolean;
+  },
   platform: KeyboardPlatform,
 ): boolean {
   if (logicalKey(event) !== shortcut.key.toLowerCase()) {
@@ -133,10 +191,17 @@ export function matchesShortcut(
   }
 
   const wantsMod = shortcut.mod === true;
+  const wantsCtrl = shortcut.ctrl === true;
   const primary = platform === "mac" ? event.metaKey : event.ctrlKey;
   const secondary = platform === "mac" ? event.ctrlKey : event.metaKey;
   if (wantsMod) {
     if (!primary || secondary) {
+      return false;
+    }
+  } else if (wantsCtrl) {
+    // The physical Control key. The platform's primary modifier must be
+    // absent, so a chord written with Ctrl is never reached by Cmd.
+    if (!event.ctrlKey || event.metaKey) {
       return false;
     }
   } else if (event.ctrlKey || event.metaKey) {
@@ -156,26 +221,49 @@ export function matchesShortcut(
  * order decide, which is how a shortcut silently stops working.
  */
 export function chordId(
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
+  shortcut: {
+    readonly key: string;
+    readonly mod?: boolean;
+    readonly shift?: boolean;
+    readonly alt?: boolean;
+    readonly ctrl?: boolean;
+  },
   platform: KeyboardPlatform,
 ): string {
-  return [
-    platform,
-    shortcut.mod === true ? "mod" : "",
-    shortcut.shift === true ? "shift" : "",
-    shortcut.alt === true ? "alt" : "",
-    shortcut.key.toLowerCase(),
-  ].join(":");
+  const parts: string[] = [platform];
+  if (shortcut.mod === true) {
+    parts.push("mod");
+  } else if (shortcut.ctrl === true) {
+    // Ctrl is the primary modifier outside macOS, so the two spellings are
+    // the same chord there and must not be allowed to claim it twice.
+    parts.push(platform === "mac" ? "ctrl" : "mod");
+  }
+  if (shortcut.shift === true) {
+    parts.push("shift");
+  }
+  if (shortcut.alt === true) {
+    parts.push("alt");
+  }
+  parts.push(shortcut.key.toLowerCase());
+  return parts.join(":");
 }
 
 /** Human-readable chord, e.g. `Ctrl+Shift+Z` or `Cmd+Z`. */
 export function formatShortcut(
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
+  shortcut: {
+    readonly key: string;
+    readonly mod?: boolean;
+    readonly shift?: boolean;
+    readonly alt?: boolean;
+    readonly ctrl?: boolean;
+  },
   platform: KeyboardPlatform,
 ): string {
   const parts: string[] = [];
   if (shortcut.mod === true) {
     parts.push(platform === "mac" ? "Cmd" : "Ctrl");
+  } else if (shortcut.ctrl === true) {
+    parts.push("Ctrl");
   }
   if (shortcut.shift === true) {
     parts.push("Shift");
@@ -203,6 +291,22 @@ function keyLabel(key: string): string {
       return "Delete";
     case "backspace":
       return "Backspace";
+    case "space":
+      return "Space";
+    case "tab":
+      return "Tab";
+    case "enter":
+      return "Enter";
+    case "home":
+      return "Home";
+    case "end":
+      return "End";
+    case "pageup":
+      return "PgUp";
+    case "pagedown":
+      return "PgDn";
+    case "insert":
+      return "Ins";
     default:
       return key.toUpperCase();
   }

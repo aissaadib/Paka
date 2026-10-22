@@ -18,6 +18,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { SettingsStore } from "../core/settings/settingsStore";
+import { createShortcutOverridesSection } from "../core/settings/shortcutsSection";
 import { createTauriSettingsGateway } from "../core/settings/tauriSettingsGateway";
 import { EditorContext } from "../state/editorContext";
 import { createEditor, type Editor } from "../state/editorStore";
@@ -35,6 +36,9 @@ export function EditorProvider({ children, editor }: EditorProviderProps) {
     const store = new SettingsStore({
       engine: value.engine,
       gateway: createTauriSettingsGateway(),
+      // The shortcuts are a section of the same file: they belong in the
+      // settings, but they are not the engine's state.
+      sections: [createShortcutOverridesSection()],
     });
     void store.load();
     return () => {

@@ -226,26 +226,57 @@ export function parseAppSettings(text: string | null): AppSettings {
 
 /** Serializes the settings, with a stable key order. */
 export function serializeAppSettings(settings: AppSettings): string {
-  return `${JSON.stringify(
-    {
-      version: SETTINGS_VERSION,
-      brush: settings.brush,
-      presets: settings.presets,
-      toolId: settings.toolId,
-      shapeFill: settings.shapeFill,
-      shapeSides: settings.shapeSides,
-      shapeInnerRatio: settings.shapeInnerRatio,
-      shapeRotation: settings.shapeRotation,
-      fillTolerance: settings.fillTolerance,
-      gradientType: settings.gradientType,
-      gradientEndColor: settings.gradientEndColor,
-      gridVisible: settings.gridVisible,
-      gridSpacing: settings.gridSpacing,
-      gridSnapping: settings.gridSnapping,
-    },
-    null,
-    2,
-  )}\n`;
+  return serializeSettingsDocument(settingsDocument(settings));
+}
+
+/**
+ * The settings as a plain document.
+ *
+ * The document is what a settings file holds: the object the serializer
+ * stringifies. It is exposed so a section of the file that the engine does
+ * not own - the panel layout, the shortcuts - can be added to the same
+ * document instead of to a second file.
+ */
+export function settingsDocument(settings: AppSettings): Record<string, unknown> {
+  return {
+    version: SETTINGS_VERSION,
+    brush: settings.brush,
+    presets: settings.presets,
+    toolId: settings.toolId,
+    shapeFill: settings.shapeFill,
+    shapeSides: settings.shapeSides,
+    shapeInnerRatio: settings.shapeInnerRatio,
+    shapeRotation: settings.shapeRotation,
+    fillTolerance: settings.fillTolerance,
+    gradientType: settings.gradientType,
+    gradientEndColor: settings.gradientEndColor,
+    gridVisible: settings.gridVisible,
+    gridSpacing: settings.gridSpacing,
+    gridSnapping: settings.gridSnapping,
+  };
+}
+
+/** Serializes a settings document, with a stable key order. */
+export function serializeSettingsDocument(document: Record<string, unknown>): string {
+  return `${JSON.stringify(document, null, 2)}\n`;
+}
+
+/**
+ * The parsed settings document.
+ *
+ * `null` - no file yet - a file that is not valid JSON and a file that is
+ * not an object all yield an empty document: a corrupt settings file must
+ * not stop the editor from starting.
+ */
+export function parseSettingsDocument(text: string | null): Record<string, unknown> {
+  if (text === null) {
+    return {};
+  }
+  try {
+    return asRecord(JSON.parse(text)) ?? {};
+  } catch {
+    return {};
+  }
 }
 
 /** Field-wise comparison, so an unchanged setting is never written again. */

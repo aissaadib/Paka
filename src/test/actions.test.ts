@@ -138,12 +138,14 @@ describe("registry shape", () => {
     const base: ActionDefinition = {
       id: "undo",
       label: "Undo",
+      category: "edit",
       shortcuts: [{ key: "z", code: "KeyZ", mod: true }],
       run: () => undefined,
     };
     const clash: ActionDefinition = {
       id: "redo",
       label: "Redo",
+      category: "edit",
       shortcuts: [{ key: "z", code: "KeyZ", mod: true }],
       run: () => undefined,
     };
@@ -154,6 +156,7 @@ describe("registry shape", () => {
     const action: ActionDefinition = {
       id: "undo",
       label: "Undo",
+      category: "edit",
       shortcuts: [{ key: "z", code: "KeyZ", mod: true }],
       run: () => undefined,
     };

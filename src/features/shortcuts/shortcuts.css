@@ -1,0 +1,163 @@
+/**
+ * The shortcut editor dialog.
+ *
+ * A quiet list: the actions on the left, their chords on the right, and the
+ * one that is being captured picked out with the accent colour. The editor
+ * has to be readable at a glance, because it is read while the user is
+ * remembering a shortcut.
+ */
+
+.dialog.shortcut-editor {
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  gap: 8px;
+}
+
+.shortcut-editor__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shortcut-editor__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcut-editor__search {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.shortcut-editor__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.shortcut-editor__group + .shortcut-editor__group {
+  margin-top: 8px;
+}
+
+.shortcut-editor__group-title {
+  margin: 4px 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.shortcut-editor__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shortcut-editor__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.shortcut-editor__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shortcut-editor__slots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.shortcut-editor__chip {
+  min-width: 76px;
+  height: var(--control-height-sm);
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: center;
+}
+
+.shortcut-editor__chip:hover {
+  background: var(--bg-raised-hover);
+}
+
+.shortcut-editor__chip.is-changed {
+  color: var(--accent);
+}
+
+.shortcut-editor__chip.is-capturing {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+
+.shortcut-editor__reset {
+  height: var(--control-height-sm);
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.shortcut-editor__reset:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text);
+}
+
+.shortcut-editor__conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.shortcut-editor__conflict-text {
+  margin: 0;
+  font-size: 11px;
+}
+
+.shortcut-editor__conflict-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.shortcut-editor__capturing,
+.shortcut-editor__notice,
+.shortcut-editor__error,
+.shortcut-editor__empty {
+  margin: 0;
+  font-size: 11px;
+}
+
+.shortcut-editor__capturing,
+.shortcut-editor__notice,
+.shortcut-editor__empty {
+  color: var(--text-dim);
+}
+
+.shortcut-editor__error {
+  color: var(--danger);
+}
