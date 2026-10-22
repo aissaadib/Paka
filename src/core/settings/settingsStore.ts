@@ -16,6 +16,12 @@
  *     failed write is recorded and forgotten. Neither stops the editor, and
  *     neither is raised as an error in the UI.
  *
+ * A **section** is the fourth thing the store carries: state that belongs in
+ * the file but not in the engine, such as the panel layout or the shell's
+ * preferences. The store owns the file, so a section's owner hands its state
+ * to the store rather than writing the file itself, and the store writes it
+ * back whenever it changes.
+ *
  * The store is framework-free, so the whole "read, apply, change, persist"
  * cycle can be exercised in Node.
  */
@@ -24,12 +30,16 @@ import type { DrawingEngine } from "../engine/DrawingEngine";
 import {
   DEFAULT_APP_SETTINGS,
   SETTINGS_VERSION,
-  parseAppSettings,
-  serializeAppSettings,
+  isFutureSettingsDocument,
+  normalizeAppSettings,
+  parseSettingsDocument,
+  serializeSettingsDocument,
+  settingsDocument,
   settingsEqual,
   type AppSettings,
 } from "./appSettings";
 import type { SettingsGateway } from "./settingsGateway";
+import type { SettingsDocument, SettingsSection } from "./settingsSection";
 
 /**
  * How long a change waits before the file is written.
@@ -43,6 +53,15 @@ const DEFAULT_DEBOUNCE_MS = 300;
 export interface SettingsStoreOptions {
   readonly engine: DrawingEngine;
   readonly gateway: SettingsGateway;
+  /**
+   * Sections of the file that the engine does not own.
+   *
+   * The store owns the file, so shell state - the panel layout, for
+   * instance - cannot write to it directly. A section is the hand-off: the
+   * store reads the section out of the file, gives it to its owner, and
+   * writes the owner's state back whenever it changes.
+   */
+  readonly sections?: readonly SettingsSection<unknown>[];
   /** How long a change waits before the file is written. */
   readonly debounceMs?: number;
   /** Injected timer functions, so the tests need not wait in real time. */
@@ -55,6 +74,36 @@ function describe(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
+}
+
+/**
+ * Whether two plain values say the same thing.
+ *
+ * The comparison ignores the order of an object's keys: the document that was
+ * found on disk and the document that would be written now say the same thing
+ * when they hold the same values, whatever order the keys are in.
+ */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((entry, index) => jsonEqual(entry, b[index]));
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (!jsonEqual(left[key], right[key])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Writes the preferences into the editor. Editor state only: no history, no dirty. */
@@ -98,11 +147,24 @@ function readFromEngine(engine: DrawingEngine): AppSettings {
 export class SettingsStore {
   private readonly engine: DrawingEngine;
   private readonly gateway: SettingsGateway;
+  private readonly sections: readonly SettingsSection<unknown>[];
   private readonly debounceMs: number;
   private readonly schedule: (callback: () => void, delayMs: number) => unknown;
   private readonly cancel: (handle: unknown) => void;
 
   private settings: AppSettings = DEFAULT_APP_SETTINGS;
+  /**
+   * The document as the store last knew it.
+   *
+   * The store owns the file, so it has to be able to write back the keys it
+   * does not understand: a section another builder owns is not this build's
+   * to drop. A file from a newer version is the exception - it is ignored
+   * wholesale, so nothing of it is written back.
+   *
+   * The document is also what the file is compared against, so a change that
+   * says nothing new is not written again.
+   */
+  private document: SettingsDocument = {};
   private loaded = false;
   private applying = false;
   private destroyed = false;
@@ -110,12 +172,14 @@ export class SettingsStore {
   private writing = false;
   private queued = false;
   private stopWatching: (() => void) | null = null;
+  private stopWatchingSections: (() => void) | null = null;
   private readError: string | null = null;
   private writeError: string | null = null;
 
   constructor(options: SettingsStoreOptions) {
     this.engine = options.engine;
     this.gateway = options.gateway;
+    this.sections = options.sections ?? [];
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.schedule =
       options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
@@ -138,6 +202,7 @@ export class SettingsStore {
    *
    * A file that is missing, malformed or from a newer version yields the
    * defaults; none of them is an error, and none of them stops the editor.
+   * The sections of the file are handed to their owners the same way.
    */
   async load(): Promise<AppSettings> {
     let text: string | null = null;
@@ -154,10 +219,16 @@ export class SettingsStore {
       return this.settings;
     }
 
-    const settings = parseAppSettings(text);
+    const document = parseSettingsDocument(text);
+    const settings = normalizeAppSettings(document);
+    // A file from a newer version is ignored wholesale, so none of it - not
+    // even the keys this build does not know - is written back.
+    this.document = isFutureSettingsDocument(document) ? {} : document;
+
     this.applying = true;
     try {
       applyToEngine(this.engine, settings);
+      this.applySections(this.document);
     } finally {
       this.applying = false;
     }
@@ -176,6 +247,10 @@ export class SettingsStore {
     if (this.stopWatching !== null) {
       this.stopWatching();
       this.stopWatching = null;
+    }
+    if (this.stopWatchingSections !== null) {
+      this.stopWatchingSections();
+      this.stopWatchingSections = null;
     }
     if (this.pending !== null) {
       this.cancel(this.pending);
@@ -196,10 +271,15 @@ export class SettingsStore {
     try {
       do {
         this.queued = false;
-        const contents = serializeAppSettings(this.settings);
+        const document = this.buildDocument();
+        if (jsonEqual(document, this.document)) {
+          // The file already holds this state, so there is nothing to write.
+          continue;
+        }
         try {
-          await this.gateway.write(contents);
+          await this.gateway.write(serializeSettingsDocument(document));
           this.writeError = null;
+          this.document = document;
         } catch (error) {
           this.writeError = describe(error);
           // A settings file that cannot be written is a minor inconvenience,
@@ -212,11 +292,52 @@ export class SettingsStore {
     }
   }
 
-  private watch(): void {
-    if (this.stopWatching !== null) {
-      return;
+  /**
+   * The file as it would be written now.
+   *
+   * The engine's own fields are written over the document that was found on
+   * disk, and every section writes its owner's state into it. The keys
+   * nobody claims are left exactly as they were found.
+   *
+   * The engine's fields are written last: they are the file's core, and a
+   * section that claimed one of their keys does not take it over.
+   */
+  private buildDocument(): SettingsDocument {
+    const engine = settingsDocument(this.settings);
+    const document: SettingsDocument = { ...this.document, ...engine };
+    for (const section of this.sections) {
+      section.write(document, section.current());
     }
-    this.stopWatching = this.engine.subscribe(() => this.onEditorChanged());
+    return { ...document, ...engine };
+  }
+
+  /** Hands the document's sections to their owners. */
+  private applySections(document: SettingsDocument): void {
+    for (const section of this.sections) {
+      try {
+        section.apply(section.read(document));
+      } catch (error) {
+        // A section that cannot make sense of its value is its own problem:
+        // the rest of the file still loads, and the editor still starts.
+        this.readError = describe(error);
+      }
+    }
+  }
+
+  private watch(): void {
+    if (this.stopWatching === null) {
+      this.stopWatching = this.engine.subscribe(() => this.onEditorChanged());
+    }
+    if (this.stopWatchingSections === null && this.sections.length > 0) {
+      const stops = this.sections.map((section) =>
+        section.subscribe(() => this.onSectionChanged()),
+      );
+      this.stopWatchingSections = () => {
+        for (const stop of stops) {
+          stop();
+        }
+      };
+    }
   }
 
   private onEditorChanged(): void {
@@ -228,6 +349,14 @@ export class SettingsStore {
       return;
     }
     this.settings = next;
+    this.scheduleWrite();
+  }
+
+  /** A section changed: the file has to be written again. */
+  private onSectionChanged(): void {
+    if (!this.loaded || this.applying) {
+      return;
+    }
     this.scheduleWrite();
   }
 
