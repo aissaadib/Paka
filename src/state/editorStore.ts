@@ -17,6 +17,7 @@ import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
 import type { BrushPreset } from "../core/brushes/presets";
+import type { PaletteSwatch } from "../core/color/palette";
 import type { BrushSettings } from "../types/brush";
 import type { ToolId } from "../types/tool";
 import type { FlipAxis } from "../types/transform";
@@ -29,6 +30,16 @@ export interface EditorActions {
   setSecondaryColor(color: string): void;
   /** Exchanges the primary and secondary colours. */
   swapColors(): void;
+  /** Puts both colours back to the ones a fresh session starts with. */
+  resetColors(): void;
+  /** Saves a colour to the palette; `null` when it cannot be saved. */
+  addPaletteSwatch(color: string, name?: string): PaletteSwatch | null;
+  /** Renames a swatch; `null` when the id is unknown or the name is empty. */
+  renamePaletteSwatch(id: string, name: string): PaletteSwatch | null;
+  /** Removes a swatch. Editor state only: no history entry, no dirty flag. */
+  removePaletteSwatch(id: string): boolean;
+  /** Empties the recent-colours history. Session state, never persisted. */
+  clearColorHistory(): void;
   /** Saves the current brush under a name; `null` when the name is empty. */
   saveBrushPreset(name: string): BrushPreset | null;
   /** Renames a preset; `null` when the id is unknown or the name is empty. */
@@ -133,6 +144,11 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setBrush: (patch) => engine.setBrush(patch),
     setSecondaryColor: (color) => engine.setSecondaryColor(color),
     swapColors: () => engine.swapColors(),
+    resetColors: () => engine.resetColors(),
+    addPaletteSwatch: (color, name) => engine.addPaletteSwatch(color, name),
+    renamePaletteSwatch: (id, name) => engine.renamePaletteSwatch(id, name),
+    removePaletteSwatch: (id) => engine.removePaletteSwatch(id),
+    clearColorHistory: () => engine.clearColorHistory(),
     saveBrushPreset: (name) => engine.saveBrushPreset(name),
     renameBrushPreset: (id, name) => engine.renameBrushPreset(id, name),
     duplicateBrushPreset: (id) => engine.duplicateBrushPreset(id),

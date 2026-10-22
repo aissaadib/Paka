@@ -195,6 +195,19 @@ export function hexToHsv(hex: string): Hsv | null {
   return rgb === null ? null : rgbToHsv(rgb);
 }
 
+/**
+ * The value an `input[type=color]` can hold.
+ *
+ * The native control accepts only `#rrggbb`, so a colour stored in another
+ * shape - a project file may hold any non-empty string - cannot be shown in
+ * it. The fallback is used instead, so the control always has a value it
+ * accepts rather than an empty one.
+ */
+export function colorInputValue(color: string, fallback = "#000000"): string {
+  const rgb = hexToRgb(color.trim());
+  return rgb === null ? fallback : rgbToHex(rgb);
+}
+
 /* ------------------------------------------------------------------ input */
 
 /**
