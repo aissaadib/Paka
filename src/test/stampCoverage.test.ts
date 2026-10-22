@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH, updateBrushSettings } from "../core/brushes/defaults";
+import { legacyPressureMapping } from "../core/brushes/pressureMapping";
 import { MAX_DOCUMENT_PIXELS } from "../core/document/document";
 import {
   MAX_STAMP_COVERAGE_WORK,
@@ -111,7 +112,7 @@ describe("stamp dab placement", () => {
   it("follows the pressure for the dab's radius", () => {
     const dabs = stampDabs(
       path([0, 50], [0, 0], [1, 0.25]),
-      brush({ size: 100, stampSpacing: 0.5, pressureSize: 1, minSizeRatio: 0.1 }),
+      brush({ size: 100, stampSpacing: 0.5, pressureSize: legacyPressureMapping(1), minSizeRatio: 0.1 }),
     );
     expect(dabs[0].radius).toBe(50);
     // The second dab sits at the far end, where the pressure is 0.25.

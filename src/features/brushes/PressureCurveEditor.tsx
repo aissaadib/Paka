@@ -6,6 +6,10 @@
  * add one, double-click (or Delete) a middle point to remove it. The endpoints
  * stay on the left and right edges; their response is still editable.
  *
+ * The named presets - linear, soft and firm - are the three shapes an artist
+ * reaches for, and the preview beside the plot shows what the curve and the
+ * brush's mappings do to a property.
+ *
  * The component keeps a local draft while a drag is in flight and commits one
  * `setBrush` on release, so a drag does not publish a snapshot per pointermove.
  */
@@ -18,11 +22,14 @@ import type {
 import {
   addPressureCurvePoint,
   movePressureCurvePoint,
+  PRESSURE_CURVE_PRESETS,
+  pressureCurvesEqual,
   removePressureCurvePoint,
 } from "../../core/brushes/pressureCurve";
 import { DEFAULT_PRESSURE_CURVE } from "../../core/brushes/defaults";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import type { PressureCurvePoint } from "../../types/brush";
+import { PressureResponsePreview } from "./PressureResponsePreview";
 
 const WIDTH = 200;
 const HEIGHT = 140;
@@ -249,10 +256,29 @@ export function PressureCurveEditor() {
           );
         })}
       </svg>
+      <PressureResponsePreview />
       <div className="pressure-curve__actions">
         <span className="pressure-curve__hint">
           {curve.length} point{curve.length === 1 ? "" : "s"}
         </span>
+        {PRESSURE_CURVE_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            className={
+              pressureCurvesEqual(curve, preset.curve)
+                ? "pressure-curve__button is-selected"
+                : "pressure-curve__button"
+            }
+            title={preset.description}
+            onClick={() => {
+              commit(preset.curve);
+              setSelected(null);
+            }}
+          >
+            {preset.label}
+          </button>
+        ))}
         <button
           type="button"
           className="pressure-curve__button"

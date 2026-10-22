@@ -121,7 +121,7 @@ memory; it never changes document size or stroke coordinates.
 | `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
 | `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
-| `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
+| `src/core/brushes` | Brush defaults, the pressure curve and the pressure mappings, stroke sample processing (`StrokeBuilder`) | core/document types |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
 | `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
@@ -306,6 +306,58 @@ stroke's opacity is applied exactly once, when the buffer composites
 rather than per sample: a lighter pass yields a lighter stroke. True per-dab
 opacity needs per-pixel max blending, which Canvas 2D does not expose - that is
 a GPU-backend feature, not a Canvas 2D one.
+
+### Pressure dynamics (mappings)
+
+A brush has one **pressure curve** and one **mapping** per property that
+answers the pressure. The chain is always the same:
+
+```
+raw device pressure -> the pressure curve -> the mapping's response -> the property
+```
+
+The **curve** (`core/brushes/pressureCurve.ts`) is a shared, piecewise-linear
+lookup table: it decides *how hard* the brush reacts to a given pressure, and
+every property that answers the pressure follows it. It is the one curve in the
+app - there is no second model.
+
+The **mapping** (`core/brushes/pressureMapping.ts`) is a typed triple -
+`{ enabled, min, max }` - and says *what the property is worth* at no pressure
+and at full pressure, both as a fraction of the property's own value:
+
+| Property | The mapping drives | Honoured by |
+| --- | --- | --- |
+| `pressureSize` | the stroke's diameter, as a fraction of `size` | every segment, per sample |
+| `pressureOpacity` | the stroke's alpha, as a fraction of `opacity` | the stroke's mean pressure |
+| `pressureFlow` | the ink one dab deposits, as a fraction of a full dab | the stamp engine, per dab |
+
+A mapping that is switched off answers `1` at every pressure: the property keeps
+its full value and the pressure does not touch it. The ends are read in either
+order and put in order again, so the response is always a rising line, and a
+mapping that is switched off keeps its ends so switching it back on restores the
+range that was chosen.
+
+The whole chain is evaluated at the brush's **mapping boundary** - the
+rasterizer - and never while a sample is captured. A stored sample keeps the
+raw pressure the device reported, so the same mapping produces the same picture
+in live drawing, in a layer rebuild, after undo/redo, in a reopened project and
+in a PNG export, and it is never applied twice.
+
+Two properties of the pipeline shape what the mappings can do:
+
+- The **segment path** paints at full coverage and the stroke's opacity is
+  applied once, when the buffer composites. So the opacity mapping answers with
+  the stroke's mean pressure, and the **flow mapping has no effect** there: a
+  per-segment alpha is exactly what makes a translucent stroke darken at every
+  joint.
+- The **stamp engine** unions its dabs with a per-pixel maximum, so a dab may
+  carry its own ink: the flow mapping scales a dab's coverage *before* the
+  union, which can only remove ink and still cannot darken where two dabs
+  overlap.
+
+A mouse reports no pressure, and the input layer gives it a stable `1`, so a
+mouse draws at the **top** of every range - the nominal size, the full opacity,
+the full ink. A pen that reports no pressure at all falls back to `0.5`.
 
 A press with no movement is a dab, and a dab alone in the buffer would be
 overdrawn by the first segment's round cap: the same area painted twice, which

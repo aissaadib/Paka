@@ -171,6 +171,62 @@
 
 /* ------------------------------------------------------- pressure curve */
 
+.pressure-dynamics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  width: 100%;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.pressure-dynamics__rows {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.pressure-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pressure-row__ends {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pressure-row__end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pressure-row__range {
+  width: 72px;
+  accent-color: var(--accent);
+}
+
+.pressure-row__value {
+  min-width: 30px;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.pressure-row__note,
+.pressure-dynamics__note {
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .pressure-curve__toggle {
   height: 22px;
   padding: 0 8px;
@@ -288,6 +344,73 @@
 .pressure-curve__button:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+.pressure-curve__button.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* ------------------------------------------------------ response preview */
+
+.pressure-preview {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  width: 200px;
+}
+
+.pressure-preview__tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.pressure-preview__tab {
+  flex: 1 1 auto;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.pressure-preview__tab.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.pressure-preview__plot {
+  width: 200px;
+  height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+}
+
+.pressure-preview__line {
+  fill: none;
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.pressure-preview__response {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.pressure-preview__caption,
+.pressure-preview__empty {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .brush-presets__field {

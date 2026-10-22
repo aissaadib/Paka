@@ -15,6 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PRESSURE_CURVE } from "../core/brushes/defaults";
+import { legacyPressureMapping } from "../core/brushes/pressureMapping";
 import {
   blendChannel,
   isLayerBlendMode,
@@ -48,8 +49,9 @@ const BRUSH: BrushSettings = {
   opacity: 1,
   color: "#000000",
   hardness: 1,
-  pressureSize: 0,
-  pressureOpacity: 0,
+  pressureSize: legacyPressureMapping(0),
+  pressureOpacity: legacyPressureMapping(0),
+  pressureFlow: legacyPressureMapping(0),
   minSizeRatio: 0,
   spacing: 0.1,
   stabilizer: 0,

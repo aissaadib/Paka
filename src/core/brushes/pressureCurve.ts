@@ -22,6 +22,59 @@ export const IDENTITY_PRESSURE_CURVE: readonly PressureCurvePoint[] = Object.fre
   Object.freeze({ x: 1, y: 1 }),
 ]);
 
+/**
+ * A named shape for the pressure response.
+ *
+ * The presets are the three shapes an artist reaches for: the response is
+ * straight, it starts late, or it starts early. They are *curves*, not
+ * mappings - a preset says how hard the brush reacts to a given pressure, and
+ * every property that answers pressure then follows it.
+ */
+export interface PressureCurvePreset {
+  readonly id: string;
+  readonly label: string;
+  /** What the preset does, in one sentence, for the control's tooltip. */
+  readonly description: string;
+  readonly curve: readonly PressureCurvePoint[];
+}
+
+/**
+ * The named pressure responses.
+ *
+ * `linear` is the identity: the pressure the brush uses is the pressure the
+ * device reported. `soft` starts late - a light touch barely marks and the
+ * brush only grows near the top of the range. `firm` starts early - a light
+ * touch already marks and the top of the range flattens out.
+ */
+export const PRESSURE_CURVE_PRESETS: readonly PressureCurvePreset[] = Object.freeze([
+  Object.freeze({
+    id: "linear",
+    label: "Linear",
+    description: "The pressure the brush uses is the pressure the device reported.",
+    curve: IDENTITY_PRESSURE_CURVE,
+  }),
+  Object.freeze({
+    id: "soft",
+    label: "Soft",
+    description: "A light touch barely marks; the brush grows near the top of the range.",
+    curve: Object.freeze([
+      Object.freeze({ x: 0, y: 0 }),
+      Object.freeze({ x: 0.5, y: 0.25 }),
+      Object.freeze({ x: 1, y: 1 }),
+    ]),
+  }),
+  Object.freeze({
+    id: "firm",
+    label: "Firm",
+    description: "A light touch already marks; the top of the range flattens out.",
+    curve: Object.freeze([
+      Object.freeze({ x: 0, y: 0 }),
+      Object.freeze({ x: 0.5, y: 0.75 }),
+      Object.freeze({ x: 1, y: 1 }),
+    ]),
+  }),
+]);
+
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }

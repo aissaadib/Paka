@@ -1,6 +1,6 @@
 /** Default brush configuration and validation. */
 
-import type { BrushSettings, PressureCurvePoint } from "../../types/brush";
+import type { BrushSettings, PressureCurvePoint, PressureMapping } from "../../types/brush";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
@@ -9,9 +9,48 @@ import {
   normalizePressureCurve,
   pressureCurvesEqual,
 } from "./pressureCurve";
+import { normalizePressureMapping, pressureMappingsEqual } from "./pressureMapping";
 
 /** The identity pressure response every pre-curve file behaves like. */
 export const DEFAULT_PRESSURE_CURVE = IDENTITY_PRESSURE_CURVE;
+
+/**
+ * The pressure response of the brush's size.
+ *
+ * The size runs from 40 % of the brush's diameter at no pressure to the full
+ * diameter at full pressure - the response a brush with a strength of `0.6`
+ * had before the mappings existed.
+ */
+export const DEFAULT_PRESSURE_SIZE: PressureMapping = Object.freeze({
+  enabled: true,
+  min: 0.4,
+  max: 1,
+});
+
+/**
+ * The pressure response of the brush's opacity.
+ *
+ * Off by default: a stroke is composited once, so its opacity cannot vary
+ * along the path, and a pressure-driven opacity is a whole-stroke decision.
+ */
+export const DEFAULT_PRESSURE_OPACITY: PressureMapping = Object.freeze({
+  enabled: false,
+  min: 0,
+  max: 1,
+});
+
+/**
+ * The pressure response of the brush's flow.
+ *
+ * Off by default, and it only does something on a stamped stroke: the stamp
+ * engine gives every dab its own ink, while the plain segment path paints at
+ * full coverage. The floor keeps a stroke from starting with no ink at all.
+ */
+export const DEFAULT_PRESSURE_FLOW: PressureMapping = Object.freeze({
+  enabled: false,
+  min: 0.2,
+  max: 1,
+});
 
 /** The colour a right-button stroke paints with until the user changes it. */
 export const DEFAULT_SECONDARY_COLOR = "#ffffff";
@@ -38,8 +77,9 @@ export const DEFAULT_BRUSH: BrushSettings = {
   opacity: 1,
   color: "#16181c",
   hardness: 1,
-  pressureSize: 0.6,
-  pressureOpacity: 0,
+  pressureSize: DEFAULT_PRESSURE_SIZE,
+  pressureOpacity: DEFAULT_PRESSURE_OPACITY,
+  pressureFlow: DEFAULT_PRESSURE_FLOW,
   pressureCurve: IDENTITY_PRESSURE_CURVE,
   minSizeRatio: 0.12,
   spacing: 0.12,
@@ -58,8 +98,9 @@ export function normalizeBrush(brush: BrushSettings): BrushSettings {
     opacity: clamp(brush.opacity, 0, 1),
     color: brush.color.trim() === "" ? DEFAULT_BRUSH.color : brush.color,
     hardness: clamp(brush.hardness, 0, 1),
-    pressureSize: clamp(brush.pressureSize, 0, 1),
-    pressureOpacity: clamp(brush.pressureOpacity, 0, 1),
+    pressureSize: normalizePressureMapping(brush.pressureSize),
+    pressureOpacity: normalizePressureMapping(brush.pressureOpacity),
+    pressureFlow: normalizePressureMapping(brush.pressureFlow),
     pressureCurve: normalizePressureCurve(brush.pressureCurve),
     minSizeRatio: clamp(brush.minSizeRatio, 0.02, 1),
     spacing: clamp(brush.spacing, MIN_SPACING, MAX_SPACING),
@@ -103,8 +144,6 @@ export const BRUSH_NUMBER_FIELDS = [
   "size",
   "opacity",
   "hardness",
-  "pressureSize",
-  "pressureOpacity",
   "minSizeRatio",
   "spacing",
   "stabilizer",
@@ -130,12 +169,31 @@ export const BRUSH_CURVE_FIELDS = [
   "pressureCurve",
 ] as const satisfies readonly CurveBrushField[];
 
+/** The fields whose value is a pressure mapping. */
+type MappingBrushField = {
+  [K in keyof BrushSettings]: BrushSettings[K] extends PressureMapping ? K : never;
+}[keyof BrushSettings];
+
+/**
+ * Every pressure-mapping field of a brush.
+ *
+ * A mapping is read as a whole: a value that is not one takes the field's
+ * default, and a value that is a number is read as the strength a brush
+ * carried before the mappings existed.
+ */
+export const BRUSH_MAPPING_FIELDS = [
+  "pressureSize",
+  "pressureOpacity",
+  "pressureFlow",
+] as const satisfies readonly MappingBrushField[];
+
 /** Every field a brush has, according to the lists above. */
 type ListedBrushField =
   | (typeof BRUSH_NUMBER_FIELDS)[number]
   | (typeof BRUSH_FLAG_FIELDS)[number]
   | (typeof BRUSH_COLOR_FIELDS)[number]
-  | (typeof BRUSH_CURVE_FIELDS)[number];
+  | (typeof BRUSH_CURVE_FIELDS)[number]
+  | (typeof BRUSH_MAPPING_FIELDS)[number];
 
 /** A brush field that no list above claims. */
 type UnlistedBrushField = Exclude<keyof BrushSettings, ListedBrushField>;
@@ -209,7 +267,30 @@ export function readBrushSettings(value: unknown): BrushSettings {
   for (const field of BRUSH_CURVE_FIELDS) {
     assign(merged, field, normalizePressureCurve(record[field]));
   }
+  for (const field of BRUSH_MAPPING_FIELDS) {
+    const raw = record[field];
+    // A field that is missing - or that is neither a mapping nor the
+    // strength a brush carried before the mappings existed - takes the
+    // default, so a settings file written by an older build still loads.
+    assign(
+      merged,
+      field,
+      raw === undefined || !isMappingValue(raw)
+        ? DEFAULT_BRUSH[field]
+        : normalizePressureMapping(raw),
+    );
+  }
   return normalizeBrush(merged);
+}
+
+/**
+ * True when a value can be read as a pressure mapping.
+ *
+ * A number is the strength a brush carried before the mappings existed; an
+ * object is a mapping. Anything else is not one.
+ */
+function isMappingValue(value: unknown): boolean {
+  return typeof value === "number" || asRecord(value) !== null;
 }
 
 export function updateBrushSettings(
@@ -226,8 +307,9 @@ export function brushSettingsEqual(a: BrushSettings, b: BrushSettings): boolean 
     a.opacity === b.opacity &&
     a.color === b.color &&
     a.hardness === b.hardness &&
-    a.pressureSize === b.pressureSize &&
-    a.pressureOpacity === b.pressureOpacity &&
+    pressureMappingsEqual(a.pressureSize, b.pressureSize) &&
+    pressureMappingsEqual(a.pressureOpacity, b.pressureOpacity) &&
+    pressureMappingsEqual(a.pressureFlow, b.pressureFlow) &&
     pressureCurvesEqual(a.pressureCurve, b.pressureCurve) &&
     a.minSizeRatio === b.minSizeRatio &&
     a.spacing === b.spacing &&

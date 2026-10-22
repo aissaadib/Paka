@@ -182,9 +182,12 @@ work as a project file or a PNG**. Several things are explicitly missing; see
   how far apart the dabs sit), **stamp hardness** (the falloff of a single
   dab) and **stamp texture** (0-100 %: the strength of the bristle lanes),
   colour (primary and secondary pickers, an 8-swatch palette and the colour
-  wheel), and toggles for pressure-driven size and pressure-driven opacity. Once
-  either pressure toggle is on, a **Pressure curve** editor shapes how raw pen
-  pressure maps to the response. Every brush setting is
+  wheel), and the **pressure dynamics**: a switch and a *from → to* range for
+  the **size**, the **opacity** and the **flow** (the flow needs the stamp
+  engine, which is the only path that can vary the ink along a stroke). A
+  **Pressure response** panel shapes how raw pen pressure maps to the response
+  - with the named shapes **linear**, **soft** and **firm**, and a preview of
+  what the curve does to the property. Every brush setting is
   captured by each stroke, so changing one later never rewrites existing work;
   hardness and texture apply to the brush, the eraser and shapes, while sampling,
   stabilizer and the stamp apply to the brush and eraser (a shape's geometry
@@ -394,7 +397,13 @@ paste-ready version of the same briefing is in
 - Opacity is applied **per stroke, not per dab**: a stroke gets one alpha, from
   the brush opacity and the stroke's mean pressure. Pressure tapers width within
   a stroke but not opacity - per-dab opacity without build-up needs per-pixel
-  max blending, which Canvas 2D does not expose.
+  max blending, which Canvas 2D does not expose. The **flow** mapping is the
+  one that *is* per dab, and only on a stamped stroke: a dab's coverage is
+  scaled by the pressure before the dabs are unioned, so the ink can vary along
+  the path without the stroke ever darkening where two dabs overlap.
+- A **mouse has no pressure**: it draws at the top of every range - the nominal
+  size, the full opacity, the full ink. Only a pen that reports a pressure
+  moves the response.
 - **Hardness is a single-pass feather of the finished stroke, not a true
   hardness profile.** Lowering it blurs the stroke silhouette once, so the edge
   is a Gaussian falloff and extends slightly beyond the nominal diameter (the

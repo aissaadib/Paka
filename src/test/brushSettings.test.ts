@@ -46,8 +46,9 @@ describe("brush configuration", () => {
       opacity: 4,
       color: "  ",
       hardness: 5,
-      pressureSize: -3,
-      pressureOpacity: 9,
+      pressureSize: { enabled: true, min: -3, max: 4 },
+      pressureOpacity: { enabled: true, min: 9, max: 0.5 },
+      pressureFlow: { enabled: true, min: 0.2, max: 0.8 },
       pressureCurve: DEFAULT_PRESSURE_CURVE,
       minSizeRatio: 0,
       spacing: 100,
@@ -62,8 +63,9 @@ describe("brush configuration", () => {
     expect(normalized.opacity).toBe(1);
     expect(normalized.color).toBe(DEFAULT_BRUSH.color);
     expect(normalized.hardness).toBe(1);
-    expect(normalized.pressureSize).toBe(0);
-    expect(normalized.pressureOpacity).toBe(1);
+    expect(normalized.pressureSize).toEqual({ enabled: true, min: 0, max: 1 });
+    expect(normalized.pressureOpacity).toEqual({ enabled: true, min: 0.5, max: 1 });
+    expect(normalized.pressureFlow).toEqual({ enabled: true, min: 0.2, max: 0.8 });
     expect(normalized.minSizeRatio).toBe(0.02);
     expect(normalized.spacing).toBe(2);
     expect(normalized.stabilizer).toBe(0);

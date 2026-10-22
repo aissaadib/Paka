@@ -28,7 +28,7 @@ import {
   settingsEqual,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings, PressureCurvePoint } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint, PressureMapping } from "../types/brush";
 import type { PointerSample } from "../types/pointer";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
@@ -51,8 +51,9 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
   opacity: 0.42,
   color: "#1a2b3c",
   hardness: 0.31,
-  pressureSize: 0.77,
-  pressureOpacity: 0.66,
+  pressureSize: { enabled: true, min: 0.23, max: 0.77 },
+  pressureOpacity: { enabled: true, min: 0.34, max: 0.66 },
+  pressureFlow: { enabled: true, min: 0.12, max: 0.88 },
   pressureCurve: BENT_CURVE,
   minSizeRatio: 0.55,
   spacing: 0.44,
@@ -67,13 +68,19 @@ const BRUSH_WITH_EVERY_FIELD_SET: BrushSettings = {
 /** A value for one field that is neither its default nor its default again. */
 function distinctiveValue(
   field: keyof BrushSettings,
-): number | string | boolean | readonly PressureCurvePoint[] {
+): number | string | boolean | readonly PressureCurvePoint[] | PressureMapping {
   const fallback = DEFAULT_BRUSH[field];
   if (typeof fallback === "boolean") {
     return !fallback;
   }
   if (typeof fallback === "string") {
     return "#0a1b2c";
+  }
+  if (field === "pressureSize" || field === "pressureOpacity" || field === "pressureFlow") {
+    // A mapping is compared field by field, so a value that differs in every
+    // part of it is what proves the mapping survived the round trip.
+    const mapping = fallback as PressureMapping;
+    return { enabled: !mapping.enabled, min: 0.23, max: 0.77 };
   }
   if (Array.isArray(fallback) || typeof fallback === "object") {
     return BENT_CURVE;
@@ -84,7 +91,7 @@ function distinctiveValue(
 /** The brush with one field changed, clamped the way the reader clamps it. */
 function brushWith(
   field: keyof BrushSettings,
-  value: number | string | boolean | readonly PressureCurvePoint[],
+  value: number | string | boolean | readonly PressureCurvePoint[] | PressureMapping,
 ): BrushSettings {
   return normalizeBrush({ ...DEFAULT_BRUSH, [field]: value } as BrushSettings);
 }

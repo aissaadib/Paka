@@ -31,6 +31,22 @@ visual-regression harness.
 
 ## 2. Current state (verified today)
 
+- **Pressure dynamics** (this branch, `feat/agent12-pressure-dynamics`): one
+  shared pressure **curve** and one typed **mapping** per property that answers
+  the pressure - size, opacity and flow. A mapping is
+  `{ enabled, min, max }`: whether the property answers the pressure at all,
+  and what it is worth at no pressure and at full pressure, both as a fraction
+  of the property's own value. The chain is
+  `raw pressure -> curve -> mapping -> property`, evaluated at the rasterizer,
+  so a stored sample keeps the raw device pressure and live drawing, a layer
+  rebuild, undo/redo, a reopen and a PNG export all agree. The flow mapping is
+  honoured by the **stamp engine**, where every dab carries its own ink; the
+  plain segment path paints at full coverage and cannot vary the ink along a
+  stroke, so the flow control is disabled without the stamp. Project format
+  **13**; the per-user settings file **2**. Version-1 to -12 project files and
+  version-1 settings files still load: their single pressure *strength* is read
+  as the mapping that strength stood for, which is the response they were
+  written by. A mouse has no pressure, so it draws at the top of every range.
 - Branch `integration/next-build-wave`, cut from the phase-1 integration tip
   `38efc1f`: the **brush preset library**, the **contrast and colour-difference
   readout** with **wider colour input**, the **grid and pointer snapping**, and
@@ -45,7 +61,7 @@ visual-regression harness.
   **30 tests, all pass**; `cargo check --lib` clean (the Rust tree is unchanged
   by this wave). `docs/qa/INTEGRATION-NEXT-BUILD-WAVE.md` records the exact
   commands, the merge SHAs and the ownership of each branch.
-- Project file format **version 11** (`PROJECT_VERSION = 11`); `stabilizer` was
+- Project file format **version 13** (`PROJECT_VERSION = 13`); `stabilizer` was
   additive within v6 (missing = 0), `texture` is required from v7,
   `blendMode` may be `multiply` or `screen` from v8, and `stamp`,
   `stampSpacing` and `stampHardness` are required from v9. `stampTexture` is
@@ -53,6 +69,10 @@ visual-regression harness.
   `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and
   `exclusion` join `normal` / `multiply` / `screen`, and a v10 reader
   refuses a v11 file rather than rendering an unknown mode as `normal`.
+  `pressureCurve` is required from v12, and **v13 replaces the per-property
+  pressure strengths with the pressure mappings**: a v13 file holds
+  `{ enabled, min, max }` per property, while a version-1 to -12 file holds one
+  strength, which is read as the mapping that strength stood for.
   `document.guides` is **additive within v9 and later** (missing = no guides),
   because the guides are display-only.
 - A release executable exists at `src-tauri/target/release/paka.exe` (unsigned,
@@ -216,8 +236,11 @@ visual-regression harness.
   switch with **stamp spacing** (2–100 % of the brush size, the distance
   between dabs), **stamp hardness** (the falloff of one dab) and **stamp
   texture** (the strength of the bristle lanes) — all four brush and eraser
-  only — colour + 8-swatch palette, pressure size and pressure
-  opacity toggles. All settings are captured per stroke.
+  only — colour + 8-swatch palette, and the **pressure dynamics**: a switch
+  and a *from → to* range for the **size**, the **opacity** and the **flow**
+  (the flow needs the stamp engine), plus a **Pressure response** panel with
+  the shared curve, the named shapes (linear, soft, firm) and a preview of what
+  the curve does to the property. All settings are captured per stroke.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
   unioned (a per-pixel maximum), so overlapping dabs and a self-crossing stroke
@@ -348,6 +371,26 @@ Key files for the next slice (directional / per-dab stamp textures):
   composites. Segments are always drawn at alpha 1. Never lower per-segment
   alpha to fake softness: overlapping translucent segments reintroduce
   self-overlap darkening.
+- **There is one pressure curve and one mapping per property.** The curve is a
+  shared lookup table that decides how hard the brush reacts to a pressure; a
+  mapping is `{ enabled, min, max }` and says what the property is worth at no
+  pressure and at full pressure, as a fraction of the property's own value.
+  The chain `raw pressure -> curve -> mapping -> property` is evaluated at the
+  rasterizer, never while a sample is captured, so a stored sample keeps the
+  raw device pressure and the picture is the same in live drawing, in a layer
+  rebuild, after undo/redo, in a reopened project and in a PNG export. There is
+  no second curve model: a property that wants its own shape gets its own
+  *mapping*, not its own curve.
+- **The flow mapping needs the stamp engine.** The segment path paints at full
+  coverage and the stroke's alpha is applied once, so the ink along a segment
+  path cannot vary without the self-darkening the buffer design forbids. The
+  stamp engine unions its dabs with a per-pixel maximum, so a dab may carry its
+  own ink: the flow scales a dab's coverage *before* the union, which can only
+  remove ink and still cannot darken where two dabs overlap.
+- **A mouse has no pressure.** The input layer gives a device without pressure a
+  stable `1`, so a mouse draws at the top of every range - the nominal size, the
+  full opacity, the full ink - and the panel says so rather than implying the
+  device reports a pressure.
 - **A blend mode is composite-stage layer metadata, not stroke data.** It maps
   to the Canvas 2D `globalCompositeOperation` used when the finished layer
   surface is drawn over the paper and lower layers (`normal` → `source-over`,

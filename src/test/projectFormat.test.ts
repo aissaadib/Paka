@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
+import { legacyPressureMapping } from "../core/brushes/pressureMapping";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
@@ -28,12 +29,13 @@ import {
 } from "../core/project/projectFormat";
 import { createId, resetIdCounters } from "../utils/id";
 import { bytesToBase64 } from "../utils/base64";
+import type { BrushSettings } from "../types/brush";
 
 function strokeFor(layerId: string, overrides: Partial<StrokeRecord> = {}): StrokeRecord {
   return {
     id: createId("stroke"),
     layerId,
-    brush: { ...DEFAULT_BRUSH, size: 12, color: "#123456", pressureOpacity: 0.5 },
+    brush: { ...DEFAULT_BRUSH, size: 12, color: "#123456", pressureOpacity: legacyPressureMapping(0.5) },
     xs: [1, 2.5, 3],
     ys: [4, 5.5, 6],
     pressures: [0.25, 0.5, 1],
@@ -49,6 +51,47 @@ function storeOf(entries: ReadonlyArray<readonly [string, LayerElement[]]>): Str
     listStrokes: (layerId) => (map.get(layerId) ?? []).filter(isStroke),
     listElements: (layerId) => map.get(layerId) ?? [],
   };
+}
+
+/**
+ * The strength a pre-version-13 brush held for one property.
+ *
+ * A version-13 brush carries the response at no pressure and at full pressure
+ * for every property that answers the pressure; an older brush carried one
+ * strength, which is the same thing when the top of the range is the full
+ * value.
+ */
+function legacyStrength(mapping: unknown): number {
+  const record = mapping as { enabled?: unknown; min?: unknown } | null;
+  if (record === null || typeof record !== "object" || record.enabled !== true) {
+    return 0;
+  }
+  const min = typeof record.min === "number" && Number.isFinite(record.min) ? record.min : 0;
+  return 1 - min;
+}
+
+/**
+ * Rewrites a payload's brush mappings as the strengths an older file held.
+ *
+ * A file written before version 13 has one number per pressure-driven
+ * property and no flow at all, so a payload that claims to be an older file
+ * has to look like one.
+ */
+function asVersionBefore13(payload: {
+  version: number;
+  layers: Array<{ elements: Array<{ brush?: unknown }> }>;
+}): void {
+  for (const layer of payload.layers) {
+    for (const element of layer.elements) {
+      const brush = element.brush as Record<string, unknown> | undefined;
+      if (!brush) {
+        continue;
+      }
+      brush.pressureSize = legacyStrength(brush.pressureSize);
+      brush.pressureOpacity = legacyStrength(brush.pressureOpacity);
+      delete brush.pressureFlow;
+    }
+  }
 }
 
 /** A small committed fill with a non-trivial mask, used to pin the file shape. */
@@ -498,6 +541,7 @@ describe("parseProject round trip", () => {
 
     // A version-5 file has no hardness field and could only produce a hard edge,
     // so it must open hard rather than being mis-read as soft.
+    asVersionBefore13(payload);
     payload.version = 5;
     delete payload.layers[0].elements[0].brush.hardness;
     const legacy = parseProject(JSON.stringify(payload));
@@ -574,6 +618,7 @@ describe("parseProject round trip", () => {
       version: number;
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
+    asVersionBefore13(payload);
     payload.version = 8;
     delete payload.layers[0].elements[0].brush.stamp;
     delete payload.layers[0].elements[0].brush.stampSpacing;
@@ -680,6 +725,7 @@ describe("parseProject round trip", () => {
       version: number;
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
+    asVersionBefore13(payload);
     payload.version = 9;
     delete payload.layers[0].elements[0].brush.stampTexture;
 
@@ -751,7 +797,11 @@ describe("parseProject round trip", () => {
     const multiplied = updateLayer(document, layerId, { blendMode: "multiply" });
     const payload = JSON.parse(
       serializeProject(multiplied, storeOf([[layerId, [strokeFor(layerId)]]])),
-    ) as { version: number };
+    ) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush?: Record<string, unknown> }> }>;
+    };
+    asVersionBefore13(payload);
     payload.version = 10;
 
     const parsed = parseProject(JSON.stringify(payload));
@@ -791,7 +841,11 @@ describe("parseProject round trip", () => {
     const layerId = document.layers[0].id;
     const payload = JSON.parse(
       serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]])),
-    ) as { version: number };
+    ) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush?: Record<string, unknown> }> }>;
+    };
+    asVersionBefore13(payload);
     payload.version = 7;
 
     const parsed = parseProject(JSON.stringify(payload));
@@ -813,6 +867,7 @@ describe("parseProject round trip", () => {
       version: number;
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
+    asVersionBefore13(payload);
     payload.version = 6;
     delete payload.layers[0].elements[0].brush.stabilizer;
     delete payload.layers[0].elements[0].brush.texture;
@@ -893,7 +948,11 @@ describe("parseProject round trip", () => {
     const fill = fillFor(layerId);
     const payload = JSON.parse(
       serializeProject(document, storeOf([[layerId, [stroke, fill]]])),
-    ) as { version: number };
+    ) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush?: Record<string, unknown> }> }>;
+    };
+    asVersionBefore13(payload);
     payload.version = 4;
 
     const parsed = parseProject(JSON.stringify(payload));
@@ -1017,8 +1076,12 @@ function rawProject(): RawProject {
 function asLegacyVersion(text: string, version: number): string {
   const payload = JSON.parse(text) as {
     version: number;
-    layers: Array<{ elements: RawStroke[]; strokes?: Array<Omit<RawStroke, "kind">> }>;
+    layers: Array<{
+      elements: RawStroke[];
+      strokes?: Array<Omit<RawStroke, "kind">>;
+    }>;
   };
+  asVersionBefore13(payload);
   payload.version = version;
   for (const layer of payload.layers) {
     layer.strokes = layer.elements.map(({ kind: _kind, ...stroke }) => stroke);
@@ -1492,7 +1555,7 @@ describe("the composition guides in the project file", () => {
     // the extra blend modes and version 12 on the pressure curve; none of those
     // bumps was for the guides, and a version-9 file that carries them still
     // opens.
-    expect(PROJECT_VERSION).toBe(12);
+    expect(PROJECT_VERSION).toBe(13);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),
@@ -1578,5 +1641,103 @@ describe("the composition guides in the project file", () => {
     expect(parsed.project.document.guides[0].id).toBe("guide-9");
     // The next generated guide id walks past the one the file carried.
     expect(createId("guide")).not.toBe("guide-9");
+  });
+});
+
+describe("the pressure mappings in the project file", () => {
+  function strokeWithMappings(): { document: ReturnType<typeof createDocument>; layerId: string } {
+    const document = createDocument({ width: 64, height: 64 });
+    return { document, layerId: document.layers[0].id };
+  }
+
+  it("round-trips every mapping", () => {
+    const { document, layerId } = strokeWithMappings();
+    const stroke = strokeFor(layerId, {
+      brush: {
+        ...DEFAULT_BRUSH,
+        pressureSize: { enabled: true, min: 0.3, max: 0.9 },
+        pressureOpacity: { enabled: true, min: 0.2, max: 0.8 },
+        pressureFlow: { enabled: true, min: 0.1, max: 0.7 },
+      },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const brush = parsed.project.strokes[0].brush;
+    expect(brush.pressureSize).toEqual({ enabled: true, min: 0.3, max: 0.9 });
+    expect(brush.pressureOpacity).toEqual({ enabled: true, min: 0.2, max: 0.8 });
+    expect(brush.pressureFlow).toEqual({ enabled: true, min: 0.1, max: 0.7 });
+  });
+
+  it("writes the mappings as objects, not as the old strengths", () => {
+    const { document, layerId } = strokeWithMappings();
+    const text = serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]]));
+    const payload = JSON.parse(text) as {
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    const brush = payload.layers[0].elements[0].brush;
+    expect(brush.pressureSize).toEqual({ enabled: true, min: 0.4, max: 1 });
+    expect(typeof brush.pressureFlow).toBe("object");
+  });
+
+  it("reads a version-12 file's strengths as the mappings they stood for", () => {
+    const { document, layerId } = strokeWithMappings();
+    const text = serializeProject(document, storeOf([[layerId, [strokeFor(layerId)]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    asVersionBefore13(payload);
+    payload.version = 12;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    const brush = parsed.project.strokes[0].brush;
+    // The strength of 0.5 the test brush carried is the mapping from 50 %.
+    expect(brush.pressureOpacity).toEqual({ enabled: true, min: 0.5, max: 1 });
+    // A version-12 file had no flow at all, and no flow is a flat response.
+    expect(brush.pressureFlow.enabled).toBe(false);
+  });
+
+  it("refuses a current-version brush without a mapping", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          delete (project.layers[0].elements[0].brush as Record<string, unknown>).pressureFlow;
+        }),
+      ),
+    ).toContain("brush pressure flow");
+  });
+
+  it("refuses a mapping with an end outside the range", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            pressureSize: { enabled: true, min: -0.5, max: 1 },
+          };
+        }),
+      ),
+    ).toContain("brush pressure size");
+  });
+
+  it("refuses a mapping that does not say whether it is enabled", () => {
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            pressureSize: { min: 0.2, max: 1 },
+          } as unknown as BrushSettings;        }),
+      ),
+    ).toContain("brush pressure size");
   });
 });

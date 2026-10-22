@@ -20,6 +20,36 @@ export interface PressureCurvePoint {
   readonly y: number;
 }
 
+/**
+ * How one brush property answers pressure.
+ *
+ * A mapping is a straight line between two ends: `min` is the response at
+ * zero pressure and `max` the response at full pressure. Both are fractions
+ * of the property's own value - the size response is a fraction of the
+ * brush's diameter, the opacity response a fraction of the brush's opacity,
+ * the flow response a fraction of the ink one dab deposits - so a mapping
+ * never changes what the property *is*, only how far pressure moves it.
+ *
+ * `enabled` turns the whole mapping off. A disabled mapping answers `1` at
+ * every pressure: the property keeps its full value and the pressure does not
+ * touch it.
+ *
+ * The *shape* of the response is not in here - it comes from the brush's
+ * pressure curve, which every property shares. The chain is
+ *
+ * ```
+ * raw device pressure -> pressure curve -> property response -> property
+ * ```
+ */
+export interface PressureMapping {
+  /** Whether pressure drives the property at all. */
+  readonly enabled: boolean;
+  /** The response at zero pressure, as a fraction of the property's value. */
+  readonly min: number;
+  /** The response at full pressure, as a fraction of the property's value. */
+  readonly max: number;
+}
+
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
   readonly size: number;
@@ -39,15 +69,32 @@ export interface BrushSettings {
    */
   readonly hardness: number;
   /**
-   * How strongly pressure modulates diameter, in `[0, 1]`.
-   * 0 = constant size, 1 = diameter scales linearly with pressure.
+   * How pressure drives the stroke's diameter.
+   *
+   * `min` is the diameter at zero pressure and `max` the diameter at full
+   * pressure, both as a fraction of `size`. The `minSizeRatio` floor still
+   * applies, so a mapping can never draw a stroke thinner than the brush's
+   * own floor.
    */
-  readonly pressureSize: number;
+  readonly pressureSize: PressureMapping;
   /**
-   * How strongly pressure modulates opacity, in `[0, 1]`.
-   * 0 = constant opacity, 1 = opacity scales linearly with pressure.
+   * How pressure drives the stroke's opacity.
+   *
+   * `min` and `max` are fractions of `opacity`. A stroke is composited once,
+   * so its opacity cannot vary along the path; the mapping answers with the
+   * stroke's mean pressure instead - a lighter pass yields a lighter stroke,
+   * without the build-up a per-segment alpha would cause.
    */
-  readonly pressureOpacity: number;
+  readonly pressureOpacity: PressureMapping;
+  /**
+   * How pressure drives the ink one dab deposits.
+   *
+   * `min` and `max` are fractions of a full dab. The flow is honoured by the
+   * stamp engine, where every dab carries its own ink; the plain segment
+   * path paints at full coverage and cannot vary the ink along the path, so
+   * the mapping has no effect there.
+   */
+  readonly pressureFlow: PressureMapping;
   /**
    * Maps raw device pressure to the pressure the brush reacts to.
    *

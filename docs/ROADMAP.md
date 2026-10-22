@@ -72,7 +72,8 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Expected keyboard shortcuts (undo/redo, zoom, brush size, tool switch,
       save/save-as/open, duplicate layer).
 - [x] Pressure-sensitive width; pressure-sensitive opacity (applied once per
-      stroke, from the stroke's mean pressure).
+      stroke, from the stroke's mean pressure); pressure-sensitive flow on a
+      stamped stroke (applied per dab).
 - [x] Stable, predictable compositing for repeated strokes on one layer.
 
 ## Phase 2 - Illustration tools
@@ -204,6 +205,14 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       (no history step, no dirty flag), a preset stores every `BrushSettings`
       field, and a table-driven guard over the default brush prevents a field
       from being silently dropped by the settings reader. Settings stay v1.
+- [x] Pressure dynamics: one shared pressure **curve** and one typed
+      **mapping** per property that answers the pressure - size, opacity and
+      flow - each with an enable switch and the response at no pressure and at
+      full pressure. The mapping is applied at the rasterizer, so a stored
+      sample keeps the raw device pressure and live drawing, a rebuild, a
+      reopen and an export agree. The flow mapping is honoured by the stamp
+      engine, where every dab carries its own ink; the segment path paints at
+      full coverage and cannot vary the ink along a stroke. Format v13.
 - [ ] Image-based or brush-tip stamp textures: a tip that is a mask rather than
       a round disc, so a stroke can be stamped with a felt tip or a dry ink
       blot. The per-dab machinery FF-01 added is what a tip would build on.

@@ -38,8 +38,17 @@ import { hexToRgb, rgbToHex } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { asRecord } from "../../utils/record";
 
-/** The version of the settings file this build reads and writes. */
-export const SETTINGS_VERSION = 1;
+/**
+ * The version of the settings file this build reads and writes.
+ *
+ * Version 2: the brush's pressure fields hold a *mapping* per property
+ * (whether it is enabled, and the response at no pressure and at full
+ * pressure) instead of one strength. A version-1 file still loads - the
+ * strengths are read as the mappings they stood for - but a version-2 file
+ * is ignored wholesale by a version-1 build, which would otherwise read the
+ * mappings as malformed fields and quietly reset the brush.
+ */
+export const SETTINGS_VERSION = 2;
 
 /**
  * The persisted editor preferences.

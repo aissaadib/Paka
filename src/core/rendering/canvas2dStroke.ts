@@ -18,6 +18,7 @@ import type { BrushSettings } from "../../types/brush";
 import type { StrokeRecord } from "../document/types";
 import { clamp } from "../../utils/math";
 import { evaluatePressureCurve } from "../brushes/pressureCurve";
+import { evaluatePressureMapping, pressureResponse } from "../brushes/pressureMapping";
 
 /**
  * Blur length applied to a stroke's finished silhouette at hardness `0`, as a
@@ -79,11 +80,17 @@ export function textureCoverage(index: number, strength: number): number {
   return floor + (1 - floor) * noise;
 }
 
-/** Diameter in document pixels for a given pressure. */
+/**
+ * Diameter in document pixels for a given pressure.
+ *
+ * The pressure the device reported goes through the brush's pressure curve
+ * and then through the brush's size mapping, and the result is a fraction of
+ * the brush's nominal diameter. The brush's own floor still applies, so a
+ * mapping can never draw a stroke thinner than `minSizeRatio`.
+ */
 export function strokeDiameter(brush: BrushSettings, pressure: number): number {
-  const mapped = evaluatePressureCurve(brush.pressureCurve, pressure);
-  const factor = 1 - brush.pressureSize * (1 - mapped);
-  return Math.max(brush.size * brush.minSizeRatio, brush.size * factor);
+  const response = pressureResponse(brush, brush.pressureSize, pressure);
+  return Math.max(brush.size * brush.minSizeRatio, brush.size * response);
 }
 
 /**
@@ -92,9 +99,10 @@ export function strokeDiameter(brush: BrushSettings, pressure: number): number {
  * A stroke is one shape, so it gets one alpha. Pressure-driven opacity cannot
  * vary *within* a stroke without per-pixel max blending, which Canvas 2D does
  * not expose - drawing each segment at its own alpha is exactly what piles up
- * into a darker line at every overlap. So `pressureOpacity` contributes through
- * the stroke's mean pressure instead: a lighter pass yields a lighter stroke,
- * without the build-up. A GPU backend can do true per-dab opacity later.
+ * into a darker line at every overlap. So the opacity mapping contributes
+ * through the stroke's mean pressure instead: a lighter pass yields a lighter
+ * stroke, without the build-up. A GPU backend can do true per-dab opacity
+ * later.
  */
 export function strokeOpacity(brush: BrushSettings, pressures: readonly number[]): number {
   let meanPressure = 1;
@@ -105,8 +113,8 @@ export function strokeOpacity(brush: BrushSettings, pressures: readonly number[]
     }
     meanPressure = sum / pressures.length;
   }
-  const factor = 1 - brush.pressureOpacity * (1 - meanPressure);
-  return clamp(brush.opacity * factor, 0, 1);
+  const response = evaluatePressureMapping(brush.pressureOpacity, meanPressure);
+  return clamp(brush.opacity * response, 0, 1);
 }
 
 /**

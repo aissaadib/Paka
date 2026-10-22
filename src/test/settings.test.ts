@@ -29,7 +29,7 @@ import {
   serializeAppSettings,
 } from "../core/settings/appSettings";
 import { SettingsStore } from "../core/settings/settingsStore";
-import type { BrushSettings, PressureCurvePoint } from "../types/brush";
+import type { BrushSettings, PressureCurvePoint, PressureMapping } from "../types/brush";
 import { MemorySettingsGateway } from "./support/memorySettingsGateway";
 
 /** A scheduler the test drives by hand, so no test waits in real time. */
@@ -100,14 +100,15 @@ function createHarness(gateway: MemorySettingsGateway = new MemorySettingsGatewa
  */
 const NON_DEFAULT_BRUSH_VALUES: Record<
   keyof BrushSettings,
-  string | number | boolean | readonly PressureCurvePoint[]
+  string | number | boolean | readonly PressureCurvePoint[] | PressureMapping
 > = {
   size: 33,
   opacity: 0.42,
   color: "#123456",
   hardness: 0.37,
-  pressureSize: 0.21,
-  pressureOpacity: 0.73,
+  pressureSize: { enabled: true, min: 0.21, max: 0.79 },
+  pressureOpacity: { enabled: true, min: 0.27, max: 0.73 },
+  pressureFlow: { enabled: true, min: 0.13, max: 0.87 },
   pressureCurve: [
     { x: 0, y: 0 },
     { x: 0.4, y: 0.7 },
@@ -166,6 +167,41 @@ describe("the settings file", () => {
     await store.load();
 
     expect(engine.getState().fillTolerance).toBe(DEFAULT_APP_SETTINGS.fillTolerance);
+  });
+
+  it("reads a version-1 brush's pressure strengths as the mappings they stood for", async () => {
+    const gateway = new MemorySettingsGateway();
+    // A version-1 file held one strength per pressure-driven property.
+    gateway.contents = JSON.stringify({
+      version: 1,
+      brush: { size: 12, pressureSize: 0.6, pressureOpacity: 0.25 },
+    });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    const brush = engine.getState().brush;
+    expect(brush.size).toBe(12);
+    expect(brush.pressureSize).toEqual({ enabled: true, min: 0.4, max: 1 });
+    expect(brush.pressureOpacity).toEqual({ enabled: true, min: 0.75, max: 1 });
+    // A version-1 file had no flow at all.
+    expect(brush.pressureFlow.enabled).toBe(false);
+  });
+
+  it("keeps a malformed pressure mapping from resetting the rest of the brush", async () => {
+    const gateway = new MemorySettingsGateway();
+    gateway.contents = JSON.stringify({
+      version: SETTINGS_VERSION,
+      brush: { size: 20, pressureSize: "nonsense" },
+    });
+    const { store, engine } = createHarness(gateway);
+
+    await store.load();
+
+    const brush = engine.getState().brush;
+    expect(brush.size).toBe(20);
+    // A field that is not a mapping takes its default.
+    expect(brush.pressureSize).toEqual(DEFAULT_APP_SETTINGS.brush.pressureSize);
   });
 
   it("clamps out-of-range values instead of rejecting them", async () => {
@@ -393,8 +429,9 @@ describe("the preferences survive a restart", () => {
       size: 44,
       opacity: 0.55,
       hardness: 0.4,
-      pressureSize: 0.3,
-      pressureOpacity: 0.2,
+      pressureSize: { enabled: true, min: 0.3, max: 0.7 },
+      pressureOpacity: { enabled: true, min: 0.2, max: 0.8 },
+      pressureFlow: { enabled: true, min: 0.25, max: 0.75 },
       minSizeRatio: 0.5,
       spacing: 0.25,
       stabilizer: 0.6,

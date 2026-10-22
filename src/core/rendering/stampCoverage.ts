@@ -24,6 +24,7 @@ import type { BrushSettings } from "../../types/brush";
 import type { Rgb } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { MAX_STAMP_SPACING, MIN_STAMP_SPACING } from "../brushes/defaults";
+import { pressureResponse } from "../brushes/pressureMapping";
 import { strokeDiameter } from "./canvas2dStroke";
 
 /**
@@ -62,6 +63,15 @@ export interface StampDab {
   readonly y: number;
   /** Radius of the dab, in document pixels. */
   readonly radius: number;
+  /**
+   * The ink the dab deposits, in `[0, 1]`.
+   *
+   * One is a full dab. A smaller value is a lighter dab: the coverage is
+   * scaled before it is unioned, so the dab still cannot darken anything and
+   * the stroke still cannot build up where its dabs overlap. The value comes
+   * from the brush's flow mapping, so it follows the pressure at the dab.
+   */
+  readonly flow: number;
   /**
    * The direction of the path at the dab, in radians.
    *
@@ -168,8 +178,15 @@ export class StampDabCursor {
       this.started = true;
       this.previousX = path.xs[0];
       this.previousY = path.ys[0];
-      const radius = strokeDiameter(this.brush, path.pressures[0] ?? 1) / 2;
-      dabs.push({ x: this.previousX, y: this.previousY, radius, angle: 0 });
+      const pressure = path.pressures[0] ?? 1;
+      const radius = strokeDiameter(this.brush, pressure) / 2;
+      dabs.push({
+        x: this.previousX,
+        y: this.previousY,
+        radius,
+        flow: this.dabFlow(pressure),
+        angle: 0,
+      });
       this.work += dabWork(radius);
       this.sampleIndex = 1;
     }
@@ -192,8 +209,8 @@ export class StampDabCursor {
         travelled += spacing - this.carried;
         this.carried = 0;
         const t = travelled / segment;
-        const radius =
-          strokeDiameter(this.brush, pressureStart + (pressureEnd - pressureStart) * t) / 2;
+        const pressure = pressureStart + (pressureEnd - pressureStart) * t;
+        const radius = strokeDiameter(this.brush, pressure) / 2;
         const work = dabWork(radius);
         if (this.work + work > MAX_STAMP_COVERAGE_WORK) {
           // The stroke's budget is spent. The cut is a lattice index: the dabs
@@ -207,6 +224,7 @@ export class StampDabCursor {
           x: this.previousX + dx * t,
           y: this.previousY + dy * t,
           radius,
+          flow: this.dabFlow(pressure),
           angle,
         });
       }
@@ -216,6 +234,17 @@ export class StampDabCursor {
     }
     this.sampleIndex = count;
     return dabs;
+  }
+
+  /**
+   * The ink one dab deposits at a pressure.
+   *
+   * The brush's flow mapping answers the pressure, so a light part of the
+   * path leaves a light mark and a heavy part leaves a heavy one. A brush
+   * without a flow mapping deposits full ink everywhere.
+   */
+  private dabFlow(pressure: number): number {
+    return pressureResponse(this.brush, this.brush.pressureFlow, pressure);
   }
 }
 
@@ -334,7 +363,9 @@ export class StampCoverage {
    *
    * A `texture` modulates the dab's coverage **before** it is unioned, so the
    * union is still a maximum and the stroke still cannot darken where its
-   * dabs overlap. A texture can therefore only ever remove ink.
+   * dabs overlap. A texture can therefore only ever remove ink. The `flow`
+   * scales the coverage the same way - it is the ink the dab deposits, and
+   * the union stays a maximum, so a light dab can never lighten a dark one.
    */
   paintDab(
     centerX: number,
@@ -342,10 +373,12 @@ export class StampCoverage {
     radius: number,
     hardness: number,
     texture: StampTexture | null = null,
+    flow = 1,
   ): StampRect | null {
     if (radius <= 0 || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
       return null;
     }
+    const ink = Number.isFinite(flow) ? clamp(flow, 0, 1) : 1;
     const left = Math.floor(centerX - radius - 0.5);
     const right = Math.ceil(centerX + radius + 0.5);
     const top = Math.floor(centerY - radius - 0.5);
@@ -432,9 +465,9 @@ export class StampCoverage {
               const depth = inside < bristleEnd - inside ? inside : bristleEnd - inside;
               // A one-device-pixel ramp on each bristle edge.
               const bristle = depth >= 0.5 ? 1 : depth <= -0.5 ? 0 : depth + 0.5;
-              value = Math.round(coverage * 255 * ((1 - strength) + strength * bristle));
+              value = Math.round(coverage * 255 * ((1 - strength) + strength * bristle) * ink);
             } else {
-              value = Math.round(coverage * 255);
+              value = Math.round(coverage * 255 * ink);
             }
             if (value > tile[index]) {
               tile[index] = value;

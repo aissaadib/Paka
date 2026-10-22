@@ -1,6 +1,5 @@
 /** Brush size, opacity and pressure mapping controls. */
 
-import { useState } from "react";
 import {
   MAX_BRUSH_SIZE,
   MAX_SPACING,
@@ -12,16 +11,11 @@ import {
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { SliderField } from "../../components/toolbar/SliderField";
 import { BrushPresets } from "./BrushPresets";
-import { PressureCurveEditor } from "./PressureCurveEditor";
-
-/** Pressure strength applied by the on/off toggles. */
-const PRESSURE_STRENGTH = 0.6;
+import { PressureDynamics } from "./PressureDynamics";
 
 export function BrushControls() {
   const { actions } = useEditor();
   const { brush } = useEditorState();
-  const [curveOpen, setCurveOpen] = useState(false);
-  const pressureEnabled = brush.pressureSize > 0 || brush.pressureOpacity > 0;
 
   return (
     <div className="toolbar__group brush-controls">
@@ -130,41 +124,7 @@ export function BrushControls() {
           />
         </>
       ) : null}
-      <label
-        className="toggle"
-        title="Pen pressure controls stroke width (ignored by mouse input)"
-      >
-        <input
-          type="checkbox"
-          checked={brush.pressureSize > 0}
-          onChange={(event) =>
-            actions.setBrush({ pressureSize: event.target.checked ? PRESSURE_STRENGTH : 0 })
-          }
-        />
-        Pressure size
-      </label>
-      <label className="toggle" title="Pen pressure controls stroke opacity">
-        <input
-          type="checkbox"
-          checked={brush.pressureOpacity > 0}
-          onChange={(event) =>
-            actions.setBrush({ pressureOpacity: event.target.checked ? PRESSURE_STRENGTH : 0 })
-          }
-        />
-        Pressure opacity
-      </label>
-      {pressureEnabled ? (
-        <button
-          type="button"
-          className="pressure-curve__toggle"
-          aria-expanded={curveOpen}
-          title="Shape how raw pen pressure maps to the size and opacity response"
-          onClick={() => setCurveOpen((open) => !open)}
-        >
-          Pressure curve
-        </button>
-      ) : null}
-      {pressureEnabled && curveOpen ? <PressureCurveEditor /> : null}
+      <PressureDynamics />
     </div>
   );
 }

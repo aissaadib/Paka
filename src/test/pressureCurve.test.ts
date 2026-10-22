@@ -9,8 +9,10 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH, DEFAULT_PRESSURE_CURVE, normalizeBrush } from "../core/brushes/defaults";
+import { legacyPressureMapping } from "../core/brushes/pressureMapping";
 import {
   MIN_PRESSURE_CURVE_GAP,
+  PRESSURE_CURVE_PRESETS,
   addPressureCurvePoint,
   evaluatePressureCurve,
   movePressureCurvePoint,
@@ -36,7 +38,7 @@ const BENT: readonly PressureCurvePoint[] = [
 
 describe("identity curve", () => {
   it("reproduces the linear diameter formula exactly", () => {
-    const brush = { ...DEFAULT_BRUSH, size: 20, pressureSize: 0.6, minSizeRatio: 0.12 };
+    const brush = { ...DEFAULT_BRUSH, size: 20, pressureSize: legacyPressureMapping(0.6), minSizeRatio: 0.12 };
     for (const pressure of [0, 0.25, 0.5, 0.75, 1]) {
       const before = Math.max(20 * 0.12, 20 * (1 - 0.6 * (1 - pressure)));
       expect(strokeDiameter(brush, pressure)).toBe(before);
@@ -44,7 +46,7 @@ describe("identity curve", () => {
   });
 
   it("reproduces the linear mean-pressure opacity exactly", () => {
-    const brush = { ...DEFAULT_BRUSH, opacity: 0.8, pressureOpacity: 0.5 };
+    const brush = { ...DEFAULT_BRUSH, opacity: 0.8, pressureOpacity: legacyPressureMapping(0.5) };
     const pressures = [0.2, 0.6, 1];
     const mean = pressures.reduce((sum, value) => sum + value, 0) / pressures.length;
     expect(strokeOpacity(brush, pressures)).toBe(0.8 * (1 - 0.5 * (1 - mean)));
@@ -197,6 +199,30 @@ describe("editing a curve", () => {
     expect(movePressureCurvePoint(BENT, 9, 0.2, 0.2)).toBe(BENT);
   });
 
+  it("offers the three named shapes, each a usable curve", () => {
+    expect(PRESSURE_CURVE_PRESETS.map((preset) => preset.id)).toEqual([
+      "linear",
+      "soft",
+      "firm",
+    ]);
+    for (const preset of PRESSURE_CURVE_PRESETS) {
+      // A preset is a curve the editor can hold: it survives the normalizer
+      // unchanged and it answers the endpoints.
+      expect(normalizePressureCurve(preset.curve)).toEqual(preset.curve);
+      expect(evaluatePressureCurve(preset.curve, 0)).toBeCloseTo(0, 12);
+      expect(evaluatePressureCurve(preset.curve, 1)).toBeCloseTo(1, 12);
+      expect(preset.description.length).toBeGreaterThan(0);
+    }
+    // The linear preset is the identity, and the other two bend the response in
+    // opposite directions.
+    const linear = PRESSURE_CURVE_PRESETS[0];
+    const soft = PRESSURE_CURVE_PRESETS[1];
+    const firm = PRESSURE_CURVE_PRESETS[2];
+    expect(linear.curve).toBe(IDENTITY_PRESSURE_CURVE);
+    expect(evaluatePressureCurve(soft.curve, 0.5)).toBeLessThan(0.5);
+    expect(evaluatePressureCurve(firm.curve, 0.5)).toBeGreaterThan(0.5);
+  });
+
   it("inserts a middle stop before the fixed end stop when the click is past the last middle", () => {
     const added = addPressureCurvePoint(BENT, 0.95, 0.97);
     expect(added).toHaveLength(4);
@@ -232,7 +258,7 @@ describe("editing a curve", () => {
 
 describe("rendering with a bent curve", () => {
   it("applies the curve once to diameter", () => {
-    const brush = { ...DEFAULT_BRUSH, size: 20, pressureSize: 0.5, minSizeRatio: 0.1, pressureCurve: BENT };
+    const brush = { ...DEFAULT_BRUSH, size: 20, pressureSize: legacyPressureMapping(0.5), minSizeRatio: 0.1, pressureCurve: BENT };
     // pressure 0.5 maps to 0.8, so the factor is 1 - 0.5 * (1 - 0.8) = 0.9.
     expect(strokeDiameter(brush, 0.5)).toBeCloseTo(18, 12);
     // pressure 0 maps to 0, so the factor is 1 - 0.5 = 0.5: 10 px.
@@ -243,7 +269,7 @@ describe("rendering with a bent curve", () => {
     const brush = {
       ...DEFAULT_BRUSH,
       opacity: 1,
-      pressureOpacity: 0.6,
+      pressureOpacity: legacyPressureMapping(0.6),
       pressureCurve: BENT,
     };
     // mapped mean = (0 + 0.8 + 1) / 3.
@@ -252,7 +278,7 @@ describe("rendering with a bent curve", () => {
   });
 
   it("leaves mouse input at full size when the curve ends at full response", () => {
-    const brush = { ...DEFAULT_BRUSH, size: 30, pressureSize: 0.8, pressureCurve: BENT };
+    const brush = { ...DEFAULT_BRUSH, size: 30, pressureSize: legacyPressureMapping(0.8), pressureCurve: BENT };
     expect(strokeDiameter(brush, 1)).toBe(30);
   });
 });
@@ -279,7 +305,7 @@ describe("project persistence", () => {
     };
   }
 
-  it("round-trips a custom curve at version 12", () => {
+  it("round-trips a custom curve at version 13", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
     const stroke = strokeWithCurve(BENT);
@@ -290,7 +316,7 @@ describe("project persistence", () => {
       layers: Array<{ elements: Array<{ brush: { pressureCurve: unknown } }> }>;
     };
     expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.version).toBe(12);
+    expect(payload.version).toBe(13);
     expect(payload.layers[0].elements[0].brush.pressureCurve).toEqual(BENT);
 
     const parsed = parseProject(JSON.stringify(payload));
@@ -312,8 +338,14 @@ describe("project persistence", () => {
       version: number;
       layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
     };
+    // A version-11 file held one strength per pressure-driven property and no
+    // pressure curve at all.
+    const brush = payload.layers[0].elements[0].brush;
+    brush.pressureSize = 0.6;
+    brush.pressureOpacity = 0;
+    delete brush.pressureCurve;
+    delete brush.pressureFlow;
     payload.version = 11;
-    delete payload.layers[0].elements[0].brush.pressureCurve;
 
     const parsed = parseProject(JSON.stringify(payload));
     expect(parsed.ok).toBe(true);
@@ -321,6 +353,13 @@ describe("project persistence", () => {
       return;
     }
     expect(parsed.project.strokes[0].brush.pressureCurve).toBe(IDENTITY_PRESSURE_CURVE);
+    // The strength is read as the mapping it stood for.
+    expect(parsed.project.strokes[0].brush.pressureSize).toEqual({
+      enabled: true,
+      min: 0.4,
+      max: 1,
+    });
+    expect(parsed.project.strokes[0].brush.pressureFlow.enabled).toBe(false);
   });
 
   it("normalises a malformed version-12 curve instead of rejecting the file", () => {

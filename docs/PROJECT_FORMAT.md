@@ -392,8 +392,9 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `opacity` | 0-1 | Alpha for the whole stroke, applied once when it composites. |
 | `color` | non-empty string | CSS colour. The colour wheel, the toolbar's colour input, the swatches and the canvas picker all write this same field, so picking a colour never changes the format. |
 | `hardness` | 0-1 | Edge falloff: `1` is the hard edge, lower values feather the finished silhouette. Required in version 6; version-1 to -5 files have no field and read as `1`. |
-| `pressureSize` | 0-1 | How strongly pressure narrows each segment of the stroke. |
-| `pressureOpacity` | 0-1 | How strongly the stroke's **mean** pressure fades it (opacity is per stroke, not per sample). |
+| `pressureSize` | mapping | How pressure drives the stroke's diameter: `{ enabled, min, max }`, where `min` is the diameter at no pressure and `max` the diameter at full pressure, both as a fraction of `size`. A file written before version 13 holds a single strength in `0..1` instead, and is read as the mapping that strength stood for. Required in version 13. |
+| `pressureOpacity` | mapping | How pressure drives the stroke's **mean** opacity (opacity is per stroke, not per sample): the same shape as `pressureSize`, as a fraction of `opacity`. A file written before version 13 holds a single strength. Required in version 13. |
+| `pressureFlow` | mapping | How pressure drives the ink one dab deposits: the same shape as `pressureSize`, as a fraction of a full dab. Only a stamped stroke is affected. New in version 13; version-1 to -12 files have no field and read as a flat response. |
 | `pressureCurve` | 2-32 points | Piecewise-linear map from raw device pressure (`x`) to the response the brush uses (`y`), both in 0-1. Stored samples keep raw pressure, so the map is applied once at rasterization and is identical in live drawing, layer rebuilds, undo/redo, reopen and export. Required in version 12; version-1 to -11 files read as the identity curve, which is the linear response they were written by. |
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
@@ -403,6 +404,22 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+
+A **pressure mapping** is `{ "enabled": boolean, "min": 0-1, "max": 0-1 }`. It
+says whether the property answers the pressure at all, and what the property
+is worth at no pressure and at full pressure - both as a fraction of the
+property's own value, so a mapping never changes what a property *is*. The
+response between the two ends is the straight line between them, and the
+*shape* of the pressure comes from `pressureCurve`, which every mapping shares:
+
+```
+raw device pressure -> pressureCurve -> the mapping's response -> the property
+```
+
+The two ends are read in either order and are put in order again, so a
+hand-edited file cannot produce a response that runs backwards. A mapping that
+is switched off keeps its ends, so switching it back on restores the range
+that was chosen.
 
 ## Validation policy
 
@@ -430,6 +447,8 @@ looks like:
   a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
   missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
   `stampSpacing`/`stampHardness` that is missing or outside its range;
+- a version-13 pressure mapping that is missing, is not an object, does not say
+  whether it is enabled, or has an end outside `0..1`;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -467,6 +486,10 @@ looks like:
 - a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
   texture did not exist before version 10, and the texture off is exactly the
   coverage those files were written by;
+- a pressure **strength** in a version-1 to -12 file → the mapping that
+  strength stood for. The strength is the response the file was written by, so
+  the picture does not change; and a file with no flow at all reads with a flat
+  flow, which is what "no flow" means.
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -512,8 +535,8 @@ Two further guarantees:
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
-| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
-| 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | The current version; what this build always writes. |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
+| 13 | Requires the pressure **mappings** (`pressureSize`, `pressureOpacity`, `pressureFlow`) on every stroke brush; reads version-1 to -12 files unchanged and reads their single strengths as the mappings those strengths stood for. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -553,6 +576,14 @@ Two further guarantees:
   version-11 reader that ignored it would draw the linear profile instead, which
   is a different picture. Version-1 to -11 files read with the identity curve,
   which is exactly the linear response they were written by.
+- **The pressure mappings required version 13.** A mapping says how far the
+  pressure may move a property and where its two ends are, so a version-12
+  reader that ignored it would draw every pressure-driven property at its full
+  value - a different picture. A version-12 file holds one *strength* per
+  property, and the strength is read as the mapping it stood for
+  (`0.6` → `{ enabled: true, min: 0.4, max: 1 }`), which is exactly the response
+  the file was written by. Version-1 to -12 files therefore open unchanged, and
+  a version-12 file has no flow at all, which is a flat response.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.

@@ -32,6 +32,10 @@ import {
 } from "../brushes/defaults";
 import { normalizePressureCurve } from "../brushes/pressureCurve";
 import {
+  legacyPressureMapping,
+  normalizePressureMapping,
+} from "../brushes/pressureMapping";
+import {
   DEFAULT_DOCUMENT_BACKGROUND,
   DOCUMENT_SIZE_LIMIT_DESCRIPTION,
   isValidDocumentSize,
@@ -52,7 +56,7 @@ import type {
 import { isLayerBlendMode } from "../document/blendModes";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
-import type { BrushSettings } from "../../types/brush";
+import type { BrushSettings, PressureMapping } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -117,6 +121,15 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
+ * Version 13: a stroke's `brush` carries the pressure *mappings* - one per
+ * property that answers pressure (size, opacity and flow), each with an
+ * enabled flag and the response at no pressure and at full pressure. The
+ * shape of the file changed, so the version was bumped and the fields are
+ * required from 13. A version-12 file holds a single strength per property
+ * instead, and is read as the mapping that strength stood for - which is
+ * exactly the response the file was written by - so version-1 to -12 files
+ * open unchanged.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
@@ -125,7 +138,7 @@ export const PROJECT_FORMAT_ID = "paka-project";
  *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 12;
+export const PROJECT_VERSION = 13;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -821,6 +834,41 @@ function readSampleArray(value: unknown, label: string, pointsSoFar: number, max
   return numbers;
 }
 
+/**
+ * Reads one pressure mapping out of a stroke's brush.
+ *
+ * A file written before version 13 holds a single strength per property, and
+ * the strength is read as the mapping it stood for. A file written from
+ * version 13 holds the mapping itself: whether it is enabled, and the
+ * response at no pressure and at full pressure.
+ */
+function readPressureMapping(value: unknown, label: string, version: number): PressureMapping {
+  if (typeof value === "number") {
+    return legacyPressureMapping(readNumber(value, label, 0, 1));
+  }
+  if (version < 13) {
+    // Every file before version 13 held a strength, so a missing field is a
+    // file that was edited by hand.
+    fail(`${label} must be a number between 0 and 1.`);
+  }
+  if (value === undefined) {
+    fail(`${label} is missing.`);
+  }
+  const record = asRecord(value, label);
+  if (typeof record.enabled !== "boolean") {
+    fail(`${label} must say whether it is enabled.`);
+  }
+  const min = readNumber(record.min, `${label} minimum response`, 0, 1);
+  const max = readNumber(record.max, `${label} maximum response`, 0, 1);
+  // The ends arrive in either order in a hand-edited file; the response is
+  // always the rising line between them.
+  return normalizePressureMapping({
+    enabled: record.enabled,
+    min,
+    max,
+  });
+}
+
 function readBrush(value: unknown, label: string, version: number): BrushSettings {
   const record = asRecord(value, `${label} brush`);
   const color = readString(record.color, `${label} brush colour`);
@@ -839,8 +887,22 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
       version >= 6
         ? readNumber(record.hardness, `${label} brush hardness`, 0, 1)
         : 1,
-    pressureSize: readNumber(record.pressureSize, `${label} brush pressure size`, 0, 1),
-    pressureOpacity: readNumber(record.pressureOpacity, `${label} brush pressure opacity`, 0, 1),
+    // The pressure mappings replaced the per-property strengths in version 13.
+    // A file written before that holds the strength, and the strength is read
+    // as the mapping it stood for - which is the response the file was
+    // written by, so the picture does not change.
+    pressureSize: readPressureMapping(record.pressureSize, `${label} brush pressure size`, version),
+    pressureOpacity: readPressureMapping(
+      record.pressureOpacity,
+      `${label} brush pressure opacity`,
+      version,
+    ),
+    // The flow mapping is new in version 13: an earlier file has no flow, and
+    // no flow is exactly the flat response those files were written by.
+    pressureFlow:
+      version >= 13
+        ? readPressureMapping(record.pressureFlow, `${label} brush pressure flow`, version)
+        : DEFAULT_BRUSH.pressureFlow,
     minSizeRatio: readNumber(record.minSizeRatio, `${label} brush minimum size ratio`, 0.02, 1),
     spacing: readNumber(record.spacing, `${label} brush spacing`, 0.02, 2),
     // Additive within version 6: files written before the field existed (and

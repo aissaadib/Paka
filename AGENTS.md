@@ -113,6 +113,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
+| Change the pressure response | `core/brushes/pressureCurve.ts` (the shared curve and its named shapes), `core/brushes/pressureMapping.ts` (the mapping model), `types/brush.ts` (`PressureMapping`), `core/rendering/canvas2dStroke.ts` (`strokeDiameter`/`strokeOpacity`), `core/rendering/stampCoverage.ts` (the per-dab flow), `core/project/projectFormat.ts` (`readPressureMapping`), `features/brushes/PressureDynamics.tsx`, `features/brushes/PressureResponsePreview.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
 | Change brush hardness / soft edge | `canvas2dStroke.ts` `strokeFeatherRadius` (L32-48), `Canvas2DRenderer.ts` `paintStrokeCoverage`/`featherStroke` (L1263/L1389), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush` (L797) |
@@ -205,8 +206,13 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `matchesShortcut`, `logicalKey`, `isTextEntryTarget`, `formatShortcut` | `core/actions/keyboard.ts` | grep the symbol |
 | `ActionDefinition`, `ActionContext`, `ShortcutSpec`, `ActionId` | `core/actions/types.ts` | grep the symbol |
 | `normalizePressureCurve`, `evaluatePressureCurve`, `pressureCurvesEqual` | `core/brushes/pressureCurve.ts` | grep the symbol |
+| `PRESSURE_CURVE_PRESETS` (linear, soft, firm) | `core/brushes/pressureCurve.ts` | grep the symbol |
+| `PressureMapping`, `normalizePressureMapping`, `evaluatePressureMapping`, `legacyPressureMapping`, `pressureResponse`, `pressureMappingsEqual` | `core/brushes/pressureMapping.ts` | grep the symbol |
+| `DEFAULT_PRESSURE_SIZE`, `DEFAULT_PRESSURE_OPACITY`, `DEFAULT_PRESSURE_FLOW` | `core/brushes/defaults.ts` | grep the symbol |
 | `DEFAULT_PRESSURE_CURVE`, `DEFAULT_SECONDARY_COLOR`, `BRUSH_CURVE_FIELDS` | `core/brushes/defaults.ts` | 14, 17, grep |
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
+| `PressureDynamics` (the pressure switches and ranges) | `features/brushes/PressureDynamics.tsx` | grep the symbol |
+| `PressureResponsePreview` (what the pressure does to a property) | `features/brushes/PressureResponsePreview.tsx` | grep the symbol |
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
 | `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
@@ -253,6 +259,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
+| Pressure dynamics (the mappings) | `pressureMapping.test.ts` (the mapping model, the size/opacity/flow responses, the curve-then-mapping chain, the mouse fallback, the legacy strengths, the replay), `pressureCurve.test.ts` (the curve and its named shapes), `stampCoverage.test.ts` (the per-dab flow and the union) |
 | Colour input formats | `colorInput.test.ts` (8-digit hex, `hsl()`, `oklch()`, the gamut clamp, the round trip, garbage and translucent input) |
 | Settings persistence | `settings.test.ts` (the round trip, the defaults, the malformed and future-versioned file, the clamping, the no-dirty contract, a failed write) |
 | Autosave | `autosave.test.ts` (the dirty-state invariants, the recovery path, the races with a user save) |

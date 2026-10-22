@@ -10,6 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
+import { legacyPressureMapping } from "../core/brushes/pressureMapping";
 import { createStrokeRecord } from "../core/brushes/strokeBuilder";
 import type { BrushSettings } from "../types/brush";
 import {
@@ -45,14 +46,14 @@ function context(): { ctx: CanvasRenderingContext2D; canvas: RecordingCanvas } {
 
 describe("strokeDiameter", () => {
   it("scales with pressure between the floor and the full size", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 10, pressureSize: 1, minSizeRatio: 0.2 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 10, pressureSize: legacyPressureMapping(1), minSizeRatio: 0.2 };
     expect(strokeDiameter(brush, 1)).toBeCloseTo(10, 10);
     expect(strokeDiameter(brush, 0.5)).toBeCloseTo(5, 10);
     expect(strokeDiameter(brush, 0)).toBeCloseTo(2, 10);
   });
 
   it("ignores pressure when pressureSize is zero", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 7, pressureSize: 0 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 7, pressureSize: legacyPressureMapping(0) };
     expect(strokeDiameter(brush, 0)).toBeCloseTo(7, 10);
     expect(strokeDiameter(brush, 1)).toBeCloseTo(7, 10);
   });
@@ -87,12 +88,12 @@ describe("strokeFeatherRadius", () => {
 
 describe("strokeOpacity", () => {
   it("uses the brush opacity when pressure does not modulate it", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 0.4, pressureOpacity: 0 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 0.4, pressureOpacity: legacyPressureMapping(0) };
     expect(strokeOpacity(brush, [0.1, 1, 0.2])).toBeCloseTo(0.4, 10);
   });
 
   it("modulates with the stroke's mean pressure", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 1, pressureOpacity: 1 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 1, pressureOpacity: legacyPressureMapping(1) };
     expect(strokeOpacity(brush, [1, 1])).toBeCloseTo(1, 10);
     expect(strokeOpacity(brush, [0, 0])).toBeCloseTo(0, 10);
     // (0.2 + 0.8) / 2 = 0.5
@@ -100,15 +101,15 @@ describe("strokeOpacity", () => {
   });
 
   it("treats a stroke with no samples as full pressure", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 0.5, pressureOpacity: 1 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, opacity: 0.5, pressureOpacity: legacyPressureMapping(1) };
     expect(strokeOpacity(brush, [])).toBeCloseTo(0.5, 10);
   });
 
   it("clamps opacity and pressure into range", () => {
-    const opaque: BrushSettings = { ...DEFAULT_BRUSH, opacity: 2, pressureOpacity: 0 };
+    const opaque: BrushSettings = { ...DEFAULT_BRUSH, opacity: 2, pressureOpacity: legacyPressureMapping(0) };
     expect(strokeOpacity(opaque, [0.5])).toBe(1);
 
-    const pressurable: BrushSettings = { ...DEFAULT_BRUSH, opacity: 1, pressureOpacity: 1 };
+    const pressurable: BrushSettings = { ...DEFAULT_BRUSH, opacity: 1, pressureOpacity: legacyPressureMapping(1) };
     expect(strokeOpacity(pressurable, [-1])).toBe(0);
     expect(strokeOpacity(pressurable, [2])).toBe(1);
   });
@@ -127,7 +128,7 @@ describe("rasterizeStroke", () => {
   });
 
   it("still varies line width with pressure", () => {
-    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 10, pressureSize: 1, minSizeRatio: 0 };
+    const brush: BrushSettings = { ...DEFAULT_BRUSH, size: 10, pressureSize: legacyPressureMapping(1), minSizeRatio: 0 };
     const { ctx, canvas } = context();
     rasterizeStroke(ctx, makeStroke(brush, [0, 10, 20], [0, 0, 0], [1, 0, 0]));
 

@@ -1244,6 +1244,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The texture rides on the dab's own direction, so the live path and
         // the rebuild path lay the same lanes out over the same pixels.
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        // The ink the dab deposits, from the brush's flow mapping.
+        dab.flow,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -1277,6 +1279,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.radius * scale,
         stroke.brush.stampHardness,
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        dab.flow,
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
