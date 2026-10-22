@@ -1,5 +1,23 @@
 /** Colour panel: the HSV wheel, its sliders and the colour readout. */
 
+/* The dock's body: the wheel, the palette and the readout, stacked in the
+   shell's side column. The chrome around it - the heading, the fold button -
+   belongs to the shell, so the body is only the controls. */
+.color-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* The palette under the wheel: the same swatches the toolbar offers, centred
+   so they sit under the disc instead of against the panel's edge. */
+.color-dock__palette {
+  display: flex;
+  justify-content: center;
+  padding: 2px 4px 4px;
+}
+
 .color-wheel {
   display: flex;
   flex-direction: column;

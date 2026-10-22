@@ -9,12 +9,8 @@
  */
 
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { PALETTE } from "./palette";
-
-/** `input[type=color]` only accepts `#rrggbb`. */
-function toColorInputValue(color: string): string {
-  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#000000";
-}
+import { ColorSwatches } from "./ColorSwatches";
+import { toColorInputValue } from "./colorInput";
 
 export function ColorControls() {
   const { actions } = useEditor();
@@ -53,28 +49,7 @@ export function ColorControls() {
           ⇄
         </button>
       </div>
-      <div className="color-controls__palette" role="group" aria-label="Color palette">
-        {PALETTE.map((color) => (
-          <button
-            key={color}
-            type="button"
-            className={[
-              "color-controls__swatch",
-              color.toLowerCase() === current.toLowerCase() ? "is-active" : "",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={{ backgroundColor: color }}
-            title={`${color} (right-click: secondary)`}
-            aria-label={`Use color ${color}`}
-            onClick={() => actions.setBrush({ color })}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              actions.setSecondaryColor(color);
-            }}
-          />
-        ))}
-      </div>
+      <ColorSwatches />
     </div>
   );
 }
