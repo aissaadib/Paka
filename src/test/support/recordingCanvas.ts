@@ -16,6 +16,7 @@ export const RECORDED_METHODS = [
   "save",
   "restore",
   "setTransform",
+  "transform",
   "clearRect",
   "fillRect",
   "drawImage",
@@ -28,6 +29,7 @@ export const RECORDED_METHODS = [
   "stroke",
   "strokeRect",
   "putImageData",
+  "fillText",
 ] as const;
 
 export interface DrawCall {
@@ -105,6 +107,19 @@ export class RecordingCanvas {
       ctx.lineDash = [...segments];
       record("setLineDash")(segments);
     };
+
+    // Text measurement is a read, not a draw call: the ruler and the guide
+    // labels ask for the width of a string to size the chip behind it. The
+    // stand-in answers with a fixed advance per character, which is enough for
+    // a test to tell one label from another.
+    (ctx as unknown as Record<string, unknown>).measureText = (
+      text: string,
+    ): TextMetrics =>
+      ({
+        width: String(text).length * 6,
+        actualBoundingBoxAscent: 8,
+        actualBoundingBoxDescent: 2,
+      }) as unknown as TextMetrics;
 
     // Pixel reads are not draw calls, so they are recorded separately: the
     // renderer's colour probe is asserted from the returned value and the

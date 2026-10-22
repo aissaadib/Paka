@@ -52,8 +52,16 @@ export interface ToolContext {
   finishShape(): void;
   /** Discards the in-progress shape without touching the layer. */
   cancelShape(): void;
-  /** Commits the active stroke to its layer and to history. */
-  finishStroke(): void;
+  /**
+   * Commits the active stroke to its layer and to history.
+   *
+   * The sample is the pointer's last known position, and it is where the
+   * stroke ends: a stabilized path lags behind a moving pointer, so the
+   * stroke's last sample is caught up to the release point. It is optional,
+   * and a stroke finished without one ends at the last position the pointer
+   * reported.
+   */
+  finishStroke(sample?: PointerSample): void;
   /** Discards the active stroke without touching the layer. */
   cancelStroke(): void;
   isStrokeActive(): boolean;
@@ -103,12 +111,17 @@ export interface ToolContext {
   /** Drops the selection and its overlay. */
   clearSelection(): void;
   /**
-   * Samples the *composited* document at the sample's document position and
-   * makes it the brush colour.
+   * Samples the colour under the sample and makes it the brush colour.
    *
    * This is not an edit: no pixels change, no stroke is recorded and nothing
    * enters history. The sample is already in document space because the input
    * pipeline applies the viewport transform.
+   *
+   * A **reference image** under the pointer is sampled instead of the
+   * artwork: the references are drawn over the canvas, so a reference under
+   * the pointer is what the artist is pointing at. The engine does that
+   * mapping, because a reference lives in workspace space and the engine is
+   * the one that knows both spaces.
    */
   pickColor(sample: PointerSample): void;
   /**
@@ -144,6 +157,30 @@ export interface ToolContext {
   /** True while a gradient is previewed but not yet recorded in history. */
   isGradientActive(): boolean;
   /**
+   * Selects the gradient under a document point, or clears the selection.
+   *
+   * The hit test is against the gradient's **geometry** - the axis of a linear
+   * gradient, the circle of a radial one - because a gradient paints its whole
+   * layer: only the geometry says which gradient the user means. Returns
+   * whether a gradient was selected.
+   */
+  selectGradientAt(docX: number, docY: number): boolean;
+  /**
+   * Starts dragging one of the selected gradient's handles.
+   *
+   * Returns whether a handle was grabbed. The drag previews the new geometry
+   * on the layer but records nothing until the release.
+   */
+  beginGradientHandleDrag(sample: PointerSample): boolean;
+  /** Moves the dragged handle, previewing the result. */
+  updateGradientHandleDrag(sample: PointerSample): void;
+  /** Commits the handle drag as one undoable step. */
+  finishGradientHandleDrag(): void;
+  /** Restores the gradient the drag started from. */
+  cancelGradientHandleDrag(): void;
+  /** True while a gradient handle is being dragged. */
+  isGradientHandleDragActive(): boolean;
+  /**
    * The composition guide a press grabs, or `null` when it grabs none.
    *
    * The grab radius is screen-space, so the engine converts it with the live
@@ -156,8 +193,20 @@ export interface ToolContext {
    * The axis is not decided yet: it comes from the direction the pointer
    * travels, which only the drag knows. The guide's position is the *press*
    * coordinate along that axis, so it does not follow the pointer.
+   *
+   * A guide pulled out of a **ruler** passes its axis: the ruler already says
+   * which way the guide runs, so the guide is created at once and the drag
+   * moves it along that axis.
    */
-  beginGuideCreate(sample: PointerSample): void;
+  beginGuideCreate(sample: PointerSample, axis?: GuideAxis): void;
+  /**
+   * The axis a press on a ruler strip would make a guide on, or `null`.
+   *
+   * The top ruler measures x, so it makes a **vertical** guide; the left
+   * ruler measures y, so it makes a **horizontal** one. The answer is `null`
+   * when the rulers are hidden or the press is not on a strip.
+   */
+  rulerAxisAt(screenX: number, screenY: number): GuideAxis | null;
   /**
    * Puts the new guide on the canvas, on the axis the drag chose.
    *

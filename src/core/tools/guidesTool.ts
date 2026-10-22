@@ -48,6 +48,13 @@ export class GuidesTool {
   private active = false;
   /** The gesture in flight: a new guide, or an existing one being moved. */
   private mode: "create" | "move" | null = null;
+  /**
+   * True when the gesture's axis is already fixed.
+   *
+   * A guide pulled out of a ruler knows its axis from the start, so the drag
+   * moves the guide along it instead of choosing an axis.
+   */
+  private axisFixed = false;
   /** Where the press landed, in document space. */
   private anchorX = 0;
   private anchorY = 0;
@@ -64,6 +71,17 @@ export class GuidesTool {
     this.active = true;
     this.anchorX = sample.docX;
     this.anchorY = sample.docY;
+
+    // A press on a ruler strip pulls a guide out of the ruler: the strip says
+    // which way the guide runs, and the drag carries it along that axis.
+    const rulerAxis = context.rulerAxisAt(sample.screenX, sample.screenY);
+    if (rulerAxis !== null) {
+      this.mode = "create";
+      this.axisFixed = true;
+      context.selectGuide(null);
+      context.beginGuideCreate(sample, rulerAxis);
+      return;
+    }
 
     const grabbed: Guide | null = context.findGuideAt(sample.docX, sample.docY);
     if (grabbed) {
@@ -91,6 +109,11 @@ export class GuidesTool {
     if (this.mode !== "create") {
       return;
     }
+    if (this.axisFixed) {
+      // The ruler already chose the axis: the drag moves the guide along it.
+      context.moveGuideTo(sample);
+      return;
+    }
 
     const dx = sample.docX - this.anchorX;
     const dy = sample.docY - this.anchorY;
@@ -110,6 +133,7 @@ export class GuidesTool {
     this.active = false;
     const mode = this.mode;
     this.mode = null;
+    this.axisFixed = false;
     if (mode === "move") {
       // The release point is the final geometry: a drag that ends outside the
       // canvas still leaves the guide where the pointer actually is.
@@ -124,6 +148,7 @@ export class GuidesTool {
     }
     this.active = false;
     this.mode = null;
+    this.axisFixed = false;
     context.cancelGuideGesture();
   }
 
@@ -133,6 +158,7 @@ export class GuidesTool {
     }
     this.active = false;
     this.mode = null;
+    this.axisFixed = false;
     context.cancelGuideGesture();
   }
 }

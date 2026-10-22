@@ -67,6 +67,8 @@ view, the summaries),
 `floodFill`, `fillScan` (the scan pipeline: the gap closing, the distance
 field, the growth and the soft edge), `fillOptions` (the bucket's options),
 `document/types.ts`, `document/guides.ts`,
+`document/symmetry.ts` (the modes, the transforms, the copies),
+`core/rendering/rulers.ts` (the step, the ticks, the hit test),
 `document/selectionTransform.ts` (the scale/rotate geometry),
 `document/selectionHandles.ts` (the transform handles),
 `canvas2dStroke`,
@@ -130,7 +132,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Task | Open, in order |
 | --- | --- |
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
-| Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides` in `Canvas2DRenderer.ts` |
+| Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides`/`paintGuideLabels` in `Canvas2DRenderer.ts` |
+| Change the rulers | `core/rendering/rulers.ts` (the pure geometry: the step, the minor step, the ticks, the hit test, the label), `core/rendering/Canvas2DRenderer.ts` (`paintRulers`), `core/rendering/types.ts` (`setRulers`), `features/rulers/RulerControls.tsx`, `core/engine/DrawingEngine.ts` (`setRulersVisible`, `rulerAxisAt`) |
+| Change the symmetry | `core/document/symmetry.ts` (the modes, the transforms, the copies, the axes), `core/engine/DrawingEngine.ts` (`setSymmetry*`, `symmetryCopiesFor`, the centre drag), `core/rendering/Canvas2DRenderer.ts` (`paintSymmetry`, `paintSymmetryCenter`, `paintSymmetricCoverage`), `core/rendering/types.ts` (`setSymmetry`), `features/options/toolOptionSchema.ts` (the symmetry group), `src/test/drawingAids.test.ts` |
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
 | Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
@@ -213,6 +217,9 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
 | `GridSettings`, `DEFAULT_GRID_SETTINGS`, `nearestGridLine`, `gridLinesBetween`, `snapDocumentPoint`, `snapTolerance` | `core/document/grid.ts` | grep the symbol |
+| `SymmetryMode`, `SymmetrySettings`, `symmetryTransforms`, `createSymmetryCopies`, `symmetryAxes`, `isOnSymmetryCenter` | `core/document/symmetry.ts` | grep the symbol |
+| `RulerSettings`, `rulerStep`, `rulerMinorStep`, `rulerTicks`, `rulerAxisAt`, `formatRulerLabel` | `core/rendering/rulers.ts` | grep the symbol |
+| `createGroupCommand` | `core/commands/groupCommand.ts` | grep the symbol |
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
 | `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
@@ -303,6 +310,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `docs/ARCHITECTURE.md` | `## Rendering pipeline` (141), `### Why a stroke buffer` (274), `### Eraser strokes` (457), `### Shape tools` (594), `#### The polygon and the star` (628), `### Bucket` (685), `### Gradients` (750), `### Selection` (792), `## Undo / redo` (994), `## Testing` (1197) |
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
 | `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
+| `docs/MULTI-DOCUMENT-TABS.md` | The open documents: the tab strip, the session registry (one engine per document), the close rules, the recent files, and what is deliberately not there |
 | `docs/qa/T06-IMPLEMENTATION-REPORT.md` | The settings slice: what is implemented, what is blocked on the owner's autosave decisions, and the verified dirty-state invariants |
 | `docs/RELEASE-READINESS-R9-R3-PLAN.md` | The R9 (CI licence allow-list) and R3 (attestation countersignature) preparation: what is verified, what is proposed, and the open owner decisions |
 | `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
@@ -330,6 +338,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
+| The drawing aids (rulers, guides, symmetry) | `drawingAids.test.ts` (the symmetry geometry, the copies, the single undo step, the centre drag, the ruler geometry, the guide a ruler hands out, the renderer's overlays and the export exclusion) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush controls and the live preview | `brushControls.test.ts` (the number box's rules, the keyboard steps, the bounds the engine honours, the properties it does not, and the preview's agreement with the rasterizer), `brushOrigin.test.ts` (the preset the brush came from, and the reset) |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |

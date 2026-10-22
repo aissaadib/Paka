@@ -1692,6 +1692,85 @@ byte-identical to one with it off.
 survive a restart. Changing one is not an edit: no history step, no revision
 bump, no dirty flag.
 
+### Rulers and symmetry
+
+The **rulers** and the **symmetry** are the two drawing aids that are neither
+document content nor the grid's kind of overlay, and they solve different
+problems.
+
+**The rulers measure the view.** The strips along the top and the left edge of
+the canvas carry ticks at **document coordinates**, so they pan and zoom with
+the paper: a tick at 400 means the same thing at 25 % and at 6400 %. What is
+*screen* space is the distance between two labelled ticks: the step is the
+smallest round number (1, 2 or 5 times a power of ten) that keeps the labels
+at least 60 CSS pixels apart, so the ruler stays readable at every zoom
+instead of turning into a solid line of digits.
+
+`core/rendering/rulers.ts` holds the geometry and is unit tested without a
+canvas: `rulerStep(zoom)`, `rulerMinorStep(step)`, `rulerTicks(from, to, step)`,
+`rulerAxisAt(screenX, screenY)` and `formatRulerLabel(value)`.
+
+The rulers are painted in **screen space** on the display canvas - they are the
+workspace's own furniture, not a mark on the paper - while their ticks are
+placed with the viewport transform, so they follow the paper. They are view
+state: no pixels, no history, no dirty flag, no export, and the switch is
+remembered in the per-user settings file.
+
+**A guide can be pulled out of a ruler.** With the rulers on, a press in the
+top strip makes a **vertical** guide (the top ruler measures x) and a press in
+the left strip makes a **horizontal** one; the drag then carries the guide
+along that axis. The axis is therefore *given* rather than decided by the
+drag, which is why the guide gesture carries an optional axis
+(`beginGuideCreate(sample, axis)`).
+
+**The symmetry repeats a stroke.** The symmetry is editor state - it describes
+the *next* stroke - and the copies it produces are **ordinary strokes**: the
+same brush, the same pressure and timing, and the same samples mapped through
+the symmetry's transform. That is what keeps the artwork self-describing: a
+reopened project, an undo and a PNG export reproduce the copies without
+knowing that a symmetry was ever on, and the project format does not change.
+
+`core/document/symmetry.ts` is the pure module:
+
+- `symmetryTransforms(settings)` - the transforms the symmetry produces, the
+  original first. Each is a 2x3 affine matrix in the **canvas 2D convention**,
+  so the renderer can hand one straight to `setTransform` and the engine can
+  map a sample with two multiplications. One description, two uses: the
+  preview and the committed copy cannot disagree about where a point lands.
+- `createSymmetryCopies(stroke, settings)` - the copies, as ordinary strokes.
+- `symmetryAxes(settings)` - the lines the overlay draws.
+
+The three modes are a **mirror across a vertical axis**, a **mirror across a
+horizontal axis** and a **radial** repeat of 2 to 12 copies.
+
+**The preview shows the copies while the user draws.** The renderer paints the
+in-progress stroke once per copy: the stroke as it was drawn, and then the
+*same coverage* mapped through each transform. Mapping the finished coverage
+rather than the samples is what keeps the preview honest - the mirror of a
+stroke is the mirror of its pixels, whether the brush is hard, soft or a chain
+of dabs - and each copy is painted with its own alpha, in the order the copies
+will be committed in, so the preview is the picture the release produces.
+
+**One gesture, one undo step.** The copies are committed with the stroke, and
+the whole set is a single history entry (`createGroupCommand`): the user drew
+one thing, not six. The copies are rasterized into the layer the way the
+stroke itself was, so the committed pixels are the copies' own rather than a
+re-rasterization of the whole layer.
+
+The symmetry applies to the tools that **paint** - the brush and the shape
+tools. The eraser is left alone (an erasing stroke subtracts coverage from
+the layer and its copies would need their own snapshot), and the bucket and
+the gradient are not strokes at all.
+
+**The centre is a handle.** The symmetry centre is a marker on the canvas, and
+a press on it moves the centre instead of drawing - the engine's single
+pointer entry point takes the press before the tool sees it. The select tool
+keeps its own handles, because its marquee is how the user picks strokes. The
+centre is editor state: dragging it is not an edit, `Esc` abandons the drag
+and puts it back, and the **Centre** button returns it to the middle of the
+paper. It belongs to the paper it is used on, so a new document starts with a
+new centre.
+
 ### Navigator
 
 The **navigator** is a small panel that shows the whole document and marks the

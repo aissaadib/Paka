@@ -3,12 +3,14 @@
  *
  * The swatch is not a picture of a brush: it is the *same* picture the live
  * preview draws, rendered by the same code, from the preset's own brush
- * settings. A property that changes a stroke changes the swatch, because
- * both come from the renderer's primitives.
+ * settings. A property that changes a stroke changes the swatch.
  *
  * The live preview draws at a fixed size, so the swatch renders into a canvas
  * of that size and scales it down. The brush is therefore shown the way it
- * would look, not the way it would measure.
+ * would look, not the way it would measure - with one exception: the swatch
+ * draws the mark **at the size it deserves**, so a hairline pen reads as a
+ * hairline and a broad airbrush fills the box. A list of brushes that all
+ * look the same size is not a list you can choose from.
  */
 
 import { useEffect, useRef } from "react";
@@ -16,15 +18,25 @@ import {
   PREVIEW_CSS_HEIGHT,
   PREVIEW_CSS_WIDTH,
   buildPreviewStroke,
+  previewFit,
   renderBrushPreview,
 } from "../../core/rendering/brushPreview";
 import type { BrushSettings } from "../../types/brush";
 
 /** The swatch's width, in CSS pixels. */
-export const TIP_CSS_WIDTH = 60;
+export const TIP_CSS_WIDTH = 44;
 
 /** The swatch's height, in CSS pixels. */
-export const TIP_CSS_HEIGHT = 20;
+export const TIP_CSS_HEIGHT = 18;
+
+/**
+ * The brush that fills the swatch.
+ *
+ * It is the reference the list is read against: a brush this wide fills the
+ * box, a wider one is drawn as wide as the box allows, and a narrower one is
+ * drawn narrower.
+ */
+const REFERENCE_SIZE = 24;
 
 export interface BrushTipPreviewProps {
   readonly brush: BrushSettings;
@@ -64,8 +76,26 @@ export function BrushTipPreview({ brush, background, label }: BrushTipPreviewPro
     }
     renderBrushPreview(sourceCtx, buildPreviewStroke(brush), { pixelRatio: ratio, background });
 
+    // How tall the mark is in the source, in CSS pixels, and how tall it
+    // should be in the swatch: the brush's own width against the reference.
+    const markHeight = Math.max(0.5, brush.size * previewFit(brush));
+    const wanted = TIP_CSS_HEIGHT * Math.min(1, brush.size / REFERENCE_SIZE);
+    const scale = wanted / markHeight;
+
     ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(source, 0, 0, width, height);
+    const drawnWidth = source.width * scale;
+    const drawnHeight = source.height * scale;
+    ctx.drawImage(
+      source,
+      0,
+      0,
+      source.width,
+      source.height,
+      (width - drawnWidth) / 2,
+      (height - drawnHeight) / 2,
+      drawnWidth,
+      drawnHeight,
+    );
   }, [brush, background]);
 
   return (

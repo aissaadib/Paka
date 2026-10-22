@@ -123,8 +123,8 @@
 .brush-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
+  gap: 5px;
+  height: 24px;
   padding: 0 4px;
   border-radius: 2px;
   border-left: 2px solid transparent;
@@ -160,24 +160,48 @@
   font-weight: 600;
 }
 
-.brush-row__builtin,
-.brush-row__recent {
+/* The brush has been changed since the preset was applied: the name says so
+   by colour, and the panel's own line says it in words. */
+.brush-row.is-edited .brush-row__name {
+  color: var(--accent);
+}
+
+.brush-row__builtin {
   flex: 0 0 auto;
-  padding: 0 4px;
+  padding: 0 3px;
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-dim);
   font-size: 9px;
-  line-height: 14px;
+  line-height: 13px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }
 
-.brush-row__edited {
+/* "Used recently": a dot, because the name needs the room more than the
+   word does. */
+.brush-row__recent {
+  display: inline-flex;
+  align-items: center;
   flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 12px;
-  line-height: 1;
+}
+
+.brush-row__recent-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .brush-row__star {

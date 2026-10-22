@@ -1,29 +1,43 @@
-/** Document toolbar: history, zoom, brush and color controls. */
+/**
+ * Document toolbar: history, zoom, grid and colour.
+ *
+ * The tool's own options live in the strip above this bar, so nothing here
+ * changes when the tool changes and the toolbar keeps the same height.
+ */
 
-import { BrushControls } from "../../features/brushes/BrushControls";
 import { ColorControls } from "../../features/color/ColorControls";
-import { GradientControls } from "../../features/gradient/GradientControls";
 import { GridControls } from "../../features/grid/GridControls";
-import { ToolOptionsPanel } from "../../features/options/ToolOptionsPanel";
-import { toolShowsBrushControls } from "../../features/options/toolOptionSchema";
 import { UndoRedoControls } from "../../features/history/UndoRedoControls";
-import { useEditor, useEditorToolId } from "../../hooks/useEditor";
+import { RulerControls } from "../../features/rulers/RulerControls";
+import { ViewControls } from "../../features/view/ViewControls";
+import { MAX_ZOOM, MIN_ZOOM } from "../../core/rendering/viewport";
+import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { IconActualSize, IconFit, IconZoomIn, IconZoomOut } from "../icons";
 import { IconButton } from "../toolbar/IconButton";
 
 export function ToolBar() {
   const { actions } = useEditor();
-  const toolId = useEditorToolId();
+  const { viewport } = useEditorState();
 
   return (
     <div className="toolbar" role="toolbar" aria-label="Document toolbar">
       <UndoRedoControls />
       <div className="toolbar__divider" />
       <div className="toolbar__group">
-        <IconButton label="Zoom out" shortcut="Ctrl+-" onClick={actions.zoomOut}>
+        <IconButton
+          label="Zoom out"
+          shortcut="Ctrl+-"
+          disabled={viewport.zoom <= MIN_ZOOM}
+          onClick={actions.zoomOut}
+        >
           <IconZoomOut />
         </IconButton>
-        <IconButton label="Zoom in" shortcut="Ctrl+=" onClick={actions.zoomIn}>
+        <IconButton
+          label="Zoom in"
+          shortcut="Ctrl+="
+          disabled={viewport.zoom >= MAX_ZOOM}
+          onClick={actions.zoomIn}
+        >
           <IconZoomIn />
         </IconButton>
         <IconButton label="Actual size" shortcut="Ctrl+1" onClick={() => actions.zoomTo(1)}>
@@ -33,11 +47,10 @@ export function ToolBar() {
           <IconFit />
         </IconButton>
       </div>
+      <ViewControls />
       <div className="toolbar__divider" />
       <GridControls />
-      {toolShowsBrushControls(toolId) ? <BrushControls /> : null}
-      <ToolOptionsPanel />
-      <GradientControls />
+      <RulerControls />
       <div className="toolbar__divider" />
       <ColorControls />
       <div className="toolbar__spacer" />

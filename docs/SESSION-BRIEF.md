@@ -90,6 +90,7 @@ visual-regression harness.
 | `feat/ff26-transform` | **Scale and rotate a selection** - the select tool's overlay grows **four corner handles** and a **rotation handle** above the frame. A corner handle scales the selection uniformly about the centre of its frame (the corner keeps its direction from the centre; the factor is clamped so a selection can never collapse or invert); the rotation handle turns it about the same centre, **snapping to 15 degrees** while the pointer is held down, with **`Shift` turning the snap off** for a free turn. The transform is **baked on apply**: it moves the selected strokes' samples and nothing else, so the brush, the colour, the opacity and the pressure are untouched and there is **no project-format change**. One undo step per transform, exactly like a move. The geometry is a pure module (`core/document/selectionTransform.ts`) with unit tests; the handles are display-only and never reach a layer surface or a PNG export. |
 | `feat/n4-grid-snapping` | **Grid and snapping** - a **Grid** switch draws a lattice over the paper and a **Snap** switch makes the drawing follow the guides and the grid lines, with a **Spacing** control in **document pixels** (2-500), so the grid means the same thing at every zoom and pans with the paper. The snap is a **magnet**: a drawing point within **6 screen pixels** of a guide or a grid line lands exactly on it, and a point that is nowhere near one keeps its position. The tolerance is screen space, so the same physical gesture snaps alike at 100 % and at 400 %. The snap is applied in the engine's single pointer entry point, so the sample the user drew and the sample that was committed agree. Both switches are **view state**: no pixels change, no history step, no dirty flag, nothing reaches an export, and the settings survive a restart in the per-user settings file. **No project-format change** - the grid is not in the drawing at all. |
 | `feat/t11-guides` | **Composition guides** (`U`) - a **Guides** tool places a vertical or horizontal guide by dragging on empty canvas (the axis follows the dominant drag direction, the position is the press coordinate) and moves an existing guide by dragging it. A click selects a guide, `Delete` removes it, `Esc` cancels a drag. A guide is document state (`DrawingDocument.guides`) but **display-only**: it is painted over the artwork and never reaches a layer surface or a PNG export, exactly like the selection overlay, so the project format change is **additive** and the version stays **9**. |
+| `feat/drawing-aids` | **Rulers, guide labels and symmetry** - a **Rulers** switch draws measuring strips whose ticks are **document coordinates** (so they pan and zoom with the paper) and whose labelled step is chosen from the live zoom, so the numbers stay readable at any zoom; the **Guides** tool can pull a guide straight out of a ruler, each guide carries a **position label**, and **Clear guides** removes them all in one undo step. A **Symmetry** switch repeats the next stroke around a draggable centre: **Mirror V**, **Mirror H** and a **Radial** repeat of 2-12 copies. The copies are **ordinary strokes** (the same samples, mapped through the symmetry), so the artwork stays self-describing, the whole set is **one undo step**, and there is **no project-format change**. The symmetry and the rulers are **view state**: they never reach a layer surface or a PNG export, and the rulers, the symmetry's mode and its copy count are remembered in the per-user settings file. |
 | `feat/t14-polygon-star` | **Polygon and star shape tools** (`P`, `S`) - a regular *n*-gon inscribed in the dragged box's ellipse (3-24 sides, a vertex at the top) and the classic *2p*-vertex star (3-24 points, an inner radius of 5-100 %), both with a rotation option, both fillable through the existing **Fill shape** switch. The options are editor state, read at press time; a shape is still an ordinary stroke, so there is **no format change**. |
 | `dbcb446` | **HSV colour wheel** — a **Colour** panel with a disc (angle = hue, distance = saturation), a value slider and three keyboard-operable sliders. It writes the same brush colour the canvas picker and the toolbar's colour input write, so colour keeps one source of truth; the RGB↔HSV conversion is exact over the whole 8-bit sRGB cube. No format change: the brush colour is still `#rrggbb`. |
 | `9b2aceb` | **Stamp (dab) brush engine** — a stroke can be drawn as a chain of round dabs placed along its path at a fixed arc-length interval, with the dabs' coverage unioned (a per-pixel maximum, so a stroke never darkens where it crosses itself) and a true per-dab hardness curve. The dabs are a pure function of the samples and the brush, so live drawing, commit, rebuild, undo/redo, reopen and export agree. Format v9. |
@@ -214,7 +215,31 @@ visual-regression harness.
   it, `Delete` removes it, `Esc` cancels a drag in flight. A guide is document
   state but **display-only**: it is painted over the artwork and never reaches a
   layer surface or a PNG export, so the format change is additive and the file
-  version stays 9.
+  version stays 9. Each guide carries a **position label**, and the guides
+  tool's **Clear guides** button removes them all in one undo step.
+- **Rulers**: a **Rulers** switch (`Ctrl+Alt+R`) draws measuring strips along
+  the top and the left edge of the canvas. The ticks are **document
+  coordinates**, so they pan and zoom with the paper, and the step between two
+  labelled ticks is chosen from the live zoom (at least 60 CSS pixels apart), so
+  the numbers stay readable at 2 % and at 6400 %. The rulers are **view
+  state**: no pixels, no history, no dirty flag, no export, and the switch is
+  remembered in the per-user settings file. With the rulers on, the **Guides**
+  tool pulls a guide straight out of a ruler - the top ruler measures x and
+  makes a vertical guide, the left ruler measures y and makes a horizontal one,
+  and the drag carries it along that axis.
+- **Symmetry**: a **Symmetry** switch in the tool's own options repeats the
+  next stroke around a centre. **Mirror V** reflects it across a vertical axis
+  (the classic left/right symmetry), **Mirror H** across a horizontal one, and
+  **Radial** repeats it 2-12 times evenly around the centre. The centre is a
+  marker on the canvas: drag it to move the symmetry, `Esc` abandons the drag
+  and puts the centre back, and the **Centre** button returns it to the middle
+  of the paper. The copies are **ordinary strokes** - the same brush and the
+  same samples, mapped through the symmetry - so they can be edited, moved and
+  deleted like any other artwork, and a reopened project shows exactly what
+  was drawn; the whole set is **one undo step**. The symmetry itself is editor
+  state: it never reaches a PNG export, and the copies it produces do. It
+  applies to the brush and the shape tools, not to the eraser, the bucket or
+  the gradient.
 - **Grid and snapping**: a **Grid** switch draws a lattice over the paper and a
   **Snap** switch makes the drawing follow the guides and the grid lines; the
   **Spacing** control sets the distance between the lines in **document pixels**
@@ -227,7 +252,7 @@ visual-regression harness.
   sample that was committed agree. Both switches are **view state**: no pixels
   change, no history step, no dirty flag, nothing reaches an export, and they
   are remembered in the per-user settings file. `Ctrl+'` and `Ctrl+Shift+'`
-  toggle them. No rulers yet.
+  toggle them.
 - **HSV colour wheel** (the **Colour** panel): a disc where the angle is the
   hue and the distance from the centre is the saturation, a value slider, and
   three sliders naming the same numbers. It writes the brush colour through
@@ -746,12 +771,18 @@ Product:
   preference change, so a preference changed in the last moments before the
   window closes can be lost.
 - Guides: axis-only (no diagonals), one guide per axis position (a duplicate is
-  refused), a fixed accent colour and no position label. A guide does take
-  part in the **snapping**, but only within the 6 screen pixel magnet radius.
+  refused) and a fixed accent colour. A guide does take part in the
+  **snapping**, but only within the 6 screen pixel magnet radius.
 - Grid and snapping: the spacing is whole document pixels only, the snap is a
-  magnet rather than a lock (a point between two lines stays where it is), the
-  grid is hidden when its lines would be closer than 3 device pixels, and there
-  are no rulers yet.
+  magnet rather than a lock (a point between two lines stays where it is) and
+  the grid is hidden when its lines would be closer than 3 device pixels.
+- Symmetry: a stroke aid, not a drawing mode. It repeats the brush and the
+  shape tools, but not the eraser, the bucket or the gradient, and the copies
+  are separate strokes, so the select tool can move one half without the
+  other. The centre is remembered per session, not per project, and the
+  mirrored half's grain (the **Texture** and **Stamp texture** brushes) shows
+  the mirrored pattern while it is drawn and the document-anchored pattern once
+  it is committed.
 - A layer with a non-default opacity or blend mode spends one extra
   document-sized scratch canvas while it is being previewed.
 - The document pixel budget covers a one-layer document plus the working

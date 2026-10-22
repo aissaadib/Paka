@@ -21,7 +21,7 @@ import {
 } from "../icons";
 import { IconButton } from "./IconButton";
 
-const TOOL_ICONS: Record<ToolId, ReactNode> = {
+export const TOOL_ICONS: Record<ToolId, ReactNode> = {
   brush: <IconBrush />,
   eraser: <IconEraser />,
   select: <IconSelect />,
