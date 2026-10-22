@@ -304,6 +304,27 @@ describe("tools and brush size", () => {
   });
 });
 
+describe("the two colours", () => {
+  it("swaps them with X and puts them back to their defaults with D", () => {
+    expect(press("x", { code: "KeyX", ctrl: false, meta: false })?.action.id).toBe("swapColors");
+    expect(actions.swapColors).toHaveBeenCalledOnce();
+
+    expect(press("d", { code: "KeyD", ctrl: false, meta: false })?.action.id).toBe("resetColors");
+    expect(actions.resetColors).toHaveBeenCalledOnce();
+  });
+
+  it("does not fire them with a modifier held", () => {
+    // Ctrl+D is the duplicate-selection shortcut, so the plain `d` must not
+    // claim the chord with a modifier, or the two would fight over it.
+    expect(press("d", { code: "KeyD", shift: true, ctrl: false, meta: false })).toBeNull();
+    expect(press("x", { code: "KeyX", ctrl: true, meta: false })?.action.id).not.toBe(
+      "swapColors",
+    );
+    expect(actions.swapColors).not.toHaveBeenCalled();
+    expect(actions.resetColors).not.toHaveBeenCalled();
+  });
+});
+
 describe("platform and layout regressions", () => {
   it("uses Cmd on macOS and refuses Ctrl", () => {
     expect(press("z", { platform: "mac" })?.action.id).toBe("undo");
