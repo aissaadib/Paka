@@ -300,6 +300,8 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| Layer groups (tree, commands, format) | `layerGroups.test.ts` (the tree, grouping, nesting, moves, dissolve, the commands and their refusals), `layerTreeDrag.test.ts` (the drop zones, the cycle guard and the parent options), `layerPanel.test.ts` (the engine facade, group deletion rules, gesture refusal, selection inside a group), `projectFormat.test.ts` (v13 round-trip, empty and nested groups) |
+| Layer groups in a real browser | `tests/visual/layer-groups.spec.ts` (create, rename, drag, collapse, visibility, delete, ungroup, the Inside selector), `tests/visual/layer-groups-render.spec.ts` (group opacity, visibility and blend pixels) |
 | Symmetry | `symmetry.test.ts` (the modes, the axes and where they stand, the mirror about the axis rather than the document's middle, the on-axis rule, the mirrors, and the display-only overlay) |
 | Brush tip control | `brushTipControl.test.ts` (the closed set of five shapes, the refusal of a shape this build does not know, the preview, and the write that is editor state - no history step, no dirty flag) |
 | The shortcut editor's runtime | `shortcutRuntime.test.ts` (the session store, the dispatcher's overrides, the chord a command gives up, the conflict reason, and the round trip through the section) |
