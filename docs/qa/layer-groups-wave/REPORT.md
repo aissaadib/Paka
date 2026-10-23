@@ -237,6 +237,8 @@ were, through `ProjectFiles`.
 - The packaged build emits a linker warning about multiple non-default
   manifests. It is recorded, not hidden; the executable and both installers were
   produced and the executable ran.
+- The **MSI and NSIS installers were produced but not installed**. The packaged
+  executable was launched directly from `src-tauri/target/release`.
 
 ## 8. Ranked next work
 
