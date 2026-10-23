@@ -166,6 +166,8 @@ Nothing was skipped and no check is claimed without a run.
 
 The requested Notion page could not be created: the browser session is at
 `https://app.notion.com/login`, no Notion MCP resources are configured and no
-`NOTION` token is present in the environment. The full app report is ready as
-`docs/qa/app-report/APP-REPORT.md`; it can be pasted into a new page once the
-owner signs in or supplies an integration token and a parent page.
+`NOTION` token is present in the environment. At the owner's direction the
+full report was delivered as a text document instead:
+`docs/qa/app-report/APP-REPORT.txt` (plain text, UTF-8) beside the Markdown
+source `APP-REPORT.md`. Either can be pasted into a new page once the owner
+signs in or supplies an integration token and a parent page.

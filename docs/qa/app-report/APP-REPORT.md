@@ -12,8 +12,9 @@
 | Settings format | version **1** |
 | Status | Green: typecheck, 2,382 unit tests, 82 browser tests and the production build all pass |
 
-This report describes the application as it exists on the branch above. It is
-written to be pasted into a Notion page without editing.
+This report describes the application as it exists on the branch above. It
+stands alone as a report and can be pasted into Notion or a word processor
+without editing. The plain-text edition is `APP-REPORT.txt` beside this file.
 
 ---
 
@@ -502,8 +503,11 @@ These are product decisions, not defects.
 1. **Notion publication.** The requested new page could not be created from
    this session: the browser is at `https://app.notion.com/login`, no Notion
    MCP resources are configured and no `NOTION`/`NOTION_TOKEN` is present in
-   the environment. This document is ready to paste once the owner signs in or
-   supplies an integration token and a parent page.
+   the environment. At the owner's direction the report was delivered as a
+   text document instead: `docs/qa/app-report/APP-REPORT.txt` (plain text,
+   UTF-8) beside the Markdown source. It is ready to paste into a new Notion
+   page once the owner signs in or supplies an integration token and a parent
+   page.
 2. **Packaged verification of the newest slices.** The layer-group and
    panel-movement slices have packaged evidence. The canvas-size presets and
    the Krita import are verified in the browser app, unit suite and production
