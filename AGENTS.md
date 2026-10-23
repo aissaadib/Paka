@@ -74,6 +74,7 @@ architecture by browsing.
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
 `features/options/OptionControl.tsx` (134: the one control for every kind),
+`features/document/NewDocumentDialog.tsx` (147: the size fields and presets),
 `features/options/toolOptions.css` (161),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
@@ -108,6 +109,7 @@ and the budget).
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
+`core/document/canvasSizePresets.ts` (the New Document quick sizes),
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/grid/GridControls.tsx`, `utils/record.ts`,
 `core/settings/settingsGateway.ts`, `core/settings/tauriSettingsGateway.ts`,
@@ -142,6 +144,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change the New Document canvas sizes | `core/document/canvasSizePresets.ts` (the presets and their selected state), `core/document/document.ts` (`MIN_DOCUMENT_SIZE`, `MAX_DOCUMENT_SIZE`, `MAX_DOCUMENT_PIXELS`, `isValidDocumentSize`), `features/document/NewDocumentDialog.tsx`, `src/app/app.css` (`.dialog__presets`), `src/test/canvasSizePresets.test.ts`, `tests/visual/new-document-sizes.spec.ts` |
 | Change the top chrome (options bar, document bar) | `components/layout/ToolBar.tsx` (the two rows), `features/options/ToolOptionsBar.tsx` (the contextual row), `features/options/toolOptions.css` (the row, the scroll area, the pinned end), `src/app/app.css` (`.top-bars`, `.toolbar`, `.brush-primary`, `.brush-advanced`) |
 | Change the side dock | `components/layout/Workspace.tsx` (`SideColumn`), `components/panels/PanelDock.tsx` (the tabs), `components/panels/panel.css` (`.panel-dock`, the heights and the minimums), `src/app/app.css` (`.side-panels`, `.side-panels__layers`), `core/workspace/workspaceSettings.ts` (`compositionPanelsInSlot`), `tests/visual/shell-layout.spec.ts` |
 | Move, float or reset a panel | `core/shell/panelMovement.ts` (the pure move and reset rules), `core/shell/preferences.ts` (`panelOrder`, `panelSlots`, `hiddenPanels`), `state/workspaceStore.ts` (`movePanel`, `resetPanels`, `applyPreferences`), `components/panels/PanelDock.tsx` (the tab drag and the actions menu), `components/panels/FloatingPanels.tsx` (the floating window), `components/layout/Workspace.tsx` (the floating layer and the dock wiring), `components/layout/AppMenuBar.tsx` (Panels -> Reset Panel Layout), `app/App.tsx` (the settings sections), `core/panels/panelLayoutSection.ts`, `tests/visual/panel-movement.spec.ts` |
@@ -226,6 +229,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
 | `EditorActions` | `state/editorStore.ts` | 24 |
 | `createDocument` | `core/document/document.ts` | 183 |
+| `CANVAS_SIZE_PRESETS`, `isCanvasSizePresetSelected`, `findCanvasSizePreset` | `core/document/canvasSizePresets.ts` | grep the symbol |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
 | `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
@@ -339,6 +343,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test, when the handles are shown, and the three defects the first review found), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
+| Canvas size presets | `canvasSizePresets.test.ts` (the presets, their limits, the selected state), `tests/visual/new-document-sizes.spec.ts` (the dialog in a real browser) |
 | Layer groups (the tree) | `layerGroups.test.ts` (the children, the order, the ancestor rule, dissolving, the panel rows and the group commands) |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
 | Export | `pngExport.test.ts` |

@@ -13,6 +13,10 @@ import {
   MIN_DOCUMENT_SIZE,
   isValidDocumentSize,
 } from "../../core/document/document";
+import {
+  CANVAS_SIZE_PRESETS,
+  isCanvasSizePresetSelected,
+} from "../../core/document/canvasSizePresets";
 import type { NewDocumentOptions } from "../../core/engine/DrawingEngine";
 
 export interface NewDocumentDialogProps {
@@ -75,6 +79,29 @@ export function NewDocumentDialog({ onCancel, onCreate }: NewDocumentDialogProps
             }}
           />
         </label>
+        <div className="dialog__presets" role="group" aria-label="Canvas size presets">
+          {CANVAS_SIZE_PRESETS.map((preset) => {
+            const selected = isCanvasSizePresetSelected(preset, width, height);
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                className={selected ? "dialog__preset is-active" : "dialog__preset"}
+                aria-pressed={selected}
+                title={`${preset.width} x ${preset.height} pixels`}
+                onClick={() => {
+                  setWidth(preset.width);
+                  setHeight(preset.height);
+                }}
+              >
+                <span className="dialog__preset-label">{preset.label}</span>
+                <span className="dialog__preset-size">
+                  {preset.width} x {preset.height}
+                </span>
+              </button>
+            );
+          })}
+        </div>
         <div className="dialog__row">
           <label className="dialog__field">
             <span>Width</span>
