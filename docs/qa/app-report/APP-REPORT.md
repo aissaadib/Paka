@@ -13,8 +13,9 @@
 | Status | Green: typecheck, 2,382 unit tests, 82 browser tests and the production build all pass |
 
 This report describes the application as it exists on the branch above. It
-stands alone as a report and can be pasted into Notion or a word processor
-without editing. The plain-text edition is `APP-REPORT.txt` beside this file.
+stands alone and can be pasted into Notion or a word processor without editing.
+It ships in two forms in `docs/qa/app-report/`: `APP-REPORT.md` (the Markdown
+source) and `APP-REPORT.txt` (plain text).
 
 ---
 
