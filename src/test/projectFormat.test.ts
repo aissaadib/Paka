@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
-import { groupLayers } from "../core/document/layerGroups";
+import { addGroup, groupLayers, moveLayerToParent } from "../core/document/layerGroups";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
 import type {
   FillPatchRecord,
@@ -1809,5 +1809,52 @@ describe("the layer groups in the project file", () => {
     const parsed = parseProject(JSON.stringify(payload));
     expect(parsed.ok).toBe(false);
     expect(parsed.ok ? "" : parsed.error).toContain("share the id");
+  });
+
+  it("round-trips an empty group", () => {
+    const base = createDocument({ name: "Empty", width: 320, height: 240 });
+    const withGroup = addGroup(base, { name: "Empty group" });
+    if (!withGroup) {
+      throw new Error("the group was not created");
+    }
+    const text = serializeProject(withGroup.document, storeOf([]));
+    const parsed = parseProject(text);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document).toEqual(withGroup.document);
+    const restored = parsed.project.document.layers.find(
+      (layer) => layer.id === withGroup.group.id,
+    );
+    expect(restored?.kind).toBe("group");
+    expect(restored?.children).toEqual([]);
+  });
+
+  it("round-trips a nested group and its ordering", () => {
+    const base = addLayer(addLayer(createDocument({ name: "Nested", width: 320, height: 240 })));
+    const [bottom, middle, top] = base.layers;
+    const grouped = groupLayers(base, [bottom.id, middle.id]);
+    const outer = grouped.layers[0];
+    const inner = addGroup(grouped, { name: "Inner", parentId: outer.id });
+    if (!inner) {
+      throw new Error("the inner group was not created");
+    }
+    const document = moveLayerToParent(inner.document, top.id, inner.group.id, 0);
+    const stroke = strokeFor(bottom.id);
+    const text = serializeProject(document, storeOf([[bottom.id, [stroke]]]));
+    const parsed = parseProject(text);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document).toEqual(document);
+    const restoredOuter = parsed.project.document.layers[0];
+    expect(restoredOuter.kind).toBe("group");
+    expect(restoredOuter.children.map((node) => node.kind)).toEqual(["layer", "layer", "group"]);
+    expect(restoredOuter.children[2].children.map((node) => node.id)).toEqual([top.id]);
+    expect(parsed.project.elements.map((element) => element.layerId)).toEqual([bottom.id]);
   });
 });

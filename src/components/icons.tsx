@@ -206,6 +206,32 @@ export function IconArrowDown(props: IconProps) {
   );
 }
 
+export function IconFolder(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 4.5h3.4l1.2 1.5h6.4v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M2.5 6h11" />
+    </Icon>
+  );
+}
+
+export function IconFolderPlus(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 4.5h3.4l1.2 1.5h6.4v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M8 8v3M6.5 9.5h3" />
+    </Icon>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3.5 10.5 8 6 12.5" />
+    </Icon>
+  );
+}
+
 export function IconEye(props: IconProps) {
   return (
     <Icon {...props}>

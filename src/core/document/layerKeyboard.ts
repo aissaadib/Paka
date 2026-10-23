@@ -41,6 +41,10 @@ export type LayerPanelAction =
   | { readonly kind: "delete" }
   /** Move the focused layer in the stack by `delta`. */
   | { readonly kind: "move"; readonly delta: number }
+  /** Collapse the focused group, or move to its parent when it is a layer. */
+  | { readonly kind: "collapse" }
+  /** Expand the focused group, or move to its first child. */
+  | { readonly kind: "expand" }
   /** Abandon a drag reorder in flight. */
   | { readonly kind: "cancelDrag" };
 
@@ -81,6 +85,10 @@ export function layerPanelAction(press: LayerPanelKeyPress): LayerPanelAction | 
       // The focus moves in the panel's own list: up is the row above.
       return { kind: "focus", offset: up ? -1 : 1 };
     }
+    case "ArrowLeft":
+      return press.mod ? null : { kind: "collapse" };
+    case "ArrowRight":
+      return press.mod ? null : { kind: "expand" };
     case "Home":
       return { kind: "focusEdge", edge: "first" };
     case "End":

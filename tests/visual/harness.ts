@@ -21,7 +21,7 @@
  */
 import { Canvas2DRenderer } from "/src/core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "/src/core/rendering/frameScheduler";
-import { createDocument, createLayer } from "/src/core/document/document";
+import { createDocument } from "/src/core/document/document";
 import { DEFAULT_BRUSH } from "/src/core/brushes/defaults";
 import {
   createRotateTransform,
@@ -32,6 +32,7 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  Layer,
   LayerElement,
   LayerId,
   StrokeRecord,
@@ -169,7 +170,7 @@ function toElements(
     const layerId = layerIds[index];
     map.set(
       layerId,
-      layer.elements.map((element) => {
+      (layer.elements ?? []).map((element) => {
         if (element.kind === "stroke") return toStroke(element, layerId);
         if (element.kind === "fill") return toFill(element, layerId);
         return toGradient(element, layerId);
@@ -179,10 +180,40 @@ function toElements(
   return map;
 }
 
+/** The paintable leaves of a scene tree, in compositing order. */
+function sceneLeaves(layers: readonly SceneLayer[]): SceneLayer[] {
+  const leaves: SceneLayer[] = [];
+  const visit = (nodes: readonly SceneLayer[]): void => {
+    for (const node of nodes) {
+      if (node.kind === "group") {
+        visit(node.children ?? []);
+      } else {
+        leaves.push(node);
+      }
+    }
+  };
+  visit(layers);
+  return leaves;
+}
+
+/** A scene node as the document's own layer tree. */
+function toLayer(sceneLayer: SceneLayer): Layer {
+  return {
+    id: sceneLayer.id,
+    name: sceneLayer.id,
+    visible: sceneLayer.visible ?? true,
+    opacity: sceneLayer.opacity ?? 1,
+    blendMode: sceneLayer.blendMode ?? "normal",
+    kind: sceneLayer.kind ?? "layer",
+    children: (sceneLayer.children ?? []).map(toLayer),
+  };
+}
+
 function buildDocument(
   scene: Scene,
-  layers: ReturnType<typeof createLayer>[],
+  layers: readonly Layer[],
   guides: readonly SceneGuide[] = [],
+  activeLayerId?: LayerId,
 ): DrawingDocument {
   const base = createDocument({
     width: scene.width,
@@ -192,7 +223,7 @@ function buildDocument(
   return {
     ...base,
     layers,
-    activeLayerId: layers[0]?.id ?? base.activeLayerId,
+    activeLayerId: activeLayerId ?? layers[0]?.id ?? base.activeLayerId,
     guides: guides.map((guide, index) => ({
       id: `guide-${index + 1}`,
       axis: guide.axis,
@@ -262,22 +293,22 @@ export function runScene(
 ): SceneVerdict {
   elementCounter = 0;
 
-  const layers = scene.layers.map((layer) => {
-    const created = createLayer(layer.id);
-    created.opacity = layer.opacity ?? 1;
-    created.blendMode = layer.blendMode ?? "normal";
-    created.visible = layer.visible ?? true;
-    return created;
-  });
-  const layerIds = layers.map((layer) => layer.id);
-  const drawingDocument = buildDocument(scene, layers, scene.guides ?? []);
+  const leaves = sceneLeaves(scene.layers);
+  const layers = scene.layers.map(toLayer);
+  const layerIds = leaves.map((layer) => layer.id);
+  const drawingDocument = buildDocument(
+    scene,
+    layers,
+    scene.guides ?? [],
+    layerIds[0],
+  );
   // The same document without its guides: the guides are display-only, so
   // this is the picture the export has to agree with.
-  const plainDocument = buildDocument(scene, layers);
+  const plainDocument = buildDocument(scene, layers, [], layerIds[0]);
 
   // The map the renderer's stroke source reads. It is mutated in place, so the
   // renderer always sees the content the step below asks it to draw.
-  const elements = toElements(scene.layers, layerIds);
+  const elements = toElements(leaves, layerIds);
   const allElements = new Map(elements);
 
   const display = document.createElement("canvas");
@@ -305,9 +336,10 @@ export function runScene(
     : NO_GRID;
   renderer.setGrid(gridSettings);
 
-  const lastLayerIndex = scene.layers.length - 1;
-  const lastLayer = scene.layers[lastLayerIndex];
-  const lastElement = lastLayer?.elements[lastLayer.elements.length - 1];
+  const lastLayerIndex = leaves.length - 1;
+  const lastLayer = leaves[lastLayerIndex];
+  const lastElements = lastLayer?.elements ?? [];
+  const lastElement = lastElements[lastElements.length - 1];
   const liveCapable = lastElement !== undefined && isSceneStroke(lastElement);
 
   const setContent = (source: Map<LayerId, LayerElement[]>): void => {

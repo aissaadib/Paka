@@ -9,7 +9,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { canDeleteLayer, layerDeletionPrompt } from "../core/document/layerDeletion";
+import {
+  canDeleteLayer,
+  canDeleteNode,
+  groupDeletionPrompt,
+  layerDeletionPrompt,
+} from "../core/document/layerDeletion";
 import { dropSlot, markerIndex, moveDeltaForSlot } from "../core/document/layerOrdering";
 import { findLayer } from "../core/document/layerGroups";
 import { createDocument } from "../core/document/document";
@@ -471,5 +476,105 @@ describe("the panel's layer-group operations", () => {
     expect(findLayer(engine.getState().document.layers, groupId)?.children.map((l) => l.id)).toEqual([
       top,
     ]);
+  });
+
+  it("refuses a group change while a stroke is in flight, then accepts it after a tool switch", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    engine.selectLayer(top);
+
+    engine.setTool("brush");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 40, docY: 40 }));
+    const depth = engine.getState().history.depth;
+
+    // The pointer owns the interaction: a structural change now would leave
+    // the in-flight stroke attached to a tree the artist can no longer see.
+    expect(engine.createGroup()).toBeNull();
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().notice).toContain("Finish the current");
+
+    // Switching tool lets the outgoing tool finish its stroke, which ends the
+    // gesture; the group tree itself is untouched.
+    engine.setTool("rectangle");
+    engine.cancelStroke();
+
+    const afterSwitch = engine.createGroup();
+    expect(afterSwitch).not.toBeNull();
+    const group = findLayer(engine.getState().document.layers, groupId);
+    expect(group?.children.map((layer) => layer.id)).toEqual([top, afterSwitch]);
+  });
+
+  it("selects the strokes of a layer inside a group, never the group itself", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      return;
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+    engine.selectLayer(top);
+    paint(engine);
+
+    expect(engine.selectAll()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    // A group has no strokes to select; the gesture is refused rather than
+    // selecting the children of a container that paints nothing.
+    engine.selectLayer(groupId);
+    expect(engine.selectAll()).toBe(false);
+    expect(engine.getState().selectedStrokes).toBe(0);
+
+    // The selection, the group and its child all survive a reorder.
+    engine.selectLayer(top);
+    engine.selectAll();
+    engine.moveLayerToParent(top, groupId, 0);
+    expect(findLayer(engine.getState().document.layers, groupId)?.children).toHaveLength(1);
+    expect(engine.getState().selectedStrokes).toBe(1);
+  });
+});
+
+describe("the panel's group deletion rules", () => {
+  it("counts the layers inside a group in the question", () => {
+    expect(groupDeletionPrompt("Group 1", 0)).toBeNull();
+    const one = groupDeletionPrompt("Group 1", 1);
+    expect(one?.body).toContain("1 layer");
+    expect(one?.body).not.toContain("1 layers");
+    const three = groupDeletionPrompt("Group 1", 3);
+    expect(three?.body).toContain("3 layers");
+    expect(three?.confirmLabel).toContain("group");
+  });
+
+  it("refuses to delete a group that holds the last paintable layer", () => {
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+    });
+    const onlyLayer = engine.getState().document.layers[0]?.id as string;
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      throw new Error("the group was not created");
+    }
+    engine.moveLayerToParent(onlyLayer, groupId, 0);
+
+    const document = engine.getState().document;
+    expect(canDeleteNode(document, groupId)).toBe(false);
+    expect(canDeleteNode(document, onlyLayer)).toBe(false);
+  });
+
+  it("allows deleting a group when another paintable layer remains", () => {
+    const engine = createEngine();
+    const [top] = topFirst(engine);
+    const groupId = engine.createGroup();
+    if (!groupId) {
+      throw new Error("the group was not created");
+    }
+    engine.moveLayerToParent(top, groupId, 0);
+
+    expect(canDeleteNode(engine.getState().document, groupId)).toBe(true);
+    expect(canDeleteNode(engine.getState().document, "missing")).toBe(false);
   });
 });

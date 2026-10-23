@@ -2,44 +2,57 @@
  * Layers panel.
  *
  * Layer metadata lives in the document model; this panel only issues intents.
- * The list is shown top-first (top of the stack at the top), matching how the
- * canvas composites.
+ * The list is a **tree**, shown top-first (top of the stack at the top) and
+ * indented by depth, matching how the canvas composites. A group row carries a
+ * folder mark, a child count and a chevron; its children follow it until the
+ * group is collapsed.
  *
- * The panel owns three pieces of *view* state - the row being dragged, the row
- * being renamed and the row the keyboard is on - and nothing else. Every
- * change to the drawing goes through an engine command, so it is undoable,
- * and the panel can never lose a layer by accident: a layer that holds content
- * is confirmed before it is deleted.
+ * The panel owns four pieces of *view* state - the row being dragged, the row
+ * being renamed, the row the keyboard is on and which groups are collapsed -
+ * and nothing else. Collapsing is deliberately not document data: it never
+ * dirties a file and never reaches the project format. Every change to the
+ * drawing goes through an engine command, so it is undoable, and a group can
+ * never lose its children by accident: a non-empty group is confirmed with the
+ * number of layers inside it.
  *
- * The rules the panel follows live in three pure modules, because the React
- * layer has no automated tests: `layerOrdering.ts` (where a drag lands),
+ * The rules the panel follows live in pure modules, because the React layer has
+ * no automated tests: `layerTreeDrag.ts` (where a drop lands),
  * `layerDeletion.ts` (when a deletion has to be confirmed) and
  * `layerKeyboard.ts` (what a key press means). This file is the shell over
  * them.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 import {
-  dropSlot,
-  isAboveRowMidpoint,
-  markerIndex,
-  moveDeltaForSlot,
-  nextRowIndex,
-  topFirstLayers,
-} from "../../core/document/layerOrdering";
-import {
-  canDeleteLayer,
+  canDeleteNode,
+  groupDeletionPrompt,
   layerDeletionPrompt,
   type LayerDeletionPrompt,
 } from "../../core/document/layerDeletion";
+import {
+  findLayer,
+  findLayerPath,
+  isAncestor,
+  layerLocation,
+  layerTreeRows,
+  paintableLayers,
+} from "../../core/document/layerGroups";
 import { layerPanelAction } from "../../core/document/layerKeyboard";
+import {
+  layerDropPosition,
+  movableParentGroups,
+  resolveLayerDrop,
+  type LayerDropPosition,
+} from "../../core/document/layerTreeDrag";
+import { nextRowIndex } from "../../core/document/layerOrdering";
 import { isTextEntryTarget, type TextEntryTargetLike } from "../../core/actions/keyboard";
 import type { Layer, LayerBlendMode, LayerId } from "../../core/document/types";
 import {
   IconArrowDown,
   IconArrowUp,
   IconCopy,
+  IconFolderPlus,
   IconPlus,
   IconTrash,
 } from "../../components/icons";
@@ -75,15 +88,24 @@ interface PendingDelete {
   readonly focusAfter: LayerId | null;
 }
 
+/** Where a drag in flight would land, for the marker and the highlight. */
+interface DropTarget {
+  readonly layerId: LayerId;
+  readonly position: LayerDropPosition;
+}
+
 export function LayersPanel() {
   const { actions, engine } = useEditor();
   const { document: drawingDocument } = useEditorState();
   const layers = drawingDocument.layers;
-  const topFirst = useMemo(() => topFirstLayers(layers), [layers]);
 
-  /** The row being dragged, and the slot it would land in. */
+  /** The groups whose children are hidden in the panel. View state only. */
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<LayerId>>(
+    () => new Set(),
+  );
+  /** The row being dragged, and the row a drop would land on. */
   const [dragLayerId, setDragLayerId] = useState<LayerId | null>(null);
-  const [dropSlotIndex, setDropSlotIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   /** The row being renamed, and the name being typed. */
   const [renamingLayerId, setRenamingLayerId] = useState<LayerId | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -100,21 +122,60 @@ export function LayersPanel() {
   /** Guards the rename against a second commit (Enter *and* the blur). */
   const renameCommitted = useRef(false);
 
-  const activeIndex = layers.findIndex((layer) => layer.id === drawingDocument.activeLayerId);
-  const activeLayer = activeIndex >= 0 ? layers[activeIndex] : undefined;
+  const rows = useMemo(
+    () =>
+      layerTreeRows(layers, drawingDocument.activeLayerId, {
+        topFirst: true,
+        collapsed: collapsedGroups,
+      }),
+    [layers, drawingDocument.activeLayerId, collapsedGroups],
+  );
 
-  const canDelete = canDeleteLayer(layers.length);
-  const canMoveUp = activeIndex >= 0 && activeIndex < layers.length - 1;
-  const canMoveDown = activeIndex > 0;
+  const activeLayer =
+    drawingDocument.activeLayerId === null
+      ? undefined
+      : findLayer(layers, drawingDocument.activeLayerId);
+  const activeLocation =
+    activeLayer === undefined ? undefined : layerLocation(layers, activeLayer.id);
+  const activeParent =
+    activeLocation?.parentId === null || activeLocation === undefined
+      ? undefined
+      : findLayer(layers, activeLocation.parentId);
+  const activeSiblings = activeParent ? activeParent.children : layers;
 
-  const draggedIndex = dragLayerId === null ? -1 : topFirst.findIndex((l) => l.id === dragLayerId);
-  const markerAt =
-    draggedIndex >= 0 && dropSlotIndex !== null ? markerIndex(draggedIndex, dropSlotIndex) : -1;
+  const canDelete = activeLayer !== undefined && canDeleteNode(drawingDocument, activeLayer.id);
+  const canMoveUp =
+    activeLocation !== undefined && activeLocation.index < activeSiblings.length - 1;
+  const canMoveDown = activeLocation !== undefined && activeLocation.index > 0;
+
+  const parentGroups = useMemo(
+    () => (activeLayer === undefined ? [] : movableParentGroups(layers, activeLayer.id)),
+    [activeLayer, layers],
+  );
+
+  /** The element count a row shows: a group counts everything it holds. */
+  const countElements = useCallback(
+    (layer: Layer): number =>
+      paintableLayers([layer]).reduce(
+        (total, paintable) => total + engine.listElements(paintable.id).length,
+        0,
+      ),
+    [engine],
+  );
+
+  /** True when an ancestor group is hidden, so this row cannot composite. */
+  const hasHiddenAncestor = useCallback(
+    (layerId: LayerId): boolean => {
+      const path = findLayerPath(layers, layerId);
+      return path?.slice(0, -1).some((ancestor) => !ancestor.visible) ?? false;
+    },
+    [layers],
+  );
 
   /** Forgets the drag, whether it ended in a drop or was cancelled. */
   const clearDrag = useCallback(() => {
     setDragLayerId(null);
-    setDropSlotIndex(null);
+    setDropTarget(null);
   }, []);
 
   const focusRow = useCallback((layerId: LayerId) => {
@@ -132,10 +193,35 @@ export function LayersPanel() {
     [],
   );
 
+  /** Expands every group above `layerId`, so a newly created row is visible. */
+  const revealLayer = useCallback(
+    (layerId: LayerId) => {
+      // Read the live document: a node created by the engine a moment ago is
+      // not in this render's `layers` closure yet.
+      const path = findLayerPath(engine.getState().document.layers, layerId);
+      if (!path || path.length < 2) {
+        return;
+      }
+      const ancestors = new Set(path.slice(0, -1).map((node) => node.id));
+      setCollapsedGroups((previous) => {
+        if (![...ancestors].some((id) => previous.has(id))) {
+          return previous;
+        }
+        const next = new Set(previous);
+        for (const id of ancestors) {
+          next.delete(id);
+        }
+        return next;
+      });
+    },
+    [engine],
+  );
+
   // --------------------------------------------------------------- renaming
 
   const startRename = useCallback((layer: Layer) => {
     renameCommitted.current = false;
+    setFocusedLayerId(layer.id);
     setRenamingLayerId(layer.id);
     setRenameDraft(layer.name);
   }, []);
@@ -151,9 +237,13 @@ export function LayersPanel() {
       return;
     }
     const trimmed = renameDraft.trim();
-    const layer = layers.find((candidate) => candidate.id === layerId);
+    const layer = findLayer(layers, layerId);
     if (layer && trimmed !== "" && trimmed !== layer.name) {
-      actions.renameLayer(layerId, trimmed);
+      if (layer.kind === "group") {
+        actions.renameGroup(layerId, trimmed);
+      } else {
+        actions.renameLayer(layerId, trimmed);
+      }
     }
   }, [actions, layers, renameDraft, renamingLayerId]);
 
@@ -163,31 +253,85 @@ export function LayersPanel() {
     setRenameDraft("");
   }, []);
 
+  // -------------------------------------------------------------- creating
+
+  /**
+   * Creates an empty group directly above the active node, at the same level,
+   * then starts renaming it.
+   *
+   * Starting the rename is the second half of the action: a row called
+   * "Group 1" is not yet a meaningful container, and making the name editable
+   * immediately is the difference between a control that works and a row the
+   * artist has to discover how to change.
+   */
+  const createGroup = useCallback(() => {
+    const groupId = actions.createGroup();
+    if (groupId === null) {
+      return;
+    }
+    const created = findLayer(engine.getState().document.layers, groupId);
+    if (!created) {
+      return;
+    }
+    revealLayer(groupId);
+    setFocusedLayerId(groupId);
+    startRename(created);
+  }, [actions, engine, revealLayer, startRename]);
+
+  const toggleExpanded = useCallback(
+    (layer: Layer) => {
+      const collapsed = collapsedGroups.has(layer.id);
+      if (!collapsed && focusedLayerId !== null && isAncestor(layers, layer.id, focusedLayerId)) {
+        // The focused child is about to disappear; the group keeps the focus.
+        setFocusedLayerId(layer.id);
+      }
+      setCollapsedGroups((previous) => {
+        const next = new Set(previous);
+        if (next.has(layer.id)) {
+          next.delete(layer.id);
+        } else {
+          next.add(layer.id);
+        }
+        return next;
+      });
+    },
+    [collapsedGroups, focusedLayerId, layers],
+  );
+
   // -------------------------------------------------------------- deleting
 
   /**
-   * Deletes a layer, asking first when the layer holds content.
+   * Deletes a node, asking first when it holds content.
    *
-   * The count comes from the engine's element list, so the question is asked
-   * about the layer's *actual* content and not about a flag that could drift.
+   * A layer is judged by its own elements. A group is judged by the paintable
+   * layers inside it: deleting a group removes every drawing in the subtree,
+   * so the question names the number of layers that go with the container. An
+   * empty group is removed without a question - there is nothing to lose.
    *
-   * The last layer is never deleted - the document keeps one - so the panel
-   * refuses before it asks, rather than showing a question the document model
-   * would answer with silence.
+   * The last paintable layer is never deleted. The rule is checked before the
+   * question, so the panel never asks about a deletion the document model
+   * would refuse.
    */
   const requestDelete = useCallback(
     (layer: Layer) => {
-      if (!canDeleteLayer(layers.length)) {
+      if (!canDeleteNode(drawingDocument, layer.id)) {
         return;
       }
       // The row that keeps the keyboard when the deleted row goes: the one
       // below it, or the one above when the deleted row was the last.
-      const index = topFirst.findIndex((candidate) => candidate.id === layer.id);
-      const focusAfter = topFirst[index + 1]?.id ?? topFirst[index - 1]?.id ?? null;
-      const prompt = layerDeletionPrompt(layer.name, engine.listElements(layer.id).length);
+      const index = rows.findIndex((row) => row.layer.id === layer.id);
+      const focusAfter = rows[index + 1]?.layer.id ?? rows[index - 1]?.layer.id ?? null;
+      const count =
+        layer.kind === "group"
+          ? paintableLayers([layer]).length
+          : engine.listElements(layer.id).length;
+      const prompt =
+        layer.kind === "group"
+          ? groupDeletionPrompt(layer.name, count)
+          : layerDeletionPrompt(layer.name, count);
       if (prompt === null) {
-        // An empty layer goes without a question, so the focus moves with it
-        // right away.
+        // Nothing inside the container and nothing on the layer: the row goes
+        // without a question, and the focus moves with it right away.
         actions.removeLayer(layer.id);
         if (focusAfter !== null) {
           setFocusedLayerId(focusAfter);
@@ -199,7 +343,7 @@ export function LayersPanel() {
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setPendingDelete({ layerId: layer.id, prompt, focusAfter });
     },
-    [actions, engine, focusRow, layers.length, topFirst],
+    [actions, drawingDocument, engine, focusRow, rows],
   );
 
   /** Closes the question and gives the keyboard back where it was. */
@@ -232,12 +376,24 @@ export function LayersPanel() {
     }
   }, [pendingDelete]);
 
+  // A row can disappear under the focus (a collapse, an undo, a move into a
+  // collapsed group). The active row is the fallback, so the keyboard is never
+  // left on a row that no longer exists.
+  useEffect(() => {
+    if (
+      focusedLayerId !== null &&
+      !rows.some((row) => row.layer.id === focusedLayerId)
+    ) {
+      setFocusedLayerId(rows.find((row) => row.active)?.layer.id ?? null);
+    }
+  }, [focusedLayerId, rows]);
+
   // -------------------------------------------------------------- reordering
 
   const handleDragStart = useCallback(
     (layerId: LayerId) => (event: DragEvent<HTMLElement>) => {
       setDragLayerId(layerId);
-      setDropSlotIndex(null);
+      setDropTarget(null);
       event.dataTransfer.effectAllowed = "move";
       // Firefox refuses to start a drag with an empty data store.
       event.dataTransfer.setData("text/plain", layerId);
@@ -246,50 +402,68 @@ export function LayersPanel() {
   );
 
   const handleDragOver = useCallback(
-    (rowLayerId: LayerId) => (event: DragEvent<HTMLElement>) => {
+    (layer: Layer) => (event: DragEvent<HTMLElement>) => {
       if (dragLayerId === null) {
         return;
       }
-      // The drop is only allowed inside the list, and the marker follows the
-      // pointer: the upper half of a row inserts above it, the lower half
-      // below it.
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      const row = event.currentTarget;
-      const rect = row.getBoundingClientRect();
-      const above = isAboveRowMidpoint(event.clientY, rect.top, rect.height);
-      const rowIndex = topFirst.findIndex((layer) => layer.id === rowLayerId);
-      const dragged = topFirst.findIndex((layer) => layer.id === dragLayerId);
-      if (rowIndex < 0 || dragged < 0) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position = layerDropPosition(
+        event.clientY,
+        rect.top,
+        rect.height,
+        layer.kind === "group",
+      );
+      const target = resolveLayerDrop(layers, dragLayerId, layer.id, position);
+      if (!target || !target.changes) {
+        setDropTarget(null);
         return;
       }
-      setDropSlotIndex(dropSlot(rowIndex, above, dragged));
+      // The drop is only allowed when it would actually move the node.
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget({ layerId: layer.id, position });
     },
-    [dragLayerId, topFirst],
+    [dragLayerId, layers],
   );
 
   const handleDrop = useCallback(
-    (event: DragEvent<HTMLElement>) => {
+    (layer: Layer) => (event: DragEvent<HTMLElement>) => {
       event.preventDefault();
       const draggedId = dragLayerId;
-      const slot = dropSlotIndex;
+      if (draggedId === null) {
+        clearDrag();
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position = layerDropPosition(
+        event.clientY,
+        rect.top,
+        rect.height,
+        layer.kind === "group",
+      );
+      const target = resolveLayerDrop(layers, draggedId, layer.id, position);
       clearDrag();
-      if (draggedId === null || slot === null) {
+      if (!target || !target.changes) {
+        // The row is exactly where it already is: no move, no history step.
         return;
       }
-      const dragged = topFirst.findIndex((layer) => layer.id === draggedId);
-      if (dragged < 0) {
-        return;
+      if (position === "into") {
+        // A drop into a collapsed group shows the result, rather than putting
+        // the layer somewhere the artist cannot see.
+        setCollapsedGroups((previous) => {
+          if (!previous.has(layer.id)) {
+            return previous;
+          }
+          const next = new Set(previous);
+          next.delete(layer.id);
+          return next;
+        });
       }
-      const delta = moveDeltaForSlot(dragged, slot);
-      if (delta === 0) {
-        // The layer lands where it already is: no move, and no history step.
-        return;
-      }
-      // One engine command, so the whole drag is one undo step.
-      actions.moveLayer(draggedId, delta);
+      actions.moveLayerToParent(draggedId, target.parentId, target.index);
+      setFocusedLayerId(draggedId);
     },
-    [actions, clearDrag, dragLayerId, dropSlotIndex, topFirst],
+    [actions, clearDrag, dragLayerId, layers],
   );
 
   // --------------------------------------------------------------- keyboard
@@ -318,39 +492,70 @@ export function LayersPanel() {
       event.stopPropagation();
 
       const focusedIndex =
-        focusedLayerId === null ? -1 : topFirst.findIndex((layer) => layer.id === focusedLayerId);
-      const focusedLayer = focusedIndex >= 0 ? topFirst[focusedIndex] : undefined;
+        focusedLayerId === null
+          ? -1
+          : rows.findIndex((row) => row.layer.id === focusedLayerId);
+      const focusedRow = focusedIndex >= 0 ? rows[focusedIndex] : undefined;
 
       switch (action.kind) {
         case "focus": {
-          const next = nextRowIndex(focusedIndex, action.offset, topFirst.length);
+          const next = nextRowIndex(focusedIndex, action.offset, rows.length);
           if (next !== null) {
-            focusRow(topFirst[next].id);
+            focusRow(rows[next].layer.id);
           }
           return;
         }
         case "focusEdge": {
-          const layer = action.edge === "first" ? topFirst[0] : topFirst[topFirst.length - 1];
-          if (layer !== undefined) {
-            focusRow(layer.id);
+          const row = action.edge === "first" ? rows[0] : rows[rows.length - 1];
+          if (row !== undefined) {
+            focusRow(row.layer.id);
           }
           return;
         }
         case "rename": {
-          if (focusedLayer !== undefined) {
-            startRename(focusedLayer);
+          if (focusedRow !== undefined) {
+            startRename(focusedRow.layer);
           }
           return;
         }
         case "delete": {
-          if (focusedLayer !== undefined) {
-            requestDelete(focusedLayer);
+          if (focusedRow !== undefined) {
+            requestDelete(focusedRow.layer);
           }
           return;
         }
         case "move": {
-          if (focusedLayer !== undefined) {
-            actions.moveLayer(focusedLayer.id, action.delta);
+          if (focusedRow !== undefined) {
+            actions.moveLayer(focusedRow.layer.id, action.delta);
+          }
+          return;
+        }
+        case "collapse": {
+          if (focusedRow === undefined) {
+            return;
+          }
+          if (focusedRow.isGroup && !collapsedGroups.has(focusedRow.layer.id)) {
+            toggleExpanded(focusedRow.layer);
+            return;
+          }
+          if (focusedRow.parentId !== null) {
+            focusRow(focusedRow.parentId);
+          }
+          return;
+        }
+        case "expand": {
+          if (focusedRow === undefined) {
+            return;
+          }
+          if (focusedRow.isGroup) {
+            if (collapsedGroups.has(focusedRow.layer.id)) {
+              toggleExpanded(focusedRow.layer);
+              return;
+            }
+            const child = rows[focusedIndex + 1];
+            if (child !== undefined && child.parentId === focusedRow.layer.id) {
+              focusRow(child.layer.id);
+            }
           }
           return;
         }
@@ -365,15 +570,19 @@ export function LayersPanel() {
     [
       actions,
       clearDrag,
+      collapsedGroups,
       dragLayerId,
       focusRow,
       focusedLayerId,
-      requestDelete,
       renamingLayerId,
+      requestDelete,
+      rows,
       startRename,
-      topFirst,
+      toggleExpanded,
     ],
   );
+
+  const parentValue = activeLocation?.parentId ?? "";
 
   return (
     <Panel
@@ -383,12 +592,15 @@ export function LayersPanel() {
           <IconButton label="Add layer" size="sm" onClick={actions.addLayer}>
             <IconPlus />
           </IconButton>
+          <IconButton label="New group" size="sm" onClick={createGroup}>
+            <IconFolderPlus />
+          </IconButton>
           <IconButton
             label="Duplicate layer"
             size="sm"
-            disabled={!activeLayer}
+            disabled={!activeLayer || activeLayer.kind === "group"}
             onClick={() => {
-              if (activeLayer) {
+              if (activeLayer && activeLayer.kind !== "group") {
                 actions.duplicateLayer(activeLayer.id);
               }
             }}
@@ -396,7 +608,7 @@ export function LayersPanel() {
             <IconCopy />
           </IconButton>
           <IconButton
-            label="Delete layer"
+            label={activeLayer?.kind === "group" ? "Delete group" : "Delete layer"}
             size="sm"
             disabled={!canDelete || !activeLayer}
             onClick={() => {
@@ -437,28 +649,71 @@ export function LayersPanel() {
         <>
           {activeLayer ? (
             <div className="layer-properties">
-              <label className="layer-blend">
-                <span className="layer-blend__label">Blend</span>
-                <select
-                  className="layer-blend__select"
-                  value={activeLayer.blendMode}
-                  aria-label="Layer blend mode"
-                  onChange={(event) => {
-                    const option = BLEND_MODE_OPTIONS.find(
-                      (candidate) => candidate.value === event.target.value,
-                    );
-                    if (option) {
-                      actions.setLayerBlendMode(activeLayer.id, option.value);
-                    }
-                  }}
-                >
-                  {BLEND_MODE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="layer-property-row">
+                <label className="layer-blend">
+                  <span className="layer-blend__label">Blend</span>
+                  <select
+                    className="layer-blend__select"
+                    value={activeLayer.blendMode}
+                    aria-label="Layer blend mode"
+                    onChange={(event) => {
+                      const option = BLEND_MODE_OPTIONS.find(
+                        (candidate) => candidate.value === event.target.value,
+                      );
+                      if (option) {
+                        actions.setLayerBlendMode(activeLayer.id, option.value);
+                      }
+                    }}
+                  >
+                    {BLEND_MODE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="layer-parent">
+                  <span className="layer-parent__label">Inside</span>
+                  <select
+                    className="layer-parent__select"
+                    value={parentValue}
+                    aria-label="Layer group"
+                    onChange={(event) => {
+                      const nextParent = event.target.value === "" ? null : event.target.value;
+                      if (nextParent === (activeLocation?.parentId ?? null)) {
+                        return;
+                      }
+                      const destination =
+                        nextParent === null
+                          ? layers
+                          : (findLayer(layers, nextParent)?.children ?? []);
+                      // The accessible counterpart of a drop: it lands at the top
+                      // of the chosen container, which is predictable and one
+                      // command.
+                      actions.moveLayerToParent(activeLayer.id, nextParent, destination.length);
+                      if (nextParent !== null) {
+                        // The row just moved into a container that may be
+                        // collapsed; showing it is the point of the move.
+                        setCollapsedGroups((previous) => {
+                          if (!previous.has(nextParent)) {
+                            return previous;
+                          }
+                          const next = new Set(previous);
+                          next.delete(nextParent);
+                          return next;
+                        });
+                      }
+                    }}
+                  >
+                    <option value="">Root</option>
+                    {parentGroups.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <SliderField
                 label="Opacity"
                 min={0}
@@ -468,13 +723,49 @@ export function LayersPanel() {
                 format={(value) => `${Math.round(value * 100)}%`}
                 onChange={(opacity) => actions.setLayerOpacity(activeLayer.id, opacity)}
               />
+              {activeLayer.kind === "group" || activeParent !== undefined ? (
+                <div className="layer-context-actions">
+                  {activeLayer.kind === "group" ? (
+                    <button
+                      type="button"
+                      className="layer-context-button"
+                      onClick={() => actions.dissolveGroup(activeLayer.id)}
+                    >
+                      Ungroup
+                    </button>
+                  ) : null}
+                  {activeParent !== undefined && activeLocation !== undefined ? (
+                    <button
+                      type="button"
+                      className="layer-context-button"
+                      onClick={() => {
+                        const groupLocation = layerLocation(layers, activeParent.id);
+                        actions.moveLayerToParent(
+                          activeLayer.id,
+                          groupLocation?.parentId ?? null,
+                          (groupLocation?.index ?? 0) + 1,
+                        );
+                      }}
+                    >
+                      Move out of group
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="layer-properties__hint">Select a layer to change its blend and opacity.</p>
           )}
-          <p className="layer-hint">
-            Up/Down focus a layer, F2 renames it, Ctrl+Up/Down reorders it, Delete removes it.
-          </p>
+          {activeLayer?.kind === "group" ? (
+            <p className="layer-hint">
+              Group selected. It holds layers; choose one to draw. Ungroup removes the container
+              and keeps its layers.
+            </p>
+          ) : (
+            <p className="layer-hint">
+              Up/Down focus · Left/Right group · F2 rename · Delete removes
+            </p>
+          )}
         </>
       }
     >
@@ -484,22 +775,30 @@ export function LayersPanel() {
         </p>
       ) : (
         <ul className="layer-list" aria-label="Layers" onKeyDown={handleListKeyDown}>
-          {topFirst.map((layer, index) => (
-            <Fragment key={layer.id}>
-              {index === markerAt ? (
-                <li className="layer-marker" aria-hidden="true" />
-              ) : null}
+          {rows.map((row) => {
+            const collapsed = collapsedGroups.has(row.layer.id);
+            return (
               <LayerRow
-                layer={layer}
-                active={layer.id === drawingDocument.activeLayerId}
-                focused={layer.id === focusedLayerId}
-                dragging={layer.id === dragLayerId}
-                renaming={layer.id === renamingLayerId}
+                key={row.layer.id}
+                layer={row.layer}
+                depth={row.depth}
+                active={row.active}
+                focused={row.layer.id === focusedLayerId}
+                dragging={row.layer.id === dragLayerId}
+                renaming={row.layer.id === renamingLayerId}
                 draft={renameDraft}
-                elementCount={engine.listElements(layer.id).length}
-                onSelect={() => actions.selectLayer(layer.id)}
-                onToggleVisibility={() => actions.toggleLayerVisibility(layer.id)}
-                onFocus={() => setFocusedLayerId(layer.id)}
+                isGroup={row.isGroup}
+                collapsed={collapsed}
+                childCount={row.layer.children.length}
+                elementCount={countElements(row.layer)}
+                inheritedHidden={hasHiddenAncestor(row.layer.id)}
+                dropPosition={
+                  dropTarget?.layerId === row.layer.id ? dropTarget.position : null
+                }
+                onSelect={() => actions.selectLayer(row.layer.id)}
+                onToggleVisibility={() => actions.toggleLayerVisibility(row.layer.id)}
+                onToggleExpanded={() => toggleExpanded(row.layer)}
+                onFocus={() => setFocusedLayerId(row.layer.id)}
                 onBlur={(event) => {
                   // The focus may move to another control in the same row; the
                   // row is only left when the focus leaves it entirely.
@@ -507,20 +806,19 @@ export function LayersPanel() {
                     setFocusedLayerId(null);
                   }
                 }}
-                onStartRename={() => startRename(layer)}
+                onStartRename={() => startRename(row.layer)}
                 onDraftChange={setRenameDraft}
                 onCommitRename={commitRename}
                 onCancelRename={cancelRename}
-                onOpacityChange={(opacity) => actions.setLayerOpacity(layer.id, opacity)}
-                onDragStart={handleDragStart(layer.id)}
+                onOpacityChange={(opacity) => actions.setLayerOpacity(row.layer.id, opacity)}
+                onDragStart={handleDragStart(row.layer.id)}
                 onDragEnd={clearDrag}
-                onDragOver={handleDragOver(layer.id)}
-                onDrop={handleDrop}
-                registerNameButton={registerNameButton(layer.id)}
+                onDragOver={handleDragOver(row.layer)}
+                onDrop={handleDrop(row.layer)}
+                registerNameButton={registerNameButton(row.layer.id)}
               />
-            </Fragment>
-          ))}
-          {markerAt === topFirst.length ? <li className="layer-marker" aria-hidden="true" /> : null}
+            );
+          })}
         </ul>
       )}
       {pendingDelete === null ? null : (

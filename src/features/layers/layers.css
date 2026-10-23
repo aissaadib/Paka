@@ -168,6 +168,102 @@
 }
 
 /**
+ * A group row.
+ *
+ * The folder mark, the chevron and the child count are what tell a container
+ * from a paintable layer. The row stays the same height: collapsing is a view
+ * change, not a different kind of row.
+ */
+.layer-row.is-group .layer-row__title {
+  font-weight: 500;
+}
+
+.layer-row__chevron,
+.layer-row__chevron-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 16px;
+}
+
+.layer-row__chevron {
+  color: var(--text-dim);
+  border-radius: 2px;
+}
+
+.layer-row__chevron:hover {
+  color: var(--text-strong);
+  background: var(--bg-raised-hover);
+}
+
+.layer-row__chevron svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.layer-row.is-expanded .layer-row__chevron svg {
+  transform: rotate(90deg);
+}
+
+.layer-row__folder {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--text-dim);
+}
+
+/** The number of direct children a group holds. */
+.layer-row__count {
+  flex: none;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/** A layer under a hidden group cannot composite, even if it is visible. */
+.layer-row.is-inherited-hidden .layer-row__title {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+/** The insertion marker of a drop above or below this row. */
+.layer-row.is-drop-above::after,
+.layer-row.is-drop-below::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.layer-row.is-drop-above::after {
+  top: -2px;
+}
+
+.layer-row.is-drop-below::after {
+  bottom: -2px;
+}
+
+/** A group being used as the destination of a drop. */
+.layer-row.is-drop-into {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: var(--accent-soft);
+}
+
+/**
  * The drag handle.
  *
  * A mouse affordance only: the keyboard moves a layer with Ctrl+Up and
@@ -284,6 +380,39 @@
   gap: 6px;
 }
 
+/** Blend and Inside share a row: the footer is short, the panel is narrow. */
+.layer-property-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.layer-property-row > .layer-blend,
+.layer-property-row > .layer-parent {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/**
+ * The footer never takes the whole panel.
+ *
+ * A group adds its context actions to the properties; at a short window the
+ * footer scrolls instead of squeezing the layer list to a header.
+ */
+.side-panels__layers .panel__footer {
+  max-height: 45%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@media (max-height: 620px) {
+  .layer-hint {
+    display: none;
+  }
+}
+
 .layer-properties__hint {
   margin: 0;
   color: var(--text-dim);
@@ -311,6 +440,59 @@
   background: var(--bg-inset);
   color: var(--text);
   font: inherit;
+}
+
+/**
+ * The group a node lives in, as a select.
+ *
+ * This is the keyboard and screen-reader counterpart of dragging a row into a
+ * group: the same engine command, with the destination named rather than
+ * pointed at.
+ */
+.layer-parent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-parent__label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.layer-parent__select {
+  flex: 1;
+  height: var(--control-height);
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+/** The group-only actions: Ungroup and moving a child back out. */
+.layer-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.layer-context-button {
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.layer-context-button:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-raised-hover);
 }
 
 /**

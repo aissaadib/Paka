@@ -113,10 +113,20 @@ export interface SceneGrid {
 export interface SceneLayer {
   /** The layer's name; it is also the layer's identity in the document. */
   readonly id: string;
+  /**
+   * `"group"` for a container; omitted or `"layer"` for a paintable layer.
+   *
+   * A group owns no elements. Its children are composited as one unit when the
+   * group's opacity is below 1 or its blend mode is not normal.
+   */
+  readonly kind?: "layer" | "group";
   readonly opacity?: number;
   readonly blendMode?: SceneBlendMode;
   readonly visible?: boolean;
-  readonly elements: readonly SceneElement[];
+  /** The layer's content; empty for a group. */
+  readonly elements?: readonly SceneElement[];
+  /** A group's children, bottom-first. */
+  readonly children?: readonly SceneLayer[];
 }
 
 export interface Scene {

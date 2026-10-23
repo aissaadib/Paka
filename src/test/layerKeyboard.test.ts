@@ -31,6 +31,13 @@ describe("layerPanelAction", () => {
     expect(layerPanelAction(press("ArrowDown", { mod: true }))).toEqual({ kind: "move", delta: -1 });
   });
 
+  it("collapses and expands groups with the left and right arrows", () => {
+    expect(layerPanelAction(press("ArrowLeft"))).toEqual({ kind: "collapse" });
+    expect(layerPanelAction(press("ArrowRight"))).toEqual({ kind: "expand" });
+    expect(layerPanelAction(press("ArrowLeft", { mod: true }))).toBeNull();
+    expect(layerPanelAction(press("ArrowRight", { mod: true }))).toBeNull();
+  });
+
   it("jumps to the first and the last row", () => {
     expect(layerPanelAction(press("Home"))).toEqual({ kind: "focusEdge", edge: "first" });
     expect(layerPanelAction(press("End"))).toEqual({ kind: "focusEdge", edge: "last" });
@@ -63,7 +70,7 @@ describe("layerPanelAction", () => {
   it("keeps its hands off every key while a field has the focus", () => {
     // The rule that keeps a number field usable: Backspace clears the number
     // and the arrow keys step it, instead of the panel moving a layer.
-    for (const key of ["Backspace", "Delete", "ArrowUp", "ArrowDown", "Home", "End", "F2"]) {
+    for (const key of ["Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "F2"]) {
       expect(layerPanelAction(press(key, { textEntry: true }))).toBeNull();
     }
     expect(layerPanelAction(press("ArrowUp", { textEntry: true, mod: true }))).toBeNull();
