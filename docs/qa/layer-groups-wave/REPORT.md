@@ -2,8 +2,10 @@
 
 Branch: `integration/layer-groups-wave`, cut from the verified feature-wave tip
 `3af055a`. The wave's implementation tip is **`242a5c1`**; this report and its
-evidence are committed after it. Nothing is pushed to `main`, and no other
-branch, tag, installer or QA artifact was rewritten, merged or deleted.
+evidence are committed after it as **`70f5267`**, and the branch is pushed to
+`origin/integration/layer-groups-wave` at that commit. Nothing is pushed to
+`main`, and no other branch, tag, installer or QA artifact was rewritten,
+merged or deleted.
 
 ## 1. What the audit changed
 
@@ -35,7 +37,7 @@ This wave therefore did three things, in this order:
 | `945a2fd` | `feat(render): composite layer groups with visibility and isolated opacity/blend` |
 | `242a5c1` | `feat(layers): expose groups as an indented, draggable tree` |
 
-The documentation/evidence commit follows `242a5c1`.
+The documentation/evidence commit is `70f5267`.
 
 ## 3. What now works
 
