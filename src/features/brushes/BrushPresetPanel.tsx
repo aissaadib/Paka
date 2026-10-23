@@ -50,6 +50,11 @@ import {
   type PresetLibraryGateway,
 } from "../../core/brushes/presetLibraryFiles";
 import { MAX_PRESET_NAME_LENGTH, type BrushPreset } from "../../core/brushes/presets";
+import {
+  KRITA_DEFAULT_PRESET_ENTRIES,
+  KRITA_DEFAULT_PRESET_SOURCE,
+  missingKritaPresets,
+} from "../../core/brushes/kritaDefaults";
 import { registerPanel } from "../../core/shell/panelRegistry";
 import type { ShellSlotId } from "../../core/shell/slots";
 import { Panel } from "../../components/panels/Panel";
@@ -209,11 +214,36 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
     }
   };
 
+  /**
+   * Adds the translated Krita 4 presets.
+   *
+   * The set is embedded, so this is the same import path as a library file
+   * without a file dialog. It only adds the brushes that are not already
+   * there, so a second click cannot bury the library in "(2)" copies.
+   */
+  const importKritaDefaults = () => {
+    const missing = missingKritaPresets(library.presets.map((preset) => preset.name));
+    if (missing.length === 0) {
+      setMessage(`The ${KRITA_DEFAULT_PRESET_SOURCE} brushes are already in the library.`);
+      return;
+    }
+    run({ kind: "import", entries: missing });
+  };
+
   return (
     <Panel
       title="Brushes"
       actions={
         <>
+          <button
+            type="button"
+            className="brush-browser__header-button"
+            title={`Add the ${KRITA_DEFAULT_PRESET_ENTRIES.length} ${KRITA_DEFAULT_PRESET_SOURCE} default brushes`}
+            disabled={busy}
+            onClick={importKritaDefaults}
+          >
+            {KRITA_DEFAULT_PRESET_SOURCE}
+          </button>
           <button
             type="button"
             className="brush-browser__header-button"

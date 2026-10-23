@@ -69,6 +69,7 @@ architecture by browsing.
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
 `core/brushes/presets.ts` (161: the preset model, its validation and its equality),
+`core/brushes/kritaDefaults.ts` (169: the Krita 4 preset translation, its provenance and its import helper),
 `features/brushes/BrushPresets.tsx` (176),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
@@ -135,6 +136,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`duplicateBrushPreset`/`applyBrushPreset`), `features/brushes/BrushPresets.tsx`, `state/editorStore.ts` |
+| Add or change the Krita 4 presets | `core/brushes/kritaDefaults.ts` (the specs, the builder, `missingKritaPresets`), `features/brushes/BrushPresetPanel.tsx` (the one-click button), `src/test/kritaPresets.test.ts`, `tests/visual/krita-presets.spec.ts` |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
 | Change the layer groups (the tree) | `core/document/layerGroups.ts` (the tree rules: the children, the order, the ancestor rule, dissolving), `core/document/types.ts` (`Layer.kind`, `Layer.children`), `core/document/document.ts` (the tree-aware layer operations), `core/commands/documentCommand.ts` (the group commands), `core/project/projectFormat.ts` (version 13), `features/layers/LayersPanel.tsx`, `PROJECT_FORMAT.md` |
 | Add or change a layer blend mode | `core/document/blendModes.ts` (the closed list, the guard, the formulas), `core/document/types.ts` (`LayerBlendMode`), `Canvas2DRenderer.ts` (`compositeOperationFor`), `features/layers/LayersPanel.tsx`, `projectFormat.ts` (the versioned closed set), `PROJECT_FORMAT.md` |
@@ -177,6 +179,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 28, 50 |
 | `BRUSH_NUMBER_FIELDS`, `BRUSH_FLAG_FIELDS`, `BRUSH_COLOR_FIELDS`, `readBrushSettings` | `core/brushes/defaults.ts` | grep the symbol |
 | `BrushPreset`, `normalizeBrushPresets`, `uniquePresetName`, `normalizePresetName`, `duplicatePreset` | `core/brushes/presets.ts` | grep the symbol |
+| `KRITA_DEFAULT_PRESET_ENTRIES`, `KRITA_DEFAULT_PRESET_SOURCE`, `missingKritaPresets` | `core/brushes/kritaDefaults.ts` | grep the symbol |
 | `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 46, 71, 86 |
 | `STABILIZER_MAX_LAG`, `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | 39, 114, 193 |
 | `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
@@ -320,6 +323,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
+| Krita 4 presets | `kritaPresets.test.ts` (the translated set, its bounds and names, the import helper, and the library-file round trip), `tests/visual/krita-presets.spec.ts` (the one-click import and the second press in a real browser) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
 | Colour input formats | `colorInput.test.ts` (8-digit hex, `hsl()`, `oklch()`, the gamut clamp, the round trip, garbage and translucent input) |
