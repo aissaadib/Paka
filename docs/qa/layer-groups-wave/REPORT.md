@@ -2,10 +2,10 @@
 
 Branch: `integration/layer-groups-wave`, cut from the verified feature-wave tip
 `3af055a`. The wave's implementation tip is **`242a5c1`**; this report and its
-evidence are committed after it as **`70f5267`**, and the branch is pushed to
-`origin/integration/layer-groups-wave` at that commit. Nothing is pushed to
-`main`, and no other branch, tag, installer or QA artifact was rewritten,
-merged or deleted.
+evidence are committed after it (evidence commit **`70f5267`**). The branch is
+pushed to `origin/integration/layer-groups-wave`. Nothing is pushed to `main`,
+and no other branch, tag, installer or QA artifact was rewritten, merged or
+deleted.
 
 ## 1. What the audit changed
 
