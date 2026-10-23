@@ -9,7 +9,7 @@ import { expect, test, type Page } from "@playwright/test";
  * press does not duplicate them.
  */
 
-const KRITA_BRUSHES = 69;
+const KRITA_BRUSHES = 81;
 
 async function openApp(page: Page) {
   await page.setViewportSize({ width: 1280, height: 800 });

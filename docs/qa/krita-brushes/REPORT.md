@@ -8,7 +8,7 @@ Status: implemented, tested and built; Notion publication blocked on login.
 
 ## 1. What shipped
 
-A one-click **Krita 4** button in the **Brushes** side panel. It adds 69
+A one-click **Krita 4** button in the **Brushes** side panel. It adds 81
 translated Krita presets to the user's own brush library as editable presets
 named `Krita - ...`. A second press adds nothing: only presets whose names are
 not already in the library are imported.
@@ -17,10 +17,10 @@ Files:
 
 | File | Purpose |
 | --- | --- |
-| `src/core/brushes/kritaDefaults.ts` | The 69 translated specs, the brush builder, `missingKritaPresets` and the provenance comment. |
+| `src/core/brushes/kritaDefaults.ts` | The 81 translated specs, the brush builder, `missingKritaPresets` and the provenance comment. |
 | `src/features/brushes/BrushPresetPanel.tsx` | The `Krita 4` header button and its import handler. |
 | `src/test/kritaPresets.test.ts` | 12 unit tests: count, names, bounds, the brush reader, the known presets, coverage, the import helper and the library-file round trip. |
-| `tests/visual/krita-presets.spec.ts` | Browser coverage: one press imports 69, the names are searchable and applicable, the second press adds nothing. |
+| `tests/visual/krita-presets.spec.ts` | Browser coverage: one press imports 81, the names are searchable and applicable, the second press adds nothing. |
 | `AGENTS.md` | The file map, the task row, the symbol table and the test map. |
 
 No new dependency. No change to `PROJECT_VERSION`, the project format, the
@@ -56,34 +56,43 @@ The module comment records this provenance in the source.
 
 ## 3. What was translated
 
-The bundle holds 95 presets. 69 use an engine Paka can represent; 26 do not and
-are skipped.
+The bundle holds 117 presets. 81 use an engine Paka can represent and a normal
+paint composite; 36 do not and are skipped.
 
 Included engines:
 
 | Krita engine | Count | Paka representation |
 | --- | --- | --- |
-| `paintbrush` | 63 (non-eraser) | Smooth or stamped dabs, with hardness, texture and pressure |
+| `paintbrush` | 76 (non-eraser, normal composite) | Smooth or stamped dabs, with hardness, texture and pressure |
 | `roundmarker` | 1 | Smooth round stroke |
 | `sketchbrush` | 2 | Smooth round stroke |
-| `spraybrush` | 2 | Stamped brush |
+| `spraybrush` | 1 | Stamped brush |
 | `hairybrush` | 1 | Stamped bristle brush |
 
-Skipped engines and erasers (26):
+Skipped engines, erasers and composite-only brushes (36):
 
 | Reason | Count | Examples |
 | --- | --- | --- |
-| `colorsmudge` | 14 | Wet Bristles, Wet Circle, Blender Smear |
+| `colorsmudge` | 15 | Wet Bristles, Wet Circle, Blender Smear |
 | `deformbrush` | 3 | Distort Grow / Move / Shrink |
-| Erasers | 3 | Eraser Circle / Small / Soft |
+| Erasers (`paintbrush`, `erase` composite) | 3 | Eraser Circle / Small / Soft |
+| Per-stroke composite (`paintbrush`) | 5 | Adjust Color / Dodge / Lighten / Multiply / Overlay Burn |
+| Per-stroke composite (`spraybrush`, `add`) | 1 | Texture Starfield |
 | `duplicate` | 1 | Clone Tool |
 | `curvebrush` | 1 | Sketching-3 Leaky |
 | `gridbrush` | 1 | Blender Pixelize |
 | `tangentnormal` | 1 | Texture Normal Map |
 | `hatchingbrush` | 1 | Screentone Moire |
 | `experimentbrush` | 1 | Shapes Fill |
+| `particlebrush` | 1 | Experimental Webs |
+| `filter` | 2 | Filter Blur / Sharpen |
 
 Mapping rules:
+
+- **Reading the preset.** Krita stores the preset XML in a PNG text chunk. Older
+  presets use a compressed `zTXt` chunk; 22 of the 117 use an uncompressed
+  `tEXt` chunk. The translator reads both, which is what raised the pack from
+  69 to 81.
 
 - **Size**: the mask generator's diameter when it states one; otherwise the
   tip file's real pixel width/height multiplied by the brush scale, read from
@@ -125,7 +134,8 @@ Targeted runs during development:
 - `pnpm exec vitest run src/test/kritaPresets.test.ts` - 12 passed.
 - `pnpm exec playwright test tests/visual/krita-presets.spec.ts` - 1 passed.
 
-Nothing was skipped and no check is claimed without a run.
+The full table above was re-measured after the pack grew from 69 to 81
+presets. Nothing was skipped and no check is claimed without a run.
 
 ---
 

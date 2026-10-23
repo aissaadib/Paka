@@ -55,8 +55,8 @@ function createPort(): PresetLibraryPort {
 }
 
 describe("the Krita 4 preset set", () => {
-  it("holds the 69 presets Paka can represent", () => {
-    expect(KRITA_DEFAULT_PRESET_ENTRIES).toHaveLength(69);
+  it("holds the 81 presets Paka can represent", () => {
+    expect(KRITA_DEFAULT_PRESET_ENTRIES).toHaveLength(81);
   });
 
   it("uses a name that is unique, prefixed and short enough for the browser", () => {
@@ -100,15 +100,22 @@ describe("the Krita 4 preset set", () => {
   it("keeps the brushes Paka users will look for", () => {
     for (const name of [
       "Krita - Airbrush Soft",
+      "Krita - Basic-3 Flow",
       "Krita - Basic-5 Size",
+      "Krita - Basic-5 Size Opacity",
       "Krita - Pencil-1 Hard",
+      "Krita - Pencil-3 Large 4B",
       "Krita - Ink-1 Precision",
+      "Krita - Ink-2 Fineliner",
       "Krita - Marker Chisel Smooth",
+      "Krita - Marker Dry",
       "Krita - Bristles-1 Details",
+      "Krita - Bristles-5 Flat",
       "Krita - Stamp Bokeh",
       "Krita - Shapes Square",
       "Krita - Pixel Art",
       "Krita - Texture Noise",
+      "Krita - Texture Reptile",
     ]) {
       expect(ENTRY_NAMES).toContain(name);
     }
@@ -130,15 +137,15 @@ describe("the Krita 4 preset set", () => {
 
 describe("the Krita 4 import helper", () => {
   it("offers every entry to an empty library", () => {
-    expect(missingKritaPresets([])).toHaveLength(69);
+    expect(missingKritaPresets([])).toHaveLength(81);
   });
 
   it("adds only the brushes that are not there yet", () => {
-    const existing = ENTRY_NAMES.slice(0, 68);
+    const existing = ENTRY_NAMES.slice(0, 80);
     const missing = missingKritaPresets(existing);
 
     expect(missing).toHaveLength(1);
-    expect(missing[0].name).toBe(ENTRY_NAMES[68]);
+    expect(missing[0].name).toBe(ENTRY_NAMES[80]);
   });
 
   it("has nothing to add when the whole set is already there", () => {
@@ -147,12 +154,12 @@ describe("the Krita 4 import helper", () => {
   });
 
   it("matches by name, not by position, so a renamed or edited entry is left alone", () => {
-    expect(missingKritaPresets(["Krita - Basic-5 Size"])).toHaveLength(68);
+    expect(missingKritaPresets(["Krita - Basic-5 Size"])).toHaveLength(80);
   });
 });
 
 describe("importing the Krita 4 set", () => {
-  it("adds all 69 brushes through the browser's import action", () => {
+  it("adds all 81 brushes through the browser's import action", () => {
     const library: PresetLibrary = { presets: [], bundled: [] };
     const port = createPort();
 
@@ -164,12 +171,12 @@ describe("importing the Krita 4 set", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.message).toBe("Imported 69 brushes.");
+    expect(result.message).toBe("Imported 81 brushes.");
     const added = (port.import as ReturnType<typeof vi.fn>).mock
       .calls[0][0] as BrushPreset[];
     expect(added.map((entry) => entry.name)).toEqual(ENTRY_NAMES);
     // Fresh ids, so the same set can be imported again without replacing.
-    expect(new Set(added.map((entry) => entry.id)).size).toBe(69);
+    expect(new Set(added.map((entry) => entry.id)).size).toBe(81);
   });
 
   it("survives the library file export and import unchanged", () => {
@@ -188,7 +195,7 @@ describe("importing the Krita 4 set", () => {
       return;
     }
     expect(read.skipped).toBe(0);
-    expect(read.entries).toHaveLength(69);
+    expect(read.entries).toHaveLength(81);
     expect(read.entries.map((entry) => entry.name)).toEqual(ENTRY_NAMES);
     for (let index = 0; index < read.entries.length; index += 1) {
       expect(brushSettingsEqual(read.entries[index].brush, library.presets[index].brush)).toBe(

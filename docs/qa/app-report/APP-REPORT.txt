@@ -38,7 +38,7 @@ compositing, undo safety, document-format rigor and a keyboard-first shell.
 There is no text tool, no filters, no scripting, no cloud service and no
 account.
 
-The current build adds 69 translated Krita 4 default brushes. They are
+The current build adds 81 translated Krita 4 default brushes. They are
 imported as the user's own editable presets with one button, with no Krita
 binary asset copied or shipped.
 
@@ -117,7 +117,7 @@ drew and the sample that was committed agree.
   pressure curve, stamp, texture and tip.
   - Bundled presets: a protected built-in set that cannot be renamed or
   deleted; duplicating is how a user gets an editable copy.
-  - Krita 4: 69 translated defaults added with one click (see §5).
+  - Krita 4: 81 translated defaults added with one click (see §5).
 
 
 2.4 Colour
@@ -386,7 +386,7 @@ persisted preferences.
 5.1 What the user gets
 ......................
 
-A Krita 4 button in the Brushes panel header. One press adds 69
+A Krita 4 button in the Brushes panel header. One press adds 81
 translated presets to the user's own library, named Krita - .... They are
 ordinary user presets: apply, rename, duplicate, star, delete and export them
 like any other brush.
@@ -413,18 +413,22 @@ actually implements.
 5.3 Coverage
 ............
 
-  Krita engine            | Count | Paka representation
-  ------------------------+-------+-----------------------------------------------------------
-  paintbrush (non-eraser) | 63    | Smooth or stamped dabs with hardness, texture and pressure
-  roundmarker             | 1     | Smooth round stroke
-  sketchbrush             | 2     | Smooth round stroke
-  spraybrush              | 2     | Stamped brush
-  hairybrush              | 1     | Stamped bristle brush
+  Krita engine                              | Count | Paka representation
+  ------------------------------------------+-------+-----------------------------------------------------------
+  paintbrush (non-eraser, normal composite) | 76    | Smooth or stamped dabs with hardness, texture and pressure
+  roundmarker                               | 1     | Smooth round stroke
+  sketchbrush                               | 2     | Smooth round stroke
+  spraybrush                                | 1     | Stamped brush
+  hairybrush                                | 1     | Stamped bristle brush
 
-Skipped (26): 14 colorsmudge, 3 deformbrush, 3 erasers, and one each
-of duplicate, curvebrush, gridbrush, tangentnormal, hatchingbrush and
-experimentbrush. Paka has no smudge, deform, clone, grid, curve, tangent or
-hatching engine, so those presets would be misleading if imported.
+Skipped (36): 15 colorsmudge, 3 deformbrush, 3 erasers, 5 paintbrush
+brushes that paint with a per-stroke composite operation (colour, dodge,
+lighten, multiply, overlay), 1 spraybrush with an add composite, and one
+each of duplicate, curvebrush, gridbrush, tangentnormal,
+hatchingbrush, experimentbrush, particlebrush and two filter presets.
+Paka has no smudge, deform, clone, grid, curve, tangent, hatching, particle or
+filter engine, and it offers blend modes at the layer level rather than per
+stroke, so those presets would be misleading if imported.
 
 
 5.4 Translation rules
@@ -452,7 +456,7 @@ hatching engine, so those presets would be misleading if imported.
 
   File                                      | Purpose
   ------------------------------------------+-------------------------------------------------------------
-  src/core/brushes/kritaDefaults.ts         | 69 specs, the brush builder, missingKritaPresets, provenance
+  src/core/brushes/kritaDefaults.ts         | 81 specs, the brush builder, missingKritaPresets, provenance
   src/features/brushes/BrushPresetPanel.tsx | The Krita 4 button and import handler
   src/test/kritaPresets.test.ts             | 12 unit tests
   tests/visual/krita-presets.spec.ts        | One-click import in a real browser

@@ -10,11 +10,13 @@
  * is copied or shipped. Every brush here is Paka's own rasterization of those
  * numbers, using only fields Paka actually implements.
  *
- * **What is included.** The bundle holds 95 presets. The 69 that use an engine
- * Paka can represent are here: `paintbrush`, `roundmarker`, `sketchbrush`,
- * `spraybrush` and `hairybrush`. The 26 that are left out need engines Paka
- * does not have (colour smudge, deform, duplicate, curve, grid, tangent
- * normal, hatching, experiment) or are erasers.
+ * **What is included.** The bundle holds 117 presets. The 81 that use an engine
+ * Paka can represent and a normal paint composite are here: `paintbrush`,
+ * `roundmarker`, `sketchbrush`, `spraybrush` and `hairybrush`. The 36 that are
+ * left out need engines Paka does not have (colour smudge, deform, duplicate,
+ * curve, grid, tangent normal, hatching, experiment, particle and filter), are
+ * erasers, or paint with a per-stroke composite operation (dodge, lighten,
+ * multiply, overlay, colour or add) that Paka only offers at the layer level.
  *
  * **What is approximate.** Paka has no per-sensor curves, no brush engines and
  * no image tips. A Krita preset is therefore carried over as its diameter,
@@ -58,11 +60,16 @@ const KRITA_PRESET_SPECS: readonly KritaPresetSpec[] = [
   { name: "Krita - Airbrush Soft", size: 512, opacity: 1, hardness: 0.05, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: false, pressureOpacity: true },
   { name: "Krita - Basic-1", size: 40, opacity: 1, hardness: 1, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Basic-2 Opacity", size: 40, opacity: 1, hardness: 0.75, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: false, pressureOpacity: false },
+  { name: "Krita - Basic-3 Flow", size: 40, opacity: 0.8, hardness: 0.75, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: false, pressureOpacity: false },
+  { name: "Krita - Basic-4 Flow Opacity", size: 40, opacity: 1, hardness: 0.75, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Basic-5 Size", size: 40, opacity: 1, hardness: 1, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Basic-5 Size Opacity", size: 40, opacity: 1, hardness: 1, spacing: 0.2, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Basic-6 Details", size: 8, opacity: 1, hardness: 1, spacing: 0.02, stamp: true, tip: "chisel", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Bristles-1 Details", size: 16, opacity: 0.4, hardness: 1, spacing: 0.04, stamp: true, tip: "bristle", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Bristles-2 Flat Rough", size: 40, opacity: 1, hardness: 1, spacing: 0.04, stamp: true, tip: "chisel", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Bristles-3 Large Smooth", size: 110, opacity: 1, hardness: 1, spacing: 0.03, stamp: true, tip: "bristle", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Bristles-4 Glaze", size: 70, opacity: 1, hardness: 1, spacing: 0.1, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
+  { name: "Krita - Bristles-5 Flat", size: 68, opacity: 1, hardness: 1, spacing: 0.06, stamp: true, tip: "chisel", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Chalk Details", size: 60, opacity: 1, hardness: 1, spacing: 0.04, stamp: true, tip: "chisel", texture: 0.85, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Chalk Grainy", size: 90, opacity: 1, hardness: 1, spacing: 0.12, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Chalk Soft", size: 135, opacity: 1, hardness: 1, spacing: 0.06, stamp: true, tip: "bristle", texture: 0.85, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
@@ -76,12 +83,17 @@ const KRITA_PRESET_SPECS: readonly KritaPresetSpec[] = [
   { name: "Krita - Dry Roller", size: 110, opacity: 1, hardness: 1, spacing: 0.1, stamp: true, tip: "chisel", texture: 0.85, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Dry Textured Creases", size: 110, opacity: 1, hardness: 1, spacing: 0.07, stamp: true, tip: "blot", texture: 0.85, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Ink-1 Precision", size: 3, opacity: 1, hardness: 0.1, spacing: 0.15, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Ink-2 Fineliner", size: 5, opacity: 1, hardness: 1, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: true },
   { name: "Krita - Ink-3 Gpen", size: 5, opacity: 0.6, hardness: 1, spacing: 0.1, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Ink-4 Pen Rough", size: 7, opacity: 1, hardness: 1, spacing: 0.1, stamp: false, tip: "chisel", texture: 0.35, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Ink-7 Brush Rough", size: 25, opacity: 1, hardness: 1, spacing: 0.1, stamp: false, tip: "round", texture: 0.85, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Ink-8 Sumi-e", size: 60, opacity: 1, hardness: 1, spacing: 0.5, stamp: true, tip: "bristle", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Marker Chisel Smooth", size: 60, opacity: 1, hardness: 0.75, spacing: 0.04, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Marker Details", size: 20, opacity: 1, hardness: 0.5, spacing: 0.2, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: true },
+  { name: "Krita - Marker Dry", size: 35, opacity: 1, hardness: 0.75, spacing: 0.04, stamp: false, tip: "chisel", texture: 0.35, stampTexture: 0, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Pencil-1 Hard", size: 10, opacity: 0.24, hardness: 0.25, spacing: 0.2, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Pencil-2", size: 10, opacity: 1, hardness: 0.25, spacing: 0.2, stamp: false, tip: "round", texture: 0, stampTexture: 0, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Pencil-3 Large 4B", size: 10, opacity: 0.05, hardness: 1, spacing: 0.05, stamp: false, tip: "round", texture: 0.85, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Pencil-4 Soft", size: 16, opacity: 1, hardness: 1, spacing: 0.2, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Pencil-5 Tilted", size: 40, opacity: 1, hardness: 1, spacing: 0.1, stamp: true, tip: "blot", texture: 0.85, stampTexture: 0, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Pencil-6 Quick Shade", size: 60, opacity: 1, hardness: 1, spacing: 0.2, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
@@ -115,7 +127,9 @@ const KRITA_PRESET_SPECS: readonly KritaPresetSpec[] = [
   { name: "Krita - Texture Impressionism", size: 80, opacity: 1, hardness: 1, spacing: 0.1, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Texture Large Splat", size: 200, opacity: 1, hardness: 1, spacing: 0.11, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Texture Noise", size: 120, opacity: 1, hardness: 1, spacing: 0.1, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Texture Pointillism", size: 114, opacity: 0.9, hardness: 0.5, spacing: 0.1, stamp: true, tip: "round", texture: 0.35, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Texture Random Particles", size: 175, opacity: 1, hardness: 1, spacing: 0.37, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
+  { name: "Krita - Texture Reptile", size: 100, opacity: 1, hardness: 0.5, spacing: 0.1, stamp: false, tip: "round", texture: 0.85, stampTexture: 0, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Texture Snow Pile", size: 130, opacity: 1, hardness: 1, spacing: 0.22, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
   { name: "Krita - Texture Spines", size: 130, opacity: 1, hardness: 1, spacing: 0.25, stamp: true, tip: "chisel", texture: 0, stampTexture: 0.35, pressureSize: false, pressureOpacity: false },
   { name: "Krita - Texture Splat", size: 135, opacity: 1, hardness: 1, spacing: 0.33, stamp: true, tip: "blot", texture: 0, stampTexture: 0.35, pressureSize: true, pressureOpacity: false },
