@@ -41,10 +41,15 @@ import { useFileCommands } from "../../features/project/useFileCommands";
 import { closeWindowNow } from "../../features/project/windowControls";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
-import { useWorkspaceComposition } from "../../hooks/useWorkspace";
+import {
+  useWorkspaceActions,
+  useWorkspaceComposition,
+} from "../../hooks/useWorkspace";
 import { WorkspaceProvider } from "../../state/workspaceContext";
+import type { WorkspaceStore } from "../../state/workspaceStore";
 import { fileNameOf } from "../../utils/path";
 import { ToolRail } from "../toolbar/ToolRail";
+import { FloatingPanels } from "../panels/FloatingPanels";
 import { PanelDock } from "../panels/PanelDock";
 import { AppMenuBar } from "./AppMenuBar";
 import { ToolBar } from "./ToolBar";
@@ -82,18 +87,24 @@ if (!findPanel("layers")) {
   });
 }
 
-export function Workspace() {
+export function Workspace({
+  store,
+}: {
+  /** Optional injected store, used by tests and by the settings wiring. */
+  readonly store?: WorkspaceStore;
+} = {}) {
   return (
-    <WorkspaceProvider>
+    <WorkspaceProvider store={store}>
       <WorkspaceShell />
     </WorkspaceProvider>
   );
 }
 
 function WorkspaceShell() {
-  const { actions, files } = useEditor();
+  const { actions: editorActions, files } = useEditor();
   const { document: drawingDocument, file } = useEditorState();
   const composition = useWorkspaceComposition();
+  const workspaceActions = useWorkspaceActions();
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
   const [pending, setPending] = useState<UnsavedAction | null>(null);
 
@@ -223,11 +234,20 @@ function WorkspaceShell() {
       {compositionPartsInRegion(composition, "bottom").map((part) =>
         part.shown ? <Fragment key={part.id}>{renderPart(part.id)}</Fragment> : null,
       )}
+      <FloatingPanels
+        panels={compositionPanelsInSlot(composition, "floating").map((panel) => ({
+          id: panel.id,
+          title: findPanel(panel.id)?.title ?? panel.id,
+          render: () => findPanel(panel.id)?.render() ?? null,
+        }))}
+        onDock={(panelId) => workspaceActions.movePanel(panelId, "right")}
+        onHide={(panelId) => workspaceActions.movePanel(panelId, "hidden")}
+      />
       {newDocumentOpen ? (
         <NewDocumentDialog
           onCancel={() => setNewDocumentOpen(false)}
           onCreate={(options) => {
-            actions.newDocument(options);
+            editorActions.newDocument(options);
             setNewDocumentOpen(false);
           }}
         />
@@ -258,6 +278,7 @@ function WorkspaceShell() {
  */
 function SideColumn() {
   const composition = useWorkspaceComposition();
+  const workspaceActions = useWorkspaceActions();
   const panels = compositionPanelsInSlot(composition, "right");
   const layers = panels.filter((panel) => panel.id === "layers");
   const docked = panels.filter((panel) => panel.id !== "layers");
@@ -271,6 +292,13 @@ function SideColumn() {
             title: findPanel(panel.id)?.title ?? panel.id,
             render: () => findPanel(panel.id)?.render() ?? null,
           }))}
+          onMovePanel={(panelId, index) =>
+            workspaceActions.movePanel(panelId, "right", index)
+          }
+          onFloatPanel={(panelId) =>
+            workspaceActions.movePanel(panelId, "floating")
+          }
+          onResetPanels={workspaceActions.resetPanels}
         />
       )}
       {layers.length === 0 ? null : (

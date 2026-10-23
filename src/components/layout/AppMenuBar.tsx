@@ -36,6 +36,7 @@ import {
   FIXED_SCALE_FACTOR,
 } from "../../core/document/selectionTransform";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
+import { useWorkspaceActions } from "../../hooks/useWorkspace";
 import {
   menuKeyFromEvent,
   menuNavigationKey,
@@ -95,6 +96,7 @@ export function AppMenuBar({
 }: AppMenuBarProps) {
   const { engine, actions } = useEditor();
   const { history, document: drawingDocument, selectedStrokes } = useEditorState();
+  const workspace = useWorkspaceActions();
   const [navigation, setNavigation] = useState<MenuNavigationState>({ mode: "outside" });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -244,6 +246,17 @@ export function AppMenuBar({
         { type: "item", label: "Fit to Window", actionId: "zoomFit" },
         { type: "separator" },
         { type: "item", label: "Show Rulers", actionId: "toggleRulers" },
+      ],
+    },
+    {
+      id: "panels",
+      label: "Panels",
+      entries: [
+        {
+          type: "item",
+          label: "Reset Panel Layout",
+          onSelect: workspace.resetPanels,
+        },
       ],
     },
   ];

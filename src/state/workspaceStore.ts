@@ -29,10 +29,15 @@ import {
   type PanelDefinition,
 } from "../core/shell/panelRegistry";
 import {
+  movePanelInPreferences,
+  resetPanelPlacement,
+} from "../core/shell/panelMovement";
+import {
   DEFAULT_SHELL_PREFERENCES,
   shellPreferencesEqual,
   type ShellPreferences,
 } from "../core/shell/preferences";
+import type { ShellSlotId } from "../core/shell/slots";
 import {
   composeWorkspace,
   DEFAULT_WORKSPACE_SETTINGS,
@@ -51,15 +56,22 @@ import type { Listener } from "../utils/store";
 /**
  * Where the shell preferences come from.
  *
- * The port is read-only as far as the composition is concerned: the store
- * asks for the preferences and is told when they change. Whoever owns the
- * preferences decides what they say.
+ * The store asks for the preferences and is told when they change. A source
+ * that owns its preferences also accepts a write; a profile or a test double
+ * can stay read-only and the store's panel actions then do nothing.
  */
 export interface WorkspacePreferencesSource {
   /** The preferences the composition is built from. */
   getPreferences(): ShellPreferences;
   /** Subscribes to the preferences' changes. */
   subscribe(listener: () => void): () => void;
+  /**
+   * Replaces the preferences and tells the listeners.
+   *
+   * Optional because a read-only source - a profile, a test double - has no
+   * business accepting writes. The workspace's own source implements it.
+   */
+  setPreferences?(preferences: ShellPreferences): void;
 }
 
 /** A preferences source the store keeps for itself. */
@@ -107,6 +119,15 @@ export interface WorkspaceActions {
   setPartOrder(id: WorkspacePartId, order: number): void;
   /** Sets how big a part is. The size is clamped into the part's range. */
   setPartSize(id: WorkspacePartId, size: WorkspacePartSize): void;
+  /**
+   * Moves a panel to a slot, optionally at a position inside that slot.
+   *
+   * The move is a preference, not an edit: it adds no history step and never
+   * reaches a document.
+   */
+  movePanel(id: string, slot: ShellSlotId, index?: number): void;
+  /** Puts every panel back in the registry's slot and order. */
+  resetPanels(): void;
   /** Restores the parts a fresh installation starts from. */
   restoreDefaults(): void;
 }
@@ -118,6 +139,11 @@ export interface WorkspaceStore extends WorkspaceSettingsSource {
   subscribe(listener: Listener): () => void;
   /** Replaces the workspace, e.g. with the one read from the settings file. */
   applySettings(settings: WorkspaceSettings): void;
+  /**
+   * Replaces the shell preferences, e.g. with the panel layout read from the
+   * settings file.
+   */
+  applyPreferences(preferences: ShellPreferences): void;
   /**
    * The composition: the parts, the panels and where the panels are docked.
    *
@@ -206,6 +232,17 @@ export function createWorkspaceStore(
     setPartSize: (id, size) => {
       commit(setWorkspacePartSize(settings, id, size));
     },
+    movePanel: (id, slot, index) => {
+      const current = preferencesSource.getPreferences();
+      preferencesSource.setPreferences?.(
+        movePanelInPreferences(current, { panelId: id, slot, index }),
+      );
+    },
+    resetPanels: () => {
+      preferencesSource.setPreferences?.(
+        resetPanelPlacement(preferencesSource.getPreferences()),
+      );
+    },
     restoreDefaults: () => {
       commit(DEFAULT_WORKSPACE_SETTINGS);
     },
@@ -238,6 +275,9 @@ export function createWorkspaceStore(
     },
     applySettings: (next) => {
       commit(next);
+    },
+    applyPreferences: (next) => {
+      preferencesSource.setPreferences?.(next);
     },
     getComposition: currentComposition,
     getPreferences: () => preferencesSource.getPreferences(),

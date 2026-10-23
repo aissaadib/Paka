@@ -334,3 +334,33 @@ export function IconKeyboard(props: IconProps) {
     </Icon>
   );
 }
+
+/** A small cross: close a floating panel. */
+export function IconClose(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </Icon>
+  );
+}
+
+/** A panel with an arrow: dock a floating panel. */
+export function IconDock(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.2" />
+      <path d="M2.5 6h11M9.5 8.2 7 10.7l2.5 2.5M7 10.7h4.5" />
+    </Icon>
+  );
+}
+
+/** Three dots: a small panel-actions menu. */
+export function IconMore(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="3.4" cy="8" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="12.6" cy="8" r=".8" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
