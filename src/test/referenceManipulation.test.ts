@@ -353,6 +353,26 @@ describe("importing a reference", () => {
     expect(engine.redo()).toBe(true);
     expect(engine.getState().document.references.map((item) => item.id)).toEqual([id]);
   });
+
+  it("is dropped, picture and all, when a new document replaces the drawing", async () => {
+    const { engine, id } = await engineWithReference();
+
+    engine.newDocument({ name: "Fresh", width: 400, height: 300 });
+
+    expect(engine.references()).toEqual([]);
+    expect(engine.findReference(id)).toBeNull();
+    expect(engine.getState().selectedReferenceId).toBeNull();
+    expect(engine.getState().history.depth).toBe(0);
+
+    // The new document accepts its own references, centred on its own paper.
+    const next = await engine.importReference({ name: "next.png", bytes: PNG_SIGNATURE });
+    expect(next.ok).toBe(true);
+    if (!next.ok) {
+      return;
+    }
+    expect(next.reference.id).not.toBe(id);
+    expect(next.reference.x).toBe((400 - next.reference.width) / 2);
+  });
 });
 
 describe("selecting a reference", () => {
