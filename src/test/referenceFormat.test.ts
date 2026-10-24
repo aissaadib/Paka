@@ -66,9 +66,9 @@ function documentOf(payload: Record<string, unknown>): Record<string, unknown> {
 }
 
 describe("references in the project file", () => {
-  it("is version 14", () => {
-    expect(PROJECT_VERSION).toBe(14);
-    expect(payloadOf(documentWith([])).version).toBe(14);
+  it("is version 15", () => {
+    expect(PROJECT_VERSION).toBe(15);
+    expect(payloadOf(documentWith([])).version).toBe(15);
   });
 
   it("round-trips a reference, bytes and all", () => {

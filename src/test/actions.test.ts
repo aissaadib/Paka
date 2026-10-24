@@ -15,6 +15,7 @@ interface FakeState {
   selectedStrokes: number;
   selectedGuideId: string | null;
   selectedReferenceId: string | null;
+  selectedShapeId: string | null;
   toolId: ToolId;
   gridVisible: boolean;
   gridSnapping: boolean;
@@ -32,6 +33,7 @@ beforeEach(() => {
     selectedStrokes: 1,
     selectedGuideId: null,
     selectedReferenceId: null,
+    selectedShapeId: null,
     toolId: "brush",
     gridVisible: false,
     gridSnapping: false,
@@ -101,6 +103,17 @@ beforeEach(() => {
     setReferenceRotation: vi.fn(),
     renameReference: vi.fn(),
     cancelReferenceGesture: vi.fn(),
+    selectShape: vi.fn(),
+    deleteSelectedShape: vi.fn(),
+    cancelShapeGesture: vi.fn(),
+    setSelectedShapeFill: vi.fn(),
+    setSelectedShapeSides: vi.fn(),
+    setSelectedShapeInnerRatio: vi.fn(),
+    setSelectedShapeRotation: vi.fn(),
+    setSelectedShapeSize: vi.fn(),
+    setSelectedShapeWidth: vi.fn(),
+    setSelectedShapeHeight: vi.fn(),
+    setSelectedShapeBrush: vi.fn(),
     nudgeSelection: vi.fn(),
     duplicateSelection: vi.fn(),
     flipSelection: vi.fn(),
@@ -114,6 +127,7 @@ beforeEach(() => {
         selectedStrokes: state.selectedStrokes,
         selectedGuideId: state.selectedGuideId,
         selectedReferenceId: state.selectedReferenceId,
+        selectedShapeId: state.selectedShapeId,
         toolId: state.toolId,
         gridVisible: state.gridVisible,
         gridSnapping: state.gridSnapping,

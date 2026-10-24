@@ -28,6 +28,7 @@ import {
   createScaleTransform,
 } from "/src/core/document/selectionTransform";
 import { isStroke } from "/src/core/document/types";
+import { shapeBrush } from "/src/core/document/shapeRecord";
 import type {
   DrawingDocument,
   FillPatchRecord,
@@ -35,6 +36,7 @@ import type {
   Layer,
   LayerElement,
   LayerId,
+  ShapeRecord,
   StrokeRecord,
 } from "/src/core/document/types";
 import type { DrawingRenderer } from "/src/core/rendering/types";
@@ -163,6 +165,27 @@ function toGradient(
   };
 }
 
+/**
+ * A scene shape as the document's own record.
+ *
+ * The geometry is copied verbatim, so the scene states the primitive and its
+ * parameters rather than a polyline. The brush goes through the shape rule -
+ * the stamp strategy is always off - exactly as a committed shape's does.
+ */
+function toShape(
+  element: Extract<SceneElement, { kind: "shape" }>,
+  layerId: LayerId,
+): ShapeRecord {
+  return {
+    id: nextId("shape"),
+    layerId,
+    kind: "shape",
+    geometry: { ...element.geometry },
+    brush: shapeBrush(toBrush(element.brush)),
+    fill: element.fill ?? false,
+  };
+}
+
 function toElements(
   layers: readonly SceneLayer[],
   layerIds: readonly LayerId[],
@@ -175,6 +198,7 @@ function toElements(
       (layer.elements ?? []).map((element) => {
         if (element.kind === "stroke") return toStroke(element, layerId);
         if (element.kind === "fill") return toFill(element, layerId);
+        if (element.kind === "shape") return toShape(element, layerId);
         return toGradient(element, layerId);
       }),
     );

@@ -138,6 +138,7 @@ describe("tool definitions", () => {
       "brush",
       "eraser",
       "select",
+      "shapeEdit",
       "line",
       "rectangle",
       "ellipse",
@@ -153,6 +154,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("brush").shortcut).toBe("B");
     expect(getToolDefinition("eraser").shortcut).toBe("E");
     expect(getToolDefinition("select").shortcut).toBe("M");
+    expect(getToolDefinition("shapeEdit").shortcut).toBe("V");
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");

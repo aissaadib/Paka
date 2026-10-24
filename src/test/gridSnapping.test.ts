@@ -22,7 +22,8 @@ import { FrameScheduler } from "../core/rendering/frameScheduler";
 import type { DrawingRenderer, RendererSelection, Rgb, StrokeSource } from "../core/rendering/types";
 import { docToScreen, screenToDoc } from "../core/rendering/viewport";
 import type { Guide } from "../core/document/types";
-import { isGradient } from "../core/document/types";
+import { isGradient, isShape } from "../core/document/types";
+import { shapeRecordOutline } from "../core/document/shapeRecord";
 import type { PointerSample } from "../types/pointer";
 import type { Viewport } from "../types/viewport";
 import {
@@ -118,6 +119,13 @@ function layerIdOf(engine: DrawingEngine): string {
   return engine.getState().document.activeLayerId as string;
 }
 
+/** The outline of the one native shape on the engine's active layer. */
+function shapeOutlineOf(engine: DrawingEngine) {
+  const shapes = engine.listElements(layerIdOf(engine)).filter(isShape);
+  expect(shapes).toHaveLength(1);
+  return shapeRecordOutline(shapes[0]);
+}
+
 /** Drags with the pointer and releases it. */
 function drag(
   engine: DrawingEngine,
@@ -146,10 +154,9 @@ describe("the grid and snapping in the engine", () => {
     // the snapping off it stays where the pointer was.
     drag(engine, [37, 70], [120, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    expect(strokes).toHaveLength(1);
-    expect(strokes[0].xs).toEqual([37, 120, 120, 37, 37]);
-    expect(strokes[0].ys).toEqual([70, 70, 90, 90, 70]);
+    const outline = shapeOutlineOf(engine);
+    expect(outline.map((point) => point.x)).toEqual([37, 120, 120, 37, 37]);
+    expect(outline.map((point) => point.y)).toEqual([70, 70, 90, 90, 70]);
   });
 
   it("lands a shape's corners on the grid lines while the snapping is on", () => {
@@ -162,10 +169,9 @@ describe("the grid and snapping in the engine", () => {
     // 10 away from the lines at 60 and 80, so the y stays where it was.
     drag(engine, [37, 70], [120, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    expect(strokes).toHaveLength(1);
-    expect(strokes[0].xs).toEqual([40, 120, 120, 40, 40]);
-    expect(strokes[0].ys).toEqual([70, 70, 90, 90, 70]);
+    const outline = shapeOutlineOf(engine);
+    expect(outline.map((point) => point.x)).toEqual([40, 120, 120, 40, 40]);
+    expect(outline.map((point) => point.y)).toEqual([70, 70, 90, 90, 70]);
   });
 
   it("leaves a corner alone when no target is within reach", () => {
@@ -177,9 +183,9 @@ describe("the grid and snapping in the engine", () => {
     // 70 is 10 away from the lines at 60 and 80.
     drag(engine, [70, 70], [120, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    expect(strokes[0].xs).toEqual([70, 120, 120, 70, 70]);
-    expect(strokes[0].ys).toEqual([70, 70, 90, 90, 70]);
+    const outline = shapeOutlineOf(engine);
+    expect(outline.map((point) => point.x)).toEqual([70, 120, 120, 70, 70]);
+    expect(outline.map((point) => point.y)).toEqual([70, 70, 90, 90, 70]);
   });
 
   it("lands a shape's corner on a composition guide", () => {
@@ -192,8 +198,8 @@ describe("the grid and snapping in the engine", () => {
     // 134 is 3 away from the guide at 137.
     drag(engine, [134, 60], [160, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    expect(strokes[0].xs).toEqual([137, 160, 160, 137, 137]);
+    const outline = shapeOutlineOf(engine);
+    expect(outline.map((point) => point.x)).toEqual([137, 160, 160, 137, 137]);
   });
 
   it("snaps a gradient's ends while the snapping is on", () => {
@@ -262,7 +268,7 @@ describe("the grid and snapping in the engine", () => {
     // ignored, exactly as it is without the snapping.
     drag(engine, [-4, 20], [100, 90]);
 
-    expect(engine.listStrokes(layerIdOf(engine))).toHaveLength(0);
+    expect(engine.listElements(layerIdOf(engine)).filter(isShape)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -277,11 +283,10 @@ describe("the grid and snapping in the engine", () => {
     // is off the paper, so the corner stays where the pointer was.
     drag(engine, [394, 20], [100, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    expect(strokes).toHaveLength(1);
-    for (const x of strokes[0].xs) {
-      expect(x).toBeGreaterThanOrEqual(0);
-      expect(x).toBeLessThanOrEqual(395);
+    const outline = shapeOutlineOf(engine);
+    for (const point of outline) {
+      expect(point.x).toBeGreaterThanOrEqual(0);
+      expect(point.x).toBeLessThanOrEqual(395);
     }
   });
 
@@ -330,7 +335,7 @@ describe("the grid and snapping in the engine", () => {
     engine.setTool("rectangle");
     drag(engine, [37, 42], [120, 90]);
 
-    // The stroke is a normal entry in the file; the grid is not in it.
+    // The shape is a normal entry in the file; the grid is not in it.
     const after = engine.serialize();
     expect(after).not.toBe(before);
     expect(after).not.toContain("grid");
@@ -353,8 +358,8 @@ describe("the snap through the viewport", () => {
       const x = 40 + 3 / zoom;
       drag(engine, [x, 20], [120, 90]);
 
-      const strokes = engine.listStrokes(layerIdOf(engine));
-      expect(strokes[0].xs[0]).toBeCloseTo(40, 9);
+      const outline = shapeOutlineOf(engine);
+      expect(outline[0].x).toBeCloseTo(40, 9);
     }
   });
 
@@ -368,8 +373,8 @@ describe("the snap through the viewport", () => {
     // 3 CSS pixels from the line at 40, which is 1.2 document pixels here.
     drag(engine, [40 + 3 / 2.5, 20], [120, 90]);
 
-    const strokes = engine.listStrokes(layerIdOf(engine));
-    const snapped = { x: strokes[0].xs[0], y: strokes[0].ys[0] };
+    const outline = shapeOutlineOf(engine);
+    const snapped = { x: outline[0].x, y: outline[0].y };
     // The snapped point is exactly on a grid line, and it is a whole document
     // pixel, so it comes back through the transform without a remainder.
     expect(snapped.x).toBe(40);

@@ -67,10 +67,11 @@ describe("the tool groups", () => {
   });
 
   it("puts the selection and its transform in one group", () => {
-    // There is no separate transform tool: the select tool carries the
-    // scale and rotate handles, so the group says so.
+    // There is no separate transform tool: the marquee selects strokes and the
+    // shape editor selects primitives, and both carry scale and rotate
+    // handles, so they share the group that says so.
     expect(toolGroupOf("select").id).toBe("select");
-    expect(toolGroupOf("select").toolIds).toEqual(["select"]);
+    expect(toolGroupOf("select").toolIds).toEqual(["select", "shapeEdit"]);
   });
 
   it("puts the reference images beside the composition guides", () => {
@@ -102,7 +103,7 @@ describe("the tool groups", () => {
 describe("the rail's slots", () => {
   it("shows one button per tool, and one for the whole shape family", () => {
     const slots = toolRailSlots("brush");
-    expect(slots).toHaveLength(10);
+    expect(slots).toHaveLength(11);
     expect(slots.filter((slot) => slot.isMenu)).toHaveLength(1);
   });
 

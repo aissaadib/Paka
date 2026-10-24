@@ -20,8 +20,9 @@ import { DEFAULT_GRID_SPACING } from "../core/document/grid";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
-import type { StrokeRecord } from "../core/document/types";
-import { isFillPatch, isGradient, isStroke } from "../core/document/types";
+import type { ShapeRecord, StrokeRecord } from "../core/document/types";
+import { isFillPatch, isGradient, isShape, isStroke } from "../core/document/types";
+import { shapeRecordOutline } from "../core/document/shapeRecord";
 import type { Guide } from "../core/document/types";
 import type { CursorReport, PointerSample } from "../types/pointer";
 import type { Bounds, Point } from "../types/geometry";
@@ -371,8 +372,9 @@ describe("DrawingEngine stroke capture", () => {
     engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 40, timeStamp: 32 }));
 
     // A shape is an outline, not a chain of dabs, so its record says so.
-    expect(engine.listStrokes(layerId)).toHaveLength(1);
-    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].brush.stamp).toBe(false);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {
@@ -925,7 +927,12 @@ describe("DrawingEngine colour picker", () => {
 });
 
 describe("DrawingEngine shape tools", () => {
-  it("previews in the stroke buffer and commits one stroke on release", () => {
+  /** The native shapes on a layer, bottom-most first. */
+  function shapesOf(engine: DrawingEngine, layerId: string): ShapeRecord[] {
+    return engine.listElements(layerId).filter(isShape);
+  }
+
+  it("previews in the stroke buffer and commits one native shape on release", () => {
     const spy = createSpyRenderer();
     const engine = new DrawingEngine({
       document: createDocument({ name: "Test", width: 400, height: 300 }),
@@ -937,23 +944,33 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 150 }));
 
-    // Mid-drag the shape is only a preview: one full-buffer redraw, no stroke,
+    // Mid-drag the shape is only a preview: one full-buffer redraw, no element,
     // no history entry.
     expect(spy.began).toHaveLength(1);
     expect(spy.replaced).toHaveLength(1);
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
 
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 150 }));
 
-    expect(spy.ended).toHaveLength(1);
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
-    // A closed rectangle: four corners plus the repeated first point.
-    expect(strokes[0].xs).toEqual([100, 200, 200, 100, 100]);
-    expect(strokes[0].ys).toEqual([100, 100, 150, 150, 100]);
-    expect(strokes[0].pressures).toEqual([1, 1, 1, 1, 1]);
+    // The preview is discarded, not composited: the committed shape is
+    // re-rasterized from its record like an undone or reopened one.
+    expect(spy.ended).toHaveLength(0);
+    expect(spy.getCancelled()).toBe(1);
+    const shapes = shapesOf(engine, layerId);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({
+      shape: "rectangle",
+      x: 100,
+      y: 100,
+      width: 100,
+      height: 50,
+    });
+    // The outline the renderer derives: four corners plus the repeated first.
+    const outline = shapeRecordOutline(shapes[0]);
+    expect(outline.map((point) => point.x)).toEqual([100, 200, 200, 100, 100]);
+    expect(outline.map((point) => point.y)).toEqual([100, 100, 150, 150, 100]);
     expect(engine.getState().history.depth).toBe(1);
     expect(engine.getState().file.dirty).toBe(true);
   });
@@ -975,19 +992,19 @@ describe("DrawingEngine shape tools", () => {
     expect(engine.getState().shapeFill).toBe(false);
     engine.setTool("rectangle");
     rectangle(50);
-    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[0].fill).toBe(false);
 
     engine.setShapeFill(true);
     expect(engine.getState().shapeFill).toBe(true);
     rectangle(100);
-    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
+    expect(shapesOf(engine, layerId)[1].fill).toBe(true);
 
-    // Each stroke keeps the setting it was drawn with: turning the fill off
+    // Each shape keeps the setting it was drawn with: turning the fill off
     // does not rewrite the shapes already committed.
     engine.setShapeFill(false);
     rectangle(150);
-    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
-    expect(engine.listStrokes(layerId)[2].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[1].fill).toBe(true);
+    expect(shapesOf(engine, layerId)[2].fill).toBe(false);
 
     // Drawing filled shapes is a change like any other, but the setting itself
     // is not: it describes the next shape, so it neither dirties the file nor
@@ -1009,7 +1026,7 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 0 }));
 
-    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[0].fill).toBe(false);
   });
 
   it("keeps the fill setting across a tool switch", () => {
@@ -1044,11 +1061,14 @@ describe("DrawingEngine shape tools", () => {
       createSample({ phase: "up", docX: 100, docY: 10, modifiers: shiftHeld }),
     );
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs).toHaveLength(2);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry.shape).toBe("line");
+    if (shape.geometry.shape !== "line") {
+      return;
+    }
     // Snapped to horizontal: the y offset collapses to zero.
-    expect(stroke.ys[1]).toBeCloseTo(0, 10);
-    expect(stroke.xs[1]).toBeCloseTo(Math.hypot(100, 10), 6);
+    expect(shape.geometry.y2).toBeCloseTo(0, 10);
+    expect(shape.geometry.x2).toBeCloseTo(Math.hypot(100, 10), 6);
   });
 
   it("draws a rectangle from its centre under Alt", () => {
@@ -1069,11 +1089,8 @@ describe("DrawingEngine shape tools", () => {
       createSample({ phase: "up", docX: 150, docY: 130, modifiers: altHeld }),
     );
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(Math.min(...stroke.xs)).toBe(50);
-    expect(Math.max(...stroke.xs)).toBe(150);
-    expect(Math.min(...stroke.ys)).toBe(70);
-    expect(Math.max(...stroke.ys)).toBe(130);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry).toMatchObject({ shape: "rectangle", x: 50, y: 70, width: 100, height: 60 });
   });
 
   it("commits the geometry of the release point, not the last move", () => {
@@ -1089,9 +1106,8 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 80 }));
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs).toEqual([0, 60]);
-    expect(stroke.ys).toEqual([0, 80]);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry).toMatchObject({ shape: "line", x1: 0, y1: 0, x2: 60, y2: 80 });
   });
 
   it("discards a click that never moved", () => {
@@ -1108,7 +1124,7 @@ describe("DrawingEngine shape tools", () => {
 
     expect(spy.replaced).toHaveLength(0);
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1126,7 +1142,7 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 100 }));
 
     expect(spy.began).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1145,7 +1161,7 @@ describe("DrawingEngine shape tools", () => {
 
     expect(spy.ended).toHaveLength(0);
     expect(spy.getCancelled()).toBe(1);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1163,7 +1179,7 @@ describe("DrawingEngine shape tools", () => {
     engine.setTool("brush");
 
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().toolId).toBe("brush");
   });
@@ -1205,19 +1221,20 @@ describe("DrawingEngine polygon and star tools", () => {
     );
   }
 
-  it("commits a polygon as one ordinary stroke", () => {
+  it("commits a polygon as one native shape", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({ shape: "polygon", sides: 5 });
     // Five sides plus the repeated first point.
-    expect(strokes[0].xs).toHaveLength(6);
-    expect(strokes[0].ys).toHaveLength(6);
-    expect(strokes[0].xs[0]).toBeCloseTo(strokes[0].xs[5], 9);
-    expect(strokes[0].ys[0]).toBeCloseTo(strokes[0].ys[5], 9);
+    const outline = shapeRecordOutline(shapes[0]);
+    expect(outline).toHaveLength(6);
+    expect(outline[0].x).toBeCloseTo(outline[5].x, 9);
+    expect(outline[0].y).toBeCloseTo(outline[5].y, 9);
     expect(engine.getState().history.depth).toBe(1);
     expect(engine.getState().file.dirty).toBe(true);
   });
@@ -1228,10 +1245,11 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("star");
     dragShape(engine, [100, 100], [200, 200]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({ shape: "star", sides: 5 });
     // Five points: five tips and five valleys, plus the repeated first point.
-    expect(strokes[0].xs).toHaveLength(11);
+    expect(shapeRecordOutline(shapes[0])).toHaveLength(11);
     expect(engine.getState().history.depth).toBe(1);
   });
 
@@ -1244,10 +1262,10 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("star");
     dragShape(engine, [200, 50], [300, 150]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(2);
-    expect(strokes[0].fill).toBe(true);
-    expect(strokes[1].fill).toBe(true);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0].fill).toBe(true);
+    expect(shapes[1].fill).toBe(true);
   });
 
   it("treats the options as editor state: no history step, no dirty flag", () => {
@@ -1294,8 +1312,9 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes[0].xs).toHaveLength(7);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes[0].geometry).toMatchObject({ shape: "polygon", sides: 6 });
+    expect(shapeRecordOutline(shapes[0])).toHaveLength(7);
   });
 
   it("keeps the inner ratio and the rotation it started with", () => {
@@ -1311,20 +1330,22 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
 
-    const star = engine.listStrokes(layerId)[0];
+    const star = engine.listElements(layerId).filter(isShape)[0];
+    expect(star.geometry).toMatchObject({ shape: "star", innerRatio: 0.25, rotation: 90 });
     // The box is 100..200 by 100..200, so the centre is (150, 150) and the
     // circle's radius is 50.
+    const outline = shapeRecordOutline(star);
     const centre = { x: 150, y: 150 };
     const radius = (index: number): number =>
-      Math.hypot(star.xs[index] - centre.x, star.ys[index] - centre.y);
+      Math.hypot(outline[index].x - centre.x, outline[index].y - centre.y);
     // A tip is on the circle, a valley at a quarter of it: the inner ratio of
     // 0.25 the star started with.
     expect(radius(0)).toBeCloseTo(50, 6);
     expect(radius(1)).toBeCloseTo(12.5, 6);
     // The rotation of 90 degrees the star started with: the first tip, which
     // starts at the top, is now at the right.
-    expect(star.xs[0]).toBeCloseTo(200, 6);
-    expect(star.ys[0]).toBeCloseTo(150, 6);
+    expect(outline[0].x).toBeCloseTo(200, 6);
+    expect(outline[0].y).toBeCloseTo(150, 6);
   });
 
   it("never rewrites a committed shape when an option changes", () => {
@@ -1332,16 +1353,15 @@ describe("DrawingEngine polygon and star tools", () => {
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
-    const committed = engine.listStrokes(layerId)[0];
-    const before = { xs: [...committed.xs], ys: [...committed.ys] };
+    const committed = engine.listElements(layerId).filter(isShape)[0];
+    const before = structuredClone(committed.geometry);
 
     engine.setShapeSides(3);
     engine.setShapeInnerRatio(0.9);
     engine.setShapeRotation(45);
 
-    const after = engine.listStrokes(layerId)[0];
-    expect(after.xs).toEqual(before.xs);
-    expect(after.ys).toEqual(before.ys);
+    const after = engine.listElements(layerId).filter(isShape)[0];
+    expect(after.geometry).toEqual(before);
     // And the option changes are not edits of their own.
     expect(engine.getState().history.depth).toBe(1);
   });
@@ -1351,23 +1371,23 @@ describe("DrawingEngine polygon and star tools", () => {
 
     engine.setTool("polygon");
     dragShape(engine, [150, 150], [250, 200], { alt: true });
-    const centred = engine.listStrokes(layerId)[0];
+    const centred = shapeRecordOutline(engine.listElements(layerId).filter(isShape)[0]);
     // The mean of the vertices is the shape's centre; the closing repeat is
     // not a vertex, so it is left out.
-    const vertices = centred.xs.length - 1;
+    const vertices = centred.length - 1;
     const centreX =
-      centred.xs.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+      centred.slice(0, vertices).reduce((sum, point) => sum + point.x, 0) / vertices;
     const centreY =
-      centred.ys.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+      centred.slice(0, vertices).reduce((sum, point) => sum + point.y, 0) / vertices;
     expect(centreX).toBeCloseTo(150, 6);
     expect(centreY).toBeCloseTo(150, 6);
 
     dragShape(engine, [100, 100], [200, 140], { shift: true });
-    const squared = engine.listStrokes(layerId)[1];
+    const squared = shapeRecordOutline(engine.listElements(layerId).filter(isShape)[1]);
     // Shift squares the drag's box (100 by 100), so the polygon is regular:
     // every vertex is the same distance from the box's centre.
-    for (let index = 0; index < squared.xs.length; index += 1) {
-      const radius = Math.hypot(squared.xs[index] - 150, squared.ys[index] - 150);
+    for (const point of squared) {
+      const radius = Math.hypot(point.x - 150, point.y - 150);
       expect(radius).toBeCloseTo(50, 6);
     }
   });
@@ -1378,42 +1398,52 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [100, 100]);
 
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.listElements(layerId).filter(isShape)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().file.dirty).toBe(false);
   });
 
-  it("draws a shape with the plain segment path, even when the brush is stamped", () => {
+  it("keeps the plain segment path even when the brush is stamped", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setBrush({ stamp: true });
     engine.setTool("star");
     dragShape(engine, [100, 100], [200, 200]);
 
-    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+    expect(engine.listElements(layerId).filter(isShape)[0].brush.stamp).toBe(false);
   });
 
-  it("selects a polygon and moves it in one undo step", () => {
+  it("selects a polygon with the shape editor and moves it in one undo step", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
-    const before = [...engine.listStrokes(layerId)[0].xs];
+    const before = structuredClone(engine.listElements(layerId).filter(isShape)[0].geometry);
 
-    engine.setTool("select");
-    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
-    engine.handlePointerSample(createSample({ phase: "move", docX: 280, docY: 280 }));
-    engine.handlePointerSample(createSample({ phase: "up", docX: 280, docY: 280 }));
-    expect(engine.getState().selectedStrokes).toBe(1);
+    engine.setTool("shapeEdit");
+    // A press on the outline selects the shape and starts a move. The point is
+    // a polygon vertex, so it is on the shape and clear of the frame handles.
+    const vertexX = 150 + 50 * Math.cos(-Math.PI / 10);
+    const vertexY = 150 + 50 * Math.sin(-Math.PI / 10);
+    engine.handlePointerSample(createSample({ phase: "down", docX: vertexX, docY: vertexY }));
+    expect(engine.getState().selectedShapeId).not.toBeNull();
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: vertexX + 20, docY: vertexY }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: vertexX + 20, docY: vertexY }),
+    );
 
-    const depth = engine.getState().history.depth;
-    engine.handlePointerSample(createSample({ phase: "down", docX: 150, docY: 150 }));
-    engine.handlePointerSample(createSample({ phase: "move", docX: 170, docY: 150 }));
-    engine.handlePointerSample(createSample({ phase: "up", docX: 170, docY: 150 }));
+    const moved = engine.listElements(layerId).filter(isShape)[0];
+    expect(moved.geometry).toMatchObject({ shape: "polygon", x: 120, y: 100 });
+    expect(moved.id).toBe(engine.getState().selectedShapeId);
+    expect(engine.getState().history.depth).toBe(2);
 
-    const moved = engine.listStrokes(layerId)[0];
-    expect(moved.xs[0]).toBeCloseTo(before[0] + 20, 6);
-    expect(engine.getState().history.depth).toBe(depth + 1);
+    engine.undo();
+    const restored = engine.listElements(layerId).filter(isShape)[0];
+    expect(restored.geometry).toEqual(before);
+    engine.redo();
+    expect(engine.listElements(layerId).filter(isShape)[0].geometry).toEqual(moved.geometry);
   });
 });
 
@@ -3884,7 +3914,8 @@ describe("DrawingEngine secondary colour", () => {
     shapeEngine.setTool("rectangle");
     shapeEngine.setSecondaryColor("#00ff00");
     drawStroke(shapeEngine, 2, { x: 2, y: 2 }, { x: 14, y: 12 });
-    expect(shapeEngine.listStrokes(shapeLayer)[0].brush.color).toBe("#00ff00");
+    const shape = shapeEngine.listElements(shapeLayer).filter(isShape)[0];
+    expect(shape.brush.color).toBe("#00ff00");
 
     const gradientEngine = createColourEngine();
     const gradientLayer = gradientEngine.getState().document.activeLayerId as string;

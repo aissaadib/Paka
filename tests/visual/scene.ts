@@ -10,6 +10,8 @@
  * tool's font policy is still open (decision D-1, question Q-a).
  */
 
+import type { ShapeGeometry } from "/src/core/document/types";
+
 export type SceneBlendMode = "normal" | "multiply" | "screen";
 
 /**
@@ -78,7 +80,25 @@ export interface SceneGradient {
   readonly opacity?: number;
 }
 
-export type SceneElement = SceneStroke | SceneFill | SceneGradient;
+/**
+ * A native shape: the primitive and its parameters, as the shape tools record
+ * them.
+ *
+ * The geometry is the document model's own `ShapeGeometry`, so a scene pins the
+ * exact record an editor would save - not a polyline approximating it. A shape
+ * has no live path (it is committed, not drawn), so a scene that declares one
+ * checks the rebuilt layer against the export.
+ */
+export interface SceneShape {
+  readonly kind: "shape";
+  readonly geometry: ShapeGeometry;
+  /** Brush settings; omitted fields come from the product's default brush. */
+  readonly brush?: Readonly<Record<string, unknown>>;
+  /** When true the outline's closed interior is filled. */
+  readonly fill?: boolean;
+}
+
+export type SceneElement = SceneStroke | SceneFill | SceneGradient | SceneShape;
 
 /**
  * A composition guide: a marker on one axis, in document pixels.
