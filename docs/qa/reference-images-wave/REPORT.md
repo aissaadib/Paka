@@ -127,7 +127,7 @@ Run on the final code commit, in this order:
 | `pnpm typecheck` | clean |
 | `pnpm test` | **98 files, 2449 tests passed** |
 | `pnpm test:visual` | **83 tests passed** (21 scenes, plus the shell/panel/rail specs) |
-| `pnpm build` | clean; `dist/assets/index-*.js` 579.78 kB (172.33 kB gzip), CSS 46.34 kB |
+| `pnpm build` | clean; `dist/assets/index-NpFh9J14.js` 579.80 kB (172.34 kB gzip), CSS 46.34 kB |
 | `pnpm tauri build` | clean; `paka.exe` and both bundles produced |
 
 Reference-specific suites:
@@ -187,6 +187,11 @@ confirms the document opens with no references and no hit-test target.
 
 The linker still warns `ld.exe: .rsrc merge failure: multiple non-default
 manifests` (pre-existing, non-fatal).
+
+The executable embeds the production bundle `index-NpFh9J14.js` (verified by
+searching the binary), which is the bundle built from the code of `71fafdc`.
+The commits after the packaged build touch only tests and documentation, so the
+smoke below ran against the code this report describes.
 
 **Method.** `paka.exe` was started with
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"` and
