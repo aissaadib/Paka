@@ -521,6 +521,21 @@ const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
 ]);
 
 /**
+ * The tools whose press only previews a native shape.
+ *
+ * A shape press places nothing until the release, so Escape can discard it
+ * exactly; a brush stroke, by contrast, has already inked the layer and is
+ * committed on release.
+ */
+const SHAPE_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
+  "line",
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+]);
+
+/**
  * Shown when a layer operation is refused because a pointer gesture is still
  * in flight. One explanation per gesture is enough; see
  * `refuseLayerChangeDuringGesture`.
@@ -900,6 +915,15 @@ export class DrawingEngine implements StrokeSource {
    * the same parameters. `null` between gestures.
    */
   private activeShapeSpec: ShapeGeometry | null = null;
+  /**
+   * True between a shape tool's press and its release.
+   *
+   * The preview stroke alone cannot say this: a press that has not moved yet
+   * has no geometry. The flag is what lets Escape discard an abandoned shape
+   * press, and it is cleared by every path that ends one - release, cancel,
+   * a lost capture or a tool switch.
+   */
+  private shapePressActive = false;
   /**
    * The decoded surfaces of the document's references.
    *
@@ -2538,6 +2562,7 @@ export class DrawingEngine implements StrokeSource {
     this.beginGesture();
     this.strokeBuilder = null;
     this.activeShapeSpec = null;
+    this.shapePressActive = true;
     this.activeStroke = stroke;
     this.renderer?.beginStroke(stroke);
   }
@@ -2583,6 +2608,7 @@ export class DrawingEngine implements StrokeSource {
   private finishShape(): void {
     const stroke = this.activeStroke;
     const geometry = this.activeShapeSpec;
+    this.shapePressActive = false;
     this.strokeBuilder = null;
     this.activeStroke = null;
     this.activeShapeSpec = null;
@@ -2636,6 +2662,7 @@ export class DrawingEngine implements StrokeSource {
 
   /** Discards the in-progress shape without touching the layer. */
   private cancelShape(): void {
+    this.shapePressActive = false;
     this.strokeBuilder = null;
     this.activeStroke = null;
     this.activeShapeSpec = null;
@@ -3373,11 +3400,36 @@ export class DrawingEngine implements StrokeSource {
     }
     this.strokeBuilder = null;
     this.activeStroke = null;
+    this.shapePressActive = false;
     // A shape preview is carried in the same stroke buffer, so cancelling the
     // stroke must forget its geometry too: otherwise the next release would
     // commit a shape the user had already abandoned.
     this.activeShapeSpec = null;
     this.renderer?.cancelStroke();
+  }
+
+  /**
+   * Discards a shape press that has not been released.
+   *
+   * A shape tool places nothing on the layer while the pointer is down, so
+   * Escape can throw the preview away exactly - unlike a brush stroke, which
+   * has already inked the layer and is committed on release. Returns whether
+   * a press was in flight, so the caller can let Escape fall through to its
+   * other meanings when it was not.
+   *
+   * The active tool is reset as well as the engine, so the tool forgets its
+   * anchor: moving the still-captured pointer after Escape cannot revive the
+   * abandoned outline, and the release commits nothing.
+   */
+  cancelShapeCreation(): boolean {
+    if (!this.shapePressActive || !SHAPE_TOOL_IDS.has(this.currentToolId)) {
+      return false;
+    }
+    this.shapePressActive = false;
+    this.activeTool().reset(this.toolContext);
+    this.publish();
+    this.requestRender();
+    return true;
   }
 
   // ---------------------------------------------------------------- selection

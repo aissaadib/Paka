@@ -16,7 +16,8 @@
  *   Ctrl+Shift+H   flip the selection horizontally
  *   Ctrl+Shift+V   flip the selection vertically
  *   Escape         clear the selection (with the guides tool: cancel the
- *                  guide drag and clear the guide selection)
+ *                  guide drag and clear the guide selection; with a shape
+ *                  tool: discard the outline that has not been released)
  *   Delete         delete the selected strokes (with the guides tool: the
  *                  selected guide)
  *   Ctrl+Z         undo

@@ -201,6 +201,32 @@ describe("creating native shapes", () => {
     expect(engine.getState().history.depth).toBe(0);
   });
 
+  it("discards an unreleased shape on Escape and stays usable afterwards", () => {
+    const { engine, layerId } = createEditor();
+    engine.setTool("rectangle");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 150 }));
+
+    // Mid-drag: the preview is in flight and nothing is committed.
+    expect(engine.cancelShapeCreation()).toBe(true);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+
+    // The release after Escape must not revive the abandoned outline.
+    engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 150 }));
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
+    expect(engine.getState().history.depth).toBe(0);
+
+    // The tool still draws: its anchor was forgotten, not just the preview.
+    drag(engine, [300, 300], [400, 350]);
+    expect(shapesOf(engine, layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+
+    // A second Escape with no press in flight is not a shape cancel, so the
+    // action registry can fall through to its other meanings.
+    expect(engine.cancelShapeCreation()).toBe(false);
+  });
+
   it("keeps the modifiers' geometry: Shift squares, Alt centres, Shift snaps a line", () => {
     const { engine, layerId } = createEditor();
 

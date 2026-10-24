@@ -201,6 +201,13 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     label: "Escape",
     shortcuts: [key("escape", "Escape")],
     run: ({ actions, engine }) => {
+      // A shape tool's press is only a preview, so Escape discards it instead
+      // of letting the release commit an outline the user abandoned. The call
+      // is false when no shape press is in flight, so Escape keeps its other
+      // meanings below.
+      if (engine.cancelShapeCreation()) {
+        return;
+      }
       // The guides tool owns Escape while it is active: it cancels the drag in
       // flight and clears the guide selection.
       if (engine.getState().toolId === "guides") {

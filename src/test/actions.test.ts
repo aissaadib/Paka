@@ -26,6 +26,8 @@ let state: FakeState;
 let actions: EditorActions;
 let engine: DrawingEngine;
 let file: FileActionHandlers;
+/** Whether the fake engine reports an unreleased shape press. */
+let shapePressActive: boolean;
 
 beforeEach(() => {
   state = {
@@ -39,6 +41,7 @@ beforeEach(() => {
     gridSnapping: false,
     brushSize: 6,
   };
+  shapePressActive = false;
   actions = {
     setTool: vi.fn(),
     setBrush: vi.fn(),
@@ -121,6 +124,7 @@ beforeEach(() => {
     rotateSelection: vi.fn(),
   };
   engine = {
+    cancelShapeCreation: () => shapePressActive,
     getState: () =>
       ({
         document: { activeLayerId: state.activeLayerId },
@@ -287,6 +291,13 @@ describe("document and view commands", () => {
   it("clears the selection otherwise", () => {
     press("escape", { code: "Escape", ctrl: false, meta: false });
     expect(actions.clearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("discards an unreleased shape press before clearing the selection", () => {
+    state.toolId = "rectangle";
+    shapePressActive = true;
+    press("escape", { code: "Escape", ctrl: false, meta: false });
+    expect(actions.clearSelection).not.toHaveBeenCalled();
   });
 
   it("deletes a selected guide before touching strokes", () => {
