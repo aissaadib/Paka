@@ -238,6 +238,20 @@ describe("painting references", () => {
     expect(squares).toHaveLength(4);
     expect(harness.display.named("arc")).toHaveLength(1);
   });
+
+  it("frames nothing when the selected reference is hidden", () => {
+    const harness = createHarness([reference({ visible: false })]);
+    harness.renderer.setSelectedReference("reference-1");
+
+    harness.renderer.render();
+
+    // The chrome follows the picture: a hidden reference leaves no frame or
+    // handles floating over the artwork.
+    expect(harness.display.named("arc")).toHaveLength(0);
+    expect(
+      harness.display.named("rect").filter((call) => call.args[2] === 8 && call.args[3] === 8),
+    ).toHaveLength(0);
+  });
 });
 
 describe("export isolation", () => {

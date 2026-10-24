@@ -4150,7 +4150,13 @@ export class DrawingEngine implements StrokeSource {
   /** The handle of the selected reference a press grabs, or `null`. */
   findReferenceHandleAt(docX: number, docY: number): ReferenceHandleId | null {
     const reference = this.selectedReference();
-    return reference === null ? null : findReferenceHandle(reference, this.viewport, docX, docY);
+    // A hidden reference shows no chrome, so it has no grabbable handle: the
+    // frame and the hit-test must agree, or a press would grab something the
+    // user cannot see.
+    if (reference === null || !reference.visible) {
+      return null;
+    }
+    return findReferenceHandle(reference, this.viewport, docX, docY);
   }
 
   /**

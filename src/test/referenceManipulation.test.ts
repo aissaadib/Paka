@@ -520,6 +520,19 @@ describe("manipulating a reference", () => {
     expect(engine.findReference(id)?.behind).toBe(false);
   });
 
+  it("offers no handle while the selected reference is hidden", async () => {
+    const { engine, id } = await engineWithReference();
+    // The fixture's top-left corner, where a handle is grabbable when shown.
+    const corner = { x: 200, y: 200 };
+    expect(engine.findReferenceHandleAt(corner.x, corner.y)).not.toBeNull();
+
+    engine.setReferenceVisible(id, false);
+
+    // The frame and the hit-test agree: a hidden reference has no chrome, so a
+    // press cannot grab a handle the user cannot see.
+    expect(engine.findReferenceHandleAt(corner.x, corner.y)).toBeNull();
+  });
+
   it("coalesces a slider run into one step", async () => {
     const { engine, id } = await engineWithReference();
     const depth = engine.getState().history.depth;

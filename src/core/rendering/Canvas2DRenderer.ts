@@ -1186,6 +1186,12 @@ export class Canvas2DRenderer implements DrawingRenderer {
     if (!reference) {
       return;
     }
+    // A hidden reference is not on the canvas, so it must not leave a frame
+    // and handles floating over the artwork either: the chrome follows the
+    // picture it belongs to.
+    if (!reference.visible) {
+      return;
+    }
     const handles = referenceHandles(reference, this.viewport);
     const size = HANDLE_SIZE_PX / scale;
     const radius = ROTATION_HANDLE_RADIUS_PX / scale;
