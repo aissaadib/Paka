@@ -13,6 +13,7 @@ export type ToolId =
   | "gradient"
   | "picker"
   | "guides"
+  | "reference"
   | "pan";
 
 export interface ToolDefinition {

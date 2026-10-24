@@ -29,13 +29,25 @@ function tabNames(page: Page) {
 
 test("dragging a tab reorders the dock", async ({ page }) => {
   await openApp(page);
-  expect(await tabNames(page)).toEqual(["Color", "Brushes", "Navigator", "Shortcuts"]);
+  expect(await tabNames(page)).toEqual([
+    "Color",
+    "Brushes",
+    "References",
+    "Navigator",
+    "Shortcuts",
+  ]);
 
   const brushes = page.getByRole("tab", { name: "Brushes" });
   const color = page.getByRole("tab", { name: "Color" });
   await brushes.dragTo(color, { targetPosition: { x: 2, y: 10 } });
 
-  expect(await tabNames(page)).toEqual(["Brushes", "Color", "Navigator", "Shortcuts"]);
+  expect(await tabNames(page)).toEqual([
+    "Brushes",
+    "Color",
+    "References",
+    "Navigator",
+    "Shortcuts",
+  ]);
 });
 
 test("a panel can be floated, moved and docked again", async ({ page }) => {
@@ -47,7 +59,7 @@ test("a panel can be floated, moved and docked again", async ({ page }) => {
   const floating = page.locator('.floating-panel[data-panel-id="color"]');
   await expect(floating).toBeVisible();
   await expect(page.getByRole("tab", { name: "Color" })).toHaveCount(0);
-  expect(await tabNames(page)).toEqual(["Brushes", "Navigator", "Shortcuts"]);
+  expect(await tabNames(page)).toEqual(["Brushes", "References", "Navigator", "Shortcuts"]);
 
   const before = await floating.boundingBox();
   await floating.getByRole("heading", { name: "Color" }).dragTo(page.locator("body"), {
@@ -59,7 +71,13 @@ test("a panel can be floated, moved and docked again", async ({ page }) => {
   await floating.getByRole("button", { name: "Dock Color" }).click();
   await expect(floating).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Color" })).toHaveCount(1);
-  expect(await tabNames(page)).toEqual(["Brushes", "Navigator", "Shortcuts", "Color"]);
+  expect(await tabNames(page)).toEqual([
+    "Brushes",
+    "References",
+    "Navigator",
+    "Shortcuts",
+    "Color",
+  ]);
 });
 
 test("dragging a tab onto the canvas floats it", async ({ page }) => {
@@ -90,5 +108,11 @@ test("the Panels menu resets the arrangement", async ({ page }) => {
   await page.getByRole("menuitem", { name: "Reset Panel Layout" }).click();
 
   await expect(page.locator('.floating-panel[data-panel-id="color"]')).toHaveCount(0);
-  expect(await tabNames(page)).toEqual(["Color", "Brushes", "Navigator", "Shortcuts"]);
+  expect(await tabNames(page)).toEqual([
+    "Color",
+    "Brushes",
+    "References",
+    "Navigator",
+    "Shortcuts",
+  ]);
 });

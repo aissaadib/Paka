@@ -24,6 +24,7 @@ import type {
 } from "../document/types";
 import { isFillPatch, isGradient } from "../document/types";
 import type { SelectionHandles } from "../document/selectionHandles";
+import { referenceHandles } from "../reference/geometry";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
 import { overlaysForLayer, type OverlayPaintContext } from "../shell/overlayRegistry";
@@ -208,6 +209,16 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private readonly textureTiles = new Map<number, HTMLCanvasElement>();
 
   private doc: DrawingDocument | null = null;
+  /**
+   * The decoded picture of each reference, keyed by reference id.
+   *
+   * The document says which references exist and where they sit; this map
+   * says which of them have pixels to draw. A reference without an entry (its
+   * picture has not decoded yet) is simply not painted.
+   */
+  private referenceSources: ReadonlyMap<string, CanvasImageSource> = new Map();
+  /** The reference the reference tool has framed, if any. */
+  private selectedReferenceId: string | null = null;
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private devicePixelRatio = 1;
   private activeStroke: StrokeRecord | null = null;
@@ -572,6 +583,31 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
+   * Sets the decoded pictures of the document's references.
+   *
+   * Display only, like the guides: the pictures are drawn on the display
+   * canvas, never into a layer surface, and `composeDocumentImage` never asks
+   * for them. The map is replaced rather than mutated, so a stale entry cannot
+   * outlive the reference it belonged to.
+   */
+  setReferenceSources(sources: ReadonlyMap<string, CanvasImageSource>): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.referenceSources = sources;
+    this.requestFrame();
+  }
+
+  /** Frames a reference on the canvas, or clears the frame with `null`. */
+  setSelectedReference(referenceId: string | null): void {
+    if (this.destroyed || referenceId === this.selectedReferenceId) {
+      return;
+    }
+    this.selectedReferenceId = referenceId;
+    this.requestFrame();
+  }
+
+  /**
    * Sets the grid's visibility and spacing.
    *
    * Overlay only, like the guides: the grid is drawn on the display canvas and
@@ -621,13 +657,19 @@ export class Canvas2DRenderer implements DrawingRenderer {
 
     this.paintOverlays(ctx, "under", scale);
 
-    this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
+    this.paintDocument(
+      ctx,
+      this.activeStroke?.erase === true ? null : this.activeStroke,
+      true,
+    );
 
     this.paintGrid(ctx, scale);
 
     this.paintGuides(ctx, scale);
 
     this.paintSelection(ctx, scale);
+
+    this.paintReferenceSelection(ctx, scale);
 
     // Hairline document boundary: exactly one device pixel at any zoom.
     ctx.lineWidth = 1 / scale;
@@ -1035,7 +1077,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * surface, which is what this loop composites. Export passes no preview, so
    * an in-flight stroke never leaks into a PNG.
    */
-  private paintDocument(ctx: CanvasRenderingContext2D, preview: StrokeRecord | null = null): void {
+  private paintDocument(
+    ctx: CanvasRenderingContext2D,
+    preview: StrokeRecord | null = null,
+    /**
+     * Whether the reference images are painted around the layers.
+     *
+     * Only `render()` passes `true`. The export path (`composeDocumentImage`)
+     * leaves it off, so a reference is excluded from a PNG **by construction**
+     * rather than by a flag someone has to remember to clear.
+     */
+    includeReferences = false,
+  ): void {
     const doc = this.doc;
     if (!doc) {
       return;
@@ -1044,14 +1097,135 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = doc.background;
     ctx.fillRect(0, 0, doc.width, doc.height);
 
+    if (includeReferences) {
+      this.paintReferences(ctx, doc, true);
+    }
+
     this.paintLayerNodes(ctx, doc.layers, {
       preview,
       depth: 0,
       probeOffset: null,
     });
 
+    if (includeReferences) {
+      this.paintReferences(ctx, doc, false);
+    }
+
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Paints the references on one side of the artwork.
+   *
+   * The paper clip is applied once for the whole pass: a reference may hang
+   * over the edge, but only the part on the paper is drawn. The placement is
+   * the model's rectangle, turned about its centre; the decoded picture is
+   * stretched into that rectangle exactly as it is on screen, so the reference
+   * sits over the same artwork at every zoom.
+   *
+   * This method is only reachable from `render()` (through the
+   * `includeReferences` flag), so it can never write into a layer surface or
+   * into the export composite.
+   */
+  private paintReferences(
+    ctx: CanvasRenderingContext2D,
+    doc: DrawingDocument,
+    behind: boolean,
+  ): void {
+    const items = doc.references.filter(
+      (reference) => reference.behind === behind && reference.visible,
+    );
+    if (items.length === 0) {
+      return;
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, doc.width, doc.height);
+    ctx.clip();
+    for (const reference of items) {
+      const source = this.referenceSources.get(reference.id);
+      if (!source) {
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = reference.opacity;
+      ctx.globalCompositeOperation = compositeOperationFor(reference.blendMode);
+      ctx.translate(reference.x + reference.width / 2, reference.y + reference.height / 2);
+      if (reference.rotation !== 0) {
+        ctx.rotate((reference.rotation * Math.PI) / 180);
+      }
+      ctx.drawImage(
+        source,
+        -reference.width / 2,
+        -reference.height / 2,
+        reference.width,
+        reference.height,
+      );
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Frames the selected reference: its rotated outline, a square on each
+   * corner and the rotation handle beyond the top edge.
+   *
+   * Overlay only, like the stroke selection: it is painted on the display
+   * canvas and never reaches a layer surface or an export.
+   */
+  private paintReferenceSelection(ctx: CanvasRenderingContext2D, scale: number): void {
+    const doc = this.doc;
+    const id = this.selectedReferenceId;
+    if (!doc || id === null) {
+      return;
+    }
+    const reference = doc.references.find((item) => item.id === id);
+    if (!reference) {
+      return;
+    }
+    const handles = referenceHandles(reference, this.viewport);
+    const size = HANDLE_SIZE_PX / scale;
+    const radius = ROTATION_HANDLE_RADIUS_PX / scale;
+    const corners = handles.corners;
+
+    ctx.save();
+    ctx.strokeStyle = SELECTION_COLOR;
+    ctx.fillStyle = HANDLE_FILL_COLOR;
+    ctx.lineWidth = 1 / scale;
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    for (let index = 1; index < corners.length; index += 1) {
+      ctx.lineTo(corners[index].x, corners[index].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    const topMid = {
+      x: (corners[0].x + corners[1].x) / 2,
+      y: (corners[0].y + corners[1].y) / 2,
+    };
+    ctx.beginPath();
+    ctx.moveTo(topMid.x, topMid.y);
+    ctx.lineTo(handles.rotation.x, handles.rotation.y);
+    ctx.stroke();
+
+    for (const corner of corners) {
+      ctx.beginPath();
+      ctx.rect(corner.x - size / 2, corner.y - size / 2, size, size);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(handles.rotation.x, handles.rotation.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   /**

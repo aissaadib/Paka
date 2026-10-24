@@ -31,6 +31,7 @@ import {
   type DecodedReference,
 } from "./decode";
 import type { ReferenceImage, ReferenceImagePatch } from "./types";
+import { normalizeReferenceRotation } from "./geometry";
 
 /** How a new reference is described to {@link createReferenceImage}. */
 export interface ReferenceImageOptions {
@@ -50,6 +51,10 @@ export interface ReferenceImageOptions {
   readonly width?: number;
   /** Displayed height, in document pixels. Defaults to the natural height. */
   readonly height?: number;
+  /** Rotation about the centre, in degrees clockwise. Defaults to upright. */
+  readonly rotation?: number;
+  /** The encoded file the reference was imported from. */
+  readonly source?: ReferenceImage["source"];
   /** How opaque the reference is drawn, `0..1`. Defaults to fully opaque. */
   readonly opacity?: number;
   /** The blend mode the reference is composited with. Defaults to `normal`. */
@@ -82,6 +87,8 @@ export function createReferenceImage(
     height: options.height ?? naturalHeight,
     naturalWidth,
     naturalHeight,
+    rotation: normalizeReferenceRotation(options.rotation ?? 0),
+    ...(options.source ? { source: options.source } : {}),
     opacity: options.opacity ?? 1,
     blendMode: options.blendMode ?? "normal",
     behind: options.behind ?? false,
@@ -342,6 +349,30 @@ export class ReferenceImageStore {
    */
   over(): readonly ReferenceImage[] {
     return this.items.filter((reference) => !reference.behind);
+  }
+
+  /**
+   * Replaces the list with the document's, keeping the decoded pixels of the
+   * ids that are still there.
+   *
+   * The document owns which references exist and where they sit; this store
+   * owns the decoded surfaces. Undo, redo and a reopened project all replace
+   * the list, so the two must be reconciled without throwing away (or
+   * double-counting) the pixels of a reference that survived.
+   */
+  sync(references: readonly ReferenceImage[]): void {
+    const kept = new Set(references.map((reference) => reference.id));
+    for (const id of [...this.decoded.keys()]) {
+      if (kept.has(id)) {
+        continue;
+      }
+      const decoded = this.decoded.get(id);
+      if (decoded) {
+        this.decodedPixels -= decoded.width * decoded.height;
+      }
+      this.decoded.delete(id);
+    }
+    this.items = [...references];
   }
 
   /** Removes every reference and releases every pixel. */

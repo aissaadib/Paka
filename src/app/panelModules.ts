@@ -19,6 +19,7 @@ import { BUNDLED_PRESETS } from "../core/brushes/bundledPresets";
 import { findPanel } from "../core/shell/panelRegistry";
 import { registerBrushPresetPanel } from "../features/brushes/BrushPresetPanel";
 import "../features/navigator/NavigatorPanel";
+import "../features/reference/ReferencePanel";
 import "../features/shortcuts/ShortcutEditorPanel";
 
 /*

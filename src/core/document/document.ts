@@ -212,6 +212,7 @@ export function createDocument(options: CreateDocumentOptions): DrawingDocument 
     layers: [firstLayer],
     activeLayerId: firstLayer.id,
     guides: [],
+    references: [],
   };
 }
 

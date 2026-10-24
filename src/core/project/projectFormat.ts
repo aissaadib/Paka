@@ -54,6 +54,12 @@ import { isGroup, paintableLayers } from "../document/layerGroups";
 import { isFillPatch, isGradient } from "../document/types";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import { isBrushTipShape } from "../rendering/brushTip";
+import {
+  MAX_REFERENCE_BYTES,
+  MAX_TOTAL_REFERENCE_PIXELS,
+} from "../reference/decode";
+import type { ReferenceImage } from "../reference/types";
+import { normalizeReferenceRotation } from "../reference/geometry";
 import type { BrushSettings, BrushTipShape } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
@@ -144,9 +150,17 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * version 6. That is why the version was not bumped for them. A file without
  * the field opens with no guides at all.
  *
+ * Version 14 adds `document.references`: the reference images, each with its
+ * placement and its original encoded bytes. Unlike the guides, the field is
+ * **not** additive: a reader that ignores it would drop the artist's
+ * references the next time the project was saved. A file that claims an older
+ * version and carries references is therefore refused, exactly as a group in a
+ * pre-13 file is, and an older build refuses a v14 file through the version
+ * gate instead of silently losing the images.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 13;
+export const PROJECT_VERSION = 14;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -161,6 +175,18 @@ export const MAX_PROJECT_GRADIENT_STOPS = 64;
  * ceiling is the same kind of guard the sample and fill-pixel ceilings are.
  */
 export const MAX_PROJECT_GUIDES = 10_000;
+
+/**
+ * Upper bound on the references a file may carry.
+ *
+ * A reference is a picture, not a handful of bytes, so the count is small and
+ * the *pixels* are bounded too: {@link MAX_PROJECT_REFERENCE_PIXELS} is the
+ * same session budget the decoder enforces, and the encoded bytes of one
+ * reference are bounded by the decoder's own byte limit.
+ */
+export const MAX_PROJECT_REFERENCES = 32;
+/** Upper bound on the decoded pixels of every reference in one file. */
+export const MAX_PROJECT_REFERENCE_PIXELS = MAX_TOTAL_REFERENCE_PIXELS;
 
 export interface SerializedStroke {
   readonly kind: "stroke";
@@ -255,6 +281,14 @@ export interface SerializedProject {
      * why the version was not bumped.
      */
     readonly guides: readonly SerializedGuide[];
+    /**
+     * The reference images, in drawing order.
+     *
+     * Required from version 14 on: a file without the field (or claiming an
+     * older version) carries no references, and one that claims an older
+     * version while carrying them is refused.
+     */
+    readonly references: readonly SerializedReference[];
   };
   /** Bottom-first, matching the in-memory document order. */
   readonly layers: readonly SerializedLayer[];
@@ -265,6 +299,32 @@ export interface SerializedGuide {
   readonly id: string;
   readonly axis: GuideAxis;
   readonly position: number;
+}
+
+/**
+ * A reference image: its placement and the file it came from.
+ *
+ * `data` is the original encoded file, base64, exactly as imported. It is not
+ * a path: the project is portable, so it reopens on another machine or after
+ * the original file moved. `naturalWidth`/`naturalHeight` are the decoded
+ * picture's own size, which is what the placement is relative to.
+ */
+export interface SerializedReference {
+  readonly id: string;
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly naturalWidth: number;
+  readonly naturalHeight: number;
+  readonly rotation: number;
+  readonly opacity: number;
+  readonly blendMode: ReferenceImage["blendMode"];
+  readonly behind: boolean;
+  readonly visible: boolean;
+  readonly mimeType: string;
+  readonly data: string;
 }
 
 export interface ParsedProject {
@@ -520,6 +580,7 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         axis: guide.axis,
         position: guide.position,
       })),
+      references: document.references.map(serializeReference),
     },
     layers: document.layers.map((layer) => serializeLayer(layer, strokes)),
   };
@@ -554,6 +615,34 @@ function serializeLayer(layer: Layer, strokes: StrokeSource): SerializedLayer {
     blendMode: layer.blendMode,
     kind: "layer",
     elements: strokes.listElements(layer.id).map(serializeElement),
+  };
+}
+
+/**
+ * Writes one reference: its placement and the file's original bytes.
+ *
+ * The bytes are written even when they are empty, so the reader can refuse a
+ * reference that lost its picture instead of opening a placement with nothing
+ * to draw. Only the engine creates document references, and it always keeps
+ * the bytes it imported.
+ */
+function serializeReference(reference: ReferenceImage): SerializedReference {
+  return {
+    id: reference.id,
+    name: reference.name,
+    x: reference.x,
+    y: reference.y,
+    width: reference.width,
+    height: reference.height,
+    naturalWidth: reference.naturalWidth,
+    naturalHeight: reference.naturalHeight,
+    rotation: reference.rotation,
+    opacity: reference.opacity,
+    blendMode: reference.blendMode,
+    behind: reference.behind,
+    visible: reference.visible,
+    mimeType: reference.source?.mimeType ?? "",
+    data: reference.source?.base64 ?? "",
   };
 }
 
@@ -723,6 +812,7 @@ function readProject(
 
   const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, state.seenLayerIds, layers, warnings);
   const guides = readGuides(rawDocument.guides, warnings);
+  const references = readReferences(rawDocument.references, version, warnings);
 
   const document: DrawingDocument = {
     id: documentId,
@@ -733,6 +823,7 @@ function readProject(
     layers,
     activeLayerId,
     guides,
+    references,
   };
 
   return { document, elements, strokes, warnings };
@@ -1005,6 +1096,133 @@ function readGuides(value: unknown, warnings: string[]): Guide[] {
   });
 
   return guides;
+}
+
+/**
+ * Reads the reference images.
+ *
+ * A reference is a picture, so a malformed one is **refused**, not ignored: a
+ * project that silently dropped a reference would look different from the one
+ * the artist saved. The version gate is the same one groups use - a file that
+ * claims an older version cannot carry references, because an older build
+ * would have dropped them on the next save.
+ */
+function readReferences(
+  value: unknown,
+  version: number,
+  warnings: string[],
+): ReferenceImage[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (version < 14) {
+    // An older file that carries actual references is refused: an older build
+    // would have dropped them on the next save. An empty list is not content -
+    // a newer serializer writes it for a document without references - so it
+    // is read as "none" rather than treated as a version lie.
+    if (Array.isArray(value) && value.length === 0) {
+      return [];
+    }
+    fail("This project carries reference images, which require file version 14.");
+  }
+  if (!Array.isArray(value)) {
+    fail("The reference list must be an array.");
+  }
+  if (value.length > MAX_PROJECT_REFERENCES) {
+    fail(
+      `This project contains ${value.length} references, more than the ${MAX_PROJECT_REFERENCES} allowed.`,
+    );
+  }
+
+  const references: ReferenceImage[] = [];
+  const seenIds = new Set<string>();
+  let decodedPixels = 0;
+
+  value.forEach((raw, index) => {
+    const label = `Reference ${index + 1}`;
+    const record = asRecord(raw, label);
+    const id = readId(record.id, "reference");
+    if (seenIds.has(id)) {
+      fail(`${label} repeats the id "${id}".`);
+    }
+    seenIds.add(id);
+
+    let name = typeof record.name === "string" ? record.name.trim() : "";
+    if (name === "") {
+      name = `Reference ${index + 1}`;
+      warnings.push(`${label} had no name; it was called "${name}".`);
+    }
+
+    const x = readAnyNumber(record.x, `${label} x`);
+    const y = readAnyNumber(record.y, `${label} y`);
+    const width = readNumber(record.width, `${label} width`, 1, Number.MAX_SAFE_INTEGER);
+    const height = readNumber(record.height, `${label} height`, 1, Number.MAX_SAFE_INTEGER);
+    const naturalWidth = Math.round(
+      readNumber(record.naturalWidth, `${label} natural width`, 1, Number.MAX_SAFE_INTEGER),
+    );
+    const naturalHeight = Math.round(
+      readNumber(record.naturalHeight, `${label} natural height`, 1, Number.MAX_SAFE_INTEGER),
+    );
+    const rotation = normalizeReferenceRotation(
+      readAnyNumber(record.rotation, `${label} rotation`),
+    );
+    const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
+    const blendMode = readString(record.blendMode, `${label} blend mode`);
+    if (!isLayerBlendMode(blendMode)) {
+      fail(`${label} has an unknown blend mode "${blendMode}".`);
+    }
+    const behind = readBoolean(record.behind, `${label} behind flag`);
+    const visible = readBoolean(record.visible, `${label} visible flag`);
+
+    const mimeType = readString(record.mimeType, `${label} MIME type`);
+    if (!mimeType.startsWith("image/")) {
+      fail(`${label} does not say what kind of image it is.`);
+    }
+    const data = readString(record.data, `${label} image data`);
+    if (data === "") {
+      fail(`${label} carries no image data.`);
+    }
+    // The base64 text is bounded before it is decoded, so an enormous string
+    // cannot make the reader allocate the bytes it encodes.
+    if (data.length > Math.ceil(MAX_REFERENCE_BYTES / 3) * 4) {
+      fail(`${label} is larger than the ${Math.round(MAX_REFERENCE_BYTES / (1024 * 1024))} MB limit.`);
+    }
+    const bytes = base64ToBytes(data);
+    if (!bytes || bytes.length === 0) {
+      fail(`${label} has image data that is not valid base64.`);
+    }
+    if (bytes.length > MAX_REFERENCE_BYTES) {
+      fail(`${label} is larger than the ${Math.round(MAX_REFERENCE_BYTES / (1024 * 1024))} MB limit.`);
+    }
+
+    decodedPixels += naturalWidth * naturalHeight;
+    if (decodedPixels > MAX_PROJECT_REFERENCE_PIXELS) {
+      fail(
+        `The references in this project need more than the ${Math.round(
+          MAX_PROJECT_REFERENCE_PIXELS / (1024 * 1024),
+        )} megapixels the editor allows in one session.`,
+      );
+    }
+
+    references.push({
+      id,
+      name,
+      x,
+      y,
+      width,
+      height,
+      naturalWidth,
+      naturalHeight,
+      rotation,
+      opacity,
+      blendMode,
+      behind,
+      visible,
+      source: { mimeType, base64: data },
+    });
+  });
+
+  return references;
 }
 
 /** Keeps generated ids from colliding with ids that came out of a file. */

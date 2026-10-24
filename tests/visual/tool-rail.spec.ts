@@ -130,7 +130,7 @@ test("the arrow keys walk the rail", async ({ page }) => {
   expect(await focusedLabel(page)).toBe("Brush");
 
   await page.keyboard.press("End");
-  expect(await focusedLabel(page)).toBe("Guides");
+  expect(await focusedLabel(page)).toBe("Reference");
 
   await page.keyboard.press("Home");
   expect(await focusedLabel(page)).toBe("Brush");

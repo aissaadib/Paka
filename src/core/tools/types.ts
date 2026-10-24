@@ -14,6 +14,8 @@ import type { Viewport } from "../../types/viewport";
 import type { Guide, GuideAxis, LayerId } from "../document/types";
 import type { SelectionHandleId } from "../document/selectionHandles";
 import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
+import type { ReferenceImage } from "../reference/types";
+import type { ReferenceHandleId } from "../reference/geometry";
 
 export interface ToolContext {
   readonly viewport: Viewport;
@@ -180,6 +182,37 @@ export interface ToolContext {
   cancelGuideGesture(): void;
   /** Selects a guide, or clears the selection with `null`. */
   selectGuide(guideId: string | null): void;
+  /**
+   * The top-most visible reference under a document point, or `null`.
+   *
+   * Hidden references are not hit-tested: they are not on the canvas, so a
+   * press under one belongs to the artwork beneath it.
+   */
+  findReferenceAt(docX: number, docY: number): ReferenceImage | null;
+  /**
+   * The handle of the *selected* reference a press grabs, or `null`.
+   *
+   * The handles take precedence over the move gesture a press inside the
+   * frame would otherwise start, exactly as the selection's handles do.
+   */
+  findReferenceHandleAt(docX: number, docY: number): ReferenceHandleId | null;
+  /** Selects a reference, or clears the selection with `null`. */
+  selectReference(referenceId: string | null): void;
+  /**
+   * Starts moving, resizing or rotating a reference.
+   *
+   * A press with no handle grabs the top-most visible reference under the
+   * point and starts a move; a press with a handle transforms the selected
+   * one. Returns whether a gesture started, so the tool can tell a press on
+   * empty canvas from a manipulation.
+   */
+  beginReferenceGesture(sample: PointerSample, handle: ReferenceHandleId | null): boolean;
+  /** Previews the gesture at the pointer. Nothing enters history yet. */
+  updateReferenceGesture(sample: PointerSample): void;
+  /** Commits the gesture as one undoable step; a no-op drag commits nothing. */
+  finishReferenceGesture(): void;
+  /** Aborts the gesture, restoring the press-time document. */
+  cancelReferenceGesture(): void;
 }
 
 export interface Tool {

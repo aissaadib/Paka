@@ -7,6 +7,7 @@ import { GradientTool } from "./gradientTool";
 import { GuidesTool } from "./guidesTool";
 import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
+import { ReferenceTool } from "./referenceTool";
 import { SelectTool } from "./selectTool";
 import { ShapeTool } from "./shapeTool";
 import {
@@ -17,6 +18,7 @@ import {
   LINE_TOOL,
   POLYGON_TOOL,
   RECTANGLE_TOOL,
+  REFERENCE_TOOL,
   SELECT_TOOL,
   STAR_TOOL,
 } from "./toolDefinitions";
@@ -44,6 +46,8 @@ export function createToolRegistry(): ToolRegistry {
     picker: new PickerTool(),
     // Composition guides: a drag places one, a drag on one moves it.
     guides: new GuidesTool(GUIDES_TOOL),
+    // Reference images: a drag moves, resizes or rotates one.
+    reference: new ReferenceTool(REFERENCE_TOOL),
     pan: new PanTool(),
   };
 }

@@ -108,6 +108,8 @@ function createSpyRenderer(
     setSelectedGuide: (guideId) => {
       selectedGuides.push(guideId);
     },
+    setReferenceSources: () => {},
+    setSelectedReference: () => {},
     setGrid: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");

@@ -11,6 +11,8 @@ import {
   type DrawingEngineOptions,
   type EditorSnapshot,
   type NewDocumentOptions,
+  type ReferenceImportInput,
+  type ReferenceImportResult,
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
 import type { SelectionShape } from "../core/document/selectionModes";
@@ -107,6 +109,31 @@ export interface EditorActions {
   deleteSelection(): void;
   /** Removes the guide the guides tool has selected, as one undoable step. */
   deleteSelectedGuide(): void;
+  /**
+   * Imports a picture as a reference image, as one undoable step.
+   *
+   * The bytes come from the panel's file input: the engine validates and
+   * decodes them, and a refused file leaves the document untouched.
+   */
+  importReference(input: ReferenceImportInput): Promise<ReferenceImportResult>;
+  /** Selects a reference, or clears the reference selection with `null`. */
+  selectReference(referenceId: string | null): void;
+  /** Removes a reference, as one undoable step. */
+  removeReference(referenceId: string): void;
+  /** Removes the selected reference, as one undoable step. */
+  deleteSelectedReference(): void;
+  /** Shows or hides a reference, as one undoable step. */
+  setReferenceVisible(referenceId: string, visible: boolean): void;
+  /** Sets a reference's opacity, as one coalescing undoable step. */
+  setReferenceOpacity(referenceId: string, opacity: number): void;
+  /** Puts a reference behind the artwork or over it. */
+  setReferenceBehind(referenceId: string, behind: boolean): void;
+  /** Turns a reference, as one coalescing undoable step. */
+  setReferenceRotation(referenceId: string, degrees: number): void;
+  /** Renames a reference, as one undoable step. */
+  renameReference(referenceId: string, name: string): void;
+  /** Aborts a reference gesture in flight, restoring the document. */
+  cancelReferenceGesture(): void;
   /** Cancels the guide gesture in flight and clears the guide selection. */
   cancelGuideGesture(): void;
   /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
@@ -217,6 +244,32 @@ export function createEditor(options: EditorOptions = {}): Editor {
     },
     deleteSelectedGuide: () => {
       engine.deleteSelectedGuide();
+    },
+    importReference: (input) => engine.importReference(input),
+    selectReference: (referenceId) => engine.selectReference(referenceId),
+    removeReference: (referenceId) => {
+      engine.removeReference(referenceId);
+    },
+    deleteSelectedReference: () => {
+      engine.deleteSelectedReference();
+    },
+    setReferenceVisible: (referenceId, visible) => {
+      engine.setReferenceVisible(referenceId, visible);
+    },
+    setReferenceOpacity: (referenceId, opacity) => {
+      engine.setReferenceOpacity(referenceId, opacity);
+    },
+    setReferenceBehind: (referenceId, behind) => {
+      engine.setReferenceBehind(referenceId, behind);
+    },
+    setReferenceRotation: (referenceId, degrees) => {
+      engine.setReferenceRotation(referenceId, degrees);
+    },
+    renameReference: (referenceId, name) => {
+      engine.renameReference(referenceId, name);
+    },
+    cancelReferenceGesture: () => {
+      engine.cancelReferenceGesture();
     },
     cancelGuideGesture: () => {
       engine.cancelGuideGesture();

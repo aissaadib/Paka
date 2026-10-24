@@ -115,6 +115,17 @@ export interface DrawingRenderer {
    */
   setGrid(grid: GridSettings): void;
   /**
+   * Sets the decoded pictures of the document's references.
+   *
+   * Display only: the references are painted by `render()` around the layers
+   * and never by `composeDocumentImage`, so a PNG export cannot contain one.
+   * The document still says which references exist and where they sit; this
+   * map only supplies the pixels.
+   */
+  setReferenceSources(sources: ReadonlyMap<string, CanvasImageSource>): void;
+  /** Frames a reference on the display canvas, or clears the frame. */
+  setSelectedReference(referenceId: string | null): void;
+  /**
    * Composites paper and visible layers into a **new** canvas at document pixel
    * size (no viewport, no border, no in-progress stroke). Used by PNG export, so
    * it must not disturb the display, the document or the layer surfaces.

@@ -147,6 +147,17 @@ export function IconGuides(props: IconProps) {
   );
 }
 
+/** A picture in a frame: a reference image. */
+export function IconImage(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.2" />
+      <path d="M3.4 11.2 6.6 8l2.2 2.2 1.6-1.6 2.2 2.4" />
+      <circle cx="6" cy="6" r="0.9" />
+    </Icon>
+  );
+}
+
 export function IconUndo(props: IconProps) {
   return (
     <Icon {...props}>

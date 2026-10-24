@@ -186,7 +186,7 @@ test("the dock tabs switch panels without dropping the layers list", async ({ pa
   await openApp(page, { width: 960, height: 600 });
 
   const tabs = page.getByRole("tablist", { name: "Panels" }).getByRole("tab");
-  await expect(tabs).toHaveCount(4);
+  await expect(tabs).toHaveCount(5);
   await expect(page.getByRole("tab", { name: "Color" })).toHaveAttribute(
     "aria-selected",
     "true",
@@ -195,7 +195,7 @@ test("the dock tabs switch panels without dropping the layers list", async ({ pa
   // Every tab is a real button with a box, and switching keeps the layers
   // list where it was.
   const layersBefore = await page.locator(".side-panels__layers").boundingBox();
-  for (const name of ["Brushes", "Navigator", "Shortcuts", "Color"]) {
+  for (const name of ["Brushes", "References", "Navigator", "Shortcuts", "Color"]) {
     const tab = page.getByRole("tab", { name });
     const box = await tab.boundingBox();
     expect(box?.width ?? 0).toBeGreaterThan(20);

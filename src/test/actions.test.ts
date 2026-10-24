@@ -14,6 +14,7 @@ interface FakeState {
   activeLayerId: string | null;
   selectedStrokes: number;
   selectedGuideId: string | null;
+  selectedReferenceId: string | null;
   toolId: ToolId;
   gridVisible: boolean;
   gridSnapping: boolean;
@@ -30,6 +31,7 @@ beforeEach(() => {
     activeLayerId: "layer-1",
     selectedStrokes: 1,
     selectedGuideId: null,
+    selectedReferenceId: null,
     toolId: "brush",
     gridVisible: false,
     gridSnapping: false,
@@ -89,6 +91,16 @@ beforeEach(() => {
     deleteSelection: vi.fn(),
     deleteSelectedGuide: vi.fn(),
     cancelGuideGesture: vi.fn(),
+    importReference: vi.fn(),
+    selectReference: vi.fn(),
+    removeReference: vi.fn(),
+    deleteSelectedReference: vi.fn(),
+    setReferenceVisible: vi.fn(),
+    setReferenceOpacity: vi.fn(),
+    setReferenceBehind: vi.fn(),
+    setReferenceRotation: vi.fn(),
+    renameReference: vi.fn(),
+    cancelReferenceGesture: vi.fn(),
     nudgeSelection: vi.fn(),
     duplicateSelection: vi.fn(),
     flipSelection: vi.fn(),
@@ -101,6 +113,7 @@ beforeEach(() => {
         document: { activeLayerId: state.activeLayerId },
         selectedStrokes: state.selectedStrokes,
         selectedGuideId: state.selectedGuideId,
+        selectedReferenceId: state.selectedReferenceId,
         toolId: state.toolId,
         gridVisible: state.gridVisible,
         gridSnapping: state.gridSnapping,

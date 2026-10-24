@@ -145,6 +145,7 @@ describe("serializeProject", () => {
       "height",
       "id",
       "name",
+      "references",
       "width",
     ]);
 
@@ -1575,10 +1576,10 @@ describe("the composition guides in the project file", () => {
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
     // the extra blend modes, version 12 on the pressure curve, version 13 on
-    // the brush tip and version 13 on the layer groups; none of those bumps
-    // was for the guides, and a
-    // version-9 file that carries them still opens.
-    expect(PROJECT_VERSION).toBe(13);
+    // the brush tip and on the layer groups, and version 14 on the reference
+    // images; none of those bumps was for the guides, and a version-9 file
+    // that carries them still opens.
+    expect(PROJECT_VERSION).toBe(14);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),

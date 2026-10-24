@@ -52,7 +52,7 @@ import {
 import type { ShellSlotId } from "../shell/slots";
 
 /** The panels the shell can show. */
-export type PanelId = "color" | "brushes" | "layers" | "navigator";
+export type PanelId = "color" | "brushes" | "layers" | "references" | "navigator";
 
 /**
  * The icon a panel is drawn with.
@@ -60,7 +60,7 @@ export type PanelId = "color" | "brushes" | "layers" | "navigator";
  * A name rather than a component: the catalogue must stay free of React, so
  * the shell maps the name to a glyph.
  */
-export type PanelIconName = "palette" | "brush" | "layers" | "navigator";
+export type PanelIconName = "palette" | "brush" | "layers" | "image" | "navigator";
 
 /**
  * When a panel is mounted.
@@ -147,6 +147,21 @@ const PANEL_DEFINITIONS: readonly PanelDefinition[] = [
     // state to lose by unmounting it.
     mounting: "when-visible",
     description: "The layer list, its blend mode and its opacity.",
+  },
+  {
+    id: "references",
+    label: "References",
+    icon: "image",
+    slot: PANEL_SIDE_SLOT,
+    order: 15,
+    defaultVisible: true,
+    collapsible: true,
+    grow: false,
+    // The panel holds the file input and the last import's message; keeping it
+    // mounted means hiding the panel cannot lose a refusal the user still
+    // needs to read.
+    mounting: "always",
+    description: "Import reference images and manage the ones on the canvas.",
   },
   {
     id: "navigator",

@@ -110,6 +110,39 @@ export interface SceneGrid {
   readonly zoom?: number;
 }
 
+/**
+ * A reference image in a scene.
+ *
+ * The harness synthesizes the picture (a solid `color`, optionally with the
+ * left half in `accent`) instead of carrying a base64 file: a reference is
+ * drawn through `drawImage`, so a real canvas is a faithful stand-in and the
+ * scene stays readable.
+ *
+ * References are document metadata, not artwork: they are painted on the
+ * display canvas and never reach the exported composite. A scene that declares
+ * them therefore pins two pictures, like a scene with guides or a grid.
+ */
+export interface SceneReference {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** The picture's own size; the source canvas is built at this size. */
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  /** Clockwise rotation about the centre, in degrees. */
+  readonly rotation?: number;
+  readonly opacity?: number;
+  readonly blendMode?: SceneBlendMode;
+  /** Painted after the paper and before the layers when true. */
+  readonly behind?: boolean;
+  readonly visible?: boolean;
+  /** The picture's colour. */
+  readonly color: string;
+  /** An optional second colour for the left half, to make rotation visible. */
+  readonly accent?: string;
+}
+
 export interface SceneLayer {
   /** The layer's name; it is also the layer's identity in the document. */
   readonly id: string;
@@ -139,6 +172,8 @@ export interface Scene {
   readonly guides?: readonly SceneGuide[];
   /** The grid overlay; omitted means the document shows no grid. */
   readonly grid?: SceneGrid;
+  /** The reference images; omitted means the document has none. */
+  readonly references?: readonly SceneReference[];
 }
 
 /** True when the element is a stroke, which is the only kind with a live path. */
@@ -170,6 +205,10 @@ export interface SceneVerdict {
   readonly gridVisible: boolean;
   /** The grid did not change the export: it is display-only. */
   readonly gridNotExported: boolean;
+  /** The references changed the display: they are painted around the layers. */
+  readonly referencesVisible: boolean;
+  /** The references did not change the export: they are not artwork. */
+  readonly referencesNotExported: boolean;
   readonly liveVsRebuiltDiffering: number;
   readonly rebuiltVsExportedDiffering: number;
   readonly firstDifference: { x: number; y: number } | null;

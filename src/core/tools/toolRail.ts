@@ -111,8 +111,8 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
   {
     id: "assist",
     label: "Assist",
-    description: "Composition guides for the layout",
-    toolIds: ["guides"],
+    description: "Composition guides and reference images for the layout",
+    toolIds: ["guides", "reference"],
     defaultToolId: "guides",
     collapsed: false,
   },

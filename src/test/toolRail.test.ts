@@ -73,6 +73,10 @@ describe("the tool groups", () => {
     expect(toolGroupOf("select").toolIds).toEqual(["select"]);
   });
 
+  it("puts the reference images beside the composition guides", () => {
+    expect(toolGroupOf("reference").id).toBe("assist");
+  });
+
   it("collapses only the shape family", () => {
     const collapsed = TOOL_GROUPS.filter((group) => group.collapsed);
     expect(collapsed.map((group) => group.id)).toEqual(["shape"]);
@@ -98,7 +102,7 @@ describe("the tool groups", () => {
 describe("the rail's slots", () => {
   it("shows one button per tool, and one for the whole shape family", () => {
     const slots = toolRailSlots("brush");
-    expect(slots).toHaveLength(9);
+    expect(slots).toHaveLength(10);
     expect(slots.filter((slot) => slot.isMenu)).toHaveLength(1);
   });
 

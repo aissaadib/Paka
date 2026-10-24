@@ -68,6 +68,7 @@ function reference(overrides: Partial<ReferenceImage> = {}): ReferenceImage {
     height: 100,
     naturalWidth: 400,
     naturalHeight: 200,
+    rotation: 0,
     opacity: 1,
     blendMode: "normal",
     behind: false,
@@ -105,7 +106,7 @@ const BMP_BYTES = new Uint8Array([0x42, 0x4d, 0, 0]);
 const TEXT_BYTES = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20]); // "hello "
 
 describe("the reference model", () => {
-  it("holds a placement, an opacity, a blend mode and a side of the drawing", () => {
+  it("holds a placement, a rotation, an opacity, a blend mode and a side of the drawing", () => {
     expect(Object.keys(reference()).sort()).toEqual([
       "behind",
       "blendMode",
@@ -115,6 +116,7 @@ describe("the reference model", () => {
       "naturalHeight",
       "naturalWidth",
       "opacity",
+      "rotation",
       "visible",
       "width",
       "x",
@@ -160,10 +162,17 @@ describe("the reference model", () => {
     expect(true).toBe(true);
   });
 
-  it("is display only: a document carries no references", () => {
-    // @ts-expect-error a drawing document holds no reference images
-    const noReferences: DrawingDocument["references"] = [];
-    expect(noReferences).toEqual([]);
+  it("is document metadata: it travels with the document but is never a layer", () => {
+    // The two halves of the contract. A reference is document state - it is
+    // saved and undone with the document - but it is not layer content: it is
+    // never rasterized into a surface, so it cannot reach the artwork or an
+    // export. If the models were ever merged, this file would stop compiling.
+    const document: DrawingDocument["references"] = [reference()];
+    expect(document).toHaveLength(1);
+    const acceptsLayerElement = (_element: LayerElement): void => undefined;
+    // @ts-expect-error a reference image is not a layer element
+    acceptsLayerElement(reference());
+    expect(true).toBe(true);
   });
 });
 

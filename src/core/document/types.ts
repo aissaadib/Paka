@@ -9,6 +9,7 @@
  */
 
 import type { BrushSettings } from "../../types/brush";
+import type { ReferenceImage } from "../reference/types";
 
 export type LayerId = string;
 
@@ -130,6 +131,19 @@ export interface DrawingDocument {
    * delete. Empty by default.
    */
   readonly guides: readonly Guide[];
+  /**
+   * The reference images placed on the document.
+   *
+   * Document-level metadata, like the guides: a reference is not layer
+   * content, it is never rasterized into a layer surface, and it is not part
+   * of the exported artwork. It *is* saved with the document, because it is
+   * part of what the artist set up: the placement and the encoded file travel
+   * together, so a project reopens with the same references.
+   *
+   * The list is the drawing order: the first is the bottom-most. Each
+   * reference decides whether it sits behind the artwork or over it.
+   */
+  readonly references: readonly ReferenceImage[];
 }
 
 /**

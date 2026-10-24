@@ -250,6 +250,7 @@ version described under [Versioning](#versioning).
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
 | `guides` | array | The composition guides. **Additive**: a file without the field opens with no guides. |
+| `references` | array | The reference images, with their placement and their encoded picture. **Required from version 14**; a version-13 file has no field and opens with no references. |
 
 #### `guides[]`
 
@@ -273,6 +274,40 @@ id or a duplicate id is dropped with a warning rather than making the file
 unopenable - a decorative overlay must never cost the user their drawing. A
 file with more than 10,000 guides is **refused**, like the sample and
 fill-pixel ceilings.
+
+#### `references[]`
+
+A reference image is a picture the artist placed on the canvas to trace or
+colour-pick from. It is **document metadata**, like a guide, and not artwork: it
+is painted around the layers on the display canvas and never reaches a layer
+surface or a PNG export.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Reference id; must be unique within the file. |
+| `name` | string | The label shown in the panel. A missing or blank name is replaced with `Reference N` and a warning. |
+| `x`, `y` | number | Top-left of the unrotated placement, in document pixels. May be negative: a reference may hang over the edge of the paper. |
+| `width`, `height` | number | The displayed size, in document pixels. Must be positive. |
+| `naturalWidth`, `naturalHeight` | number | The decoded picture's own size, in pixels. Rounded when read. |
+| `rotation` | number | Clockwise rotation about the placement's centre, in degrees; wrapped to `[0, 360)`. |
+| `opacity` | number | `0`-`1`. |
+| `blendMode` | string | One of the closed layer blend-mode set. A reference composites like a layer. |
+| `behind` | boolean | Painted after the paper and before the layers when true, over them when false. |
+| `visible` | boolean | Hidden references stay in the file and are not painted. |
+| `mimeType` | string | Must start with `image/`. |
+| `data` | string | The **original encoded bytes**, base64. This is what makes a project portable: reopening decodes the picture from the project file and never consults the path it was imported from. |
+
+The reader bounds the base64 text *before* decoding it, so an enormous string
+cannot make it allocate the bytes it encodes. One reference is capped at 32 MB
+of encoded bytes and 24 megapixels; a project is capped at 64 megapixels of
+reference pixels in total and 32 references. A file past any of those ceilings is
+refused rather than opened with a missing picture.
+
+A file that claims a version below 14 and carries a **non-empty** `references`
+list is refused: the writer of such a file was not the version it claims, and
+guessing which fields it meant would be worse than refusing. An **empty** list
+under an older version is tolerated, because a newer serializer writes the field
+unconditionally.
 
 ### `layers[]`
 
@@ -634,6 +669,16 @@ Two further guarantees:
   every one of their layers is a paintable layer, exactly as they were written.
   A file that claims an older version and carries a group is refused too, for
   the same reason.
+- **References are why version 14 exists.** A version-13 reader knows no
+  `document.references` field. It would open the file, paint the artwork and
+  silently drop every reference the artist placed - the drawing would survive,
+  but the tracing setup would be gone without a word. The field also carries the
+  encoded bytes of each picture, so it is a required new shape rather than an
+  ignorable extra. Version-13 files have no field and open with no references,
+  exactly as they were written. A file that claims an older version *and*
+  carries a non-empty reference list is refused for the same reason a
+  version-12 file carrying a group is: the claim is inconsistent with its
+  contents.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
@@ -727,6 +772,11 @@ the unsaved marker: exporting is not saving.
 Hidden layers and layers at 0 opacity are excluded, matching what is on screen.
 The output has no border, no zoom and no surrounding UI.
 
+Reference images are excluded as well, whatever their `behind` flag says: they
+are tracing aids, not artwork, and a reference that appeared in an export would
+be a bug, not a feature. The export path passes no references to the compositor,
+so the exclusion is structural rather than a filter that could be forgotten.
+
 ## Known gaps
 
 - **No compression.** Text JSON, so files are large for heavy drawings. Fill
@@ -736,6 +786,10 @@ The output has no border, no zoom and no surrounding UI.
   mask pixels per file.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
+- **Reference pictures are stored verbatim.** Each reference carries its
+  original encoded bytes, so a 12 MB photograph adds 16 MB of base64 to every
+  save. There is no downscaling and no shared-source deduplication: importing
+  the same file twice stores it twice.
 - **No non-separable blend modes**: the layer menu offers the separable modes
   (`normal`, `multiply`, `screen`, `overlay`, `soft-light`, `hard-light`,
   `color-dodge`, `darken`, `lighten`, `difference`, `exclusion`). Hue,

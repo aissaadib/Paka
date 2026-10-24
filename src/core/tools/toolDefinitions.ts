@@ -103,6 +103,13 @@ export const GUIDES_TOOL: ToolDefinition = {
   description: "Place and move composition guides",
 };
 
+export const REFERENCE_TOOL: ToolDefinition = {
+  id: "reference",
+  label: "Reference",
+  shortcut: "Y",
+  description: "Select, move, resize and rotate reference images",
+};
+
 /** Tools offered by the application, in tool rail order. */
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
@@ -118,6 +125,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   PICKER_TOOL,
   GUIDES_TOOL,
   PAN_TOOL,
+  REFERENCE_TOOL,
 ];
 
 export function findToolByShortcut(key: string): ToolDefinition | undefined {

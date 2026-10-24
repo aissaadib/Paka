@@ -207,6 +207,12 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
         actions.cancelGuideGesture();
         return;
       }
+      // The reference tool owns Escape the same way: a drag in flight is
+      // restored and the reference selection is cleared.
+      if (engine.getState().toolId === "reference") {
+        actions.cancelReferenceGesture();
+        return;
+      }
       actions.clearSelection();
     },
   },
@@ -220,6 +226,14 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
       // first; the stroke selection is untouched by it.
       if (engine.getState().toolId === "guides" && engine.getState().selectedGuideId !== null) {
         actions.deleteSelectedGuide();
+        return;
+      }
+      // Likewise a selected reference belongs to the reference tool.
+      if (
+        engine.getState().toolId === "reference" &&
+        engine.getState().selectedReferenceId !== null
+      ) {
+        actions.deleteSelectedReference();
         return;
       }
       actions.deleteSelection();

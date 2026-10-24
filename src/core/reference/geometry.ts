@@ -24,7 +24,7 @@ import type { Bounds, Point, Size } from "../../types/geometry";
 import type { Viewport } from "../../types/viewport";
 import { clamp } from "../../utils/math";
 import { docToScreen } from "../rendering/viewport";
-import type { ReferenceImage } from "./types";
+import type { ReferenceImage, ReferenceImagePatch } from "./types";
 
 /**
  * The smallest a reference may be scaled to, in document pixels.
@@ -35,6 +35,314 @@ import type { ReferenceImage } from "./types";
  * follows it down.
  */
 export const MIN_REFERENCE_SIZE = 8;
+
+/**
+ * The radius a selection handle is grabbed within, in CSS pixels.
+ *
+ * Screen-space, like the guide's grab radius: a handle is equally easy to grab
+ * at 2 % and at 6400 %.
+ */
+export const REFERENCE_HANDLE_RADIUS_PX = 8;
+
+/** How far the rotation handle sits from the top edge, in CSS pixels. */
+export const REFERENCE_ROTATION_HANDLE_OFFSET_PX = 26;
+
+/** The handles a selected reference shows. */
+export type ReferenceHandleId = "nw" | "ne" | "se" | "sw" | "rotate";
+
+/** The CSS cursor each handle asks for. */
+export const REFERENCE_HANDLE_CURSORS: Record<ReferenceHandleId, string> = {
+  nw: "nwse-resize",
+  ne: "nesw-resize",
+  se: "nwse-resize",
+  sw: "nesw-resize",
+  rotate: "grab",
+};
+
+/** The four corners and the rotation handle of a selected reference. */
+export interface ReferenceHandles {
+  /** Top-left, top-right, bottom-right, bottom-left, rotated with the picture. */
+  readonly corners: readonly [Point, Point, Point, Point];
+  /** The grab point that turns the picture. */
+  readonly rotation: Point;
+}
+
+/** The centre of a reference's rectangle, in document coordinates. */
+export function referenceCentre(reference: ReferenceImage): Point {
+  return {
+    x: reference.x + reference.width / 2,
+    y: reference.y + reference.height / 2,
+  };
+}
+
+/**
+ * Turns a point about a centre by a number of degrees.
+ *
+ * The document's y axis points down, so a positive angle turns clockwise on
+ * screen - the direction the model documents for `rotation`.
+ */
+export function rotatePointAbout(point: Point, centre: Point, degrees: number): Point {
+  if (!Number.isFinite(degrees) || degrees === 0) {
+    return point;
+  }
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const dx = point.x - centre.x;
+  const dy = point.y - centre.y;
+  return {
+    x: centre.x + dx * cos - dy * sin,
+    y: centre.y + dx * sin + dy * cos,
+  };
+}
+
+/** Normalizes an angle into `[0, 360)`. */
+export function normalizeReferenceRotation(degrees: number): number {
+  if (!Number.isFinite(degrees)) {
+    return 0;
+  }
+  const wrapped = degrees % 360;
+  return wrapped < 0 ? wrapped + 360 : wrapped;
+}
+
+/** The four corners of a reference, in document coordinates, rotated. */
+export function referenceCorners(
+  reference: ReferenceImage,
+): readonly [Point, Point, Point, Point] {
+  const centre = referenceCentre(reference);
+  const left = reference.x;
+  const top = reference.y;
+  const right = reference.x + reference.width;
+  const bottom = reference.y + reference.height;
+  return [
+    rotatePointAbout({ x: left, y: top }, centre, reference.rotation),
+    rotatePointAbout({ x: right, y: top }, centre, reference.rotation),
+    rotatePointAbout({ x: right, y: bottom }, centre, reference.rotation),
+    rotatePointAbout({ x: left, y: bottom }, centre, reference.rotation),
+  ];
+}
+
+/**
+ * The axis-aligned box a rotated reference covers.
+ *
+ * Rotation makes the covered area larger than the placement rectangle: this is
+ * the smallest box that holds all four corners, which is what the paper clip
+ * and the navigator need.
+ */
+export function referenceBounds(reference: ReferenceImage): Bounds {
+  const corners = referenceCorners(reference);
+  const xs = corners.map((corner) => corner.x);
+  const ys = corners.map((corner) => corner.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * A document point in the reference's own unrotated frame.
+ *
+ * The result is relative to the placement rectangle's top-left, so
+ * `0..width` and `0..height` name the picture. This is the inverse of the
+ * rotation the renderer applies, which is what keeps hit-testing and sampling
+ * in agreement with what is drawn.
+ */
+export function referenceLocalPoint(reference: ReferenceImage, x: number, y: number): Point {
+  const centre = referenceCentre(reference);
+  const unrotated = rotatePointAbout({ x, y }, centre, -reference.rotation);
+  return { x: unrotated.x - reference.x, y: unrotated.y - reference.y };
+}
+
+/** Sets a reference's rotation, in degrees clockwise, wrapped to `[0, 360)`. */
+export function setReferenceRotation(reference: ReferenceImage, degrees: number): ReferenceImage {
+  if (!Number.isFinite(degrees)) {
+    return reference;
+  }
+  return { ...reference, rotation: normalizeReferenceRotation(degrees) };
+}
+
+/** Turns a reference by a relative angle, in degrees clockwise. */
+export function rotateReference(reference: ReferenceImage, degrees: number): ReferenceImage {
+  if (!Number.isFinite(degrees)) {
+    return reference;
+  }
+  return setReferenceRotation(reference, reference.rotation + degrees);
+}
+
+/**
+ * The handles a selected reference shows, in document coordinates.
+ *
+ * The corners follow the rotation; the rotation handle sits a fixed number of
+ * **CSS pixels** beyond the top edge, so it stays grabbable at every zoom.
+ */
+export function referenceHandles(
+  reference: ReferenceImage,
+  viewport: Viewport,
+): ReferenceHandles {
+  const corners = referenceCorners(reference);
+  const topMid = {
+    x: (corners[0].x + corners[1].x) / 2,
+    y: (corners[0].y + corners[1].y) / 2,
+  };
+  const zoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+  const offset = REFERENCE_ROTATION_HANDLE_OFFSET_PX / zoom;
+  const radians = (reference.rotation * Math.PI) / 180;
+  // The outward normal of the top edge: (0, -1) turned with the picture.
+  return {
+    corners,
+    rotation: {
+      x: topMid.x + Math.sin(radians) * offset,
+      y: topMid.y - Math.cos(radians) * offset,
+    },
+  };
+}
+
+/** The handle a document point grabs, or `null` when it grabs none. */
+export function findReferenceHandle(
+  reference: ReferenceImage,
+  viewport: Viewport,
+  x: number,
+  y: number,
+  radiusPx = REFERENCE_HANDLE_RADIUS_PX,
+): ReferenceHandleId | null {
+  const zoom = Number.isFinite(viewport.zoom) && viewport.zoom > 0 ? viewport.zoom : 1;
+  const radius = radiusPx / zoom;
+  const handles = referenceHandles(reference, viewport);
+  const ids: readonly ReferenceHandleId[] = ["nw", "ne", "se", "sw"];
+  for (let index = 0; index < handles.corners.length; index += 1) {
+    const corner = handles.corners[index];
+    if (Math.hypot(corner.x - x, corner.y - y) <= radius) {
+      return ids[index];
+    }
+  }
+  if (Math.hypot(handles.rotation.x - x, handles.rotation.y - y) <= radius) {
+    return "rotate";
+  }
+  return null;
+}
+
+/**
+ * Resizes a reference from one of its corners, keeping its aspect ratio.
+ *
+ * The opposite corner is the anchor: it stays exactly where it is while the
+ * dragged corner follows the pointer. The drag is measured in the reference's
+ * own rotated frame, so a turned picture resizes along its own edges rather
+ * than along the screen's axes.
+ */
+export function resizeReferenceFromCorner(
+  reference: ReferenceImage,
+  corner: Exclude<ReferenceHandleId, "rotate">,
+  x: number,
+  y: number,
+): ReferenceImage {
+  const width = reference.width;
+  const height = reference.height;
+  if (!(width > 0) || !(height > 0) || !Number.isFinite(x) || !Number.isFinite(y)) {
+    return reference;
+  }
+  const centre = referenceCentre(reference);
+  const local = rotatePointAbout({ x, y }, centre, -reference.rotation);
+  const left = reference.x;
+  const top = reference.y;
+  const right = left + width;
+  const bottom = top + height;
+  const anchor =
+    corner === "nw"
+      ? { x: right, y: bottom }
+      : corner === "ne"
+        ? { x: left, y: bottom }
+        : corner === "se"
+          ? { x: left, y: top }
+          : { x: right, y: top };
+
+  const aspect = width / height;
+  let nextWidth = Math.abs(local.x - anchor.x);
+  let nextHeight = Math.abs(local.y - anchor.y);
+  // The dominant axis wins, so the picture follows the pointer without
+  // distorting: the other side is derived from the aspect ratio.
+  if (nextWidth / aspect >= nextHeight) {
+    nextHeight = nextWidth / aspect;
+  } else {
+    nextWidth = nextHeight * aspect;
+  }
+  const longest = Math.max(nextWidth, nextHeight);
+  if (!(longest > 0)) {
+    return reference;
+  }
+  if (longest < MIN_REFERENCE_SIZE) {
+    const grow = MIN_REFERENCE_SIZE / longest;
+    nextWidth *= grow;
+    nextHeight *= grow;
+  }
+
+  const signX = local.x >= anchor.x ? 1 : -1;
+  const signY = local.y >= anchor.y ? 1 : -1;
+  const anchorDoc = rotatePointAbout(anchor, centre, reference.rotation);
+  const halfX = rotatePointAbout(
+    { x: (signX * nextWidth) / 2, y: 0 },
+    { x: 0, y: 0 },
+    reference.rotation,
+  );
+  const halfY = rotatePointAbout(
+    { x: 0, y: (signY * nextHeight) / 2 },
+    { x: 0, y: 0 },
+    reference.rotation,
+  );
+  const nextCentre = {
+    x: anchorDoc.x + halfX.x + halfY.x,
+    y: anchorDoc.y + halfX.y + halfY.y,
+  };
+  return {
+    ...reference,
+    x: nextCentre.x - nextWidth / 2,
+    y: nextCentre.y - nextHeight / 2,
+    width: nextWidth,
+    height: nextHeight,
+  };
+}
+
+/**
+ * Applies a user patch to a reference, clamping the fields that have limits.
+ *
+ * One place for the rules, so a slider, a gesture and a project file cannot
+ * disagree about what an opacity or a size may be.
+ */
+export function applyReferencePatch(
+  reference: ReferenceImage,
+  patch: ReferenceImagePatch,
+): ReferenceImage {
+  const next: ReferenceImage = { ...reference, ...patch };
+  return {
+    ...next,
+    rotation: normalizeReferenceRotation(next.rotation),
+    opacity: clamp(next.opacity, 0, 1),
+    width: Number.isFinite(next.width) ? Math.max(MIN_REFERENCE_SIZE, next.width) : reference.width,
+    height: Number.isFinite(next.height)
+      ? Math.max(MIN_REFERENCE_SIZE, next.height)
+      : reference.height,
+  };
+}
+
+/** True when two references would draw the very same picture. */
+export function referenceEqual(a: ReferenceImage, b: ReferenceImage): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.x === b.x &&
+    a.y === b.y &&
+    a.width === b.width &&
+    a.height === b.height &&
+    a.naturalWidth === b.naturalWidth &&
+    a.naturalHeight === b.naturalHeight &&
+    a.rotation === b.rotation &&
+    a.opacity === b.opacity &&
+    a.blendMode === b.blendMode &&
+    a.behind === b.behind &&
+    a.visible === b.visible &&
+    a.source === b.source
+  );
+}
 
 /** The rectangle a reference occupies, in document coordinates. */
 export function referenceRect(reference: ReferenceImage): Bounds {
@@ -79,20 +387,16 @@ export function clipRectToDocument(rect: Bounds, document: Size): Bounds | null 
  * not drawn at all.
  */
 export function referenceVisibleRect(reference: ReferenceImage, document: Size): Bounds | null {
-  return clipRectToDocument(referenceRect(reference), document);
+  return clipRectToDocument(referenceBounds(reference), document);
 }
 
-/** True when a document point lies inside the reference's rectangle. */
+/** True when a document point lies inside the reference's rotated rectangle. */
 export function referenceContains(reference: ReferenceImage, x: number, y: number): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     return false;
   }
-  return (
-    x >= reference.x &&
-    y >= reference.y &&
-    x < reference.x + reference.width &&
-    y < reference.y + reference.height
-  );
+  const local = referenceLocalPoint(reference, x, y);
+  return local.x >= 0 && local.y >= 0 && local.x < reference.width && local.y < reference.height;
 }
 
 /**
@@ -108,16 +412,10 @@ export function referenceVisibleContains(
   y: number,
   document: Size,
 ): boolean {
-  const visible = referenceVisibleRect(reference, document);
-  if (!visible) {
+  if (!referenceContains(reference, x, y)) {
     return false;
   }
-  return (
-    x >= visible.x &&
-    y >= visible.y &&
-    x < visible.x + visible.width &&
-    y < visible.y + visible.height
-  );
+  return x >= 0 && y >= 0 && x < document.width && y < document.height;
 }
 
 /**
@@ -140,8 +438,9 @@ export function referenceSourcePoint(
   if (reference.width <= 0 || reference.height <= 0) {
     return null;
   }
-  const u = ((x - reference.x) / reference.width) * reference.naturalWidth;
-  const v = ((y - reference.y) / reference.height) * reference.naturalHeight;
+  const local = referenceLocalPoint(reference, x, y);
+  const u = (local.x / reference.width) * reference.naturalWidth;
+  const v = (local.y / reference.height) * reference.naturalHeight;
   if (u < 0 || v < 0 || u >= reference.naturalWidth || v >= reference.naturalHeight) {
     return null;
   }
@@ -275,8 +574,9 @@ export function fitReferenceToDocument(
  * document rectangle never changes.
  */
 export function referenceScreenRect(reference: ReferenceImage, viewport: Viewport): Bounds {
-  const topLeft = docToScreen(viewport, reference.x, reference.y);
-  const bottomRight = docToScreen(viewport, reference.x + reference.width, reference.y + reference.height);
+  const bounds = referenceBounds(reference);
+  const topLeft = docToScreen(viewport, bounds.x, bounds.y);
+  const bottomRight = docToScreen(viewport, bounds.x + bounds.width, bounds.y + bounds.height);
   return {
     x: topLeft.x,
     y: topLeft.y,

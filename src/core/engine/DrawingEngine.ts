@@ -25,6 +25,7 @@ import type { FlipAxis } from "../../types/transform";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { createId } from "../../utils/id";
+import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
@@ -90,6 +91,26 @@ import {
   roundGuidePosition,
   setGuidePosition,
 } from "../document/guides";
+import {
+  REFERENCE_HANDLE_CURSORS,
+  applyReferencePatch,
+  findReferenceHandle,
+  fitReferenceToDocument,
+  referenceEqual,
+  referenceVisibleContains,
+  resizeReferenceFromCorner,
+  setReferenceRotation,
+  type ReferenceHandleId,
+} from "../reference/geometry";
+import {
+  ReferenceDecodeError,
+  decodeReferenceImage,
+  detectImageFormat,
+  referenceMimeType,
+  type DecodedReference,
+} from "../reference/decode";
+import { ReferenceImageStore, createReferenceImage } from "../reference/store";
+import type { ReferenceImage, ReferenceImagePatch } from "../reference/types";
 import {
   findLayer,
   flattenLayers,
@@ -268,6 +289,13 @@ export interface EditorSnapshot {
    */
   readonly selectedGuideId: string | null;
   /**
+   * The id of the reference the reference tool has selected, or `null`.
+   *
+   * Editor state, like `selectedGuideId`: the references are document state,
+   * but which one is framed on the canvas belongs to the tool.
+   */
+  readonly selectedReferenceId: string | null;
+  /**
    * Whether the shape tools fill their outline instead of tracing it.
    *
    * Editor state rather than document state: it describes the next shape, not
@@ -403,6 +431,14 @@ export interface DrawingEngineOptions {
    * not create a Canvas 2D renderer, and the caller owns its configuration.
    */
   readonly renderer?: DrawingRenderer;
+  /**
+   * How an imported picture's bytes become a drawable surface.
+   *
+   * Defaults to the browser decoder (`createImageBitmap`). It is a seam so the
+   * import path can be exercised without a browser, and so a host without
+   * `createImageBitmap` can supply its own decoder instead of failing.
+   */
+  readonly decodeReference?: (bytes: Uint8Array) => Promise<DecodedReference>;
 }
 
 const DEFAULT_DOCUMENT_WIDTH = 1600;
@@ -645,6 +681,52 @@ interface GuideGesture {
 }
 
 /**
+ * A reference gesture in flight.
+ *
+ * Like a guide gesture, it is a *preview*: the document is replaced as the
+ * pointer moves, without touching history, and the press-time document is what
+ * a cancel restores and what the committed command reverts to. That is what
+ * makes one drag one undo step.
+ */
+interface ReferenceGesture {
+  readonly mode: "move" | "resize" | "rotate";
+  /** The document at press time: the revert point and the cancel state. */
+  readonly before: DrawingDocument;
+  /** The reference as it was at press time: every delta is measured from it. */
+  readonly initial: ReferenceImage;
+  readonly referenceId: string;
+  /** The corner being dragged, or `null` for a move and a rotation. */
+  readonly handle: ReferenceHandleId | null;
+  /** The press point, in document space. */
+  readonly pressX: number;
+  readonly pressY: number;
+  /** The reference's centre at press time, for the rotation angle. */
+  readonly centreX: number;
+  readonly centreY: number;
+  /** The pointer's angle about the centre at press time, in radians. */
+  readonly startAngle: number;
+}
+
+/** Why an imported reference was refused. */
+export type ReferenceImportFailure =
+  | "not-an-image"
+  | "too-large"
+  | "unsupported"
+  | "malformed"
+  | "budget";
+
+/** The outcome of importing a reference image. */
+export type ReferenceImportResult =
+  | { readonly ok: true; readonly reference: ReferenceImage }
+  | { readonly ok: false; readonly reason: ReferenceImportFailure; readonly message: string };
+
+/** What an import hands the engine: a file name and its bytes. */
+export interface ReferenceImportInput {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
+/**
  * Copies one element into a layer, generating a fresh id.
  *
  * Used when a layer is duplicated. Fills keep their raster mask and gradients
@@ -728,6 +810,23 @@ export class DrawingEngine implements StrokeSource {
   private selectedGuideId: string | null = null;
   /** The guide gesture in flight, or `null`. */
   private guideGesture: GuideGesture | null = null;
+  /** The reference the reference tool has selected, or `null`. */
+  private selectedReferenceId: string | null = null;
+  /** The reference gesture in flight, if any. */
+  private referenceGesture: ReferenceGesture | null = null;
+  /**
+   * The decoded surfaces of the document's references.
+   *
+   * A cache, not a source of truth: the document says which references exist
+   * and where they sit, the store holds the pixels keyed by id. A reference
+   * whose picture has not decoded yet is simply not painted; it is still
+   * saved, selected and manipulated.
+   */
+  private readonly referenceStore = new ReferenceImageStore();
+  /** Reference ids whose bytes are being decoded, so one is decoded once. */
+  private readonly pendingReferenceDecodes = new Set<string>();
+  /** The decoder the import path and a reopened project share. */
+  private readonly decodeReference: (bytes: Uint8Array) => Promise<DecodedReference>;
   /**
    * Identity counter for the current selection, restarted whenever the
    * selection is replaced. It is what scopes nudge coalescing to *one* run: two
@@ -777,6 +876,7 @@ export class DrawingEngine implements StrokeSource {
     this.brush = normalizeBrush(options.brush ?? DEFAULT_BRUSH);
     this.currentToolId = options.toolId ?? "brush";
     this.renderer = options.renderer ?? null;
+    this.decodeReference = options.decodeReference ?? ((bytes) => decodeReferenceImage(bytes));
     this.tools = createToolRegistry();
     this.middlePanTool = this.tools.pan;
     this.commands = new CommandStack({ limit: options.historyLimit ?? DEFAULT_HISTORY_LIMIT });
@@ -842,6 +942,14 @@ export class DrawingEngine implements StrokeSource {
       finishGuideGesture: () => engine.finishGuideGesture(),
       cancelGuideGesture: () => engine.cancelGuideGesture(),
       selectGuide: (guideId) => engine.selectGuide(guideId),
+      findReferenceAt: (docX, docY) => engine.findReferenceAt(docX, docY),
+      findReferenceHandleAt: (docX, docY) => engine.findReferenceHandleAt(docX, docY),
+      selectReference: (referenceId) => engine.selectReference(referenceId),
+      beginReferenceGesture: (sample, handle) =>
+        engine.beginReferenceGesture(sample, handle),
+      updateReferenceGesture: (sample) => engine.updateReferenceGesture(sample),
+      finishReferenceGesture: () => engine.finishReferenceGesture(),
+      cancelReferenceGesture: () => engine.cancelReferenceGesture(),
     };
 
     this.commands.subscribe(() => this.publish());
@@ -864,6 +972,7 @@ export class DrawingEngine implements StrokeSource {
       rasterScale: this.rasterScale,
     });
     renderer.setDocument(this.doc);
+    renderer.setReferenceSources(this.referenceSourceMap());
     renderer.setViewport(this.viewport);
     renderer.setGrid({
       visible: this.gridVisible,
@@ -874,6 +983,9 @@ export class DrawingEngine implements StrokeSource {
       renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, this.devicePixelRatio);
     }
     this.renderer = renderer;
+    // A document handed to the constructor may already carry references: their
+    // bytes are decoded now that there is somewhere to draw them.
+    this.decodeMissingReferenceSources();
 
     const handlers: CanvasInputHandlers = {
       getViewport: () => this.viewport,
@@ -977,7 +1089,10 @@ export class DrawingEngine implements StrokeSource {
     this.abortStroke();
     this.resetSelection();
     this.resetGuideGesture();
+    this.resetReferenceGesture();
     this.doc = documentOps.createDocument(options);
+    this.referenceStore.clear();
+    this.pendingReferenceDecodes.clear();
     this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
@@ -1010,7 +1125,11 @@ export class DrawingEngine implements StrokeSource {
     this.abortStroke();
     this.resetSelection();
     this.resetGuideGesture();
+    this.resetReferenceGesture();
     this.doc = project.document;
+    this.referenceStore.clear();
+    this.pendingReferenceDecodes.clear();
+    this.syncReferences();
     this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
@@ -1082,7 +1201,7 @@ export class DrawingEngine implements StrokeSource {
   markSaved(path: string): void {
     this.filePath = path;
     this.savedRevision = this.revision;
-    this.fileHoldsPreview = this.guideGesture !== null;
+    this.fileHoldsPreview = this.guideGesture !== null || this.referenceGesture !== null;
     this.publish();
   }
 
@@ -1969,6 +2088,11 @@ export class DrawingEngine implements StrokeSource {
     if (toolId !== "guides") {
       this.clearGuideSelection();
     }
+    // The reference selection belongs to the reference tool, exactly as the
+    // stroke selection belongs to the select tool.
+    if (toolId !== "reference") {
+      this.clearReferenceSelection();
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -2131,7 +2255,8 @@ export class DrawingEngine implements StrokeSource {
       this.activeFill !== null ||
       this.activeGradient !== null ||
       this.selectionGesture !== null ||
-      this.guideGesture !== null
+      this.guideGesture !== null ||
+      this.referenceGesture !== null
     );
   }
 
@@ -3923,6 +4048,477 @@ export class DrawingEngine implements StrokeSource {
     this.tools.guides.reset(this.toolContext);
   }
 
+  // --------------------------------------------------------------- references
+
+  /**
+   * Imports a picture as a reference, as one undoable step.
+   *
+   * The bytes are validated and decoded *before* anything is added, so a
+   * malformed file, an unsupported format or an oversized picture leaves the
+   * document exactly as it was. The decoded surface goes to the session store;
+   * the encoded bytes go into the document, which is what makes a project
+   * portable.
+   */
+  async importReference(input: ReferenceImportInput): Promise<ReferenceImportResult> {
+    let decoded: DecodedReference;
+    try {
+      decoded = await this.decodeReference(input.bytes);
+    } catch (error) {
+      if (error instanceof ReferenceDecodeError) {
+        return { ok: false, reason: error.reason, message: error.message };
+      }
+      return {
+        ok: false,
+        reason: "malformed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const format = detectImageFormat(input.bytes);
+    const source = {
+      mimeType: format ? referenceMimeType(format) : "image/png",
+      base64: bytesToBase64(input.bytes),
+    };
+    const paper = { width: this.doc.width, height: this.doc.height };
+    let reference = createReferenceImage({
+      name: input.name.trim() === "" ? "Reference" : input.name.trim(),
+      naturalWidth: decoded.width,
+      naturalHeight: decoded.height,
+      source,
+    });
+    reference =
+      reference.naturalWidth > paper.width - 48 || reference.naturalHeight > paper.height - 48
+        ? fitReferenceToDocument(reference, paper, 24)
+        : {
+            ...reference,
+            x: (paper.width - reference.width) / 2,
+            y: (paper.height - reference.height) / 2,
+          };
+
+    const added = this.referenceStore.add(reference, decoded);
+    if (!added.ok) {
+      return { ok: false, reason: "budget", message: added.message };
+    }
+
+    const before = this.doc;
+    const after: DrawingDocument = {
+      ...before,
+      references: [...before.references, reference],
+    };
+    this.commitDocumentChange("Add Reference", before, after, { preserveActiveLayer: true });
+    // The reference tool owns the reference selection, so an import hands
+    // ownership over: the user has just placed something and wants to move it.
+    this.setTool("reference");
+    this.selectReference(reference.id);
+    return { ok: true, reference };
+  }
+
+  /** The document's references, in drawing order. */
+  references(): readonly ReferenceImage[] {
+    return this.doc.references;
+  }
+
+  /** One reference by id, or `null`. */
+  findReference(id: string): ReferenceImage | null {
+    return this.doc.references.find((reference) => reference.id === id) ?? null;
+  }
+
+  /** The reference the tool has selected, or `null`. */
+  selectedReference(): ReferenceImage | null {
+    const id = this.selectedReferenceId;
+    return id === null ? null : this.findReference(id);
+  }
+
+  /**
+   * The top-most visible reference under a document point.
+   *
+   * Hit-testing walks the list backwards: the last reference is drawn on top,
+   * so it is the one a press belongs to. Hidden references are skipped - they
+   * are not on the canvas.
+   */
+  findReferenceAt(docX: number, docY: number): ReferenceImage | null {
+    const paper = { width: this.doc.width, height: this.doc.height };
+    for (let index = this.doc.references.length - 1; index >= 0; index -= 1) {
+      const reference = this.doc.references[index];
+      if (reference && reference.visible && referenceVisibleContains(reference, docX, docY, paper)) {
+        return reference;
+      }
+    }
+    return null;
+  }
+
+  /** The handle of the selected reference a press grabs, or `null`. */
+  findReferenceHandleAt(docX: number, docY: number): ReferenceHandleId | null {
+    const reference = this.selectedReference();
+    return reference === null ? null : findReferenceHandle(reference, this.viewport, docX, docY);
+  }
+
+  /**
+   * Selects a reference, or clears the selection with `null`.
+   *
+   * Editor state, like the guide selection: the references are document state,
+   * but which one is framed belongs to the tool. Selecting ends the current
+   * history merge run, so two edits of the same reference are two steps.
+   */
+  selectReference(referenceId: string | null): void {
+    this.commands.breakMerge();
+    if (this.selectedReferenceId === referenceId) {
+      this.publish();
+      return;
+    }
+    this.selectedReferenceId = referenceId;
+    this.renderer?.setSelectedReference(referenceId);
+    this.publish();
+    this.requestRender();
+  }
+
+  /** Removes a reference as one undoable step. */
+  removeReference(referenceId: string): boolean {
+    const reference = this.findReference(referenceId);
+    if (!reference) {
+      return false;
+    }
+    if (this.selectedReferenceId === referenceId) {
+      this.clearReferenceSelection();
+    }
+    const before = this.doc;
+    const after: DrawingDocument = {
+      ...before,
+      references: before.references.filter((item) => item.id !== referenceId),
+    };
+    this.commitDocumentChange("Remove Reference", before, after, { preserveActiveLayer: true });
+    return true;
+  }
+
+  /** Removes the selected reference, if there is one. */
+  deleteSelectedReference(): boolean {
+    const id = this.selectedReferenceId;
+    return id === null ? false : this.removeReference(id);
+  }
+
+  /** Shows or hides a reference, as one undoable step. */
+  setReferenceVisible(referenceId: string, visible: boolean): boolean {
+    return this.updateReference(
+      referenceId,
+      { visible },
+      visible ? "Show Reference" : "Hide Reference",
+      `reference-visible:${referenceId}`,
+    );
+  }
+
+  /** Sets a reference's opacity, as one coalescing undoable step. */
+  setReferenceOpacity(referenceId: string, opacity: number): boolean {
+    return this.updateReference(
+      referenceId,
+      { opacity },
+      "Reference Opacity",
+      `reference-opacity:${referenceId}`,
+    );
+  }
+
+  /** Puts a reference behind the artwork or over it, as one undoable step. */
+  setReferenceBehind(referenceId: string, behind: boolean): boolean {
+    return this.updateReference(
+      referenceId,
+      { behind },
+      behind ? "Reference Behind Artwork" : "Reference Over Artwork",
+      `reference-behind:${referenceId}`,
+    );
+  }
+
+  /** Turns a reference, as one coalescing undoable step. */
+  setReferenceRotation(referenceId: string, degrees: number): boolean {
+    return this.updateReference(
+      referenceId,
+      { rotation: degrees },
+      "Rotate Reference",
+      `reference-rotation:${referenceId}`,
+    );
+  }
+
+  /** Renames a reference, as one undoable step. */
+  renameReference(referenceId: string, name: string): boolean {
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      return false;
+    }
+    return this.updateReference(referenceId, { name: trimmed }, "Rename Reference");
+  }
+
+  /**
+   * Applies a metadata patch to one reference as one undoable step.
+   *
+   * The patch is clamped by the pure geometry module, so a slider and a
+   * gesture cannot disagree about what an opacity or a size may be.
+   */
+  updateReference(
+    referenceId: string,
+    patch: ReferenceImagePatch,
+    label = "Edit Reference",
+    mergeKey?: string,
+  ): boolean {
+    const reference = this.findReference(referenceId);
+    if (!reference) {
+      return false;
+    }
+    const next = applyReferencePatch(reference, patch);
+    if (referenceEqual(reference, next)) {
+      return false;
+    }
+    const before = this.doc;
+    this.commitDocumentChange(
+      label,
+      before,
+      {
+        ...before,
+        references: before.references.map((item) =>
+          item.id === referenceId ? next : item,
+        ),
+      },
+      { preserveActiveLayer: true, mergeKey },
+    );
+    return true;
+  }
+
+  /**
+   * Starts moving, resizing or rotating a reference.
+   *
+   * A press with no handle grabs the top-most visible reference under the
+   * point and starts a move. Returns whether a gesture started, so a press on
+   * empty canvas can clear the selection instead.
+   */
+  beginReferenceGesture(sample: PointerSample, handle: ReferenceHandleId | null): boolean {
+    if (!Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return false;
+    }
+    let reference = this.selectedReference();
+    if (handle === null) {
+      const hit = this.findReferenceAt(sample.docX, sample.docY);
+      if (!hit) {
+        this.selectReference(null);
+        return false;
+      }
+      if (hit.id !== this.selectedReferenceId) {
+        this.selectReference(hit.id);
+      }
+      reference = hit;
+    }
+    if (!reference) {
+      return false;
+    }
+
+    const centreX = reference.x + reference.width / 2;
+    const centreY = reference.y + reference.height / 2;
+    this.abortReferenceGesture();
+    this.beginGesture();
+    this.referenceGesture = {
+      mode: handle === "rotate" ? "rotate" : handle === null ? "move" : "resize",
+      before: this.doc,
+      initial: reference,
+      referenceId: reference.id,
+      handle,
+      pressX: sample.docX,
+      pressY: sample.docY,
+      centreX,
+      centreY,
+      startAngle: Math.atan2(sample.docY - centreY, sample.docX - centreX),
+    };
+    return true;
+  }
+
+  /** Previews the reference gesture at the pointer. Nothing enters history yet. */
+  updateReferenceGesture(sample: PointerSample): void {
+    const gesture = this.referenceGesture;
+    if (!gesture || !Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return;
+    }
+
+    let next: ReferenceImage;
+    if (gesture.mode === "move") {
+      next = {
+        ...gesture.initial,
+        x: gesture.initial.x + (sample.docX - gesture.pressX),
+        y: gesture.initial.y + (sample.docY - gesture.pressY),
+      };
+    } else if (gesture.mode === "resize") {
+      if (gesture.handle === null || gesture.handle === "rotate") {
+        return;
+      }
+      next = resizeReferenceFromCorner(
+        gesture.initial,
+        gesture.handle,
+        sample.docX,
+        sample.docY,
+      );
+    } else {
+      const angle = Math.atan2(sample.docY - gesture.centreY, sample.docX - gesture.centreX);
+      const degrees = ((angle - gesture.startAngle) * 180) / Math.PI;
+      next = setReferenceRotation(gesture.initial, gesture.initial.rotation + degrees);
+    }
+
+    const current = this.findReference(gesture.referenceId);
+    if (current && referenceEqual(current, next)) {
+      return;
+    }
+    this.applyDocumentState({
+      ...this.doc,
+      references: this.doc.references.map((item) =>
+        item.id === gesture.referenceId ? next : item,
+      ),
+    });
+  }
+
+  /**
+   * Commits the gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click, or a drag that ended where it
+   * started - commits nothing, so history never holds an empty step.
+   */
+  finishReferenceGesture(): void {
+    const gesture = this.referenceGesture;
+    if (!gesture) {
+      return;
+    }
+    this.referenceGesture = null;
+    const after = this.doc;
+    const final = this.findReference(gesture.referenceId);
+    if (!final || referenceEqual(gesture.initial, final)) {
+      return;
+    }
+    const label =
+      gesture.mode === "move"
+        ? "Move Reference"
+        : gesture.mode === "resize"
+          ? "Resize Reference"
+          : "Rotate Reference";
+    this.commitDocumentChange(label, gesture.before, after, { preserveActiveLayer: true });
+  }
+
+  /**
+   * Aborts the gesture and restores the press-time document.
+   *
+   * The tool owns its own bookkeeping, so it is told as well: a cancel that
+   * comes from outside the pointer pipeline - the `Esc` key - would otherwise
+   * leave it believing a drag is in flight.
+   */
+  cancelReferenceGesture(): void {
+    this.abortReferenceGesture();
+    // Escape cancels the drag *and* drops the frame, exactly as it clears the
+    // guide selection: the user asked to stop, not to keep editing.
+    this.clearReferenceSelection();
+    this.tools.reference.reset(this.toolContext);
+    this.publish();
+    this.requestRender();
+  }
+
+  /** Clears an in-flight gesture without telling the tool. */
+  private abortReferenceGesture(): void {
+    const gesture = this.referenceGesture;
+    if (!gesture) {
+      return;
+    }
+    this.referenceGesture = null;
+    this.applyDocumentState(gesture.before);
+  }
+
+  /** Forgets the reference selection, e.g. when the reference tool is left. */
+  private clearReferenceSelection(): void {
+    if (this.selectedReferenceId === null) {
+      return;
+    }
+    this.selectedReferenceId = null;
+    this.renderer?.setSelectedReference(null);
+  }
+
+  /**
+   * Reconciles the decoded-pixel cache with the document's references.
+   *
+   * The document is the authority for which references exist; the store keeps
+   * one decoded surface per id. Undo, redo and a reopened project all replace
+   * the list, so this runs on every document change.
+   */
+  private syncReferences(): void {
+    this.referenceStore.sync(this.doc.references);
+    this.renderer?.setReferenceSources(this.referenceSourceMap());
+    if (
+      this.selectedReferenceId !== null &&
+      !this.doc.references.some((reference) => reference.id === this.selectedReferenceId)
+    ) {
+      this.clearReferenceSelection();
+    }
+    // Redo of an import, or undo of a removal, brings back a reference whose
+    // bytes are in the document but whose pixels are not in the cache any
+    // more. Decoding here is what makes those steps show the picture again.
+    this.decodeMissingReferenceSources();
+  }
+
+  /** The decoded surfaces the renderer may draw, keyed by reference id. */
+  private referenceSourceMap(): ReadonlyMap<string, CanvasImageSource> {
+    const sources = new Map<string, CanvasImageSource>();
+    for (const reference of this.doc.references) {
+      const decoded = this.referenceStore.decodedFor(reference.id);
+      if (decoded) {
+        sources.set(reference.id, decoded.source);
+      }
+    }
+    return sources;
+  }
+
+  /**
+   * Decodes the references a reopened project brought, one by one.
+   *
+   * Loading is synchronous, so the project appears at once and the pictures
+   * follow. A picture that cannot be decoded is not painted; its placement and
+   * bytes are still part of the document, so it saves and reopens unchanged.
+   */
+  private decodeMissingReferenceSources(): void {
+    const missing = this.doc.references.filter(
+      (reference) =>
+        reference.source !== undefined &&
+        this.referenceStore.decodedFor(reference.id) === null &&
+        !this.pendingReferenceDecodes.has(reference.id),
+    );
+    if (missing.length === 0) {
+      return;
+    }
+    for (const reference of missing) {
+      this.pendingReferenceDecodes.add(reference.id);
+    }
+    void Promise.all(
+      missing.map(async (reference) => {
+        const source = reference.source;
+        if (!source) {
+          return;
+        }
+        try {
+          const bytes = base64ToBytes(source.base64);
+          if (!bytes) {
+            return;
+          }
+          const decoded = await this.decodeReference(bytes);
+          this.referenceStore.attachDecoded(reference.id, decoded);
+        } catch {
+          // A reference whose picture cannot be decoded stays in the document
+          // but is not painted. Refusing to open the whole project over one
+          // picture would be worse: the placement and the bytes are intact.
+        }
+      }),
+    ).finally(() => {
+      for (const reference of missing) {
+        this.pendingReferenceDecodes.delete(reference.id);
+      }
+      this.renderer?.setReferenceSources(this.referenceSourceMap());
+      this.requestRender();
+    });
+  }
+
+  /** Aborts a reference gesture and forgets the selection, e.g. on new/open. */
+  private resetReferenceGesture(): void {
+    this.referenceGesture = null;
+    this.clearReferenceSelection();
+    this.tools.reference.reset(this.toolContext);
+  }
+
   requestRender(): void {
     this.renderer?.requestRender();
   }
@@ -3998,8 +4594,12 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     const activeLayerChanged = next.activeLayerId !== this.doc.activeLayerId;
+    const referencesChanged = next.references !== this.doc.references;
     this.doc = next;
     this.renderer?.setDocument(next);
+    if (referencesChanged) {
+      this.syncReferences();
+    }
     // A selection is meaningful only on the layer it was made on: activating
     // another layer, or removing that layer, drops it rather than leaving a
     // highlight over strokes that are no longer the ones a transform would move.
@@ -4171,6 +4771,17 @@ export class DrawingEngine implements StrokeSource {
    */
   private cursorFor(docX: number, docY: number): string {
     const tool = this.activeTool();
+    if (this.currentToolId === "reference") {
+      const gesture = this.referenceGesture;
+      if (gesture?.handle) {
+        return REFERENCE_HANDLE_CURSORS[gesture.handle];
+      }
+      const handle = this.findReferenceHandleAt(docX, docY);
+      if (handle !== null) {
+        return REFERENCE_HANDLE_CURSORS[handle];
+      }
+      return this.findReferenceAt(docX, docY) ? "move" : tool.cursor;
+    }
     if (this.currentToolId !== "select") {
       return tool.cursor;
     }
@@ -4241,6 +4852,7 @@ export class DrawingEngine implements StrokeSource {
       selectedStrokes: this.selectedStrokes().length,
       selectionShape: this.selectionShape,
       selectedGuideId: this.selectedGuideId,
+      selectedReferenceId: this.selectedReferenceId,
       shapeFill: this.shapeFill,
       shapeSides: this.shapeSides,
       shapeInnerRatio: this.shapeInnerRatio,
@@ -4280,6 +4892,7 @@ export class DrawingEngine implements StrokeSource {
       previous.selectedStrokes === next.selectedStrokes &&
       previous.selectionShape === next.selectionShape &&
       previous.selectedGuideId === next.selectedGuideId &&
+      previous.selectedReferenceId === next.selectedReferenceId &&
       previous.shapeFill === next.shapeFill &&
       previous.shapeSides === next.shapeSides &&
       previous.shapeInnerRatio === next.shapeInnerRatio &&

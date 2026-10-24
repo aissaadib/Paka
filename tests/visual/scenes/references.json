@@ -1,0 +1,44 @@
+{
+  "id": "references",
+  "width": 200,
+  "height": 160,
+  "background": "#ffffff",
+  "references": [
+    {
+      "x": 16,
+      "y": 20,
+      "width": 110,
+      "height": 60,
+      "color": "#2f6fd0",
+      "accent": "#9cc8ff",
+      "behind": true
+    },
+    {
+      "x": 96,
+      "y": 74,
+      "width": 90,
+      "height": 46,
+      "rotation": 18,
+      "opacity": 0.9,
+      "color": "#d64545",
+      "accent": "#ffb3b3"
+    }
+  ],
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        {
+          "kind": "stroke",
+          "brush": {
+            "hardness": 1,
+            "color": "#16181c",
+            "size": 6
+          },
+          "xs": [10, 190],
+          "ys": [120, 40]
+        }
+      ]
+    }
+  ]
+}

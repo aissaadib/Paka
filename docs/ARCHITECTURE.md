@@ -1382,6 +1382,61 @@ byte-identical to one with it off.
 survive a restart. Changing one is not an edit: no history step, no revision
 bump, no dirty flag.
 
+### Reference images
+
+A reference image is a picture the artist places on the canvas to trace over or
+to pick colours from. Unlike a guide or the grid it has **pixels**, and unlike a
+layer it is **not artwork**: it is never composited into an export.
+
+**Document metadata, not editor state.** The placements live in
+`DrawingDocument.references`, next to the guides, because they are part of the
+drawing the user saves. The *decoded* pictures do not: they live in a session
+store (`core/reference/store.ts`) keyed by reference id, because a decoded
+`ImageBitmap` is not serializable and must be rebuilt from the encoded bytes
+after a reopen. The document is the authority for which references exist; the
+store keeps one decoded surface per id and reconciles on every document change
+(`sync`), so undo, redo and a reopen all converge on the same picture set.
+
+**The encoded bytes travel with the file.** A reference stores its original
+encoded bytes (`source: { mimeType, base64 }`) in the project, so a project
+reopened on another machine draws the same references without the original file
+being present. This is why references forced format version 14: a version-13
+reader would silently drop them, and a tracing setup that disappears without a
+word is worse than a refused file. The decoded size is stored too
+(`naturalWidth`/`naturalHeight`), so the placement maps back to image pixels
+without re-measuring the picture.
+
+**Geometry is pure and rotation-aware.** `core/reference/geometry.ts` holds the
+rectangle, the centre, the corners, the hit-test, the source-pixel mapping, the
+resize-from-corner and the patch/clamp rules. Rotation is about the placement's
+centre, so a hit-test rotates the point *back* by `-rotation` before comparing -
+a rotated reference is grabbable where it is drawn, not where its bounding box
+is. Handles are screen-space (8 CSS px grab radius, a rotation handle 26 CSS px
+above the top edge), like the guides', so they are equally easy to grab at every
+zoom.
+
+**One tool, three gestures.** The dedicated **Reference** tool (`Y`) owns pointer
+ownership: a press on a handle resizes or rotates, a press on a visible reference
+selects and moves it, and a press anywhere else clears the selection. A dedicated
+tool is what keeps the brush from guessing whether a press is paint or a grab.
+The engine owns the preview and the history: a gesture mutates the document
+directly (that is how the renderer shows it), the release commits **one**
+document command, and `Esc` restores the document exactly and records nothing.
+Sliders coalesce into one step per run, the same rule as the layer opacity.
+
+**Painting order and export isolation.** `paintDocument` takes an
+`includeReferences` flag: `behind` references are painted after the paper fill and
+before the layers, the rest after the layers, and only `render()` passes `true`.
+`composeDocumentImage` never does, so a reference can never reach a PNG export -
+the exclusion is structural, not a filter that could be forgotten. References
+are clipped to the paper (like a layer), and their selection frame and handles
+are painted in the overlay pass, so they never enter a layer surface either.
+
+**Limits.** One reference is capped at 32 MB of encoded bytes and 24 megapixels;
+a project at 64 megapixels of reference pixels and 32 references. The reader
+bounds the base64 text before decoding it, so a hostile file cannot make the
+reader allocate the bytes it claims.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its element list:

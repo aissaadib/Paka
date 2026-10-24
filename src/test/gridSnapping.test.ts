@@ -70,6 +70,8 @@ function createSpyRenderer() {
     cancelStroke: () => {},
     setSelection: (_selection: RendererSelection | null) => {},
     setSelectedGuide: () => {},
+    setReferenceSources: () => {},
+    setSelectedReference: () => {},
     setGrid: (grid) => {
       grids.push(grid);
     },

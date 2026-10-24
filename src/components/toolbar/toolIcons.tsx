@@ -21,6 +21,7 @@ import {
   IconGradient,
   IconGuides,
   IconHand,
+  IconImage,
   IconLine,
   IconPicker,
   IconPolygon,
@@ -73,6 +74,7 @@ export const TOOL_ICONS: Record<ToolId, ReactNode> = {
   gradient: <IconGradient />,
   picker: <IconPicker />,
   guides: <IconGuides />,
+  reference: <IconImage />,
   pan: <IconHand />,
 };
 

@@ -28,6 +28,13 @@ export const RECORDED_METHODS = [
   "stroke",
   "strokeRect",
   "putImageData",
+  // Geometry-only calls: recorded so a test can assert what was clipped or
+  // transformed, not just what was painted.
+  "rect",
+  "clip",
+  "translate",
+  "rotate",
+  "scale",
 ] as const;
 
 export interface DrawCall {

@@ -49,6 +49,27 @@ export interface ReferenceImage {
   readonly naturalWidth: number;
   /** Height of the decoded image, in its own pixels. */
   readonly naturalHeight: number;
+  /**
+   * Rotation about the reference's centre, in degrees clockwise.
+   *
+   * Document state, like the position: the picture turns with the paper when
+   * the viewport is zoomed or panned. The rectangle (`x`, `y`, `width`,
+   * `height`) stays axis-aligned in the model; the rotation is applied about
+   * its centre when it is drawn and when it is hit-tested.
+   */
+  readonly rotation: number;
+  /**
+   * The encoded bytes the reference was imported from.
+   *
+   * The document carries the image itself, not a path: a project therefore
+   * reopens on another machine, or after the original file moved, and still
+   * shows the same reference. The decoded pixels are not here - they are heavy
+   * and belong to the store - so this is the one copy of the file's bytes.
+   *
+   * A reference built in memory for placement-only use may omit it; a
+   * reference read from a project file always has one.
+   */
+  readonly source?: ReferenceImageSource;
   /** How opaque the reference is drawn, `0..1`. */
   readonly opacity: number;
   /**
@@ -77,11 +98,28 @@ export interface ReferenceImage {
   readonly visible: boolean;
 }
 
+/** The encoded file a reference was imported from. */
+export interface ReferenceImageSource {
+  /** The MIME type the bytes were detected as, e.g. `image/png`. */
+  readonly mimeType: string;
+  /** The file's bytes, base64 encoded, exactly as they were imported. */
+  readonly base64: string;
+}
+
 /** The fields of a reference a user action may change. */
 export type ReferenceImagePatch = Partial<
   Pick<
     ReferenceImage,
-    "name" | "x" | "y" | "width" | "height" | "opacity" | "blendMode" | "behind" | "visible"
+    | "name"
+    | "x"
+    | "y"
+    | "width"
+    | "height"
+    | "rotation"
+    | "opacity"
+    | "blendMode"
+    | "behind"
+    | "visible"
   >
 >;
 

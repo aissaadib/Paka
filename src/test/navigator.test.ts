@@ -115,6 +115,7 @@ function createEngine() {
       ],
       activeLayerId: "layer-1",
       guides: [],
+      references: [],
     },
   });
   engine.setViewportSize(viewportSize.width, viewportSize.height);

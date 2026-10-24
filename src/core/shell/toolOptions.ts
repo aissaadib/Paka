@@ -254,6 +254,7 @@ export function toolShowsBrushControls(toolId: ToolId): boolean {
     case "bucket":
     case "picker":
     case "guides":
+    case "reference":
     case "pan":
       return false;
   }

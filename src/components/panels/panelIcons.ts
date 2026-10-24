@@ -11,7 +11,7 @@
  */
 
 import type { ComponentType, SVGProps } from "react";
-import { IconBrush } from "../icons";
+import { IconBrush, IconImage } from "../icons";
 import type { PanelIconName } from "../../core/panels/panelRegistry";
 import {
   PanelLayersIcon,
@@ -24,5 +24,6 @@ export const PANEL_ICONS: Record<PanelIconName, ComponentType<SVGProps<SVGSVGEle
   palette: PanelPaletteIcon,
   brush: IconBrush,
   layers: PanelLayersIcon,
+  image: IconImage,
   navigator: PanelNavigatorIcon,
 };

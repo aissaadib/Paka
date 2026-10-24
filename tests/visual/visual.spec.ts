@@ -45,6 +45,7 @@ const ALLOWED_APP_IMPORTS = [
   "/src/core/document/document",
   "/src/core/document/selectionTransform",
   "/src/core/document/types",
+  "/src/core/reference/types",
   "/src/core/brushes/defaults",
   "/src/types/brush",
 ];
@@ -168,6 +169,18 @@ test.describe("Paka visual regression", () => {
         `the grid of scene ${scene.id} reached the exported composite`,
       ).toBe(true);
 
+      // References are painted around the layers and never into the export.
+      // The proof is a pixel comparison of the export with and without them,
+      // made in the browser on real antialiased pixels.
+      expect(
+        verdict.referencesVisible,
+        `the references of scene ${scene.id} are not visible on the display`,
+      ).toBe((scene.references?.length ?? 0) > 0);
+      expect(
+        verdict.referencesNotExported,
+        `the references of scene ${scene.id} reached the exported composite`,
+      ).toBe(true);
+
       // The golden is the exported picture: the thing a PNG export writes.
       await expect(page.locator("#golden")).toHaveScreenshot({ name: `${scene.id}.png` });
 
@@ -182,6 +195,14 @@ test.describe("Paka visual regression", () => {
       // The same for a scene with a grid: the lattice is display-only, so the
       // export golden and the display golden are two different pictures.
       if (scene.grid !== undefined) {
+        await expect(page.locator("#display")).toHaveScreenshot({
+          name: `${scene.id}-display.png`,
+        });
+      }
+
+      // And for a scene with references: the picture the artist sees while
+      // painting is not the picture an export writes.
+      if ((scene.references?.length ?? 0) > 0) {
         await expect(page.locator("#display")).toHaveScreenshot({
           name: `${scene.id}-display.png`,
         });

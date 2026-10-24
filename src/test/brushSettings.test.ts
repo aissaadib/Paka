@@ -148,6 +148,7 @@ describe("tool definitions", () => {
       "picker",
       "guides",
       "pan",
+      "reference",
     ]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
     expect(getToolDefinition("eraser").shortcut).toBe("E");
@@ -162,6 +163,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("picker").shortcut).toBe("I");
     expect(getToolDefinition("guides").shortcut).toBe("U");
     expect(getToolDefinition("pan").shortcut).toBe("H");
+    expect(getToolDefinition("reference").shortcut).toBe("Y");
   });
 
   it("resolves shortcuts case-insensitively and ignores unknown keys", () => {

@@ -38,6 +38,7 @@ import type {
   StrokeRecord,
 } from "/src/core/document/types";
 import type { DrawingRenderer } from "/src/core/rendering/types";
+import type { ReferenceImage } from "/src/core/reference/types";
 import type { BrushSettings } from "/src/types/brush";
 import { isSceneStroke } from "./scene";
 import type {
@@ -45,6 +46,7 @@ import type {
   SceneElement,
   SceneGuide,
   SceneLayer,
+  SceneReference,
   SceneTransform,
   SceneVerdict,
 } from "./scene";
@@ -214,6 +216,7 @@ function buildDocument(
   layers: readonly Layer[],
   guides: readonly SceneGuide[] = [],
   activeLayerId?: LayerId,
+  references: readonly ReferenceImage[] = [],
 ): DrawingDocument {
   const base = createDocument({
     width: scene.width,
@@ -229,7 +232,52 @@ function buildDocument(
       axis: guide.axis,
       position: guide.position,
     })),
+    references,
   };
+}
+
+/** The document's reference records, in drawing order. */
+function toReferences(scene: Scene): ReferenceImage[] {
+  return (scene.references ?? []).map((reference, index) => ({
+    id: `reference-${index + 1}`,
+    name: `reference-${index + 1}`,
+    x: reference.x,
+    y: reference.y,
+    width: reference.width,
+    height: reference.height,
+    naturalWidth: reference.naturalWidth ?? 64,
+    naturalHeight: reference.naturalHeight ?? 64,
+    rotation: reference.rotation ?? 0,
+    opacity: reference.opacity ?? 1,
+    blendMode: reference.blendMode ?? "normal",
+    behind: reference.behind ?? false,
+    visible: reference.visible ?? true,
+  }));
+}
+
+/**
+ * Builds the picture a scene's reference is drawn from.
+ *
+ * A real canvas, because that is exactly what `drawImage` receives in the
+ * product: the harness must not fake the draw call, only the picture.
+ */
+function referenceSource(reference: SceneReference): HTMLCanvasElement {
+  const width = reference.naturalWidth ?? 64;
+  const height = reference.naturalHeight ?? 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("the harness needs a 2d context for a reference");
+  }
+  context.fillStyle = reference.color;
+  context.fillRect(0, 0, width, height);
+  if (reference.accent) {
+    context.fillStyle = reference.accent;
+    context.fillRect(0, 0, width / 2, height);
+  }
+  return canvas;
 }
 
 function readPixels(canvas: HTMLCanvasElement): Uint8ClampedArray {
@@ -296,15 +344,28 @@ export function runScene(
   const leaves = sceneLeaves(scene.layers);
   const layers = scene.layers.map(toLayer);
   const layerIds = leaves.map((layer) => layer.id);
+  const references = toReferences(scene);
   const drawingDocument = buildDocument(
     scene,
     layers,
     scene.guides ?? [],
     layerIds[0],
+    references,
   );
-  // The same document without its guides: the guides are display-only, so
-  // this is the picture the export has to agree with.
-  const plainDocument = buildDocument(scene, layers, [], layerIds[0]);
+  // The same document without its references: they are not artwork, so this
+  // is the picture the export has to agree with.
+  const withoutReferencesDocument = buildDocument(
+    scene,
+    layers,
+    scene.guides ?? [],
+    layerIds[0],
+    [],
+  );
+  // The same document without its guides: the guides are display-only too, so
+  // the difference between the two displays is the guides' own contribution.
+  const withoutGuidesDocument = buildDocument(scene, layers, [], layerIds[0], references);
+  // Neither guides nor references: the exported artwork.
+  const artworkDocument = buildDocument(scene, layers, [], layerIds[0], []);
 
   // The map the renderer's stroke source reads. It is mutated in place, so the
   // renderer always sees the content the step below asks it to draw.
@@ -326,6 +387,14 @@ export function runScene(
     scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
   });
   renderer.setDocument(drawingDocument);
+  const referenceSources = new Map<string, CanvasImageSource>();
+  references.forEach((reference, index) => {
+    const definition = scene.references?.[index];
+    if (definition) {
+      referenceSources.set(reference.id, referenceSource(definition));
+    }
+  });
+  renderer.setReferenceSources(referenceSources);
   renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
   renderer.setDisplaySize(scene.width, scene.height, 1);
   renderer.setRasterScale(1);
@@ -384,9 +453,17 @@ export function runScene(
 
   // 4. The same display without the guides. The guides are display-only, so
   // the difference between the two displays is the guides' own contribution.
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(withoutGuidesDocument);
   renderer.render();
   const withoutGuidesPixels = readPixels(display);
+  renderer.setDocument(drawingDocument);
+  renderer.render();
+
+  // 4b. The same display without the references. References are not artwork,
+  // so the difference is the references' own contribution.
+  renderer.setDocument(withoutReferencesDocument);
+  renderer.render();
+  const withoutReferencesPixels = readPixels(display);
   renderer.setDocument(drawingDocument);
   renderer.render();
 
@@ -398,10 +475,10 @@ export function runScene(
   renderer.setGrid(gridSettings);
   renderer.render();
 
-  // 6. The display without either of them: the picture the export has to
-  // agree with, because neither a guide nor a grid reaches an export.
+  // 6. The display of the artwork alone: the picture the export has to agree
+  // with, because neither a guide, a grid nor a reference reaches an export.
   renderer.setGrid(NO_GRID);
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(artworkDocument);
   renderer.render();
   const plainPixels = readPixels(display);
   renderer.setGrid(gridSettings);
@@ -438,9 +515,15 @@ export function runScene(
 
   // The export of the same document without its guides: the two must be the
   // same picture, because a guide never reaches an export.
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(withoutGuidesDocument);
   const plainExport = renderer.composeDocumentImage();
   const plainExportPixels = readPixels(plainExport);
+
+  // The export of the same document without its references: the two must be
+  // the same picture, because a reference is not artwork.
+  renderer.setDocument(withoutReferencesDocument);
+  const exportWithoutReferences = renderer.composeDocumentImage();
+  const exportWithoutReferencesPixels = readPixels(exportWithoutReferences);
   renderer.setDocument(drawingDocument);
 
   // The export of the same document with the grid off: it must be the same
@@ -486,6 +569,12 @@ export function runScene(
   const gridNotExported =
     compare(exportedPixels, exportWithoutGridPixels, scene.width, scene.height, false).differing ===
     0;
+  // The references' own contribution, and their exclusion from the export.
+  const referencesVisible =
+    compare(rebuiltPixels, withoutReferencesPixels, scene.width, scene.height, false).differing > 0;
+  const referencesNotExported =
+    compare(exportedPixels, exportWithoutReferencesPixels, scene.width, scene.height, false)
+      .differing === 0;
 
   return {
     sceneId: scene.id,
@@ -496,6 +585,8 @@ export function runScene(
     guidesNotExported,
     gridVisible,
     gridNotExported,
+    referencesVisible,
+    referencesNotExported,
     liveVsRebuiltDiffering: liveVsRebuilt.differing,
     rebuiltVsExportedDiffering: rebuiltVsExported.differing,
     firstDifference: liveVsRebuilt.first ?? rebuiltVsExported.first,
