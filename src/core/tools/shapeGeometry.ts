@@ -20,6 +20,7 @@
  */
 
 import { clamp } from "../../utils/math";
+import type { BoxShapeGeometry, ShapeGeometry } from "../document/types";
 import {
   DEFAULT_SHAPE_OPTIONS,
   normalizeShapeOptions,
@@ -94,18 +95,117 @@ export function shapeOutline(
   drag: ShapeDrag,
   options: ShapeOptions = DEFAULT_SHAPE_OPTIONS,
 ): ShapePoint[] {
-  switch (kind) {
-    case "line":
-      return lineOutline(drag);
-    case "rectangle":
-      return rectangleOutline(drag, options);
-    case "ellipse":
-      return ellipseOutline(drag, options);
-    case "polygon":
-      return polygonOutline(drag, options);
-    case "star":
-      return starOutline(drag, options);
+  return shapeGeometryOutline(shapeSpecFromDrag(kind, drag, options));
+}
+
+/**
+ * The native geometry a drag produces.
+ *
+ * This is the **one** place where the modifier rules (Shift, Alt) are turned
+ * into stored geometry. The tool previews the outline of this value and the
+ * engine commits this value as a `ShapeRecord`, so the preview, the committed
+ * element, the layer rebuild after undo and the reopened project all derive
+ * their outline from the same parameters.
+ *
+ * A line keeps its two endpoints: the drag direction is part of the shape and
+ * a box cannot represent it without losing which end is which. Every other
+ * kind stores the normalized drag box and the options the gesture started
+ * with.
+ */
+export function shapeSpecFromDrag(
+  kind: ShapeKind,
+  drag: ShapeDrag,
+  options: ShapeOptions = DEFAULT_SHAPE_OPTIONS,
+): ShapeGeometry {
+  if (kind === "line") {
+    const [start, end] = lineOutline(drag);
+    return {
+      shape: "line",
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+    };
   }
+  const { minX, minY, maxX, maxY } = dragBox(drag);
+  const normalized = normalizeShapeOptions(options);
+  return {
+    shape: kind,
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+    rotation: normalized.rotation,
+    sides: normalized.sides,
+    innerRatio: normalized.innerRatio,
+  };
+}
+
+/**
+ * The outline of stored geometry.
+ *
+ * The inverse of {@link shapeSpecFromDrag}: a committed shape, an edited shape
+ * and a shape read back from a project file all become the very points the
+ * tool drew. The renderer and the selection overlay both call this.
+ */
+export function shapeGeometryOutline(geometry: ShapeGeometry): ShapePoint[] {
+  if (geometry.shape === "line") {
+    return [
+      { x: geometry.x1, y: geometry.y1 },
+      { x: geometry.x2, y: geometry.y2 },
+    ];
+  }
+  const minX = geometry.x;
+  const minY = geometry.y;
+  const maxX = geometry.x + geometry.width;
+  const maxY = geometry.y + geometry.height;
+  const options: ShapeOptions = {
+    sides: geometry.sides,
+    innerRatio: geometry.innerRatio,
+    rotation: geometry.rotation,
+  };
+  switch (geometry.shape) {
+    case "rectangle":
+      return rectangleOutline(minX, minY, maxX, maxY, options);
+    case "ellipse":
+      return ellipseOutline(minX, minY, maxX, maxY, options);
+    case "polygon":
+      return polygonOutline(minX, minY, maxX, maxY, options);
+    case "star":
+      return starOutline(minX, minY, maxX, maxY, options);
+  }
+}
+
+/** The four corners of a box geometry's unrotated frame, in document space. */
+export function shapeGeometryCorners(geometry: ShapeGeometry): ShapePoint[] {
+  if (geometry.shape === "line") {
+    const minX = Math.min(geometry.x1, geometry.x2);
+    const minY = Math.min(geometry.y1, geometry.y2);
+    const maxX = Math.max(geometry.x1, geometry.x2);
+    const maxY = Math.max(geometry.y1, geometry.y2);
+    return [
+      { x: minX, y: minY },
+      { x: maxX, y: minY },
+      { x: maxX, y: maxY },
+      { x: minX, y: maxY },
+    ];
+  }
+  return boxCorners(geometry);
+}
+
+function boxCorners(geometry: BoxShapeGeometry): ShapePoint[] {
+  const { x, y, width, height } = geometry;
+  const centre = { x: x + width / 2, y: y + height / 2 };
+  const placed: ShapePoint[] = [
+    { x, y },
+    { x: x + width, y },
+    { x: x + width, y: y + height },
+    { x, y: y + height },
+  ];
+  if (geometry.rotation % 360 === 0) {
+    return placed;
+  }
+  return rotateAboutCentre(placed, centre.x, centre.y, geometry.rotation);
 }
 
 /**
@@ -201,8 +301,13 @@ function dragBox(drag: ShapeDrag): { minX: number; minY: number; maxX: number; m
  * *exactly*: the default rectangle is the very same list of points it was
  * before the rotation option reached it.
  */
-function rectangleOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
-  const { minX, minY, maxX, maxY } = dragBox(drag);
+function rectangleOutline(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  options: ShapeOptions,
+): ShapePoint[] {
   const placed: ShapePoint[] = [
     { x: minX, y: minY },
     { x: maxX, y: minY },
@@ -220,8 +325,13 @@ function rectangleOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] 
  * about the box's centre, exactly like the polygon's vertices are: a rigid
  * turn, so the ellipse keeps its size and only changes its tilt.
  */
-function ellipseOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
-  const { minX, minY, maxX, maxY } = dragBox(drag);
+function ellipseOutline(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  options: ShapeOptions,
+): ShapePoint[] {
   const centerX = (minX + maxX) / 2;
   const centerY = (minY + maxY) / 2;
   const radiusX = (maxX - minX) / 2;
@@ -290,13 +400,17 @@ function roundUpToFour(value: number): number {
  * extremes), it is narrower in one axis when the side count is two more than a
  * multiple of four, and it is smaller in both axes when the side count is odd.
  */
-function dragEllipse(drag: ShapeDrag): {
+function boxEllipse(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+): {
   centerX: number;
   centerY: number;
   radiusX: number;
   radiusY: number;
 } {
-  const { minX, minY, maxX, maxY } = dragBox(drag);
   return {
     centerX: (minX + maxX) / 2,
     centerY: (minY + maxY) / 2,
@@ -361,9 +475,15 @@ function turnedOutline(
  * rotation is applied afterwards, about the box's centre, so the shape turns
  * rigidly and the first vertex ends up at `-π/2 + rotation`.
  */
-function polygonOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
+function polygonOutline(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  options: ShapeOptions,
+): ShapePoint[] {
   const { sides, rotation } = normalizeShapeOptions(options);
-  const { centerX, centerY, radiusX, radiusY } = dragEllipse(drag);
+  const { centerX, centerY, radiusX, radiusY } = boxEllipse(minX, minY, maxX, maxY);
   const placed: ShapePoint[] = [];
   for (let index = 0; index < sides; index += 1) {
     const angle = -Math.PI / 2 + (2 * Math.PI * index) / sides;
@@ -390,9 +510,15 @@ function polygonOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
  * tips. The rotation is applied afterwards, about the box's centre, so the
  * star turns rigidly and keeps the ratio between its tips and its valleys.
  */
-function starOutline(drag: ShapeDrag, options: ShapeOptions): ShapePoint[] {
+function starOutline(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  options: ShapeOptions,
+): ShapePoint[] {
   const { sides, innerRatio, rotation } = normalizeShapeOptions(options);
-  const { centerX, centerY, radiusX, radiusY } = dragEllipse(drag);
+  const { centerX, centerY, radiusX, radiusY } = boxEllipse(minX, minY, maxX, maxY);
   const placed: ShapePoint[] = [];
   for (let index = 0; index < sides; index += 1) {
     const outer = -Math.PI / 2 + (2 * Math.PI * index) / sides;

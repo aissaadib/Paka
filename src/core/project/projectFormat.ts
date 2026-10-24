@@ -46,12 +46,23 @@ import type {
   Layer,
   LayerElement,
   LayerId,
+  ShapeGeometry,
+  ShapeRecord,
   StrokeRecord,
   StrokeSource,
 } from "../document/types";
 import { isLayerBlendMode } from "../document/blendModes";
 import { isGroup, paintableLayers } from "../document/layerGroups";
-import { isFillPatch, isGradient } from "../document/types";
+import { isFillPatch, isGradient, isShape } from "../document/types";
+import { shapeBrush } from "../document/shapeRecord";
+import {
+  MAX_SHAPE_INNER_RATIO,
+  MAX_SHAPE_ROTATION,
+  MAX_SHAPE_SIDES,
+  MIN_SHAPE_INNER_RATIO,
+  MIN_SHAPE_ROTATION,
+  MIN_SHAPE_SIDES,
+} from "../tools/shapeOptions";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
 import { isBrushTipShape } from "../rendering/brushTip";
 import {
@@ -158,9 +169,16 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * pre-13 file is, and an older build refuses a v14 file through the version
  * gate instead of silently losing the images.
  *
+ * Version 15: an element may be a **native shape** (`kind: "shape"`), carrying
+ * the primitive and its parameters instead of baked samples. A version-14
+ * reader rejects the unknown kind, and a version-14 file's baked shapes stay
+ * baked strokes - they are never guessed back into shapes. A shape is a
+ * different record, not a different rendering rule, so version-1 to -14 files
+ * open unchanged and keep their exact pixels.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 14;
+export const PROJECT_VERSION = 15;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -216,7 +234,11 @@ export interface SerializedFillPatch {
   readonly mask: string;
 }
 
-export type SerializedElement = SerializedStroke | SerializedFillPatch | SerializedGradient;
+export type SerializedElement =
+  | SerializedStroke
+  | SerializedFillPatch
+  | SerializedGradient
+  | SerializedShape;
 
 /** A gradient: geometry plus colour stops, not a pixel snapshot. */
 export interface SerializedGradient {
@@ -229,6 +251,27 @@ export interface SerializedGradient {
   readonly y2: number;
   readonly stops: readonly GradientStop[];
   readonly opacity: number;
+}
+
+/**
+ * A native shape: the primitive and its parameters, not baked samples.
+ *
+ * `geometry` is the shape's identity. Its `shape` field names the primitive
+ * (line, rectangle, ellipse, polygon or star), and the remaining fields are
+ * what reconstruct its outline. `brush` is the complete brush the shape was
+ * drawn with, with `stamp` forced off, so fill colour, width, opacity,
+ * hardness, texture, tip and pressure survive a save and a reopen exactly.
+ *
+ * Required from version 15 on. A version-14 file has no shape elements, and a
+ * file that claims an older version while carrying one is refused rather than
+ * silently converting it into a stroke.
+ */
+export interface SerializedShape {
+  readonly kind: "shape";
+  readonly id: string;
+  readonly geometry: ShapeGeometry;
+  readonly brush: BrushSettings;
+  readonly fill: boolean;
 }
 
 export interface SerializedLayer {
@@ -555,8 +598,83 @@ function readGradient(
   };
 }
 
-function readInteger(value: unknown, label: string, min: number, max: number): number {
-  const number = readAnyNumber(value, label);
+/**
+ * Reads a native shape.
+ *
+ * The primitive is the identity, so it is validated first and every other
+ * field is then read against the kind that names it. A line stores endpoints;
+ * a box shape stores its normalized box, its rigid rotation and the
+ * polygon/star parameters. The brush goes through the same reader a stroke
+ * uses, then has `stamp` forced off, which is the rule the shape tool has
+ * always applied - a shape is an outline, never a chain of dabs.
+ */
+function readShape(
+  raw: Record<string, unknown>,
+  label: string,
+  layerId: LayerId,
+  version: number,
+): ShapeRecord {
+  const id = readId(raw.id, "shape");
+  const geometry = readShapeGeometry(raw.geometry, `${label} shape geometry`);
+  const brush = shapeBrush(readBrush(raw.brush, label, version));
+  return {
+    id,
+    layerId,
+    kind: "shape",
+    geometry,
+    brush,
+    fill: raw.fill === undefined ? false : readBoolean(raw.fill, `${label} shape fill`),
+  };
+}
+
+function readShapeGeometry(value: unknown, label: string): ShapeGeometry {
+  const record = asRecord(value, label);
+  const shape = readString(record.shape, `${label} primitive`);
+  if (shape === "line") {
+    return {
+      shape: "line",
+      x1: readAnyNumber(record.x1, `${label} x1`),
+      y1: readAnyNumber(record.y1, `${label} y1`),
+      x2: readAnyNumber(record.x2, `${label} x2`),
+      y2: readAnyNumber(record.y2, `${label} y2`),
+    };
+  }
+  if (
+    shape !== "rectangle" &&
+    shape !== "ellipse" &&
+    shape !== "polygon" &&
+    shape !== "star"
+  ) {
+    fail(`${label} primitive must be line, rectangle, ellipse, polygon or star.`);
+  }
+  const width = readAnyNumber(record.width, `${label} width`);
+  const height = readAnyNumber(record.height, `${label} height`);
+  if (width < 0 || height < 0) {
+    fail(`${label} width and height cannot be negative.`);
+  }
+  return {
+    shape,
+    x: readAnyNumber(record.x, `${label} x`),
+    y: readAnyNumber(record.y, `${label} y`),
+    width,
+    height,
+    rotation: readNumber(
+      record.rotation,
+      `${label} rotation`,
+      MIN_SHAPE_ROTATION,
+      MAX_SHAPE_ROTATION,
+    ),
+    sides: readInteger(record.sides, `${label} sides`, MIN_SHAPE_SIDES, MAX_SHAPE_SIDES),
+    innerRatio: readNumber(
+      record.innerRatio,
+      `${label} inner ratio`,
+      MIN_SHAPE_INNER_RATIO,
+      MAX_SHAPE_INNER_RATIO,
+    ),
+  };
+}
+
+function readInteger(value: unknown, label: string, min: number, max: number): number {  const number = readAnyNumber(value, label);
   if (!Number.isInteger(number) || number < min || number > max) {
     fail(`${label} must be a whole number between ${min} and ${max}.`);
   }
@@ -670,6 +788,17 @@ function serializeElement(element: LayerElement): SerializedElement {
       y2: element.y2,
       stops: element.stops.map((stop) => ({ offset: stop.offset, color: stop.color })),
       opacity: element.opacity,
+    };
+  }
+  if (isShape(element)) {
+    return {
+      kind: "shape",
+      id: element.id,
+      // The geometry is already plain data; copying it keeps the serialized
+      // value independent of the in-memory record.
+      geometry: { ...element.geometry },
+      brush: element.brush,
+      fill: element.fill,
     };
   }
   return {
@@ -1014,6 +1143,13 @@ function readLayer(
         state.elements.push(
           readGradient(element, elementLabel, id, documentWidth, documentHeight),
         );
+        continue;
+      }
+      if (elementKind === "shape") {
+        if (version < 15) {
+          fail(`${elementLabel} uses a native shape, which requires file version 15.`);
+        }
+        state.elements.push(readShape(element, elementLabel, id, version));
         continue;
       }
       if (elementKind !== "stroke") {

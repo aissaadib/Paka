@@ -22,7 +22,8 @@ import type {
   LayerBlendMode,
   StrokeRecord,
 } from "../document/types";
-import { isFillPatch, isGradient } from "../document/types";
+import { isFillPatch, isGradient, isShape } from "../document/types";
+import { strokeFromShape } from "../document/shapeRecord";
 import type { SelectionHandles } from "../document/selectionHandles";
 import { referenceHandles } from "../reference/geometry";
 import type { GridSettings } from "../document/grid";
@@ -889,6 +890,37 @@ export class Canvas2DRenderer implements DrawingRenderer {
       ctx.setLineDash([]);
     }
 
+    const frame = selection.frame;
+    if (frame && frame.length >= 2) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
+      ctx.beginPath();
+      ctx.moveTo(frame[0].x, frame[0].y);
+      for (let index = 1; index < frame.length; index += 1) {
+        ctx.lineTo(frame[index].x, frame[index].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const outline = selection.outline;
+    if (outline && outline.length >= 2) {
+      ctx.globalAlpha = SELECTION_TRACE_ALPHA;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = SELECTION_TRACE_WIDTH / scale;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(outline[0].x, outline[0].y);
+      for (let index = 1; index < outline.length; index += 1) {
+        ctx.lineTo(outline[index].x, outline[index].y);
+      }
+      ctx.stroke();
+    }
+
     const bounds = selection.bounds;
     if (bounds) {
       ctx.globalAlpha = 1;
@@ -1481,11 +1513,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
         this.rasterizeGradient(surface, element);
         continue;
       }
-      this.rasterizeStrokeToBuffer(element);
+      // A native shape is drawn by expanding it to the very outline the shape
+      // tool previewed and feeding that through the stroke rasterizer. There is
+      // one rasterizer, so a shape and a legacy baked shape cannot diverge.
+      const stroke = isShape(element) ? strokeFromShape(element) : element;
+      this.rasterizeStrokeToBuffer(stroke);
       this.compositeStrokeBuffer(
         surface,
-        element,
-        element.erase === true ? "destination-out" : "source-over",
+        stroke,
+        stroke.erase === true ? "destination-out" : "source-over",
       );
     }
     surface.dirty = false;

@@ -46,6 +46,22 @@ export interface RendererSelection {
    * `composeDocumentImage`.
    */
   readonly handles?: SelectionHandles | null;
+  /**
+   * A native shape's outline, traced as an accent overlay.
+   *
+   * Unlike `strokes`, this is the exact primitive outline, not samples: it is
+   * what tells the user the selection is a shape rather than a freehand path.
+   * Overlay only, like everything else here.
+   */
+  readonly outline?: readonly Point[] | null;
+  /**
+   * A native shape's own frame (its rotated box, or a line's bounding box).
+   *
+   * Painted dashed. A rotated shape's frame turns with it, so the handles sit
+   * on the shape rather than on an axis-aligned box that no longer describes
+   * it. Overlay only.
+   */
+  readonly frame?: readonly Point[] | null;
 }
 
 /**

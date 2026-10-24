@@ -10,6 +10,7 @@
 
 import type { BrushSettings } from "../../types/brush";
 import type { ReferenceImage } from "../reference/types";
+import type { ShapeKind } from "../tools/shapeOptions";
 
 export type LayerId = string;
 
@@ -273,8 +274,86 @@ export interface GradientRecord {
   readonly opacity: number;
 }
 
+/**
+ * A line's geometry: two endpoints in document pixels.
+ *
+ * A line is stored by its endpoints rather than by a box because a box cannot
+ * say which end is which: the drag direction is part of the shape, and
+ * reversing it must not reverse the line when it is reopened.
+ */
+export interface LineShapeGeometry {
+  readonly shape: "line";
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+}
+
+/**
+ * A box shape's geometry: the normalized drag box, the rigid rotation about
+ * its centre, and the polygon/star parameters.
+ *
+ * The box is the same one the shape tool computes from the drag, so the
+ * outline the tool previewed can be reconstructed exactly. `rotation` turns
+ * the placed outline about the box centre, exactly like the tool's rotation
+ * option. `sides` and `innerRatio` are meaningful for the polygon and the
+ * star; the rectangle and the ellipse carry their defaults so the record has
+ * one shape.
+ */
+export interface BoxShapeGeometry {
+  readonly shape: Exclude<ShapeKind, "line">;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** Rigid rotation about the box centre, in degrees (`0..360`). */
+  readonly rotation: number;
+  /** Polygon sides, or star points (`3..24`). */
+  readonly sides: number;
+  /** Star inner radius as a fraction of its outer radius (`0.05..1`). */
+  readonly innerRatio: number;
+}
+
+/** The geometry of a native shape, discriminated by the primitive. */
+export type ShapeGeometry = LineShapeGeometry | BoxShapeGeometry;
+
+/**
+ * A committed shape: a native, editable primitive.
+ *
+ * This is deliberately **not** a stroke. A stroke stores samples, so a
+ * rectangle and a freehand closed loop are the same record and neither can be
+ * reselected as the primitive that made it. A shape stores the primitive and
+ * the parameters that reconstruct its outline deterministically, plus the
+ * brush it was drawn with, so editing a side count or a rotation is a change
+ * to the model rather than a re-guess from pixels.
+ *
+ * Rendering is unchanged: the renderer expands the geometry to the same
+ * outline the shape tool previewed and feeds it through the existing stroke
+ * rasterizer. The shape is therefore one element in the layer's ordered list,
+ * exactly like a stroke, a fill patch or a gradient.
+ *
+ * `brush` is the full brush configuration the shape was drawn with, so the
+ * fill colour, width, opacity, hardness, texture and tip survive a save and a
+ * reopen. `stamp` is always `false`: a shape is an outline, not a chain of
+ * dabs.
+ */
+export interface ShapeRecord {
+  readonly id: string;
+  readonly layerId: LayerId;
+  /** Discriminator for the `LayerElement` union. */
+  readonly kind: "shape";
+  readonly geometry: ShapeGeometry;
+  readonly brush: BrushSettings;
+  /** True when the outline's interior is filled instead of only traced. */
+  readonly fill: boolean;
+}
+
 /** One item of a layer's authoritative content, in painting order. */
-export type LayerElement = StrokeRecord | FillPatchRecord | GradientRecord;
+export type LayerElement =
+  | StrokeRecord
+  | FillPatchRecord
+  | GradientRecord
+  | ShapeRecord;
 
 /** Narrows a layer element to a bucket-fill patch. */
 export function isFillPatch(element: LayerElement): element is FillPatchRecord {
@@ -286,7 +365,12 @@ export function isGradient(element: LayerElement): element is GradientRecord {
   return (element as GradientRecord).kind === "gradient";
 }
 
+/** Narrows a layer element to a native shape. */
+export function isShape(element: LayerElement): element is ShapeRecord {
+  return (element as ShapeRecord).kind === "shape";
+}
+
 /** Narrows a layer element to a stroke (the only element without a `kind`). */
 export function isStroke(element: LayerElement): element is StrokeRecord {
-  return !isFillPatch(element) && !isGradient(element);
+  return !isFillPatch(element) && !isGradient(element) && !isShape(element);
 }

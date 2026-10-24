@@ -20,6 +20,8 @@ export interface StrokeCommandHost {
   /** Inserts an element, optionally at a specific index in the layer. */
   insert(element: LayerElement, index?: number): void;
   remove(element: LayerElement): void;
+  /** Swaps an element for a new version with the same id, keeping its index. */
+  replace(element: LayerElement): void;
   /** Re-rasterizes a layer after its element list changed. */
   refresh(layerId: LayerId): void;
 }
@@ -35,6 +37,9 @@ export function createStrokeCommandHost(
     },
     remove(element) {
       store.remove(element.layerId, element.id);
+    },
+    replace(element) {
+      store.replace(element);
     },
     refresh,
   };

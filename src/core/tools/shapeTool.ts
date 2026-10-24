@@ -25,10 +25,12 @@
 
 import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolDefinition } from "../../types/tool";
+import type { ShapeGeometry } from "../document/types";
 import {
   DEFAULT_SHAPE_OPTIONS,
   outlineExtent,
-  shapeOutline,
+  shapeGeometryOutline,
+  shapeSpecFromDrag,
   type ShapeDrag,
   type ShapeKind,
   type ShapeOptions,
@@ -77,7 +79,7 @@ export class ShapeTool implements Tool {
     if (!this.anchor) {
       return;
     }
-    context.setShapeOutline(this.outlineFor(this.anchor, sample));
+    context.setShapeSpec(this.specFor(this.anchor, sample));
   }
 
   onPointerUp(context: ToolContext, sample: PointerSample): void {
@@ -89,12 +91,12 @@ export class ShapeTool implements Tool {
 
     // The release point can differ from the last move, so the committed shape
     // is recomputed here rather than trusting whatever the buffer last drew.
-    const outline = this.outlineFor(anchor, sample);
-    if (outlineExtent(outline) < MIN_SHAPE_EXTENT) {
+    const geometry = this.specFor(anchor, sample);
+    if (outlineExtent(shapeGeometryOutline(geometry)) < MIN_SHAPE_EXTENT) {
       context.cancelShape();
       return;
     }
-    context.setShapeOutline(outline);
+    context.setShapeSpec(geometry);
     context.finishShape();
   }
 
@@ -114,13 +116,13 @@ export class ShapeTool implements Tool {
     context.cancelShape();
   }
 
-  private outlineFor(anchor: ShapePoint, sample: PointerSample): ShapePoint[] {
+  private specFor(anchor: ShapePoint, sample: PointerSample): ShapeGeometry {
     const drag: ShapeDrag = {
       anchor,
       current: { x: sample.docX, y: sample.docY },
       shift: sample.modifiers.shift,
       alt: sample.modifiers.alt,
     };
-    return shapeOutline(this.kind, drag, this.options);
+    return shapeSpecFromDrag(this.kind, drag, this.options);
   }
 }
