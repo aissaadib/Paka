@@ -28,7 +28,6 @@ import {
   createScaleTransform,
 } from "/src/core/document/selectionTransform";
 import { isStroke } from "/src/core/document/types";
-import { shapeBrush } from "/src/core/document/shapeRecord";
 import type {
   DrawingDocument,
   FillPatchRecord,
@@ -181,7 +180,7 @@ function toShape(
     layerId,
     kind: "shape",
     geometry: { ...element.geometry },
-    brush: shapeBrush(toBrush(element.brush)),
+    brush: { ...toBrush(element.brush), stamp: false },
     fill: element.fill ?? false,
   };
 }
