@@ -126,7 +126,7 @@ Run on the final code commit, in this order:
 | --- | --- |
 | `pnpm typecheck` | clean |
 | `pnpm test` | **98 files, 2449 tests passed** |
-| `pnpm test:visual` | **83 tests passed** (21 scenes, plus the shell/panel/rail specs) |
+| `pnpm test:visual` | **83 tests passed** (22 scenes, plus the shell/panel/rail specs) |
 | `pnpm build` | clean; `dist/assets/index-NpFh9J14.js` 579.80 kB (172.34 kB gzip), CSS 46.34 kB |
 | `pnpm tauri build` | clean; `paka.exe` and both bundles produced |
 
