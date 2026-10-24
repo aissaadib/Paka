@@ -60,11 +60,40 @@ export function IconShapes(props: IconProps) {
   );
 }
 
+/**
+ * The shape-editor glyph: a rectangle with its four corner handles.
+ *
+ * It has to read as "the same object as a shape, but editable", so it borrows
+ * the shape family's square and adds the handles rather than repeating the
+ * marquee's arrow.
+ */
+export function IconShapeEdit(props: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+      {...props}
+    >
+      <path d="M3.5 3.5h9v9h-9z" />
+      <path d="M1.5 1.5h3v3h-3zM11.5 1.5h3v3h-3zM1.5 11.5h3v3h-3zM11.5 11.5h3v3h-3z" />
+    </svg>
+  );
+}
+
 /** The icon of every tool. */
 export const TOOL_ICONS: Record<ToolId, ReactNode> = {
   brush: <IconBrush />,
   eraser: <IconEraser />,
   select: <IconSelect />,
+  shapeEdit: <IconShapeEdit />,
   line: <IconLine />,
   rectangle: <IconRectangle />,
   ellipse: <IconEllipse />,

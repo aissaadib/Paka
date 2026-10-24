@@ -11,9 +11,9 @@ import type { BrushSettings } from "../../types/brush";
 import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
-import type { Guide, GuideAxis, LayerId } from "../document/types";
+import type { Guide, GuideAxis, LayerId, ShapeGeometry, ShapeRecord } from "../document/types";
 import type { SelectionHandleId } from "../document/selectionHandles";
-import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
+import type { ShapeOptions } from "./shapeGeometry";
 import type { ReferenceImage } from "../reference/types";
 import type { ReferenceHandleId } from "../reference/geometry";
 
@@ -40,20 +40,54 @@ export interface ToolContext {
    * Starts a shape gesture on the active layer with the current brush.
    *
    * Like `beginStroke`, but the samples are not a path the pointer traces: the
-   * tool computes the whole outline and replaces it with `setShapeOutline`. The
+   * tool computes the whole primitive and replaces it with `setShapeSpec`. The
    * shape is previewed in the stroke buffer and reaches the layer only when
    * `finishShape` is called.
    */
   beginShape(sample: PointerSample): void;
   /**
-   * Replaces the in-progress shape's outline with the given document-space
-   * points. A preview only: nothing is committed until `finishShape`.
+   * Replaces the in-progress shape with the given native geometry.
+   *
+   * A preview only: nothing is committed until `finishShape`. The geometry is
+   * the same value the engine will store, so what the user sees is derived
+   * from exactly what a save and a reopen will read back.
    */
-  setShapeOutline(points: readonly ShapePoint[]): void;
-  /** Commits the in-progress shape as one undoable stroke. */
+  setShapeSpec(geometry: ShapeGeometry): void;
+  /** Commits the in-progress shape as one undoable element. */
   finishShape(): void;
   /** Discards the in-progress shape without touching the layer. */
   cancelShape(): void;
+  /**
+   * The top-most shape under a document point on the active layer, or `null`.
+   *
+   * Hit-testing is confined to the active paintable layer, exactly like the
+   * stroke marquee: the shape editor selects what the artist is working on,
+   * not a shape on a layer they would then edit blind.
+   */
+  findShapeAt(docX: number, docY: number): ShapeRecord | null;
+  /**
+   * The handle of the *selected* shape a press grabs, or `null`.
+   *
+   * Handles take precedence over the move gesture, exactly as the stroke
+   * selection's handles do.
+   */
+  findShapeHandleAt(docX: number, docY: number): SelectionHandleId | null;
+  /** Selects a shape, or clears the selection with `null`. */
+  selectShape(shapeId: string | null): void;
+  /**
+   * Starts moving, resizing or rotating the selected shape.
+   *
+   * A press with no handle grabs the top-most shape under the point and starts
+   * a move; a press with a handle transforms the selected one. Returns whether
+   * a gesture started, so a press on empty canvas can clear the selection.
+   */
+  beginShapeGesture(sample: PointerSample, handle: SelectionHandleId | null): boolean;
+  /** Previews the shape gesture at the pointer. Nothing enters history yet. */
+  updateShapeGesture(sample: PointerSample): void;
+  /** Commits the gesture as one undoable step; a no-op drag commits nothing. */
+  finishShapeGesture(): void;
+  /** Aborts the gesture, restoring the press-time record. */
+  cancelShapeGesture(): void;
   /** Commits the active stroke to its layer and to history. */
   finishStroke(): void;
   /** Discards the active stroke without touching the layer. */

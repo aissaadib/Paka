@@ -19,6 +19,14 @@ import {
   SHAPE_INNER_RATIO_STEP,
 } from "../../core/tools/shapeGeometry";
 import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+} from "../../core/brushes/defaults";
+import { MIN_SHAPE_SIZE } from "../../core/document/shapeRecord";
+import type { BoxShapeGeometry } from "../../core/document/types";
+import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
+import {
   FILL_MODES,
   FILL_SAMPLE_SCALES,
 } from "../../core/fill/fillOptions";
@@ -26,6 +34,7 @@ import { MAX_DOCUMENT_SIZE } from "../../core/document/document";
 import { SELECTION_SHAPES } from "../../core/document/selectionModes";
 import {
   registerToolOptions,
+  type ColorToolOption,
   type NumberToolOption,
   type SelectToolOption,
   type SliderToolOption,
@@ -231,6 +240,173 @@ const selectionShapeOption: SelectToolOption = {
 };
 
 /**
+ * The selected shape's box, or `null` when nothing is selected or the
+ * selection is a line.
+ *
+ * A line has endpoints rather than a box, so the box-only controls - rotation,
+ * width, height - must not appear for it: they would edit nothing.
+ */
+function selectedBox(snapshot: EditorSnapshot): BoxShapeGeometry | null {
+  const shape = snapshot.selectedShape;
+  return shape && shape.geometry.shape !== "line" ? shape.geometry : null;
+}
+
+/** Whether the selected shape is one of `kinds`. */
+function selectedShapeIs(snapshot: EditorSnapshot, ...kinds: readonly string[]): boolean {
+  const kind = snapshot.selectedShape?.geometry.shape;
+  return kind !== undefined && kinds.includes(kind);
+}
+
+/**
+ * The compact editor for a committed shape.
+ *
+ * These controls are registered on the shape-editor tool, not on the shape
+ * tools: they edit the **selected** shape rather than the settings for the
+ * next one. Every field is hidden until a shape is selected, and each is
+ * hidden again for the kinds it cannot change - a line has no fill, rotation
+ * or box, and only a polygon has sides and only a star has an inner radius.
+ */
+const shapeEditFillOption: ToggleToolOption = {
+  id: "shapeEditFill",
+  kind: "toggle",
+  label: "Fill",
+  group: "Shape",
+  title: "Fill the selected shape's interior instead of tracing just its outline",
+  visible: (snapshot) =>
+    selectedShapeIs(snapshot, "rectangle", "ellipse", "polygon", "star"),
+  read: (snapshot) => snapshot.selectedShape?.fill ?? false,
+  write: (actions, value) => actions.setSelectedShapeFill(value),
+};
+
+const shapeEditSidesOption: SliderToolOption = {
+  id: "shapeEditSides",
+  kind: "slider",
+  label: (snapshot) =>
+    snapshot.selectedShape?.geometry.shape === "star" ? "Points" : "Sides",
+  group: "Shape",
+  title: "How many sides the selected polygon has, or how many points the selected star has",
+  min: MIN_SHAPE_SIDES,
+  max: MAX_SHAPE_SIDES,
+  step: 1,
+  visible: (snapshot) => selectedShapeIs(snapshot, "polygon", "star"),
+  read: (snapshot) => selectedBox(snapshot)?.sides ?? MIN_SHAPE_SIDES,
+  write: (actions, value) => actions.setSelectedShapeSides(value),
+};
+
+const shapeEditInnerRatioOption: SliderToolOption = {
+  id: "shapeEditInnerRatio",
+  kind: "slider",
+  label: "Inner radius",
+  group: "Shape",
+  title: "How deep the selected star's valleys reach, as a fraction of its outer radius",
+  min: MIN_SHAPE_INNER_RATIO,
+  max: MAX_SHAPE_INNER_RATIO,
+  step: SHAPE_INNER_RATIO_STEP,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => selectedShapeIs(snapshot, "star"),
+  read: (snapshot) => selectedBox(snapshot)?.innerRatio ?? MIN_SHAPE_INNER_RATIO,
+  write: (actions, value) =>
+    actions.setSelectedShapeInnerRatio(
+      Math.round(value / SHAPE_INNER_RATIO_STEP) * SHAPE_INNER_RATIO_STEP,
+    ),
+};
+
+const shapeEditRotationOption: SliderToolOption = {
+  id: "shapeEditRotation",
+  kind: "slider",
+  label: "Rotation",
+  group: "Shape",
+  title: "Turn the selected shape about the centre of its box",
+  min: 0,
+  max: 360,
+  step: 1,
+  format: (value) => `${Math.round(value)}°`,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.rotation ?? 0,
+  write: (actions, value) => actions.setSelectedShapeRotation(value),
+};
+
+const shapeEditWidthOption: NumberToolOption = {
+  id: "shapeEditWidth",
+  kind: "number",
+  label: "Width",
+  group: "Shape",
+  title: "Width of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.width ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeWidth(value),
+};
+
+const shapeEditHeightOption: NumberToolOption = {
+  id: "shapeEditHeight",
+  kind: "number",
+  label: "Height",
+  group: "Shape",
+  title: "Height of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.height ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeHeight(value),
+};
+
+const shapeEditColorOption: ColorToolOption = {
+  id: "shapeEditColor",
+  kind: "color",
+  label: "Color",
+  group: "Appearance",
+  title: "Color of the selected shape's outline",
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.color ?? DEFAULT_BRUSH.color,
+  write: (actions, value) => actions.setSelectedShapeBrush({ color: value }),
+};
+
+const shapeEditStrokeOption: SliderToolOption = {
+  id: "shapeEditStroke",
+  kind: "slider",
+  label: "Stroke",
+  group: "Appearance",
+  title: "Width of the selected shape's outline",
+  min: MIN_BRUSH_SIZE,
+  max: MAX_BRUSH_SIZE,
+  step: 1,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.size ?? MIN_BRUSH_SIZE,
+  write: (actions, value) => actions.setSelectedShapeBrush({ size: value }),
+};
+
+const shapeEditOpacityOption: SliderToolOption = {
+  id: "shapeEditOpacity",
+  kind: "slider",
+  label: "Opacity",
+  group: "Appearance",
+  title: "Opacity of the selected shape",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.opacity ?? 1,
+  write: (actions, value) => actions.setSelectedShapeBrush({ opacity: value }),
+};
+
+const shapeEditOptions: readonly ToolOption[] = [
+  shapeEditFillOption,
+  shapeEditSidesOption,
+  shapeEditInnerRatioOption,
+  shapeEditRotationOption,
+  shapeEditWidthOption,
+  shapeEditHeightOption,
+  shapeEditColorOption,
+  shapeEditStrokeOption,
+  shapeEditOpacityOption,
+];
+
+/**
  * The option fields for each tool, in toolbar order.
  *
  * Tools without an entry have no options of their own: their controls are the
@@ -238,6 +414,7 @@ const selectionShapeOption: SelectToolOption = {
  */
 export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> = {
   select: [selectionShapeOption],
+  shapeEdit: [...shapeEditOptions],
   brush: [...symmetryOptions],
   eraser: [...symmetryOptions],
   line: [...symmetryOptions],

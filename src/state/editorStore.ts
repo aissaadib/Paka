@@ -134,6 +134,28 @@ export interface EditorActions {
   renameReference(referenceId: string, name: string): void;
   /** Aborts a reference gesture in flight, restoring the document. */
   cancelReferenceGesture(): void;
+  /** Selects an editable shape, or clears the shape selection with `null`. */
+  selectShape(shapeId: string | null): void;
+  /** Removes the selected shape, as one undoable step. */
+  deleteSelectedShape(): void;
+  /** Aborts a shape gesture in flight, restoring the shape and clearing it. */
+  cancelShapeGesture(): void;
+  /** Whether the selected shape's interior is filled. */
+  setSelectedShapeFill(filled: boolean): void;
+  /** Sides of the selected polygon, or points of the selected star. */
+  setSelectedShapeSides(sides: number): void;
+  /** Inner radius of the selected star, as a fraction of its outer radius. */
+  setSelectedShapeInnerRatio(ratio: number): void;
+  /** Absolute rotation of the selected box shape, in degrees (0-360). */
+  setSelectedShapeRotation(degrees: number): void;
+  /** Size of the selected box shape, keeping its top-left corner. */
+  setSelectedShapeSize(width: number, height: number): void;
+  /** Width of the selected box shape, keeping its height. */
+  setSelectedShapeWidth(width: number): void;
+  /** Height of the selected box shape, keeping its width. */
+  setSelectedShapeHeight(height: number): void;
+  /** Patches the selected shape's appearance; one coalescing history step. */
+  setSelectedShapeBrush(patch: Partial<BrushSettings>): void;
   /** Cancels the guide gesture in flight and clears the guide selection. */
   cancelGuideGesture(): void;
   /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
@@ -270,6 +292,39 @@ export function createEditor(options: EditorOptions = {}): Editor {
     },
     cancelReferenceGesture: () => {
       engine.cancelReferenceGesture();
+    },
+    selectShape: (shapeId) => {
+      engine.selectShape(shapeId);
+    },
+    deleteSelectedShape: () => {
+      engine.deleteSelectedShape();
+    },
+    cancelShapeGesture: () => {
+      engine.cancelShapeGesture();
+    },
+    setSelectedShapeFill: (filled) => {
+      engine.setSelectedShapeFill(filled);
+    },
+    setSelectedShapeSides: (sides) => {
+      engine.setSelectedShapeSides(sides);
+    },
+    setSelectedShapeInnerRatio: (ratio) => {
+      engine.setSelectedShapeInnerRatio(ratio);
+    },
+    setSelectedShapeRotation: (degrees) => {
+      engine.setSelectedShapeRotation(degrees);
+    },
+    setSelectedShapeSize: (width, height) => {
+      engine.setSelectedShapeSize(width, height);
+    },
+    setSelectedShapeWidth: (width) => {
+      engine.setSelectedShapeWidth(width);
+    },
+    setSelectedShapeHeight: (height) => {
+      engine.setSelectedShapeHeight(height);
+    },
+    setSelectedShapeBrush: (patch) => {
+      engine.setSelectedShapeBrush(patch);
     },
     cancelGuideGesture: () => {
       engine.cancelGuideGesture();

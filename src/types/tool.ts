@@ -4,6 +4,7 @@ export type ToolId =
   | "brush"
   | "eraser"
   | "select"
+  | "shapeEdit"
   | "line"
   | "rectangle"
   | "ellipse"

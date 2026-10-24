@@ -9,6 +9,7 @@ import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
 import { ReferenceTool } from "./referenceTool";
 import { SelectTool } from "./selectTool";
+import { ShapeEditTool } from "./shapeEditTool";
 import { ShapeTool } from "./shapeTool";
 import {
   BRUSH_TOOL,
@@ -20,6 +21,7 @@ import {
   RECTANGLE_TOOL,
   REFERENCE_TOOL,
   SELECT_TOOL,
+  SHAPE_EDIT_TOOL,
   STAR_TOOL,
 } from "./toolDefinitions";
 import type { Tool } from "./types";
@@ -33,6 +35,8 @@ export function createToolRegistry(): ToolRegistry {
     eraser: new BrushTool(ERASER_TOOL, true),
     // Marquee selection and stroke translation.
     select: new SelectTool(SELECT_TOOL),
+    // Native shape selection, move, resize and rotation.
+    shapeEdit: new ShapeEditTool(SHAPE_EDIT_TOOL),
     // One class parameterised by kind; the geometry lives in shapeGeometry.
     line: new ShapeTool("line", LINE_TOOL),
     rectangle: new ShapeTool("rectangle", RECTANGLE_TOOL),

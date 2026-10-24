@@ -251,6 +251,7 @@ export function toolShowsBrushControls(toolId: ToolId): boolean {
     case "gradient":
       return true;
     case "select":
+    case "shapeEdit":
     case "bucket":
     case "picker":
     case "guides":

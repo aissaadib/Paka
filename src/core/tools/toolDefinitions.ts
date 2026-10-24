@@ -29,6 +29,13 @@ export const SELECT_TOOL: ToolDefinition = {
   description: "Select strokes with a marquee, then drag to move them",
 };
 
+export const SHAPE_EDIT_TOOL: ToolDefinition = {
+  id: "shapeEdit",
+  label: "Shape edit",
+  shortcut: "V",
+  description: "Select, move, resize and rotate editable shapes",
+};
+
 export const LINE_TOOL: ToolDefinition = {
   id: "line",
   label: "Line",
@@ -115,6 +122,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   BRUSH_TOOL,
   ERASER_TOOL,
   SELECT_TOOL,
+  SHAPE_EDIT_TOOL,
   LINE_TOOL,
   RECTANGLE_TOOL,
   ELLIPSE_TOOL,

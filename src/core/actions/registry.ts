@@ -213,6 +213,12 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
         actions.cancelReferenceGesture();
         return;
       }
+      // The shape editor owns Escape too: a drag is restored, then the
+      // selection is cleared.
+      if (engine.getState().toolId === "shapeEdit") {
+        actions.cancelShapeGesture();
+        return;
+      }
       actions.clearSelection();
     },
   },
@@ -234,6 +240,11 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
         engine.getState().selectedReferenceId !== null
       ) {
         actions.deleteSelectedReference();
+        return;
+      }
+      // A selected native shape belongs to the shape editor.
+      if (engine.getState().toolId === "shapeEdit" && engine.getState().selectedShapeId !== null) {
+        actions.deleteSelectedShape();
         return;
       }
       actions.deleteSelection();

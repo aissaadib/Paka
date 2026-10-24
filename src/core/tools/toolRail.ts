@@ -86,8 +86,8 @@ export const TOOL_GROUPS: readonly ToolGroup[] = [
   {
     id: "select",
     label: "Select & transform",
-    description: "Select strokes, then move, scale or rotate them",
-    toolIds: ["select"],
+    description: "Select strokes or shapes, then move, scale or rotate them",
+    toolIds: ["select", "shapeEdit"],
     defaultToolId: "select",
     collapsed: false,
     hint: "Drag a corner handle to scale, the handle above to rotate.",
