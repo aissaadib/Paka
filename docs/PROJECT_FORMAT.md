@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 13,
+  "version": 15,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -349,8 +349,8 @@ to the layers it holds, never to the group itself.
 ### `elements[]`
 
 The `kind` field decides the element shape. Painting order is array order:
-strokes, fills and gradients interleave exactly as the user made them, and a
-reader must not reorder or drop elements.
+strokes, fills, gradients and native shapes interleave exactly as the user made
+them, and a reader must not reorder or drop elements.
 
 #### Strokes
 
@@ -380,27 +380,30 @@ An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
 re-renderable if the brush model changes.
 
-A shape drawn with the line, rectangle, ellipse, polygon or star tool is an
-**ordinary stroke**:
+A shape committed by a version-1 to -14 build is an **ordinary stroke**:
 its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
 four corners plus the repeated first point for a rectangle, a closed run of
 short segments for an ellipse, and the outline's own vertices for a polygon or
 a star - with `pressures` all `1`, so a shape has the
 brush's constant full width. There is no geometry field, which is why
 adding shape tools needed no new element kind: a reader that already knows
-strokes reproduces shapes, and undo, reopen and export treat them exactly like
-any other stroke.
+strokes reproduces those shapes, and undo, reopen and export treat them exactly
+like any other stroke. Version 15 introduces the native shape element (see
+[Shapes](#shapes)); a file that carries the old baked form still opens as the
+stroke it is and is **never converted** on the way in, because a primitive
+cannot be recovered from samples without guessing.
 
 A rectangle, ellipse, polygon or star committed with the fill setting on adds
 one boolean,
-`fill: true`, to that same stroke: the samples still trace the outline, and a
+`fill: true` to that same stroke: the samples still trace the outline, and a
 reader fills the polygon they bound before tracing it. It is a stroke-level flag
 rather than a document- or layer-level one, so a single layer can mix filled
 shapes, outlines and brush strokes in painting order, and the fill re-rasterizes
 from the file with no extra state. `fill` is why version 3 exists: a version-2
 reader would trace a filled shape's outline and leave the interior empty - a
 visibly different drawing - so it must refuse the file rather than mis-read it
-(see [Versioning](#versioning)).
+(see [Versioning](#versioning)). A native shape carries the same `fill` flag
+with the same meaning.
 
 #### Fills
 
@@ -470,6 +473,49 @@ stops and every colour is a hex colour, so `core/gradient/gradientRecord.ts`
 **refuses** a file whose gradient is malformed rather than quietly drawing a
 different ramp. A gradient is refused, not repaired, in both places.
 
+#### Shapes
+
+A **native shape** is the primitive and its parameters, not the pixels or
+samples it produced. It keeps its identity across save/reopen, so a rectangle
+reopens as a rectangle that can be resized and rotated again; a legacy baked
+shape (a stroke) cannot, and is never converted.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `kind` | `"shape"` | Element discriminator. Required from version 15. |
+| `id` | string | Shape id. It is stable across edits, undo/redo and a reopen. |
+| `geometry` | object | The primitive and its parameters; see below. |
+| `brush` | object | The complete brush the shape was drawn with, read by the same [`brush`](#brush) rules as a stroke. `stamp` is forced off: a shape is an outline, not a chain of dabs. |
+| `fill` | boolean | `true` fills the outline's interior before tracing it. A line has no interior; the writer always writes `false` for one. |
+
+`geometry` is a discriminated union on its own `shape` field:
+
+| `geometry.shape` | Fields | Meaning |
+| --- | --- | --- |
+| `"line"` | `x1`, `y1`, `x2`, `y2` | The two endpoints in document pixels. Endpoints, not a box, because a line's direction is part of the shape: reversing the drag must not reverse the reopened line. |
+| `"rectangle"`, `"ellipse"`, `"polygon"`, `"star"` | `x`, `y`, `width`, `height` | The normalized drag box: origin, positive size in document pixels. |
+| the four box kinds | `rotation` | Rigid rotation about the box centre, `0 <= rotation < 360`. It turns the placed outline; it never changes the box's side lengths. |
+| `"polygon"`, `"star"` | `sides` | Vertex count, an integer in the shape options' supported range. |
+| `"star"` | `innerRatio` | Valley depth as a fraction of the outer radius, in the shape options' supported range. |
+
+Every box kind carries `rotation`, `sides` and `innerRatio` even when they do
+not affect its outline, so the record has one shape and a kind change (a
+polygon's sides becoming a star's points) needs no migration. A line carries no
+box: it has no interior to fill and no rotation parameter, because its two
+endpoints already describe its orientation.
+
+The outline is reconstructed by the same pure function the shape tool previewed
+and the renderer draws (`shapeGeometryOutline`), and the renderer expands a
+native shape to a stroke of that outline and feeds it through the one stroke
+rasterizer. A shape drawn, committed, undone, reopened and exported therefore
+produces the same points and the same pixels every time; there is no second
+rasterizer for shapes.
+
+An edit replaces the record in place, keeping its `id` and its position in the
+element list, so painting order, selection and a redo after an undo all survive
+the edit. Symmetry copies are ordinary native shapes inserted after the
+original; they carry no link back to it.
+
 ### `brush`
 
 | Field | Range | Meaning |
@@ -510,12 +556,18 @@ looks like:
   carries `elements`, a paintable layer that carries `children`, and a group
   that lists no layers;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
-- a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"` or
-  `"gradient"`, or a gradient in a version-4 file;
+- a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"`,
+  `"gradient"` or `"shape"`, or a gradient in a version-4 file, or a shape in a
+  file that claims a version below 15;
 - a non-boolean `erase` flag on a stroke;
-- a non-boolean `fill` flag on a stroke;
+- a non-boolean `fill` flag on a stroke or a shape;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
+- a shape `geometry` that is missing, not an object, or names an unknown
+  primitive; a line endpoint that is not a finite number; a box with a
+  non-finite origin, a negative or non-finite `width`/`height`, a `rotation`
+  outside `0..360`, a `sides` that is not an integer in the supported range, or
+  an `innerRatio` outside the supported range;
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
   a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
@@ -550,7 +602,7 @@ looks like:
 - a missing `erase` flag → the stroke paints (which is what every version-1
   stroke does);
 - a missing `fill` flag → the stroke traces its outline (which is what every
-  version-1 and -2 shape does);
+  version-1 and -2 shape does), and a missing `fill` on a shape → `false`;
 - a missing `stabilizer` → `0`. This is an additive field within version 6: the
   stored samples already describe the smoothed path, so old version-6 files and
   all earlier versions render exactly as they did;
@@ -611,7 +663,9 @@ Two further guarantees:
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
 | 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
-| 13 | Adds `kind` to every layer entry and `children` to a group, so `layers[]` is a tree; and requires `tip` on every stroke brush, the shape a stamped dab is masked with. Reads version-1 to -12 files unchanged (they have no `kind` and no `tip`: every one of their layers is a paintable layer and their strokes are plain discs). | The current version; what this build always writes. |
+| 13 | Adds `kind` to every layer entry and `children` to a group, so `layers[]` is a tree; and requires `tip` on every stroke brush, the shape a stamped dab is masked with. Reads version-1 to -12 files unchanged (they have no `kind` and no `tip`: every one of their layers is a paintable layer and their strokes are plain discs). | - |
+| 14 | Adds `document.references`: the reference images, with their placement and their encoded picture. Reads version-1 to -13 files unchanged (they have no field and open with no references). | Writes the required `references` field. |
+| 15 | Adds `kind: "shape"`: a native primitive with its geometry, parameters and brush, instead of a baked stroke. Reads version-1 to -14 files unchanged; their shapes stay strokes and are never converted. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -679,6 +733,15 @@ Two further guarantees:
   carries a non-empty reference list is refused for the same reason a
   version-12 file carrying a group is: the claim is inconsistent with its
   contents.
+- **Native shapes are why version 15 exists.** A version-14 reader rejects an
+  unknown element `kind`, so it would refuse the file rather than mis-read it -
+  but the schema still gained a required new element shape. A native shape
+  cannot be added additively: a reader that skipped it would drop the shape from
+  the picture, and a reader that guessed a primitive from samples would be
+  inventing geometry the artist never committed. Version-1 to -14 files contain
+  no native shape and open unchanged; their baked shapes stay strokes. A file
+  that claims an older version and carries a shape is refused for the same
+  reason a version-12 file carrying a group is.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
