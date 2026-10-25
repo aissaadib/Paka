@@ -177,6 +177,21 @@ function brushOr(value: unknown): BrushSettings {
 }
 
 /**
+ * The colour palette, validated swatch by swatch.
+ *
+ * A missing or non-array `palette` takes the default list, so files written
+ * before the palette was editable load unchanged. The entries are read by
+ * `normalizePalette`, the same reader the engine uses: a malformed swatch is
+ * dropped rather than allowed to lose the rest.
+ */
+function paletteOr(value: unknown): readonly PaletteSwatch[] {
+  if (!Array.isArray(value)) {
+    return DEFAULT_PALETTE;
+  }
+  return normalizePalette(value);
+}
+
+/**
  * The preset library, validated entry by entry.
  *
  * A missing or non-array `presets` is an empty list, so files written before
@@ -294,6 +309,8 @@ export function settingsDocument(settings: AppSettings): SettingsDocument {
   return {
     version: SETTINGS_VERSION,
     brush: settings.brush,
+    secondaryColor: settings.secondaryColor,
+    palette: settings.palette,
     presets: settings.presets,
     toolId: settings.toolId,
     shapeFill: settings.shapeFill,
