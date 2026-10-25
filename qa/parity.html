@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Paka QA harness</title>
+    <style>
+      body {
+        font: 13px/1.5 system-ui, sans-serif;
+        margin: 16px;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Paka QA harness</h1>
+    <p>
+      Loads the shipped renderer and the pre-R1 renderer and compares them with real
+      Chromium Canvas 2D pixels. The result is on
+      <code>window.__qa.runAll()</code>.
+    </p>
+    <pre id="status">loading…</pre>
+    <script type="module">
+      import { runAll } from "/qa/harness.ts";
+      window.__qa = { ...(window.__qa ?? {}), runAll };
+      document.getElementById("status").textContent = "harness loaded";
+    </script>
+  </body>
+</html>

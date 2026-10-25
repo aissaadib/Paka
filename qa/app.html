@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Paka — Drawing (QA harness)</title>
+    <script>
+      // The QA harness runs the tab in the background, where the browser
+      // suspends requestAnimationFrame and the app's frame scheduler never
+      // paints. A setTimeout shim restores the frame loop (HANDOFF §8).
+      // It is installed BEFORE the app boots, so the first frame is scheduled
+      // through the shim rather than being stuck on the suspended one.
+      (function () {
+        let nextHandle = 1;
+        const pending = new Map();
+        window.requestAnimationFrame = function (callback) {
+          const handle = nextHandle++;
+          const timer = setTimeout(function () {
+            pending.delete(handle);
+            callback(performance.now());
+          }, 16);
+          pending.set(handle, timer);
+          return handle;
+        };
+        window.cancelAnimationFrame = function (handle) {
+          const timer = pending.get(handle);
+          if (timer !== undefined) {
+            clearTimeout(timer);
+            pending.delete(handle);
+          }
+        };
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
