@@ -11,7 +11,8 @@
  * pixels) a 16-pixel grid is already at its limit, and every extra pixel of
  * detail would be invisible. The subject is a *type* of brush - a nib, a soft
  * dab, a chisel marker, an airbrush, a charcoal stick, a stamp - not a
- * picture of a stroke. The mark a preset paints is drawn by the row itself.
+ * picture of a stroke. Every other brush draws its own icon from its settings;
+ * `brushIconFromBrush` reuses these subjects and adds the mark.
  *
  * Each subject carries its own dark outline. That outline is what survives
  * the shrinking: at 18 pixels the fills are a handful of squares each, and
@@ -24,8 +25,23 @@
 /** The width and height of every icon, in grid squares. */
 export const BRUSH_ICON_SIZE = 16;
 
-/** Which built-in brush an icon belongs to. */
-export type BrushIconId = "pen" | "soft" | "marker" | "airbrush" | "charcoal" | "stamps";
+/**
+ * Which kind of brush an icon draws.
+ *
+ * The six hand-drawn ones are the built-in brushes; `round`, `bristle` and
+ * `felt` are drawn by the same hand for the kinds only a saved brush can be,
+ * and are reached through `brushIconFromBrush`.
+ */
+export type BrushIconId =
+  | "pen"
+  | "soft"
+  | "marker"
+  | "airbrush"
+  | "charcoal"
+  | "stamps"
+  | "round"
+  | "bristle"
+  | "felt";
 
 /** One icon: its identity, its colours and its grid. */
 export interface BrushIcon {
@@ -48,8 +64,14 @@ export interface BrushIconRun {
   readonly color: string;
 }
 
+/** One colour's rectangles, as a single path. */
+export interface BrushIconPath {
+  readonly color: string;
+  readonly d: string;
+}
+
 /** The tile's outline, and the outline every subject is drawn with. */
-const BORDER = "#10161f";
+export const BORDER = "#10161f";
 
 /**
  * Wraps a subject in the tile.
@@ -57,8 +79,11 @@ const BORDER = "#10161f";
  * The subject is twelve rows of twelve characters. Inside it `.` means "the
  * tile's background": the frame turns it into `B`, so the subject can be
  * written against nothing and still sit on a solid colour.
+ *
+ * `brushIconFromBrush` uses this too: an icon is generated only when its art
+ * is framed the same way, so the whole library reads as one set.
  */
-function framed(art: readonly string[]): readonly string[] {
+export function framed(art: readonly string[]): readonly string[] {
   return [
     `..${"k".repeat(12)}..`,
     `.k${"b".repeat(12)}k.`,
@@ -250,15 +275,15 @@ export const BRUSH_ICONS: readonly BrushIcon[] = [PEN, SOFT, MARKER, AIRBRUSH, C
  * The icon of a built-in preset, by the preset's id.
  *
  * The built-in brushes are `builtin-pen`, `builtin-soft` and so on; an icon's
- * id is the part after the prefix. A user preset has its own generated id, so
- * it has no entry here and falls back to its painted mark.
+ * id is the part after the prefix. A saved brush has its own generated id, so
+ * it has no entry here; `brushIconForPreset` draws one from its settings.
  */
 export const BRUSH_ICON_BY_PRESET_ID: Readonly<Record<string, BrushIcon>> = Object.freeze(
   Object.fromEntries(BRUSH_ICONS.map((icon) => [`builtin-${icon.id}`, icon])),
 );
 
-/** The icon for a preset id, or `null` when the preset is not a built-in one. */
-export function brushIconForPreset(presetId: string): BrushIcon | null {
+/** The hand-drawn icon for a preset id, or `null` when the preset is not a built-in one. */
+export function brushIconForBuiltIn(presetId: string): BrushIcon | null {
   return BRUSH_ICON_BY_PRESET_ID[presetId] ?? null;
 }
 
@@ -292,4 +317,27 @@ export function brushIconRuns(icon: BrushIcon): readonly BrushIconRun[] {
     }
   });
   return runs;
+}
+
+/**
+ * Groups the runs into one path per colour.
+ *
+ * A path is one node where a run would be a node, and an icon has at most a
+ * palette's worth of colours: the library can list every brush without the
+ * dock paying for a few thousand rectangles. The segments never overlap, so
+ * the order of the paths is the order the colours first appear and nothing
+ * else.
+ */
+export function brushIconPaths(icon: BrushIcon): readonly BrushIconPath[] {
+  const byColor = new Map<string, string[]>();
+  for (const run of brushIconRuns(icon)) {
+    const segment = `M${run.x} ${run.y}h${run.width}v1h-${run.width}z`;
+    const segments = byColor.get(run.color);
+    if (segments) {
+      segments.push(segment);
+    } else {
+      byColor.set(run.color, [segment]);
+    }
+  }
+  return [...byColor].map(([color, segments]) => ({ color, d: segments.join("") }));
 }
