@@ -34,6 +34,8 @@ export function createStubRenderer(options: StubRendererOptions = {}): DrawingRe
     setSelection: () => {},
     setSelectedGuide: () => {},
     setGrid: () => {},
+    setReferenceSources: () => {},
+    setSelectedReference: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
