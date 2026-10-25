@@ -73,9 +73,9 @@ architecture by browsing.
 `features/brushes/BrushPresets.tsx` (176),
 `features/brushes/BrushPresetPanel.tsx` (the browser: the grid, the search, the order, the keys),
 `features/brushes/PresetRow.tsx` (one tile of the grid: the thumbnail, the corner star and the edited dot),
-`features/brushes/brushIcons.ts` (the six built-in icons: the grid, the palette, the run grouping and the preset lookup),
-`features/brushes/brushIconFromBrush.ts` (the generated icons: the kind, the per-kind palettes, the mark and the preset lookup),
-`features/brushes/BrushIcon.tsx` (the icon, drawn as one path per colour, at 40 px),
+`features/brushes/brushIcons.ts` (the vector model: `BrushIcon`/`BrushIconPath`, the nine `BRUSH_PALETTES`, the shared frame and grip, the nine subjects, `composeBrushIcon`),
+`features/brushes/brushIconFromBrush.ts` (the generated icons: the kind, `BUILT_IN_KINDS`, `brushMark` and its colour, the preset lookup),
+`features/brushes/BrushIcon.tsx` (the icon, one `<path>` per vector shape, at 46 px),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
@@ -142,7 +142,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`duplicateBrushPreset`/`applyBrushPreset`), `features/brushes/BrushPresets.tsx`, `state/editorStore.ts` |
-| Change a brush icon | `features/brushes/brushIcons.ts` (the grid model, `framed`, the six hand-drawn icons, `brushIconRuns`/`brushIconPaths`), `features/brushes/brushIconFromBrush.ts` (`brushGlyphId` the kind order, `PALETTES` per kind, `swashRows` the mark, `brushIconForPreset`), `features/brushes/BrushIcon.tsx` (one `<path>` per colour, `BRUSH_ICON_CSS_SIZE`), `features/brushes/PresetRow.tsx` (the tile), `src/test/brushIcons.test.ts`, `tests/visual/brush-icons.spec.ts` |
+| Change a brush icon | `features/brushes/brushIcons.ts` (`BRUSH_ICON_SIZE` the 48-unit box, `BrushIconPath`, `BRUSH_PALETTES` and `BRUSH_ICON_LABELS` per kind, `frame` the tile, `grip` the handle, the nine subject functions, `brushIconSubject`, `composeBrushIcon`), `features/brushes/brushIconFromBrush.ts` (`brushGlyphId` the kind order, `BUILT_IN_KINDS` the six curated subjects, `brushMark` the mark and its colour, `brushIconForPreset`), `features/brushes/BrushIcon.tsx` (one `<path>` per shape, `BRUSH_ICON_CSS_SIZE`), `features/brushes/PresetRow.tsx` (the tile), `src/test/brushIcons.test.ts`, `tests/visual/brush-icons.spec.ts` |
 | Change the brush library's grid | `features/brushes/brushPresets.css` (`.brush-browser__tiles` the grid and the tile minimum, `.brush-tile*` the square, the ring, the corner star and the edited dot, the sticky group heading), `features/brushes/PresetRow.tsx` (one tile: the pick button, the star, `data-built-in`), `features/brushes/BrushPresetPanel.tsx` (`gridColumnCount`, the arrow keys move a tile or a row, the selected tile is scrolled into view), `core/brushes/presetBrowser.ts` (`nextSelectionId` takes a step), `src/test/presetBrowser.test.ts`, `tests/visual/brush-icons.spec.ts` |
 | Add or change the Krita 4 presets | `core/brushes/kritaDefaults.ts` (the specs, the builder, `missingKritaPresets`), `features/brushes/BrushPresetPanel.tsx` (the one-click button), `src/test/kritaPresets.test.ts`, `tests/visual/krita-presets.spec.ts` |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
@@ -278,8 +278,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `PresetRow`, `PresetRowProps` | `features/brushes/PresetRow.tsx` | grep the symbol |
 | `gridColumnCount` | `features/brushes/BrushPresetPanel.tsx` | grep the symbol |
 | `nextSelectionId` (a step, not a direction) | `core/brushes/presetBrowser.ts` | grep the symbol |
-| `BRUSH_ICONS`, `BrushIcon`, `BRUSH_ICON_BY_PRESET_ID`, `brushIconForBuiltIn`, `brushIconRuns`, `brushIconPaths`, `framed` | `features/brushes/brushIcons.ts` | grep the symbol |
-| `brushGlyphId`, `brushIconPalette`, `brushIconFromBrush`, `brushIconForPreset` | `features/brushes/brushIconFromBrush.ts` | grep the symbol |
+| `BRUSH_ICON_SIZE`, `BrushIconId`, `BrushIconPalette`, `BrushIconPath`, `BrushIcon`, `BRUSH_PALETTES`, `BRUSH_ICON_LABELS`, `brushIconSubject`, `composeBrushIcon`, `BORDER` | `features/brushes/brushIcons.ts` | grep the symbol |
+| `brushGlyphId`, `brushIconPalette`, `brushIconFromBrush`, `brushIconForPreset`, `brushIconLabel`, `BrushMark`, `BrushMarkShape`, `brushMark` | `features/brushes/brushIconFromBrush.ts` | grep the symbol |
 | `BrushPropertyTier`, `brushPropertiesInTier`, `primaryBrushProperties`, `advancedBrushProperties` | `core/brushes/brushProperties.ts` | grep the symbol |
 | `PanelDock`, `DockPanel` | `components/panels/PanelDock.tsx` | grep the symbol |
 | `movePanelInPreferences`, `resetPanelPlacement`, `panelSlotOf`, `PanelMove` | `core/shell/panelMovement.ts` | grep the symbol |
@@ -338,7 +338,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
-| The brush icons | `brushIcons.test.ts` (one hand-drawn icon per built-in brush and no other, the grid and its palette, the shared frame, the run grouping and the path grouping, an icon for every preset in the library, the kind a set of settings paints, and the mark: its ink, its length, its fade, its taper and its dots) |
+| The brush icons | `brushIcons.test.ts` (a picture for every preset in the library, coordinates inside the icon, colours the renderer can read, the shared frame, six distinct built-ins with their curated subjects, the same settings drawing the same picture, the kind a set of settings paints and its palette, and the mark: its ink, its length, its fade, its taper and its dots) |
 | The brush browser (the library's grid) | `presetBrowser.test.ts` (the search, the order, the two groups, the favourites, the actions, the selection and its row step, the library file, the malformed file and the import), `tests/visual/brush-icons.spec.ts` (the grid of square thumbnails with no captions, each built-in tile drawing its own picture, and a saved brush drawn from its settings, never a painted dot) |
 | Krita 4 presets | `kritaPresets.test.ts` (the translated set, its bounds and names, the import helper, and the library-file round trip), `tests/visual/krita-presets.spec.ts` (the one-click import and the second press in a real browser) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
