@@ -775,6 +775,8 @@ describe("the settings document", () => {
     expect(Object.keys(settingsDocument(DEFAULT_APP_SETTINGS))).toEqual([
       "version",
       "brush",
+      "secondaryColor",
+      "palette",
       "presets",
       "toolId",
       "shapeFill",
