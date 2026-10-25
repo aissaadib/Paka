@@ -109,6 +109,16 @@ test("the keyboard's tile is scrolled into view", async ({ page }) => {
     return tileRect.top >= listRect.top - 1 && tileRect.bottom <= listRect.bottom + 1;
   });
   expect(inView, "the selected tile must be inside the list's viewport").toBe(true);
+
+  // The group's heading stays at the top of the list while the tiles scroll.
+  const headingTop = await list.evaluate((element) => {
+    const title = element.querySelector(".brush-browser__group-title");
+    if (title === null) {
+      return null;
+    }
+    return Math.round(title.getBoundingClientRect().top - element.getBoundingClientRect().top);
+  });
+  expect(headingTop, "the group's heading sticks to the list's top").toBeLessThan(12);
 });
 
 test("a saved brush is drawn from its settings, never from a painted dot", async ({ page }) => {
