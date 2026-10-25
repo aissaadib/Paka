@@ -1,54 +1,22 @@
 /**
  * One row of the brush library.
  *
- * The row shows the mark the brush paints, its name and the two states that
+ * The row shows the icon of the brush, its name and the two states that
  * matter: whether it is the brush in effect, and whether the brush has been
  * changed since it was applied. The star is the user's own note about the
  * brush, so it is a button of its own rather than part of the name.
  *
- * The mark is drawn from the brush's own settings - its colour, its width,
- * its opacity, its soft edge and whether it is stamped - so a property that
- * changes a stroke changes the mark too. It is a mark, not a picture of a
- * stroke: the pixels a brush lays down are the renderer's business.
- *
- * A built-in brush shows its icon instead of the mark. The icon says what
- * kind of brush it is - a nib, a dab, a marker, an airbrush, a charcoal
- * stick, a stamp - which the settings cannot say on their own; a saved brush
- * has no icon, so it keeps its mark.
+ * Every brush has an icon. A built-in brush shows the picture drawn for it by
+ * hand; a saved one - a Krita preset or the user's own - is drawn from its
+ * settings, in the same frame and the same manner, so the list reads as one
+ * set and a row says what kind of brush it is before it is applied.
  */
 
-import type { CSSProperties } from "react";
+import { useMemo } from "react";
 import { describePreset } from "../../core/brushes/presetBrowser";
 import type { BrushPreset } from "../../core/brushes/presets";
-import type { BrushSettings } from "../../types/brush";
 import { BrushIcon } from "./BrushIcon";
-import { brushIconForPreset } from "./brushIcons";
-
-/** The largest the mark is drawn, in CSS pixels. */
-const MAX_MARK_SIZE = 14;
-
-/** The smallest the mark is drawn, in CSS pixels. */
-const MIN_MARK_SIZE = 4;
-
-/** The mark a brush paints, as inline styles. */
-function markStyle(brush: BrushSettings): CSSProperties {
-  const dot = Math.round(
-    Math.min(MAX_MARK_SIZE, Math.max(MIN_MARK_SIZE, brush.size * 0.5)),
-  );
-  return {
-    width: `${dot}px`,
-    height: `${dot}px`,
-    background: brush.color,
-    opacity: brush.opacity,
-    // A soft edge is a blurred edge, which is what the setting does to the
-    // outside of the stroke.
-    filter: brush.hardness < 1 ? `blur(${((1 - brush.hardness) * dot * 0.14).toFixed(2)}px)` : undefined,
-    // A stamped brush paints a chain of dabs, so its mark is a row of dots.
-    boxShadow: brush.stamp
-      ? `${dot * 1.5}px 0 0 0 ${brush.color}, ${dot * 3}px 0 0 0 ${brush.color}`
-      : undefined,
-  };
-}
+import { brushIconForPreset } from "./brushIconFromBrush";
 
 export interface PresetRowProps {
   readonly preset: BrushPreset;
@@ -79,7 +47,7 @@ export function PresetRow({
   onToggleFavorite,
 }: PresetRowProps) {
   const description = describePreset(preset);
-  const icon = bundled ? brushIconForPreset(preset.id) : null;
+  const icon = useMemo(() => brushIconForPreset(preset), [preset]);
   const title = bundled
     ? `${preset.name} - ${description} (built-in)`
     : `${preset.name} - ${description}`;
@@ -101,11 +69,7 @@ export function PresetRow({
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(preset.id)}
       >
-        {icon ? (
-          <BrushIcon icon={icon} />
-        ) : (
-          <span className="brush-row__mark" style={markStyle(preset.brush)} aria-hidden="true" />
-        )}
+        <BrushIcon icon={icon} />
         <span className="brush-row__name">{preset.name}</span>
         {edited ? (
           <span
