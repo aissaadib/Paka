@@ -305,6 +305,15 @@ describe("the selection", () => {
     expect(nextSelectionId(visible, "b-pencil", 1)).toBe("b-pencil");
   });
 
+  it("moves by a whole row when the grid has several columns", () => {
+    // The library is drawn as a grid, so a vertical arrow is a step of the
+    // column count rather than of one.
+    expect(nextSelectionId(visible, "p-ink", 2)).toBe("p-soft");
+    expect(nextSelectionId(visible, "p-soft", -2)).toBe("p-ink");
+    // A step past the end clamps to the end, as a single move does.
+    expect(nextSelectionId(visible, "p-ink", 9)).toBe("b-pencil");
+  });
+
   it("starts at the first brush when the selected one is gone", () => {
     expect(nextSelectionId(visible, "p-gone", 1)).toBe("p-ink");
   });
