@@ -1,15 +1,23 @@
 /**
- * One row of the brush library.
+ * One tile of the brush library.
  *
- * The row shows the icon of the brush, its name and the two states that
- * matter: whether it is the brush in effect, and whether the brush has been
- * changed since it was applied. The star is the user's own note about the
- * brush, so it is a button of its own rather than part of the name.
+ * The library is a grid of square thumbnails, as a paint program's preset
+ * chooser is: the picture is the brush, and the name is the tooltip and the
+ * button's accessible name rather than a caption under every tile. Two states
+ * are drawn on the tile itself - the brush in effect and the tile the keyboard
+ * is on - and two marks sit in its corners: the star the user gave the brush
+ * and the dot that says the live brush has been changed since the preset was
+ * applied.
+ *
+ * The star is the user's own note about the brush, so it is a button of its
+ * own rather than part of the tile's press. It is pinned to the corner and
+ * shown while the tile is under the pointer or the keyboard, or while the
+ * brush is starred, so a grid of unstarred brushes stays a grid of pictures.
  *
  * Every brush has an icon. A built-in brush shows the picture drawn for it by
  * hand; a saved one - a Krita preset or the user's own - is drawn from its
- * settings, in the same frame and the same manner, so the list reads as one
- * set and a row says what kind of brush it is before it is applied.
+ * settings, in the same frame and the same manner, so the grid reads as one
+ * set and a tile says what kind of brush it is before it is applied.
  */
 
 import { useMemo } from "react";
@@ -22,7 +30,7 @@ export interface PresetRowProps {
   readonly preset: BrushPreset;
   /** Whether the brush is one of the built-in ones. */
   readonly bundled: boolean;
-  /** Whether the row is the one the keyboard is on. */
+  /** Whether the tile is the one the keyboard is on. */
   readonly selected: boolean;
   /** Whether the brush is the one in effect. */
   readonly current: boolean;
@@ -30,7 +38,7 @@ export interface PresetRowProps {
   readonly edited: boolean;
   /** Whether the brush is starred. */
   readonly favorite: boolean;
-  /** The row was picked: the brush is applied to the live brush. */
+  /** The tile was picked: the brush is applied to the live brush. */
   readonly onSelect: (id: string) => void;
   /** The star was pressed. */
   readonly onToggleFavorite: (id: string) => void;
@@ -51,9 +59,11 @@ export function PresetRow({
   const title = bundled
     ? `${preset.name} - ${description} (built-in)`
     : `${preset.name} - ${description}`;
+  // The tile draws no text, so its name has to come from the button.
+  const label = bundled ? `${preset.name} (built-in brush)` : preset.name;
 
   const className = [
-    "brush-row",
+    "brush-tile",
     selected ? "is-selected" : "",
     current ? "is-current" : "",
   ]
@@ -61,33 +71,29 @@ export function PresetRow({
     .join(" ");
 
   return (
-    <li className={className}>
+    <li className={className} data-built-in={bundled ? "true" : undefined}>
       <button
         type="button"
-        className="brush-row__pick"
+        className="brush-tile__pick"
         title={title}
-        aria-current={selected ? "true" : undefined}
+        aria-label={label}
+        aria-current={current ? "true" : undefined}
         onClick={() => onSelect(preset.id)}
       >
         <BrushIcon icon={icon} />
-        <span className="brush-row__name">{preset.name}</span>
-        {edited ? (
-          <span
-            className="brush-row__edited"
-            title="The brush has changed since this preset was applied"
-          >
-            •
-          </span>
-        ) : null}
-        {bundled ? (
-          <span className="brush-row__builtin" title="A built-in brush">
-            built-in
-          </span>
-        ) : null}
       </button>
+      {edited ? (
+        <span
+          className="brush-tile__edited"
+          title="The brush has changed since this preset was applied"
+          aria-hidden="true"
+        >
+          •
+        </span>
+      ) : null}
       <button
         type="button"
-        className="brush-row__star"
+        className="brush-tile__star"
         aria-label={favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
         aria-pressed={favorite}
         title={favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
