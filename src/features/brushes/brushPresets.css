@@ -191,9 +191,7 @@
 }
 
 .brush-icon {
-  /* The art is a grid of runs at whole coordinates: ask the browser to keep
-     their edges hard instead of smoothing a fractional size. */
-  shape-rendering: crispEdges;
+  display: block;
 }
 
 .brush-tile__edited {
