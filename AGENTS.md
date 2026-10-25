@@ -72,7 +72,8 @@ architecture by browsing.
 `core/brushes/kritaDefaults.ts` (169: the Krita 4 preset translation, its provenance and its import helper),
 `features/brushes/BrushPresets.tsx` (176),
 `features/brushes/brushIcons.ts` (the six built-in icons: the grid, the palette, the run grouping and the preset lookup),
-`features/brushes/BrushIcon.tsx` (the icon, drawn as one rectangle per run),
+`features/brushes/brushIconFromBrush.ts` (the generated icons: the kind, the per-kind palettes, the mark and the preset lookup),
+`features/brushes/BrushIcon.tsx` (the icon, drawn as one path per colour),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
@@ -139,6 +140,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`duplicateBrushPreset`/`applyBrushPreset`), `features/brushes/BrushPresets.tsx`, `state/editorStore.ts` |
+| Change a brush icon | `features/brushes/brushIcons.ts` (the grid model, `framed`, the six hand-drawn icons, `brushIconRuns`/`brushIconPaths`), `features/brushes/brushIconFromBrush.ts` (`brushGlyphId` the kind order, `PALETTES` per kind, `swashRows` the mark, `brushIconForPreset`), `features/brushes/BrushIcon.tsx` (one `<path>` per colour), `features/brushes/PresetRow.tsx`, `src/test/brushIcons.test.ts`, `tests/visual/brush-icons.spec.ts` |
 | Add or change the Krita 4 presets | `core/brushes/kritaDefaults.ts` (the specs, the builder, `missingKritaPresets`), `features/brushes/BrushPresetPanel.tsx` (the one-click button), `src/test/kritaPresets.test.ts`, `tests/visual/krita-presets.spec.ts` |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
 | Change the layer groups (the tree) | `core/document/layerGroups.ts` (the tree rules: the children, the order, the ancestor rule, dissolving), `core/document/types.ts` (`Layer.kind`, `Layer.children`), `core/document/document.ts` (the tree-aware layer operations), `core/commands/documentCommand.ts` (the group commands), `core/project/projectFormat.ts` (version 13), `features/layers/LayersPanel.tsx`, `PROJECT_FORMAT.md` |
@@ -270,7 +272,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `BrushAdvancedPopover` | `features/brushes/BrushAdvancedPopover.tsx` | grep the symbol |
 | `BrushPresetControls` | `features/brushes/BrushPresets.tsx` | grep the symbol |
 | `BrushIcon`, `BRUSH_ICON_CSS_SIZE` | `features/brushes/BrushIcon.tsx` | grep the symbol |
-| `BRUSH_ICONS`, `BrushIcon`, `BRUSH_ICON_BY_PRESET_ID`, `brushIconForPreset`, `brushIconRuns` | `features/brushes/brushIcons.ts` | grep the symbol |
+| `BRUSH_ICONS`, `BrushIcon`, `BRUSH_ICON_BY_PRESET_ID`, `brushIconForBuiltIn`, `brushIconRuns`, `brushIconPaths`, `framed` | `features/brushes/brushIcons.ts` | grep the symbol |
+| `brushGlyphId`, `brushIconPalette`, `brushIconFromBrush`, `brushIconForPreset` | `features/brushes/brushIconFromBrush.ts` | grep the symbol |
 | `BrushPropertyTier`, `brushPropertiesInTier`, `primaryBrushProperties`, `advancedBrushProperties` | `core/brushes/brushProperties.ts` | grep the symbol |
 | `PanelDock`, `DockPanel` | `components/panels/PanelDock.tsx` | grep the symbol |
 | `movePanelInPreferences`, `resetPanelPlacement`, `panelSlotOf`, `PanelMove` | `core/shell/panelMovement.ts` | grep the symbol |
@@ -329,7 +332,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
-| The built-in brushes' icons | `brushIcons.test.ts` (one icon per built-in brush, the grid and its palette, the shared frame, the preset lookup, and the run grouping that the renderer draws), `tests/visual/brush-icons.spec.ts` (each built-in row draws its own picture, and a saved brush keeps its mark) |
+| The brush icons | `brushIcons.test.ts` (one hand-drawn icon per built-in brush and no other, the grid and its palette, the shared frame, the run grouping and the path grouping, an icon for every preset in the library, the kind a set of settings paints, and the mark: its ink, its length, its fade, its taper and its dots), `tests/visual/brush-icons.spec.ts` (each built-in row draws its own picture, and a saved brush is drawn from its settings, never from a painted dot) |
 | Krita 4 presets | `kritaPresets.test.ts` (the translated set, its bounds and names, the import helper, and the library-file round trip), `tests/visual/krita-presets.spec.ts` (the one-click import and the second press in a real browser) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
