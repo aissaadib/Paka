@@ -86,6 +86,31 @@ test("every built-in brush shows its own icon", async ({ page }) => {
   );
 });
 
+test("the keyboard's tile is scrolled into view", async ({ page }) => {
+  const panel = await openBrushes(page);
+  await panel.getByRole("button", { name: "Krita 4", exact: true }).click();
+  await expect(panel.getByRole("status")).toHaveText("Imported 81 brushes.");
+
+  const list = panel.locator(".brush-browser__list");
+  await list.focus();
+  // More rows than the panel can show: the selection has to follow.
+  for (let index = 0; index < 8; index += 1) {
+    await page.keyboard.press("ArrowDown");
+  }
+  const selected = panel.locator(".brush-tile.is-selected");
+  await expect(selected).toHaveCount(1);
+  const inView = await list.evaluate((element) => {
+    const tile = element.querySelector(".brush-tile.is-selected");
+    if (tile === null) {
+      return null;
+    }
+    const listRect = element.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    return tileRect.top >= listRect.top - 1 && tileRect.bottom <= listRect.bottom + 1;
+  });
+  expect(inView, "the selected tile must be inside the list's viewport").toBe(true);
+});
+
 test("a saved brush is drawn from its settings, never from a painted dot", async ({ page }) => {
   const panel = await openBrushes(page);
   await panel.getByRole("button", { name: "Krita 4", exact: true }).click();
