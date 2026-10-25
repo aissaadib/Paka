@@ -26,7 +26,7 @@
  * only holds the little state the browser owns and calls the editor.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { brushSettingsEqual } from "../../core/brushes/defaults";
 import {
   DEFAULT_PRESET_BROWSER_STATE,
@@ -90,6 +90,7 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
   const [message, setMessage] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const library: PresetLibrary = useMemo(() => ({ presets, bundled }), [presets, bundled]);
   const groups = useMemo(() => groupPresets(library, state), [library, state]);
@@ -102,6 +103,29 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
       current !== null && findPreset(library, current) === null ? null : current,
     );
   }, [library]);
+
+  // The grid is taller than the panel, so the keyboard's tile has to be
+  // brought into view as it moves. Only the list's own scroll is touched: the
+  // panel around it stays where it is.
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null || selectedId === null) {
+      return;
+    }
+    const tile = Array.from(list.querySelectorAll<HTMLElement>("[data-preset-id]")).find(
+      (element) => element.dataset.presetId === selectedId,
+    );
+    if (tile === undefined) {
+      return;
+    }
+    const listRect = list.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    if (tileRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - tileRect.top;
+    } else if (tileRect.bottom > listRect.bottom) {
+      list.scrollTop += tileRect.bottom - listRect.bottom;
+    }
+  }, [selectedId]);
 
   const selected = findPreset(library, selectedId);
   const confirming = findPreset(library, confirmingId);
@@ -407,6 +431,7 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
 
         <div
           className="brush-browser__list"
+          ref={listRef}
           tabIndex={0}
           aria-label="Brush presets"
           onKeyDown={(event) => {
