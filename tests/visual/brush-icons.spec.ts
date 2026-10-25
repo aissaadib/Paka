@@ -3,8 +3,8 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 /**
  * The brush library, in a real browser.
  *
- * The unit suite proves the grids, the palettes and the generated kinds; this
- * spec proves the part a user meets: the library is a grid of square
+ * The unit suite proves the vector art, the palettes and the generated kinds;
+ * this spec proves the part a user meets: the library is a grid of square
  * thumbnails, every tile carries a picture and no tile carries a caption, the
  * six built-in brushes draw six different ones, and a saved brush is drawn
  * from its own settings - a bristle brush does not look like a nib, and no
@@ -76,8 +76,8 @@ test("every built-in brush shows its own icon", async ({ page }) => {
     await expect(icon, `${name} must show an icon`).toBeVisible();
     // The icon is decoration: the button's name is what is announced.
     await expect(icon).toHaveAttribute("aria-hidden", "true");
-    // A picture, not an empty box: one path per colour.
-    expect(await icon.locator("path").count(), `${name} must draw colours`).toBeGreaterThan(4);
+    // A picture, not an empty box: a frame, a mark and a subject of its own.
+    expect(await icon.locator("path").count(), `${name} must draw its subject`).toBeGreaterThan(6);
     pictures.push(await icon.evaluate((element) => element.innerHTML));
   }
 
