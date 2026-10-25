@@ -36,12 +36,32 @@
   min-height: 0;
   overflow-y: auto;
   padding: 4px;
+  /* A docked panel's body is often taller than the dock: the scrollbar is the
+     one thing that says so, so it is visible rather than an overlay. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.panel__body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel__body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
 }
 
 .panel__footer {
   padding: 4px 8px;
   border-top: 1px solid var(--border);
 }
+
+/* ------------------------------------------------------------------- list */
 
 .layer-list {
   display: flex;
@@ -52,12 +72,53 @@
   list-style: none;
 }
 
+/**
+ * The insertion marker of a drag reorder.
+ *
+ * A two-pixel accent line between the rows, so the place the layer will land
+ * is visible before the drop. It takes no space of its own: the rows keep
+ * their density while the drag is in flight.
+ */
+.layer-marker {
+  height: 0;
+  margin: 0 2px;
+  border-top: 2px solid var(--accent);
+  list-style: none;
+}
+
+/**
+ * The empty state.
+ *
+ * The document model always keeps one layer, so this is the defensive case:
+ * if the list is ever empty, the panel says what to do about it instead of
+ * showing an empty box.
+ */
+.layer-empty {
+  margin: 8px 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------- rows */
+
+/**
+ * One layer.
+ *
+ * The row is a fixed height, so the panel reads as a list of equal rows
+ * whatever the layer names are. The three states an artist has to tell apart
+ * at a glance each have their own mark: the **active** layer is filled and
+ * carries an accent bar, the **focused** row has a dotted outline, and a
+ * **hidden** layer's name is dimmed.
+ */
 .layer-row {
+  --layer-row-height: 26px;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 26px;
-  padding: 0 4px;
+  height: var(--layer-row-height);
+  padding: 0 4px 0 6px;
   border: 1px solid transparent;
   border-radius: var(--radius);
 }
@@ -66,15 +127,174 @@
   background: var(--bg-raised);
 }
 
+/** The layer the engine draws into. */
 .layer-row.is-active {
   background: var(--accent-soft);
   border-color: var(--accent);
+}
+
+/**
+ * The accent bar of the active layer.
+ *
+ * A filled row and a bar say the same thing twice on purpose: the bar is
+ * what stays visible when the row is hovered, and it is what separates the
+ * active layer from the focused one at a glance.
+ */
+.layer-row.is-active::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/** The row the keyboard is on. Focus is not the same as the active layer. */
+.layer-row.is-focused {
+  outline: 1px dotted var(--text-dim);
+  outline-offset: -1px;
+}
+
+/** A layer that is not composited: its name steps back. */
+.layer-row.is-hidden .layer-row__title {
+  color: var(--text-dim);
+}
+
+/** The row being dragged: it stays in place, dimmed, while the marker moves. */
+.layer-row.is-dragging {
+  opacity: 0.5;
+}
+
+/**
+ * A group row.
+ *
+ * The folder mark, the chevron and the child count are what tell a container
+ * from a paintable layer. The row stays the same height: collapsing is a view
+ * change, not a different kind of row.
+ */
+.layer-row.is-group .layer-row__title {
+  font-weight: 500;
+}
+
+.layer-row__chevron,
+.layer-row__chevron-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 16px;
+}
+
+.layer-row__chevron {
+  color: var(--text-dim);
+  border-radius: 2px;
+}
+
+.layer-row__chevron:hover {
+  color: var(--text-strong);
+  background: var(--bg-raised-hover);
+}
+
+.layer-row__chevron svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 120ms ease;
+}
+
+.layer-row.is-expanded .layer-row__chevron svg {
+  transform: rotate(90deg);
+}
+
+.layer-row__folder {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--text-dim);
+}
+
+/** The number of direct children a group holds. */
+.layer-row__count {
+  flex: none;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/** A layer under a hidden group cannot composite, even if it is visible. */
+.layer-row.is-inherited-hidden .layer-row__title {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+/** The insertion marker of a drop above or below this row. */
+.layer-row.is-drop-above::after,
+.layer-row.is-drop-below::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.layer-row.is-drop-above::after {
+  top: -2px;
+}
+
+.layer-row.is-drop-below::after {
+  bottom: -2px;
+}
+
+/** A group being used as the destination of a drop. */
+.layer-row.is-drop-into {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: var(--accent-soft);
+}
+
+/**
+ * The drag handle.
+ *
+ * A mouse affordance only: the keyboard moves a layer with Ctrl+Up and
+ * Ctrl+Down, and the panel's Move buttons do the same. It is hidden until
+ * the row is hovered, so it does not compete with the name for attention.
+ */
+.layer-row__grip {
+  flex: none;
+  width: 8px;
+  height: 16px;
+  cursor: grab;
+  opacity: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='12' viewBox='0 0 6 12'%3E%3Cg fill='%238a919b'%3E%3Ccircle cx='1.5' cy='2' r='1'/%3E%3Ccircle cx='4.5' cy='2' r='1'/%3E%3Ccircle cx='1.5' cy='6' r='1'/%3E%3Ccircle cx='4.5' cy='6' r='1'/%3E%3Ccircle cx='1.5' cy='10' r='1'/%3E%3Ccircle cx='4.5' cy='10' r='1'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.layer-row:hover .layer-row__grip,
+.layer-row.is-dragging .layer-row__grip {
+  opacity: 1;
+}
+
+.layer-row__grip:active {
+  cursor: grabbing;
 }
 
 .layer-row__visibility {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   width: 20px;
   height: 20px;
   color: var(--text-dim);
@@ -89,10 +309,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
+  min-width: 0;
   height: 100%;
-  padding: 0 4px;
+  padding: 0 2px;
   text-align: left;
   overflow: hidden;
 }
@@ -103,16 +324,99 @@
   white-space: nowrap;
 }
 
+/**
+ * The badge of a non-normal blend mode.
+ *
+ * Two letters, because the row is narrow; the mode's name is in the blend
+ * selector and in the row's tooltip.
+ */
+.layer-row__blend {
+  flex: none;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-dim);
+  font-size: 9px;
+  line-height: 13px;
+  letter-spacing: 0.04em;
+}
+
+/** The layer's opacity, and the quick editor that changes it. */
 .layer-row__opacity {
+  flex: none;
+  min-width: 30px;
+  padding: 0 2px;
   color: var(--text-dim);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
+  text-align: right;
+  border-radius: 2px;
 }
+
+.layer-row__opacity:hover {
+  color: var(--text-strong);
+  background: var(--bg-raised-hover);
+}
+
+.layer-row__opacity-input {
+  flex: none;
+  width: 40px;
+  height: 18px;
+  padding: 0 2px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* -------------------------------------------------------------- properties */
 
 .layer-properties {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/** Blend and Inside share a row: the footer is short, the panel is narrow. */
+.layer-property-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.layer-property-row > .layer-blend,
+.layer-property-row > .layer-parent {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/**
+ * The footer never takes the whole panel.
+ *
+ * A group adds its context actions to the properties; at a short window the
+ * footer scrolls instead of squeezing the layer list to a header.
+ */
+.side-panels__layers .panel__footer {
+  max-height: 45%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@media (max-height: 620px) {
+  .layer-hint {
+    display: none;
+  }
+}
+
+.layer-properties__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 
 .layer-blend {
@@ -138,10 +442,76 @@
   font: inherit;
 }
 
+/**
+ * The group a node lives in, as a select.
+ *
+ * This is the keyboard and screen-reader counterpart of dragging a row into a
+ * group: the same engine command, with the destination named rather than
+ * pointed at.
+ */
+.layer-parent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layer-parent__label {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.layer-parent__select {
+  flex: 1;
+  height: var(--control-height);
+  min-width: 0;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}
+
+/** The group-only actions: Ungroup and moving a child back out. */
+.layer-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.layer-context-button {
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.layer-context-button:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-raised-hover);
+}
+
+/**
+ * The keyboard hint.
+ *
+ * The panel's shortcuts are not discoverable otherwise, and a panel that can
+ * be driven from the keyboard has to say how.
+ */
+.layer-hint {
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .layer-row__input {
   flex: 1;
-  height: 20px;
   min-width: 0;
+  height: 20px;
   padding: 0 4px;
   border: 1px solid var(--accent);
   border-radius: 2px;

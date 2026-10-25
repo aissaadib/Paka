@@ -11,9 +11,11 @@ import type { BrushSettings } from "../../types/brush";
 import type { PointerSample } from "../../types/pointer";
 import type { ToolDefinition, ToolId } from "../../types/tool";
 import type { Viewport } from "../../types/viewport";
-import type { Guide, GuideAxis, LayerId } from "../document/types";
+import type { Guide, GuideAxis, LayerId, ShapeGeometry, ShapeRecord } from "../document/types";
 import type { SelectionHandleId } from "../document/selectionHandles";
-import type { ShapeOptions, ShapePoint } from "./shapeGeometry";
+import type { ShapeOptions } from "./shapeGeometry";
+import type { ReferenceImage } from "../reference/types";
+import type { ReferenceHandleId } from "../reference/geometry";
 
 export interface ToolContext {
   readonly viewport: Viewport;
@@ -38,30 +40,56 @@ export interface ToolContext {
    * Starts a shape gesture on the active layer with the current brush.
    *
    * Like `beginStroke`, but the samples are not a path the pointer traces: the
-   * tool computes the whole outline and replaces it with `setShapeOutline`. The
+   * tool computes the whole primitive and replaces it with `setShapeSpec`. The
    * shape is previewed in the stroke buffer and reaches the layer only when
    * `finishShape` is called.
    */
   beginShape(sample: PointerSample): void;
   /**
-   * Replaces the in-progress shape's outline with the given document-space
-   * points. A preview only: nothing is committed until `finishShape`.
+   * Replaces the in-progress shape with the given native geometry.
+   *
+   * A preview only: nothing is committed until `finishShape`. The geometry is
+   * the same value the engine will store, so what the user sees is derived
+   * from exactly what a save and a reopen will read back.
    */
-  setShapeOutline(points: readonly ShapePoint[]): void;
-  /** Commits the in-progress shape as one undoable stroke. */
+  setShapeSpec(geometry: ShapeGeometry): void;
+  /** Commits the in-progress shape as one undoable element. */
   finishShape(): void;
   /** Discards the in-progress shape without touching the layer. */
   cancelShape(): void;
   /**
-   * Commits the active stroke to its layer and to history.
+   * The top-most shape under a document point on the active layer, or `null`.
    *
-   * The sample is the pointer's last known position, and it is where the
-   * stroke ends: a stabilized path lags behind a moving pointer, so the
-   * stroke's last sample is caught up to the release point. It is optional,
-   * and a stroke finished without one ends at the last position the pointer
-   * reported.
+   * Hit-testing is confined to the active paintable layer, exactly like the
+   * stroke marquee: the shape editor selects what the artist is working on,
+   * not a shape on a layer they would then edit blind.
    */
-  finishStroke(sample?: PointerSample): void;
+  findShapeAt(docX: number, docY: number): ShapeRecord | null;
+  /**
+   * The handle of the *selected* shape a press grabs, or `null`.
+   *
+   * Handles take precedence over the move gesture, exactly as the stroke
+   * selection's handles do.
+   */
+  findShapeHandleAt(docX: number, docY: number): SelectionHandleId | null;
+  /** Selects a shape, or clears the selection with `null`. */
+  selectShape(shapeId: string | null): void;
+  /**
+   * Starts moving, resizing or rotating the selected shape.
+   *
+   * A press with no handle grabs the top-most shape under the point and starts
+   * a move; a press with a handle transforms the selected one. Returns whether
+   * a gesture started, so a press on empty canvas can clear the selection.
+   */
+  beginShapeGesture(sample: PointerSample, handle: SelectionHandleId | null): boolean;
+  /** Previews the shape gesture at the pointer. Nothing enters history yet. */
+  updateShapeGesture(sample: PointerSample): void;
+  /** Commits the gesture as one undoable step; a no-op drag commits nothing. */
+  finishShapeGesture(): void;
+  /** Aborts the gesture, restoring the press-time record. */
+  cancelShapeGesture(): void;
+  /** Commits the active stroke to its layer and to history. */
+  finishStroke(): void;
   /** Discards the active stroke without touching the layer. */
   cancelStroke(): void;
   isStrokeActive(): boolean;
@@ -111,17 +139,12 @@ export interface ToolContext {
   /** Drops the selection and its overlay. */
   clearSelection(): void;
   /**
-   * Samples the colour under the sample and makes it the brush colour.
+   * Samples the *composited* document at the sample's document position and
+   * makes it the brush colour.
    *
    * This is not an edit: no pixels change, no stroke is recorded and nothing
    * enters history. The sample is already in document space because the input
    * pipeline applies the viewport transform.
-   *
-   * A **reference image** under the pointer is sampled instead of the
-   * artwork: the references are drawn over the canvas, so a reference under
-   * the pointer is what the artist is pointing at. The engine does that
-   * mapping, because a reference lives in workspace space and the engine is
-   * the one that knows both spaces.
    */
   pickColor(sample: PointerSample): void;
   /**
@@ -157,30 +180,6 @@ export interface ToolContext {
   /** True while a gradient is previewed but not yet recorded in history. */
   isGradientActive(): boolean;
   /**
-   * Selects the gradient under a document point, or clears the selection.
-   *
-   * The hit test is against the gradient's **geometry** - the axis of a linear
-   * gradient, the circle of a radial one - because a gradient paints its whole
-   * layer: only the geometry says which gradient the user means. Returns
-   * whether a gradient was selected.
-   */
-  selectGradientAt(docX: number, docY: number): boolean;
-  /**
-   * Starts dragging one of the selected gradient's handles.
-   *
-   * Returns whether a handle was grabbed. The drag previews the new geometry
-   * on the layer but records nothing until the release.
-   */
-  beginGradientHandleDrag(sample: PointerSample): boolean;
-  /** Moves the dragged handle, previewing the result. */
-  updateGradientHandleDrag(sample: PointerSample): void;
-  /** Commits the handle drag as one undoable step. */
-  finishGradientHandleDrag(): void;
-  /** Restores the gradient the drag started from. */
-  cancelGradientHandleDrag(): void;
-  /** True while a gradient handle is being dragged. */
-  isGradientHandleDragActive(): boolean;
-  /**
    * The composition guide a press grabs, or `null` when it grabs none.
    *
    * The grab radius is screen-space, so the engine converts it with the live
@@ -193,20 +192,8 @@ export interface ToolContext {
    * The axis is not decided yet: it comes from the direction the pointer
    * travels, which only the drag knows. The guide's position is the *press*
    * coordinate along that axis, so it does not follow the pointer.
-   *
-   * A guide pulled out of a **ruler** passes its axis: the ruler already says
-   * which way the guide runs, so the guide is created at once and the drag
-   * moves it along that axis.
    */
-  beginGuideCreate(sample: PointerSample, axis?: GuideAxis): void;
-  /**
-   * The axis a press on a ruler strip would make a guide on, or `null`.
-   *
-   * The top ruler measures x, so it makes a **vertical** guide; the left
-   * ruler measures y, so it makes a **horizontal** one. The answer is `null`
-   * when the rulers are hidden or the press is not on a strip.
-   */
-  rulerAxisAt(screenX: number, screenY: number): GuideAxis | null;
+  beginGuideCreate(sample: PointerSample): void;
   /**
    * Puts the new guide on the canvas, on the axis the drag chose.
    *
@@ -229,6 +216,37 @@ export interface ToolContext {
   cancelGuideGesture(): void;
   /** Selects a guide, or clears the selection with `null`. */
   selectGuide(guideId: string | null): void;
+  /**
+   * The top-most visible reference under a document point, or `null`.
+   *
+   * Hidden references are not hit-tested: they are not on the canvas, so a
+   * press under one belongs to the artwork beneath it.
+   */
+  findReferenceAt(docX: number, docY: number): ReferenceImage | null;
+  /**
+   * The handle of the *selected* reference a press grabs, or `null`.
+   *
+   * The handles take precedence over the move gesture a press inside the
+   * frame would otherwise start, exactly as the selection's handles do.
+   */
+  findReferenceHandleAt(docX: number, docY: number): ReferenceHandleId | null;
+  /** Selects a reference, or clears the selection with `null`. */
+  selectReference(referenceId: string | null): void;
+  /**
+   * Starts moving, resizing or rotating a reference.
+   *
+   * A press with no handle grabs the top-most visible reference under the
+   * point and starts a move; a press with a handle transforms the selected
+   * one. Returns whether a gesture started, so the tool can tell a press on
+   * empty canvas from a manipulation.
+   */
+  beginReferenceGesture(sample: PointerSample, handle: ReferenceHandleId | null): boolean;
+  /** Previews the gesture at the pointer. Nothing enters history yet. */
+  updateReferenceGesture(sample: PointerSample): void;
+  /** Commits the gesture as one undoable step; a no-op drag commits nothing. */
+  finishReferenceGesture(): void;
+  /** Aborts the gesture, restoring the press-time document. */
+  cancelReferenceGesture(): void;
 }
 
 export interface Tool {

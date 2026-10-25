@@ -10,6 +10,12 @@
  *
  * Matching is exact: a chord claims a key only when every modifier agrees.
  * There is no guessing and no fallback to a different action.
+ *
+ * A chord is matched on the **logical key**, with the physical `code` as the
+ * fallback. The logical key is what the chord is written with; the physical
+ * code is the same key on a layout that does not produce the Latin character.
+ * That fallback is what lets a chord the user recorded on one layout keep
+ * working on another.
  */
 
 export type KeyboardPlatform = "mac" | "other";
@@ -21,6 +27,31 @@ export interface KeyboardEventLike {
   readonly metaKey: boolean;
   readonly shiftKey: boolean;
   readonly altKey: boolean;
+}
+
+/**
+ * A chord, as it is written down.
+ *
+ * `code` is optional here so a chord may be written with the logical key
+ * alone; the registry always fills it in.
+ */
+export interface ChordLike {
+  readonly key: string;
+  readonly code?: string;
+  /** The platform's primary modifier: Ctrl elsewhere, Cmd on macOS. */
+  readonly mod?: boolean;
+  readonly shift?: boolean;
+  readonly alt?: boolean;
+}
+
+/** The modifiers an event carries, read for the platform. */
+export interface ChordModifiers {
+  /** The platform's primary modifier: Ctrl elsewhere, Cmd on macOS. */
+  readonly primary: boolean;
+  /** The other one: Cmd elsewhere, Ctrl on macOS. Paka binds no chord with it. */
+  readonly secondary: boolean;
+  readonly shift: boolean;
+  readonly alt: boolean;
 }
 
 /**
@@ -122,31 +153,63 @@ export function currentPlatform(): KeyboardPlatform {
   return /mac|iphone|ipad|ipod/i.test(platform) ? "mac" : "other";
 }
 
+/**
+ * The modifiers an event carries, read for the platform.
+ *
+ * The primary modifier is Ctrl everywhere but on macOS, where it is Cmd. The
+ * other one is never bound: a chord that carries it is refused rather than
+ * guessed at, so a macOS Ctrl+Z cannot fire undo behind the system's back.
+ */
+export function eventModifiers(
+  event: KeyboardEventLike,
+  platform: KeyboardPlatform,
+): ChordModifiers {
+  return {
+    primary: platform === "mac" ? event.metaKey : event.ctrlKey,
+    secondary: platform === "mac" ? event.ctrlKey : event.metaKey,
+    shift: event.shiftKey,
+    alt: event.altKey,
+  };
+}
+
+/**
+ * True when the event's key is the chord's key.
+ *
+ * The logical key wins. The physical code is the fallback, and it is what
+ * makes a chord work on a layout that does not produce the Latin character:
+ * the same physical key is still the same key.
+ */
+function keyMatches(event: KeyboardEventLike, shortcut: ChordLike): boolean {
+  if (logicalKey(event) === shortcut.key.toLowerCase()) {
+    return true;
+  }
+  return shortcut.code !== undefined && shortcut.code !== "" && event.code === shortcut.code;
+}
+
 /** True when the event is the exact chord described by `shortcut`. */
 export function matchesShortcut(
   event: KeyboardEventLike,
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
+  shortcut: ChordLike,
   platform: KeyboardPlatform,
 ): boolean {
-  if (logicalKey(event) !== shortcut.key.toLowerCase()) {
+  if (!keyMatches(event, shortcut)) {
     return false;
   }
 
+  const modifiers = eventModifiers(event, platform);
   const wantsMod = shortcut.mod === true;
-  const primary = platform === "mac" ? event.metaKey : event.ctrlKey;
-  const secondary = platform === "mac" ? event.ctrlKey : event.metaKey;
   if (wantsMod) {
-    if (!primary || secondary) {
+    if (!modifiers.primary || modifiers.secondary) {
       return false;
     }
-  } else if (event.ctrlKey || event.metaKey) {
+  } else if (modifiers.primary || modifiers.secondary) {
     return false;
   }
 
-  if (event.altKey !== (shortcut.alt === true)) {
+  if (modifiers.alt !== (shortcut.alt === true)) {
     return false;
   }
-  return event.shiftKey === (shortcut.shift === true);
+  return modifiers.shift === (shortcut.shift === true);
 }
 
 /**
@@ -155,10 +218,7 @@ export function matchesShortcut(
  * Used to refuse two actions that claim the same key instead of letting array
  * order decide, which is how a shortcut silently stops working.
  */
-export function chordId(
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
-  platform: KeyboardPlatform,
-): string {
+export function chordId(shortcut: ChordLike, platform: KeyboardPlatform): string {
   return [
     platform,
     shortcut.mod === true ? "mod" : "",
@@ -169,10 +229,7 @@ export function chordId(
 }
 
 /** Human-readable chord, e.g. `Ctrl+Shift+Z` or `Cmd+Z`. */
-export function formatShortcut(
-  shortcut: { readonly key: string; readonly mod?: boolean; readonly shift?: boolean; readonly alt?: boolean },
-  platform: KeyboardPlatform,
-): string {
+export function formatShortcut(shortcut: ChordLike, platform: KeyboardPlatform): string {
   const parts: string[] = [];
   if (shortcut.mod === true) {
     parts.push(platform === "mac" ? "Cmd" : "Ctrl");
@@ -203,9 +260,28 @@ function keyLabel(key: string): string {
       return "Delete";
     case "backspace":
       return "Backspace";
+    case "space":
+      return "Space";
+    case "tab":
+      return "Tab";
+    case "enter":
+    case "return":
+      return "Enter";
+    case "insert":
+      return "Insert";
+    case "home":
+      return "Home";
+    case "end":
+      return "End";
+    case "pageup":
+      return "Page Up";
+    case "pagedown":
+      return "Page Down";
     default:
-      return key.toUpperCase();
+      break;
   }
+  // Everything else is written in capitals: A, F1, "]".
+  return key.toUpperCase();
 }
 
 /** Structural text-entry test, kept pure so it can be tested without a DOM. */

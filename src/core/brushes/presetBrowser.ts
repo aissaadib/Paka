@@ -1,52 +1,102 @@
 /**
  * The brush preset browser's model.
  *
- * The browser is a list of presets with a search box, a sort order and a set
- * of actions. All of that is pure: filtering, sorting, moving the selection
- * and deciding what an action does are ordinary functions over plain data, so
- * they can be exercised in Node without a DOM, a canvas or React.
+ * The browser is a list of brushes with a search box, an order, a favourites
+ * filter and a set of actions. All of that is pure: filtering, sorting,
+ * moving the selection and deciding what an action does are ordinary
+ * functions over plain data, so they can be exercised in Node without a DOM,
+ * a canvas or React.
  *
- * The component in `features/brushes` is an adapter over this module: it holds
- * the little state the browser owns (the query, the sort order, which preset
- * is selected) and calls the editor for the operations that change anything.
- * Nothing here reaches into the engine, so the same rules can be tested
- * against a stub.
+ * The component in `features/brushes` is an adapter over this module: it
+ * holds the little state the browser owns (the query, the order, which brush
+ * is selected, which brushes are starred) and calls the editor for the
+ * operations that change anything. Nothing here reaches into the engine, so
+ * the same rules can be tested against a stub.
+ *
+ * Two decisions shape the module:
+ *
+ *  1. **The built-in brushes are an argument.** `bundledPresets.ts` is code
+ *     that belongs to another slice, so the list of built-in brushes is
+ *     handed to these functions rather than imported. A built-in brush is
+ *     protected: it cannot be renamed or deleted, because that would take the
+ *     feature away rather than the user's data. Duplicating it is how the
+ *     user gets a copy they can change.
+ *  2. **A star and a "recently used" note are the browser's own.** They are
+ *     not part of a preset - a preset is an id, a name and a brush, and that
+ *     model already exists in `presets.ts` - so they live here, keyed by
+ *     preset id, and travel with the library file rather than with the
+ *     preset.
  */
 
 import { brushSettingsEqual } from "./defaults";
 import {
-  MAX_PRESET_NAME_LENGTH,
-  isBundledPreset,
+  createPresetId,
   normalizePresetName,
+  uniquePresetName,
   type BrushPreset,
 } from "./presets";
+import type { PresetLibraryEntry } from "./presetTransfer";
 import type { BrushSettings } from "../../types/brush";
 
-/** How the browser orders the presets. */
-export type PresetSort = "name" | "recent" | "size";
+/** How the browser orders the brushes. */
+export type PresetSort = "name" | "recent" | "favorites";
 
-/** The sort orders the browser offers, in the order it offers them. */
-export const PRESET_SORT_OPTIONS: readonly { readonly id: PresetSort; readonly label: string }[] = [
+/** The orders the browser offers, in the order it offers them. */
+export const PRESET_SORT_OPTIONS: readonly {
+  readonly id: PresetSort;
+  readonly label: string;
+}[] = [
   { id: "name", label: "Name" },
   { id: "recent", label: "Recently used" },
-  { id: "size", label: "Size" },
+  { id: "favorites", label: "Starred" },
 ];
 
-/** What the browser shows: a search, an order and a favourites-only filter. */
-export interface PresetFilter {
+/**
+ * How many brushes the "recently used" note remembers.
+ *
+ * A bounded list: the note is a convenience, not a history, and a library
+ * that grows without end would make the order slower for no gain.
+ */
+export const MAX_RECENT_PRESETS = 20;
+
+/**
+ * The library the browser shows.
+ *
+ * The user's own brushes and the built-in ones are kept apart, because they
+ * are protected differently.
+ */
+export interface PresetLibrary {
+  /** The brushes the user has saved. */
+  readonly presets: readonly BrushPreset[];
+  /** The built-in brushes. The browser cannot rename or delete these. */
+  readonly bundled: readonly BrushPreset[];
+}
+
+/**
+ * The state the browser owns.
+ *
+ * None of it is an edit: it is how the list is looked at, not what is in it.
+ */
+export interface PresetBrowserState {
   /** The text typed in the search box. */
   readonly query: string;
   /** The order the list is in. */
   readonly sort: PresetSort;
-  /** Whether the list is limited to the starred presets. */
+  /** Whether the list is limited to the starred brushes. */
   readonly favoritesOnly: boolean;
+  /** The ids of the starred brushes. */
+  readonly favorites: readonly string[];
+  /** The ids of the brushes used most recently, newest first. */
+  readonly recent: readonly string[];
 }
 
-/** The filter a browser starts with. */
-export const DEFAULT_PRESET_FILTER: PresetFilter = {
+/** The state a browser starts with. */
+export const DEFAULT_PRESET_BROWSER_STATE: PresetBrowserState = {
   query: "",
   sort: "name",
   favoritesOnly: false,
+  favorites: [],
+  recent: [],
 };
 
 /** The two groups the browser lists: the user's own brushes, then the built-in ones. */
@@ -56,7 +106,41 @@ export interface PresetGroups {
 }
 
 /**
- * Whether a preset's name matches the search.
+ * Whether a brush is one of the built-in ones.
+ *
+ * The two lists are separate id spaces - a saved brush gets an id from the
+ * editor's counter, a built-in one from wherever it was written - so an id on
+ * its own must not be enough: a saved brush that happens to share an id with
+ * a built-in one is still the user's own brush, and must stay editable. The
+ * name is part of the test, because a built-in brush cannot be renamed, so
+ * its name is fixed for as long as it exists.
+ */
+export function isBundledPreset(
+  preset: BrushPreset,
+  bundled: readonly BrushPreset[],
+): boolean {
+  return bundled.some(
+    (candidate) => candidate.id === preset.id && candidate.name === preset.name,
+  );
+}
+
+/** The brush with this id, or `null`. */
+export function findPreset(
+  library: PresetLibrary,
+  id: string | null,
+): BrushPreset | null {
+  if (id === null) {
+    return null;
+  }
+  return (
+    library.presets.find((preset) => preset.id === id) ??
+    library.bundled.find((preset) => preset.id === id) ??
+    null
+  );
+}
+
+/**
+ * Whether a brush's name matches the search.
  *
  * The comparison ignores case and surrounding whitespace, and matches on any
  * part of the name, so "ink" finds "Soft Ink" and "INK" finds "ink".
@@ -69,45 +153,70 @@ export function matchesQuery(preset: BrushPreset, query: string): boolean {
   return preset.name.toLowerCase().includes(needle);
 }
 
-/** The presets that pass the search and the favourites filter. */
+/** Whether a brush is starred. */
+export function isFavorite(state: PresetBrowserState, id: string): boolean {
+  return state.favorites.includes(id);
+}
+
+/**
+ * The brushes that pass the search and the favourites filter.
+ *
+ * The built-in brushes are searched too: a search that matches only a
+ * built-in brush should still find it.
+ */
 export function filterPresets(
-  presets: readonly BrushPreset[],
-  filter: PresetFilter,
+  library: PresetLibrary,
+  state: PresetBrowserState,
 ): readonly BrushPreset[] {
-  return presets.filter((preset) => {
-    if (filter.favoritesOnly && !preset.favorite) {
+  return [...library.presets, ...library.bundled].filter((preset) => {
+    if (state.favoritesOnly && !isFavorite(state, preset.id)) {
       return false;
     }
-    return matchesQuery(preset, filter.query);
+    return matchesQuery(preset, state.query);
   });
 }
 
 function byName(a: BrushPreset, b: BrushPreset): number {
-  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  const compared = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  if (compared !== 0) {
+    return compared;
+  }
+  // Two brushes may share a name; the id keeps the order total, so the list
+  // is the same on every machine and in every run.
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
- * The order the browser lists presets in.
+ * The order the browser lists brushes in.
  *
- * "recent" puts the presets that were used most recently first and the ones
- * that were never used last; "size" orders them by the width they paint, so
- * a list of brushes reads from fine to broad.
+ * "recent" puts the brushes that were used most recently first and the ones
+ * that were never used last; "favorites" puts the starred ones first. Within
+ * an order the name decides, so the list never depends on the order the
+ * library happened to be built in.
  */
 export function sortPresets(
   presets: readonly BrushPreset[],
-  sort: PresetSort,
+  state: PresetBrowserState,
 ): readonly BrushPreset[] {
   const sorted = [...presets];
-  if (sort === "size") {
-    sorted.sort((a, b) => a.brush.size - b.brush.size || byName(a, b));
+  if (state.sort === "recent") {
+    const rank = new Map(state.recent.map((id, index) => [id, index]));
+    sorted.sort((a, b) => {
+      const left = rank.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const right = rank.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      if (left !== right) {
+        return left - right;
+      }
+      return byName(a, b);
+    });
     return sorted;
   }
-  if (sort === "recent") {
+  if (state.sort === "favorites") {
     sorted.sort((a, b) => {
-      const left = a.lastUsedAt ?? -1;
-      const right = b.lastUsedAt ?? -1;
+      const left = isFavorite(state, a.id) ? 0 : 1;
+      const right = isFavorite(state, b.id) ? 0 : 1;
       if (left !== right) {
-        return right - left;
+        return left - right;
       }
       return byName(a, b);
     });
@@ -117,148 +226,79 @@ export function sortPresets(
   return sorted;
 }
 
-/** The presets the browser shows, filtered and ordered. */
-export function visiblePresets(
-  presets: readonly BrushPreset[],
-  filter: PresetFilter,
-): readonly BrushPreset[] {
-  return sortPresets(filterPresets(presets, filter), filter.sort);
-}
-
 /**
- * The visible presets, split into the user's own and the built-in ones.
+ * The visible brushes, split into the user's own and the built-in ones.
  *
  * The two groups are ordered independently, so a search that matches only a
  * built-in brush still shows it under "Built-in" rather than hiding it.
  */
 export function groupPresets(
-  presets: readonly BrushPreset[],
-  filter: PresetFilter,
+  library: PresetLibrary,
+  state: PresetBrowserState,
 ): PresetGroups {
-  const visible = visiblePresets(presets, filter);
+  const visible = sortPresets(filterPresets(library, state), state);
   return {
-    user: visible.filter((preset) => !isBundledPreset(preset)),
-    builtin: visible.filter((preset) => isBundledPreset(preset)),
+    user: visible.filter((preset) => !isBundledPreset(preset, library.bundled)),
+    builtin: visible.filter((preset) => isBundledPreset(preset, library.bundled)),
   };
 }
 
-/** The preset with this id, or `null`. */
-export function findPreset(
-  presets: readonly BrushPreset[],
-  id: string | null,
-): BrushPreset | null {
-  if (id === null) {
-    return null;
-  }
-  return presets.find((preset) => preset.id === id) ?? null;
+/** The visible brushes, in the order they are shown. */
+export function visiblePresets(
+  library: PresetLibrary,
+  state: PresetBrowserState,
+): readonly BrushPreset[] {
+  const groups = groupPresets(library, state);
+  return [...groups.user, ...groups.builtin];
 }
 
 /**
- * The preset the live brush matches, or `null` when the brush is the user's
+ * The brush the live brush matches, or `null` when the brush is the user's
  * own.
  *
- * This is what the browser shows as the active preset before the user has
+ * This is what the browser shows as the brush in effect before the user has
  * picked one: the brush the settings file restored, after a restart.
  */
 export function presetMatchingBrush(
-  presets: readonly BrushPreset[],
+  library: PresetLibrary,
   brush: BrushSettings,
 ): BrushPreset | null {
-  return presets.find((preset) => brushSettingsEqual(preset.brush, brush)) ?? null;
+  return (
+    [...library.presets, ...library.bundled].find((preset) =>
+      brushSettingsEqual(preset.brush, brush),
+    ) ?? null
+  );
 }
 
 /**
- * The next preset the keyboard moves to.
+ * The next brush the keyboard moves to.
  *
- * The list is flat, so the arrow keys walk it in the order it is shown. The
- * selection never leaves the list: moving past the end stays at the end.
+ * The library is a flat list drawn as a grid, so a move is a number of entries
+ * rather than a direction: one tile for a horizontal arrow, one row for a
+ * vertical one. The selection never leaves the list - moving past either end
+ * stays at that end.
  */
 export function nextSelectionId(
   visible: readonly BrushPreset[],
   currentId: string | null,
-  direction: 1 | -1,
+  step: number,
 ): string | null {
   if (visible.length === 0) {
     return null;
   }
   if (currentId === null) {
-    return direction === 1 ? visible[0].id : visible[visible.length - 1].id;
+    return step > 0 ? visible[0].id : visible[visible.length - 1].id;
   }
   const index = visible.findIndex((preset) => preset.id === currentId);
   if (index === -1) {
-    return direction === 1 ? visible[0].id : visible[visible.length - 1].id;
+    return step > 0 ? visible[0].id : visible[visible.length - 1].id;
   }
-  const next = Math.min(Math.max(index + direction, 0), visible.length - 1);
+  const next = Math.min(Math.max(index + step, 0), visible.length - 1);
   return visible[next].id;
 }
 
-/* -------------------------------------------------------------------------- *
- * The keyboard.
- *
- * The list owns the keys that act on the selection: moving it, applying it
- * and removing it. Delete is among them because the editor has a global
- * Delete shortcut - it deletes the selected strokes - so the list has to
- * claim it before the drawing sees it. A keyboard user browsing the brushes
- * must not lose their work by pressing Delete on a brush.
- * ----------------------------------------------------------------------- */
-
-/** What a key press in the list asks for. */
-export type PresetListIntent =
-  | { readonly kind: "move"; readonly direction: 1 | -1 }
-  | { readonly kind: "first" }
-  | { readonly kind: "last" }
-  | { readonly kind: "apply" }
-  | { readonly kind: "delete" }
-  | null;
-
 /**
- * The intent a key press in the list means, or `null` when the key is none of
- * the list's.
- *
- * The keys that need a selection - Enter to apply, Delete to remove - claim
- * nothing without one, so the key keeps its own meaning elsewhere. Every key
- * the list does claim is one the list acts on, and the caller stops the event
- * from travelling further.
- */
-export function presetListIntent(key: string, hasSelection: boolean): PresetListIntent {
-  switch (key) {
-    case "ArrowDown":
-      return { kind: "move", direction: 1 };
-    case "ArrowUp":
-      return { kind: "move", direction: -1 };
-    case "Home":
-      return { kind: "first" };
-    case "End":
-      return { kind: "last" };
-    case "Enter":
-      return hasSelection ? { kind: "apply" } : null;
-    case "Delete":
-    case "Backspace":
-      return hasSelection ? { kind: "delete" } : null;
-    default:
-      return null;
-  }
-}
-
-/** How long a preset counts as recent after it was used. */
-export const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Whether the preset was used lately.
- *
- * "Lately" is a day: a brush that was picked this morning is still one of the
- * brushes the user reaches for, and one they used last month is not.
- */
-export function isRecentlyUsed(preset: BrushPreset, now: number = Date.now()): boolean {
-  if (preset.lastUsedAt === null) {
-    return false;
-  }
-  const age = now - preset.lastUsedAt;
-  return age >= 0 && age < RECENT_WINDOW_MS;
-}
-
-/**
- * A short description of what a preset paints, for the row's tooltip.
+ * A short description of what a brush paints, for the row's tooltip.
  *
  * "14 px, soft, textured" reads faster than the four sliders it came from.
  */
@@ -284,10 +324,82 @@ export function describePreset(preset: BrushPreset): string {
   return parts.join(", ");
 }
 
-/** The name a preset would get, or `""` when the name is not usable. */
-export function usablePresetName(name: string): string {
-  const normalized = normalizePresetName(name);
-  return normalized === "" ? "" : normalized.slice(0, MAX_PRESET_NAME_LENGTH);
+/**
+ * The brushes that may be renamed or deleted.
+ *
+ * A built-in brush is code: renaming or deleting it would take the feature
+ * away rather than the user's data, so the browser offers "duplicate"
+ * instead.
+ */
+export function canModifyPreset(
+  preset: BrushPreset | null,
+  bundled: readonly BrushPreset[],
+): boolean {
+  return preset !== null && !isBundledPreset(preset, bundled);
+}
+
+/** Stars a brush, or unstars it when it is already starred. */
+export function toggleFavorite(
+  state: PresetBrowserState,
+  id: string,
+): PresetBrowserState {
+  const favorites = state.favorites.includes(id)
+    ? state.favorites.filter((favorite) => favorite !== id)
+    : [...state.favorites, id];
+  return { ...state, favorites };
+}
+
+/**
+ * Notes that a brush was just used.
+ *
+ * The note is a bounded list of ids, newest first, so the "recently used"
+ * order is a pure function of what happened - no clock, no stored timestamps.
+ */
+export function markPresetUsed(
+  state: PresetBrowserState,
+  id: string,
+): PresetBrowserState {
+  const recent = [id, ...state.recent.filter((entry) => entry !== id)].slice(
+    0,
+    MAX_RECENT_PRESETS,
+  );
+  return { ...state, recent };
+}
+
+/** The brushes an imported file brings in, and the ones it stars. */
+export interface PresetImport {
+  /** The presets to add to the library. */
+  readonly presets: readonly BrushPreset[];
+  /** The ids of the presets the file starred. */
+  readonly favoriteIds: readonly string[];
+}
+
+/**
+ * Turns the entries of an imported file into presets for this library.
+ *
+ * Every entry gets a fresh id, so the same file can be imported twice
+ * without the second copy replacing the first, and a name that does not
+ * clash with the ones already in the library. The brush is the one the file
+ * held, read field by field, so nothing is dropped on the way in.
+ */
+export function importEntries(
+  entries: readonly PresetLibraryEntry[],
+  existing: readonly BrushPreset[],
+): PresetImport {
+  const presets: BrushPreset[] = [];
+  const favoriteIds: string[] = [];
+  for (const entry of entries) {
+    const id = createPresetId();
+    presets.push({
+      id,
+      name: uniquePresetName(entry.name, [...existing, ...presets]),
+      brush: { ...entry.brush },
+    });
+    if (entry.favorite) {
+      favoriteIds.push(id);
+    }
+  }
+  return { presets, favoriteIds };
 }
 
 /* -------------------------------------------------------------------------- *
@@ -303,22 +415,16 @@ export function usablePresetName(name: string): string {
 export interface PresetLibraryPort {
   /** Saves the live brush under a name; `null` when the name is not usable. */
   save(name: string): BrushPreset | null;
-  /** Renames a preset; `null` when the id is unknown or the name is not usable. */
+  /** Renames a brush; `null` when the id is unknown or the name is not usable. */
   rename(id: string, name: string): BrushPreset | null;
-  /** Duplicates a preset; `null` when the id is unknown. */
+  /** Duplicates a brush; `null` when the id is unknown. */
   duplicate(id: string): BrushPreset | null;
-  /** Stores the live brush in the preset; `null` when the id is unknown. */
-  update(id: string): BrushPreset | null;
-  /** Deletes a preset; `false` when the id is unknown or the preset is built in. */
+  /** Deletes a brush; `false` when the id is unknown. */
   remove(id: string): boolean;
-  /** Applies a preset; `false` when the id is unknown. */
-  apply(id: string): boolean;
-  /** Stars or unstars a preset; `false` when the id is unknown. */
-  toggleFavorite(id: string): boolean;
-  /** Adds presets to the library; the number that were added. */
-  import(entries: readonly BrushPreset[]): number;
-  /** Restores the default brush. */
-  resetBrush(): void;
+  /** Applies a brush to the live brush; `false` when it could not be applied. */
+  apply(preset: BrushPreset): boolean;
+  /** Adds brushes to the library; the ones that were added. */
+  import(presets: readonly BrushPreset[]): readonly BrushPreset[];
 }
 
 /** What the browser asks for. */
@@ -326,12 +432,10 @@ export type PresetAction =
   | { readonly kind: "save"; readonly name: string }
   | { readonly kind: "rename"; readonly id: string; readonly name: string }
   | { readonly kind: "duplicate"; readonly id: string }
-  | { readonly kind: "update"; readonly id: string }
   | { readonly kind: "delete"; readonly id: string }
   | { readonly kind: "apply"; readonly id: string }
   | { readonly kind: "favorite"; readonly id: string }
-  | { readonly kind: "import"; readonly entries: readonly BrushPreset[] }
-  | { readonly kind: "reset" };
+  | { readonly kind: "import"; readonly entries: readonly PresetLibraryEntry[] };
 
 /** What happened. */
 export interface PresetActionResult {
@@ -339,18 +443,24 @@ export interface PresetActionResult {
   readonly ok: boolean;
   /** What to tell the user, or `null` when there is nothing to say. */
   readonly message: string | null;
-  /** The preset the browser should select afterwards, or `null` for none. */
+  /** The brush the browser should select afterwards, or `null` for no change. */
   readonly selection: string | null;
+  /** The browser's state after the action, or `null` when it did not change. */
+  readonly state: PresetBrowserState | null;
 }
 
 /** A result that reports a refusal. */
-function refused(message: string, selection: string | null = null): PresetActionResult {
-  return { ok: false, message, selection };
+function refused(message: string): PresetActionResult {
+  return { ok: false, message, selection: null, state: null };
 }
 
 /** A result that reports success. */
-function done(message: string | null, selection: string | null = null): PresetActionResult {
-  return { ok: true, message, selection };
+function done(
+  message: string | null,
+  selection: string | null = null,
+  state: PresetBrowserState | null = null,
+): PresetActionResult {
+  return { ok: true, message, selection, state };
 }
 
 /**
@@ -359,92 +469,105 @@ function done(message: string | null, selection: string | null = null): PresetAc
  * Every button in the browser goes through here, so a button that cannot do
  * what it says says so instead of doing nothing: a built-in brush is
  * protected, an empty name is not a name, and an unknown id is reported.
+ *
+ * Nothing here touches the document. Applying a brush goes through the
+ * editor's normal brush setter, so it adds no history step and dirties
+ * nothing.
  */
 export function runPresetAction(
+  library: PresetLibrary,
+  state: PresetBrowserState,
   port: PresetLibraryPort,
   action: PresetAction,
 ): PresetActionResult {
   switch (action.kind) {
     case "save": {
-      const name = usablePresetName(action.name);
+      const name = normalizePresetName(action.name);
       if (name === "") {
-        return refused("A preset needs a name.");
+        return refused("A brush needs a name.");
       }
       const preset = port.save(name);
       if (preset === null) {
-        return refused("The preset could not be saved.");
+        return refused("The brush could not be saved.");
       }
       return done(`Saved "${preset.name}".`, preset.id);
     }
     case "rename": {
-      const name = usablePresetName(action.name);
+      const target = findPreset(library, action.id);
+      if (target === null) {
+        return refused("That brush is no longer in the library.");
+      }
+      if (isBundledPreset(target, library.bundled)) {
+        return refused(`"${target.name}" is a built-in brush - duplicate it to change it.`);
+      }
+      const name = normalizePresetName(action.name);
       if (name === "") {
-        return refused("A preset needs a name.");
+        return refused("A brush needs a name.");
       }
-      const preset = port.rename(action.id, name);
-      if (preset === null) {
-        return refused("The preset could not be renamed.");
+      const renamed = port.rename(action.id, name);
+      if (renamed === null) {
+        return refused("The brush could not be renamed.");
       }
-      return done(`Renamed to "${preset.name}".`, preset.id);
+      return done(`Renamed to "${renamed.name}".`, renamed.id);
     }
     case "duplicate": {
-      const preset = port.duplicate(action.id);
-      if (preset === null) {
-        return refused("The preset could not be duplicated.");
+      const target = findPreset(library, action.id);
+      if (target === null) {
+        return refused("That brush is no longer in the library.");
       }
-      return done(`Duplicated as "${preset.name}".`, preset.id);
-    }
-    case "update": {
-      const preset = port.update(action.id);
-      if (preset === null) {
-        return refused("The preset could not be updated.");
+      const copy = port.duplicate(action.id);
+      if (copy === null) {
+        return refused("The brush could not be duplicated.");
       }
-      return done(`Updated "${preset.name}".`, preset.id);
+      return done(`Duplicated as "${copy.name}".`, copy.id);
     }
     case "delete": {
-      if (port.remove(action.id)) {
-        return done("The preset was deleted.", null);
+      const target = findPreset(library, action.id);
+      if (target === null) {
+        return refused("That brush is no longer in the library.");
       }
-      return refused("The preset could not be deleted.");
+      if (isBundledPreset(target, library.bundled)) {
+        return refused(`"${target.name}" is a built-in brush - it cannot be deleted.`);
+      }
+      if (!port.remove(action.id)) {
+        return refused("The brush could not be deleted.");
+      }
+      return done(`Deleted "${target.name}".`);
     }
     case "apply": {
-      if (port.apply(action.id)) {
-        return done(null, action.id);
+      const target = findPreset(library, action.id);
+      if (target === null) {
+        return refused("That brush is no longer in the library.");
       }
-      return refused("The preset could not be applied.");
+      if (!port.apply(target)) {
+        return refused("The brush could not be applied.");
+      }
+      // The brush in effect is now this one, so the "recently used" order
+      // moves it to the front.
+      return done(null, target.id, markPresetUsed(state, target.id));
     }
     case "favorite": {
-      if (port.toggleFavorite(action.id)) {
-        return done(null, action.id);
-      }
-      return refused("The preset could not be starred.");
+      return done(null, action.id, toggleFavorite(state, action.id));
     }
     case "import": {
-      const count = port.import(action.entries);
-      if (count === 0) {
+      const imported = importEntries(action.entries, library.presets);
+      if (imported.presets.length === 0) {
         return refused("Nothing was imported.");
       }
-      return done(count === 1 ? "Imported 1 preset." : `Imported ${count} presets.`, null);
-    }
-    case "reset": {
-      port.resetBrush();
-      return done("The brush was restored to its default.");
+      const added = port.import(imported.presets);
+      if (added.length === 0) {
+        return refused("Nothing was imported.");
+      }
+      const addedIds = new Set(added.map((preset) => preset.id));
+      const favorites = [
+        ...state.favorites,
+        ...imported.favoriteIds.filter((id) => addedIds.has(id)),
+      ];
+      return done(
+        added.length === 1 ? "Imported 1 brush." : `Imported ${added.length} brushes.`,
+        null,
+        { ...state, favorites },
+      );
     }
   }
-}
-
-/**
- * The presets that may be changed or removed.
- *
- * A built-in brush is code: renaming, overwriting or deleting it would take
- * the feature away rather than the user's data, so the browser offers
- * "duplicate" instead.
- */
-export function canModifyPreset(preset: BrushPreset | null): boolean {
-  return preset !== null && !isBundledPreset(preset);
-}
-
-/** The presets the browser can delete, for the confirmation's wording. */
-export function deletablePresets(presets: readonly BrushPreset[]): readonly BrushPreset[] {
-  return presets.filter((preset) => !isBundledPreset(preset));
 }

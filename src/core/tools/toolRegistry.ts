@@ -7,7 +7,9 @@ import { GradientTool } from "./gradientTool";
 import { GuidesTool } from "./guidesTool";
 import { PanTool } from "./panTool";
 import { PickerTool } from "./pickerTool";
+import { ReferenceTool } from "./referenceTool";
 import { SelectTool } from "./selectTool";
+import { ShapeEditTool } from "./shapeEditTool";
 import { ShapeTool } from "./shapeTool";
 import {
   BRUSH_TOOL,
@@ -17,7 +19,9 @@ import {
   LINE_TOOL,
   POLYGON_TOOL,
   RECTANGLE_TOOL,
+  REFERENCE_TOOL,
   SELECT_TOOL,
+  SHAPE_EDIT_TOOL,
   STAR_TOOL,
 } from "./toolDefinitions";
 import type { Tool } from "./types";
@@ -31,6 +35,8 @@ export function createToolRegistry(): ToolRegistry {
     eraser: new BrushTool(ERASER_TOOL, true),
     // Marquee selection and stroke translation.
     select: new SelectTool(SELECT_TOOL),
+    // Native shape selection, move, resize and rotation.
+    shapeEdit: new ShapeEditTool(SHAPE_EDIT_TOOL),
     // One class parameterised by kind; the geometry lives in shapeGeometry.
     line: new ShapeTool("line", LINE_TOOL),
     rectangle: new ShapeTool("rectangle", RECTANGLE_TOOL),
@@ -44,6 +50,8 @@ export function createToolRegistry(): ToolRegistry {
     picker: new PickerTool(),
     // Composition guides: a drag places one, a drag on one moves it.
     guides: new GuidesTool(GUIDES_TOOL),
+    // Reference images: a drag moves, resizes or rotates one.
+    reference: new ReferenceTool(REFERENCE_TOOL),
     pan: new PanTool(),
   };
 }

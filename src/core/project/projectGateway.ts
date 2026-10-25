@@ -15,10 +15,6 @@ export interface ProjectFileGateway {
   pickProjectToSave(suggestedName: string): Promise<string | null>;
   /** Native save dialog for PNG export; `null` on cancel. */
   pickPngToSave(suggestedName: string): Promise<string | null>;
-  /** Native open dialog for a brush library; `null` when the user cancels. */
-  pickPresetLibraryToOpen(): Promise<string | null>;
-  /** Native save dialog for a brush library; `null` when the user cancels. */
-  pickPresetLibraryToSave(suggestedName: string): Promise<string | null>;
   readTextFile(path: string): Promise<string>;
   writeTextFile(path: string, contents: string): Promise<void>;
   writeBinaryFile(path: string, bytes: Uint8Array): Promise<void>;

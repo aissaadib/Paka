@@ -121,6 +121,92 @@ export function gradientStopsEqual(
 }
 
 /**
+ * The middle stops of a gradient: the stops between its two endpoints.
+ *
+ * The ramp's first and last stop are the gradient's own two end points - the
+ * colours that sit at the start and at the end of the axis - so the stops
+ * between them are the ones a user can slide along the axis.
+ */
+export function gradientMiddleStops(gradient: GradientRecord): readonly GradientStop[] {
+  if (gradient.stops.length <= 2) {
+    return [];
+  }
+  return gradient.stops.slice(1, gradient.stops.length - 1);
+}
+
+/**
+ * True when two gradients are the same gradient.
+ *
+ * The equality covers everything the record carries: the kind of ramp, the
+ * geometry it is drawn along, its stops and its opacity. A record that differs
+ * in any of them paints a different picture, so this is the comparison an
+ * edit uses to decide whether it changed anything at all.
+ */
+export function gradientRecordEqual(a: GradientRecord, b: GradientRecord): boolean {
+  if (a === b) {
+    return true;
+  }
+  return (
+    a.type === b.type &&
+    a.x1 === b.x1 &&
+    a.y1 === b.y1 &&
+    a.x2 === b.x2 &&
+    a.y2 === b.y2 &&
+    a.opacity === b.opacity &&
+    gradientStopsEqual(a.stops, b.stops)
+  );
+}
+
+/**
+ * The reason a gradient record cannot be stored, or `null` when it can.
+ *
+ * The rules are the file format's own rules, because a record the reader
+ * would refuse is a drawing that cannot be saved: a ramp needs at least two
+ * stops, every stop's offset has to sit inside the ramp and the offsets have
+ * to be strictly ascending, every colour has to be a hex colour, the geometry
+ * has to be finite and the opacity has to be a fraction.
+ *
+ * A record that breaks a rule is **rejected**, not repaired: dropping the
+ * offending stop or clamping its offset would quietly draw a different
+ * gradient than the one the user made.
+ */
+export function gradientRecordProblem(gradient: GradientRecord): string | null {
+  if (gradient.stops.length < 2) {
+    return "a gradient needs at least two colour stops";
+  }
+  if (
+    !Number.isFinite(gradient.x1) ||
+    !Number.isFinite(gradient.y1) ||
+    !Number.isFinite(gradient.x2) ||
+    !Number.isFinite(gradient.y2)
+  ) {
+    return "a gradient's geometry must be finite";
+  }
+  if (!Number.isFinite(gradient.opacity) || gradient.opacity < 0 || gradient.opacity > 1) {
+    return "a gradient's opacity must be between 0 and 1";
+  }
+  let previousOffset = -1;
+  for (const stop of gradient.stops) {
+    if (!Number.isFinite(stop.offset) || stop.offset < 0 || stop.offset > 1) {
+      return "a gradient stop must sit inside the ramp";
+    }
+    if (stop.offset <= previousOffset) {
+      return "a gradient's stops must be strictly ascending";
+    }
+    if (!hexToRgb(stop.color)) {
+      return "a gradient stop must carry a hex colour";
+    }
+    previousOffset = stop.offset;
+  }
+  return null;
+}
+
+/** True when a gradient record is one the file format can store. */
+export function isValidGradientRecord(gradient: GradientRecord): boolean {
+  return gradientRecordProblem(gradient) === null;
+}
+
+/**
  * Builds the gradient a drag creates.
  *
  * `midStops` are the stops strictly between the start and end colours; the

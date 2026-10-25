@@ -103,7 +103,7 @@ describe("StrokeBuilder", () => {
     expect(builder.stroke.pressures).toEqual([0.2, 0.6]);
   });
 
-  it("lags a stabilized path and catches up on the release point", () => {
+  it("lags a stabilized path and settles on the raw release point", () => {
     const builder = createBuilder({
       ...DEFAULT_BRUSH,
       size: 200,
@@ -114,48 +114,14 @@ describe("StrokeBuilder", () => {
     builder.addSample(sample(10, 0, 1, 10));
     builder.addSample(sample(20, 0, 1, 20));
 
-    // The captured point trails the pointer, so it is between the press point
-    // and the pointer's own position.
-    expect(builder.stroke.xs[0]).toBe(0);
-    expect(builder.stroke.xs[1]).toBeGreaterThan(0);
-    expect(builder.stroke.xs[1]).toBeLessThan(10);
+    // follow = 1 - STABILIZER_MAX_LAG = 0.25:
+    // 0 -> 2.5 -> 6.875, then finish appends the raw 20.
+    expect(builder.stroke.xs).toEqual([0, 2.5, 6.875]);
+    expect(builder.stroke.pressures).toEqual([0, 0.25, 0.4375]);
 
     builder.finish();
-    // The catch-up lands the stroke on the pointer's last position.
-    expect(builder.stroke.xs[builder.stroke.xs.length - 1]).toBe(20);
-    expect(builder.stroke.ys[builder.stroke.ys.length - 1]).toBe(0);
-  });
-
-  it("ends exactly on the release point it is given", () => {
-    const builder = createBuilder({ ...DEFAULT_BRUSH, stabilizer: 1 });
-    builder.addSample(sample(0, 0, 0.5, 0));
-    builder.addSample(sample(10, 0, 0.5, 10));
-    builder.finish(sample(37, 21, 0.5, 20));
-
-    const last = builder.stroke.xs.length - 1;
-    expect(builder.stroke.xs[last]).toBe(37);
-    expect(builder.stroke.ys[last]).toBe(21);
-  });
-
-  it("stores the device's pressure, not a smoothed one", () => {
-    const builder = createBuilder({ ...DEFAULT_BRUSH, stabilizer: 1 });
-    builder.addSample(sample(0, 0, 0.2, 0));
-    builder.addSample(sample(10, 0, 0.6, 10));
-    builder.addSample(sample(20, 0, 0.9, 20));
-
-    // The raw pressures are the ones the device measured: the brush's
-    // pressure curve is applied when the stroke is rasterized, not here.
-    expect(builder.stroke.pressures[0]).toBe(0.2);
-    expect(builder.stroke.pressures[builder.stroke.pressures.length - 1]).toBe(0.9);
-  });
-
-  it("stores the device's times, not a smoothed one", () => {
-    const builder = createBuilder({ ...DEFAULT_BRUSH, stabilizer: 1 });
-    builder.addSample(sample(0, 0, 0.5, 0));
-    builder.addSample(sample(10, 0, 0.5, 40));
-
-    expect(builder.stroke.times[0]).toBe(0);
-    expect(builder.stroke.times[builder.stroke.times.length - 1]).toBe(40);
+    expect(builder.stroke.xs).toEqual([0, 2.5, 6.875, 20]);
+    expect(builder.stroke.pressures).toEqual([0, 0.25, 0.4375, 1]);
   });
 
   it("keeps a stabilized stroke's start exactly on the press point", () => {
@@ -216,99 +182,6 @@ describe("StrokeBuilder", () => {
   it("marks a stroke as an eraser only when asked", () => {
     expect(createStrokeRecord("layer-1", DEFAULT_BRUSH).erase).toBe(false);
     expect(createStrokeRecord("layer-1", DEFAULT_BRUSH, true).erase).toBe(true);
-  });
-});
-
-describe("the same gesture, captured twice", () => {
-  /**
-   * A straight drag with a hand's tremor on it.
-   *
-   * The line runs along `y = 40` at 100 px/s and a 1 px tremor at 10 Hz
-   * swings the pointer up and down, which is the shape of a hand that is
-   * nearly still.
-   */
-  function gesture(count = 60): StrokeSample[] {
-    const samples: StrokeSample[] = [];
-    for (let index = 0; index < count; index += 1) {
-      const time = index * 8;
-      samples.push(
-        sample(
-          index * 0.8,
-          40 + Math.sin((2 * Math.PI * 10 * time) / 1000),
-          0.5,
-          time,
-        ),
-      );
-    }
-    return samples;
-  }
-
-  /** Captures the gesture with a brush and returns the stored points. */
-  function capture(brush: BrushSettings): StrokeSample[] {
-    const builder = createBuilder(brush);
-    for (const entry of gesture()) {
-      builder.addSample(entry);
-    }
-    builder.finish();
-    return builder.stroke.ys.map((y, index) => ({
-      x: builder.stroke.xs[index],
-      y,
-      pressure: builder.stroke.pressures[index],
-      time: builder.stroke.times[index],
-    }));
-  }
-
-  /** How far the drawn path strays from the ideal line, on average. */
-  function spread(points: readonly StrokeSample[]): number {
-    const squares = points.map((point) => (point.y - 40) ** 2);
-    return Math.sqrt(squares.reduce((total, square) => total + square, 0) / squares.length);
-  }
-
-  /** The length of the drawn path. */
-  function length(points: readonly StrokeSample[]): number {
-    let total = 0;
-    for (let index = 1; index < points.length; index += 1) {
-      total += Math.hypot(
-        points[index].x - points[index - 1].x,
-        points[index].y - points[index - 1].y,
-      );
-    }
-    return total;
-  }
-
-  const raw = capture({ ...DEFAULT_BRUSH, stabilizer: 0, stabilizerMode: "off" });
-  const smoothed = capture({ ...DEFAULT_BRUSH, stabilizer: 1, stabilizerMode: "smooth" });
-
-  it("draws a calmer line with the stabilizer on", () => {
-    // The raw path swings a full pixel either side of the line; the
-    // stabilized path keeps a fraction of that.
-    expect(spread(raw)).toBeGreaterThan(0.5);
-    expect(spread(smoothed)).toBeLessThan(spread(raw) * 0.6);
-  });
-
-  it("draws a shorter line with the stabilizer on", () => {
-    // The tremor is not only wider, it is longer: a shaky line wanders.
-    expect(length(smoothed)).toBeLessThan(length(raw));
-  });
-
-  it("starts and ends in the same place either way", () => {
-    expect(smoothed[0].x).toBe(raw[0].x);
-    expect(smoothed[0].y).toBe(raw[0].y);
-    expect(smoothed[smoothed.length - 1].x).toBeCloseTo(raw[raw.length - 1].x, 9);
-    expect(smoothed[smoothed.length - 1].y).toBeCloseTo(raw[raw.length - 1].y, 9);
-  });
-
-  it("keeps the device's pressure and times either way", () => {
-    // The gesture reports one pressure throughout, and so does the stroke:
-    // the filter moves the point, not the pressure.
-    expect(new Set(smoothed.map((point) => point.pressure))).toEqual(new Set([0.5]));
-    expect(new Set(raw.map((point) => point.pressure))).toEqual(new Set([0.5]));
-    // And the times are the device's, in order.
-    const times = smoothed.map((point) => point.time);
-    expect(times[0]).toBe(0);
-    for (let index = 1; index < times.length; index += 1) {
-      expect(times[index]).toBeGreaterThanOrEqual(times[index - 1]);
-    }
   });
 });
 

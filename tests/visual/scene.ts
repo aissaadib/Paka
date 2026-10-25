@@ -10,6 +10,8 @@
  * tool's font policy is still open (decision D-1, question Q-a).
  */
 
+import type { ShapeGeometry } from "/src/core/document/types";
+
 export type SceneBlendMode = "normal" | "multiply" | "screen";
 
 /**
@@ -78,7 +80,25 @@ export interface SceneGradient {
   readonly opacity?: number;
 }
 
-export type SceneElement = SceneStroke | SceneFill | SceneGradient;
+/**
+ * A native shape: the primitive and its parameters, as the shape tools record
+ * them.
+ *
+ * The geometry is the document model's own `ShapeGeometry`, so a scene pins the
+ * exact record an editor would save - not a polyline approximating it. A shape
+ * has no live path (it is committed, not drawn), so a scene that declares one
+ * checks the rebuilt layer against the export.
+ */
+export interface SceneShape {
+  readonly kind: "shape";
+  readonly geometry: ShapeGeometry;
+  /** Brush settings; omitted fields come from the product's default brush. */
+  readonly brush?: Readonly<Record<string, unknown>>;
+  /** When true the outline's closed interior is filled. */
+  readonly fill?: boolean;
+}
+
+export type SceneElement = SceneStroke | SceneFill | SceneGradient | SceneShape;
 
 /**
  * A composition guide: a marker on one axis, in document pixels.
@@ -110,13 +130,56 @@ export interface SceneGrid {
   readonly zoom?: number;
 }
 
+/**
+ * A reference image in a scene.
+ *
+ * The harness synthesizes the picture (a solid `color`, optionally with the
+ * left half in `accent`) instead of carrying a base64 file: a reference is
+ * drawn through `drawImage`, so a real canvas is a faithful stand-in and the
+ * scene stays readable.
+ *
+ * References are document metadata, not artwork: they are painted on the
+ * display canvas and never reach the exported composite. A scene that declares
+ * them therefore pins two pictures, like a scene with guides or a grid.
+ */
+export interface SceneReference {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  /** The picture's own size; the source canvas is built at this size. */
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  /** Clockwise rotation about the centre, in degrees. */
+  readonly rotation?: number;
+  readonly opacity?: number;
+  readonly blendMode?: SceneBlendMode;
+  /** Painted after the paper and before the layers when true. */
+  readonly behind?: boolean;
+  readonly visible?: boolean;
+  /** The picture's colour. */
+  readonly color: string;
+  /** An optional second colour for the left half, to make rotation visible. */
+  readonly accent?: string;
+}
+
 export interface SceneLayer {
   /** The layer's name; it is also the layer's identity in the document. */
   readonly id: string;
+  /**
+   * `"group"` for a container; omitted or `"layer"` for a paintable layer.
+   *
+   * A group owns no elements. Its children are composited as one unit when the
+   * group's opacity is below 1 or its blend mode is not normal.
+   */
+  readonly kind?: "layer" | "group";
   readonly opacity?: number;
   readonly blendMode?: SceneBlendMode;
   readonly visible?: boolean;
-  readonly elements: readonly SceneElement[];
+  /** The layer's content; empty for a group. */
+  readonly elements?: readonly SceneElement[];
+  /** A group's children, bottom-first. */
+  readonly children?: readonly SceneLayer[];
 }
 
 export interface Scene {
@@ -129,6 +192,8 @@ export interface Scene {
   readonly guides?: readonly SceneGuide[];
   /** The grid overlay; omitted means the document shows no grid. */
   readonly grid?: SceneGrid;
+  /** The reference images; omitted means the document has none. */
+  readonly references?: readonly SceneReference[];
 }
 
 /** True when the element is a stroke, which is the only kind with a live path. */
@@ -160,6 +225,10 @@ export interface SceneVerdict {
   readonly gridVisible: boolean;
   /** The grid did not change the export: it is display-only. */
   readonly gridNotExported: boolean;
+  /** The references changed the display: they are painted around the layers. */
+  readonly referencesVisible: boolean;
+  /** The references did not change the export: they are not artwork. */
+  readonly referencesNotExported: boolean;
   readonly liveVsRebuiltDiffering: number;
   readonly rebuiltVsExportedDiffering: number;
   readonly firstDifference: { x: number; y: number } | null;

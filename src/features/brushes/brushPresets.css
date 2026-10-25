@@ -1,10 +1,9 @@
 /**
  * The brush library: the browser in the side panel.
  *
- * The panel is narrow - one column of the side stack - so the list is a
- * column of rows, each with a small swatch, and the controls are compact.
- * The styles here are the browser's own; the panel's frame belongs to the
- * shell.
+ * The panel is narrow - one column of the side stack - so the library is a
+ * grid of square thumbnails and the controls are compact. The styles here are
+ * the browser's own; the panel's frame belongs to the shell.
  */
 
 .brush-browser {
@@ -12,6 +11,25 @@
   flex-direction: column;
   gap: 4px;
   min-height: 0;
+}
+
+/* In the tabbed dock the browser is the whole of its tab. The list takes the
+   height the browser has left and scrolls on its own, so the management form
+   below it stays visible instead of sitting past a second scrollbar. */
+.panel-dock__panel[data-panel-id="brushes"] .panel__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-dock__panel[data-panel-id="brushes"] .panel__body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.panel-dock__panel[data-panel-id="brushes"] .brush-browser__list {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 48px;
 }
 
 /* ------------------------------------------------------------- the filters */
@@ -23,7 +41,7 @@
 }
 
 .brush-browser__search {
-  /* The search box takes the room the row has; the sort and the star are
+  /* The search box takes the room the row has; the order and the star are
      fixed, so the box shrinks with the panel instead of pushing them out. */
   flex: 1 1 auto;
   min-width: 0;
@@ -38,7 +56,7 @@
 .brush-browser__sort {
   flex: 0 0 auto;
   height: var(--control-height-sm);
-  max-width: 84px;
+  max-width: 92px;
   padding: 0 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -65,7 +83,7 @@
   line-height: 1;
 }
 
-.brush-browser__favourites:hover {
+.brush-browser__favourites:hover:not(:disabled) {
   background: var(--bg-raised-hover);
 }
 
@@ -102,13 +120,31 @@
 }
 
 .brush-browser__group-title {
+  /* The library is long and the grid is short: the heading stays at the top
+     of the list while its own group is on screen, so a tile is never shown
+     without the group it belongs to. It sticks over the list's own padding,
+     so no tile edge shows above it. */
+  position: sticky;
+  top: -2px;
+  z-index: 1;
   margin: 2px 0 1px;
   padding: 0 4px;
+  background: var(--bg-inset);
   color: var(--text-dim);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+.brush-browser__tiles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* Square thumbnails, as many to a row as the panel's width allows. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 6px;
 }
 
 .brush-browser__empty {
@@ -118,108 +154,88 @@
   line-height: 1.4;
 }
 
-/* ------------------------------------------------------------------ a row */
+/* ----------------------------------------------------------------- a tile */
 
-.brush-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 4px;
-  border-radius: 2px;
-  border-left: 2px solid transparent;
-  cursor: pointer;
-}
-
-.brush-row:hover {
-  background: var(--bg-raised);
-}
-
-.brush-row.is-selected {
-  background: var(--accent-soft);
-  border-left-color: var(--accent);
-}
-
-.brush-tip {
-  flex: 0 0 auto;
-  border-radius: 2px;
-  background: var(--bg-panel);
-}
-
-.brush-row__name {
-  flex: 1 1 auto;
+.brush-tile {
+  position: relative;
+  /* The tile is a square whatever the row's height is. */
+  aspect-ratio: 1;
   min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text);
 }
 
-.brush-row.is-current .brush-row__name {
-  color: var(--text-strong);
-  font-weight: 600;
-}
-
-/* The brush has been changed since the preset was applied: the name says so
-   by colour, and the panel's own line says it in words. */
-.brush-row.is-edited .brush-row__name {
-  color: var(--accent);
-}
-
-.brush-row__builtin {
-  flex: 0 0 auto;
-  padding: 0 3px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-dim);
-  font-size: 9px;
-  line-height: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-/* "Used recently": a dot, because the name needs the room more than the
-   word does. */
-.brush-row__recent {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-}
-
-.brush-row__recent-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-dim);
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
+.brush-tile__pick {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
   padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
 }
 
-.brush-row__star {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  color: var(--text-dim);
-  font-size: 12px;
+.brush-tile__pick:hover {
+  background: var(--bg-raised);
+  border-color: var(--border);
+}
+
+/* The brush in effect: the tile is filled and outlined. */
+.brush-tile.is-current .brush-tile__pick {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+/* The tile the keyboard is on: a ring, so it reads over the current one. */
+.brush-tile.is-selected .brush-tile__pick {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.brush-icon {
+  display: block;
+}
+
+.brush-tile__edited {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  color: var(--accent);
+  font-size: 10px;
   line-height: 1;
-  border-radius: 2px;
+  pointer-events: none;
 }
 
-.brush-row__star:hover {
+.brush-tile__star {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1;
+  /* The star is the tile's corner note, not a caption: it appears while the
+     tile is hovered or focused, and stays once the brush is starred. */
+  opacity: 0;
+  pointer-events: none;
+}
+
+.brush-tile:hover .brush-tile__star,
+.brush-tile:focus-within .brush-tile__star,
+.brush-tile__star[aria-pressed="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.brush-tile__star:hover {
   color: var(--text-strong);
   background: var(--bg-raised-hover);
 }
 
-.brush-row__star[aria-pressed="true"] {
+.brush-tile__star[aria-pressed="true"] {
   color: var(--accent);
 }
 

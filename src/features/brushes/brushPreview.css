@@ -1,0 +1,10 @@
+/** The live brush preview: a small swatch of what the brush will paint. */
+
+.brush-preview {
+  display: block;
+  /* The swatch is a picture, not a control: it takes no clicks. */
+  pointer-events: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-panel);
+}

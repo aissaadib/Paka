@@ -24,6 +24,8 @@ import type { BrushSettings } from "../../types/brush";
 import type { Rgb } from "../../utils/color";
 import { clamp } from "../../utils/math";
 import { MAX_STAMP_SPACING, MIN_STAMP_SPACING } from "../brushes/defaults";
+import type { BrushTipFrame } from "./brushTip";
+import { brushTipMask } from "./brushTip";
 import { strokeDiameter } from "./canvas2dStroke";
 
 /**
@@ -335,6 +337,11 @@ export class StampCoverage {
    * A `texture` modulates the dab's coverage **before** it is unioned, so the
    * union is still a maximum and the stroke still cannot darken where its
    * dabs overlap. A texture can therefore only ever remove ink.
+   *
+   * A `tip` masks the dab the same way: the tip's mask multiplies the dab's
+   * radial coverage **before** the union, so the union stays a maximum and a
+   * tip can only ever remove ink. The round tip - and no tip at all - leave
+   * the coverage byte for byte as it was.
    */
   paintDab(
     centerX: number,
@@ -342,6 +349,7 @@ export class StampCoverage {
     radius: number,
     hardness: number,
     texture: StampTexture | null = null,
+    tip: BrushTipFrame | null = null,
   ): StampRect | null {
     if (radius <= 0 || !Number.isFinite(centerX) || !Number.isFinite(centerY)) {
       return null;
@@ -373,6 +381,14 @@ export class StampCoverage {
     let lane = -1;
     let bristleStart = 0;
     let bristleEnd = 0;
+
+    // The tip is masked in the dab's own frame too, for the same reason: the
+    // nib, the blot and the bristles all point along the path. The round tip
+    // is the plain disc, so it is not masked at all and the coverage stays
+    // byte for byte what it was before tips existed.
+    const tipFrame = tip !== null && tip.shape !== "round" ? tip : null;
+    const tipDirectionX = tipFrame !== null ? tipFrame.directionX : 0;
+    const tipDirectionY = tipFrame !== null ? tipFrame.directionY : 0;
 
     const firstTileX = Math.floor(left / COVERAGE_TILE_SIZE);
     const lastTileX = Math.floor((right - 1) / COVERAGE_TILE_SIZE);
@@ -410,6 +426,19 @@ export class StampCoverage {
               const distance = Math.sqrt(distanceSquared);
               const t = clamp((outerLimit - distance) / bandWidth, 0, 1);
               coverage = t * t * (3 - 2 * t);
+            }
+            if (tipFrame !== null) {
+              // The tip's mask multiplies the dab's coverage *before* the
+              // union, so the union is still a maximum and the stroke cannot
+              // darken where its dabs cross. The mask is zero outside the
+              // dab's radius, so a tip never widens a stroke's footprint.
+              const along = dx * tipDirectionX + dy * tipDirectionY;
+              const across = -dx * tipDirectionY + dy * tipDirectionX;
+              const mask = brushTipMask(tipFrame, along, across);
+              if (mask <= 0) {
+                continue;
+              }
+              coverage *= mask;
             }
             let value: number;
             if (textured) {

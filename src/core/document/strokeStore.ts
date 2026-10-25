@@ -11,6 +11,12 @@
  * patches and gradients interleave exactly as the user made them. `list` is a
  * filtered view for stroke-only features (selection, transforms);
  * `listElements` is the painting order the renderer and project writer consume.
+ *
+ * The store is keyed by **layer id**, and a layer group owns no content of its
+ * own: the layers it holds keep their own element lists, under their own ids.
+ * Grouping layers therefore moves nothing here, and dissolving a group leaves
+ * every child's content exactly where it was - the pixels inside a group are
+ * the children's, and they stay theirs.
  */
 
 import type { LayerElement, LayerId, StrokeRecord } from "./types";
@@ -19,6 +25,17 @@ import { isStroke } from "./types";
 export interface RemoveElementResult {
   readonly element: LayerElement;
   readonly index: number;
+}
+
+/**
+ * A layer's content, taken out of the store.
+ *
+ * The shape a document command carries across a history boundary: the layer
+ * it belongs to, and the elements that were on it.
+ */
+export interface TakenElements {
+  readonly layerId: LayerId;
+  readonly elements: readonly LayerElement[];
 }
 
 export class StrokeStore {
@@ -124,6 +141,28 @@ export class StrokeStore {
 
   clearLayer(layerId: LayerId): void {
     this.byLayer.delete(layerId);
+  }
+
+  /**
+   * Takes the elements of several layers out of the store at once.
+   *
+   * A **group** owns no content of its own: its children do. Removing a
+   * group therefore removes the content of every layer in its subtree, and
+   * undo has to put all of it back. This does both in one call, so the
+   * caller does not have to read a list it is about to clear, and a layer
+   * that holds nothing is reported with an empty list.
+   *
+   * The order of the transfers follows the order of `layerIds`, which is the
+   * order the layers are walked in.
+   */
+  takeLayers(layerIds: readonly LayerId[]): TakenElements[] {
+    const taken: TakenElements[] = [];
+    for (const layerId of layerIds) {
+      const elements = this.byLayer.get(layerId);
+      this.byLayer.delete(layerId);
+      taken.push({ layerId, elements: elements ? [...elements] : [] });
+    }
+    return taken;
   }
 
   /** Replaces a layer's element list, used by layer commands on undo/redo. */

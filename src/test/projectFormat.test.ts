@@ -9,9 +9,9 @@
 
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
-import { DEFAULT_STABILIZER_MODE } from "../core/brushes/stabilizer";
 import { LAYER_BLEND_MODES } from "../core/document/blendModes";
 import { addLayer, createDocument, updateLayer } from "../core/document/document";
+import { addGroup, groupLayers, moveLayerToParent } from "../core/document/layerGroups";
 import { isFillPatch, isGradient, isStroke } from "../core/document/types";
 import type {
   FillPatchRecord,
@@ -145,6 +145,7 @@ describe("serializeProject", () => {
       "height",
       "id",
       "name",
+      "references",
       "width",
     ]);
 
@@ -153,6 +154,7 @@ describe("serializeProject", () => {
       "blendMode",
       "elements",
       "id",
+      "kind",
       "name",
       "opacity",
       "visible",
@@ -533,62 +535,6 @@ describe("parseProject round trip", () => {
     expect(payload.version).toBe(PROJECT_VERSION);
   });
 
-  it("round-trips the stabilizer's mode", () => {
-    const document = createDocument({ width: 64, height: 64 });
-    const layerId = document.layers[0].id;
-    const stroke = strokeFor(layerId, {
-      brush: { ...DEFAULT_BRUSH, stabilizer: 0.6, stabilizerMode: "pull" },
-    });
-    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
-
-    const parsed = parseProject(text);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) {
-      return;
-    }
-    expect(parsed.project.strokes[0].brush.stabilizerMode).toBe("pull");
-
-    // The mode is written on every stroke, not inferred from a default.
-    const payload = JSON.parse(text) as {
-      version: number;
-      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
-    };
-    expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.layers[0].elements[0].brush.stabilizerMode).toBe("pull");
-  });
-
-  it("opens a file without the stabilizer's mode with the default one", () => {
-    // The mode is additive within the current version, like the stabilizer
-    // itself: a file written before it existed opens unchanged, because the
-    // stored samples already describe the picture.
-    const document = createDocument({ width: 64, height: 64 });
-    const layerId = document.layers[0].id;
-    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stabilizer: 0.6 } });
-    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
-    const payload = JSON.parse(text) as {
-      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
-    };
-    delete payload.layers[0].elements[0].brush.stabilizerMode;
-
-    const legacy = parseProject(JSON.stringify(payload));
-    expect(legacy.ok).toBe(true);
-    if (!legacy.ok) {
-      return;
-    }
-    expect(legacy.project.strokes[0].brush.stabilizerMode).toBe(DEFAULT_STABILIZER_MODE);
-    expect(legacy.project.strokes[0].brush.stabilizer).toBe(0.6);
-  });
-
-  it("refuses a stroke brush with an unknown stabilizer mode", () => {
-    const message = rejectionOf(
-      mutate((project) => {
-        const brush = project.layers[0].elements[0].brush as Record<string, unknown>;
-        brush.stabilizerMode = "rubber";
-      }),
-    );
-    expect(message).toContain("brush stabilizer mode");
-  });
-
   it("round-trips the stamp engine's settings at version 9", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -787,6 +733,87 @@ describe("parseProject round trip", () => {
     ).toContain("brush stamp texture");
   });
 
+  it("round-trips the brush tip at version 13", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, stamp: true, tip: "chisel" },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.strokes[0].brush.tip).toBe("chisel");
+
+    // The tip is written on every stroke, not inferred from a default.
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    expect(payload.version).toBe(PROJECT_VERSION);
+    expect(payload.layers[0].elements[0].brush.tip).toBe("chisel");
+  });
+
+  it("opens version 12 files with the round tip, which is the path they were written by", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, { brush: { ...DEFAULT_BRUSH, stamp: true } });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+    const payload = JSON.parse(text) as {
+      version: number;
+      layers: Array<{ elements: Array<{ brush: Record<string, unknown> }> }>;
+    };
+    payload.version = 12;
+    delete payload.layers[0].elements[0].brush.tip;
+
+    const legacy = parseProject(JSON.stringify(payload));
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) {
+      return;
+    }
+    expect(legacy.project.strokes[0].brush.tip).toBe("round");
+  });
+
+  it("refuses a version-13 stroke brush with an unknown tip", () => {
+    // The tip is a closed set of shapes: a shape this build does not know is
+    // refused rather than drawn as the wrong thing.
+    expect(
+      rejectionOf(
+        mutate((project) => {
+          project.layers[0].elements[0].brush = {
+            ...DEFAULT_BRUSH,
+            tip: "nib",
+          } as unknown as Record<string, unknown>;
+        }),
+      ),
+    ).toContain("brush tip");
+  });
+
+  it("a version-12 reader refuses a tip instead of drawing the dabs plain", () => {
+    const document = createDocument({ width: 64, height: 64 });
+    const layerId = document.layers[0].id;
+    const stroke = strokeFor(layerId, {
+      brush: { ...DEFAULT_BRUSH, stamp: true, tip: "chisel" },
+    });
+    const text = serializeProject(document, storeOf([[layerId, [stroke]]]));
+
+    // The current build reads it...
+    expect(parseProject(text).ok).toBe(true);
+
+    // ... while a reader that accepts no higher than version 12 refuses it at
+    // the version gate: a version-12 reader ignores the tip and draws the
+    // same dabs as plain discs, which is a different picture.
+    const older = parseProject(text, { maxVersion: 12 });
+    expect(older.ok).toBe(false);
+    if (!older.ok) {
+      expect(older.error).toContain("newer version of Paka");
+      expect(older.error).toContain("reads up to 12");
+    }
+  });
+
   it("round-trips every layer blend mode at version 11", () => {
     const document = createDocument({ width: 64, height: 64 });
     const layerId = document.layers[0].id;
@@ -829,7 +856,6 @@ describe("parseProject round trip", () => {
       serializeProject(overlaid, storeOf([[layerId, [strokeFor(layerId)]]])),
     ) as { version: number };
     expect(payload.version).toBe(PROJECT_VERSION);
-    expect(payload.version).toBe(12);
 
     // The current build reads it...
     expect(parseProject(JSON.stringify(payload)).ok).toBe(true);
@@ -1016,6 +1042,7 @@ interface RawLayer {
   visible: boolean;
   opacity: number;
   blendMode: string;
+  kind: string;
   elements: RawStroke[];
 }
 
@@ -1054,6 +1081,7 @@ function rawProject(): RawProject {
         visible: true,
         opacity: 1,
         blendMode: "normal",
+        kind: "layer",
         elements: [
           {
             kind: "stroke",
@@ -1547,10 +1575,11 @@ describe("the composition guides in the project file", () => {
     // The guides arrived in version 9 and have stayed additive since: they are
     // display-only, so a reader that does not know the field draws the very
     // same picture. Version 10 was spent on the per-dab texture, version 11 on
-    // the extra blend modes and version 12 on the pressure curve; none of those
-    // bumps was for the guides, and a version-9 file that carries them still
-    // opens.
-    expect(PROJECT_VERSION).toBe(12);
+    // the extra blend modes, version 12 on the pressure curve, version 13 on
+    // the brush tip and on the layer groups, version 14 on the reference
+    // images, and version 15 on the native shapes; none of those bumps was for
+    // the guides, and a version-9 file that carries them still opens.
+    expect(PROJECT_VERSION).toBe(15);
 
     const document = {
       ...createDocument({ width: 100, height: 80 }),
@@ -1636,5 +1665,197 @@ describe("the composition guides in the project file", () => {
     expect(parsed.project.document.guides[0].id).toBe("guide-9");
     // The next generated guide id walks past the one the file carried.
     expect(createId("guide")).not.toBe("guide-9");
+  });
+});
+
+/**
+ * The layer groups in the project file.
+ *
+ * Version 13 added the group: a layer entry carries a `kind`, and a group
+ * carries the layers it holds. A version-12 reader knows neither: it would
+ * read a group as a paintable layer with no content, and every layer inside
+ * the group would be lost from the picture - a different drawing, not merely
+ * an incomplete one - so the version was bumped and an older reader refuses
+ * the file.
+ */
+describe("the layer groups in the project file", () => {
+  /** A document with two layers in a group, and a stroke on the lower one. */
+  function groupedProject() {
+    const base = createDocument({ name: "Study", width: 640, height: 480 });
+    const withLayer = addLayer(base);
+    const document = groupLayers(withLayer, [
+      withLayer.layers[0].id,
+      withLayer.layers[1].id,
+    ]);
+    const group = document.layers[0];
+    const [bottom, top] = group.children;
+    const stroke = strokeFor(bottom.id);
+
+    return {
+      document,
+      group,
+      bottom,
+      top,
+      stroke,
+      text: serializeProject(document, storeOf([[bottom.id, [stroke]]])),
+    };
+  }
+
+  it("round-trips a group with the layers it holds", () => {
+    const { document, bottom, top, text } = groupedProject();
+
+    const parsed = parseProject(text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+
+    // The tree comes back exactly as it was written.
+    expect(parsed.project.document).toEqual(document);
+    expect(parsed.project.document.layers[0].kind).toBe("group");
+    expect(parsed.project.document.layers[0].children.map((child) => child.id)).toEqual([
+      bottom.id,
+      top.id,
+    ]);
+    // The group's children keep their order.
+    expect(parsed.project.document.layers[0].children.map((child) => child.name)).toEqual([
+      bottom.name,
+      top.name,
+    ]);
+    // The content is the children's, not the group's.
+    expect(parsed.project.strokes.map((stroke) => stroke.layerId)).toEqual([bottom.id]);
+    expect(parsed.project.elements.map((element) => element.layerId)).toEqual([bottom.id]);
+  });
+
+  it("writes the kind of every layer, and the children of a group", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as {
+      layers: Array<Record<string, unknown> & { children?: Array<Record<string, unknown>> }>;
+    };
+
+    const [group] = payload.layers;
+    expect(group.kind).toBe("group");
+    expect(group.elements).toBeUndefined();
+    expect(group.children).toHaveLength(2);
+    for (const child of group.children ?? []) {
+      expect(child.kind).toBe("layer");
+      expect(child.elements).toBeDefined();
+    }
+  });
+
+  it("refuses the new file in a reader that only knows version 12", () => {
+    const { text } = groupedProject();
+
+    // A version-12 reader would read the group as a paintable layer with no
+    // content, and lose the layers inside it. It must refuse the file.
+    const parsed = parseProject(text, { maxVersion: 12 });
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("newer version of Paka");
+  });
+
+  it("refuses a file that claims an old version and carries a group", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { version: number };
+    payload.version = 12;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("version 13");
+  });
+
+  it("refuses an unknown layer kind", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    payload.layers[0].kind = "folder";
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("unknown kind");
+  });
+
+  it("refuses a group that carries elements, and a layer that carries layers", () => {
+    const { text } = groupedProject();
+
+    const withElements = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    withElements.layers[0].elements = [];
+    expect(parseProject(JSON.stringify(withElements)).ok).toBe(false);
+
+    const withChildren = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    withChildren.layers[0].kind = "layer";
+    expect(parseProject(JSON.stringify(withChildren)).ok).toBe(false);
+  });
+
+  it("refuses a group that lists no layers", () => {
+    const { text } = groupedProject();
+    const payload = JSON.parse(text) as { layers: Array<Record<string, unknown>> };
+    delete payload.layers[0].children;
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("does not list the layers it holds");
+  });
+
+  it("refuses two layers that share an id, even across a group", () => {
+    const { text, bottom } = groupedProject();
+    const payload = JSON.parse(text) as {
+      layers: Array<Record<string, unknown> & { children?: Array<Record<string, unknown>> }>;
+    };
+    const [group] = payload.layers;
+    const children = group.children ?? [];
+    const second = children[1];
+    if (second) {
+      second.id = bottom.id;
+    }
+
+    const parsed = parseProject(JSON.stringify(payload));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.ok ? "" : parsed.error).toContain("share the id");
+  });
+
+  it("round-trips an empty group", () => {
+    const base = createDocument({ name: "Empty", width: 320, height: 240 });
+    const withGroup = addGroup(base, { name: "Empty group" });
+    if (!withGroup) {
+      throw new Error("the group was not created");
+    }
+    const text = serializeProject(withGroup.document, storeOf([]));
+    const parsed = parseProject(text);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document).toEqual(withGroup.document);
+    const restored = parsed.project.document.layers.find(
+      (layer) => layer.id === withGroup.group.id,
+    );
+    expect(restored?.kind).toBe("group");
+    expect(restored?.children).toEqual([]);
+  });
+
+  it("round-trips a nested group and its ordering", () => {
+    const base = addLayer(addLayer(createDocument({ name: "Nested", width: 320, height: 240 })));
+    const [bottom, middle, top] = base.layers;
+    const grouped = groupLayers(base, [bottom.id, middle.id]);
+    const outer = grouped.layers[0];
+    const inner = addGroup(grouped, { name: "Inner", parentId: outer.id });
+    if (!inner) {
+      throw new Error("the inner group was not created");
+    }
+    const document = moveLayerToParent(inner.document, top.id, inner.group.id, 0);
+    const stroke = strokeFor(bottom.id);
+    const text = serializeProject(document, storeOf([[bottom.id, [stroke]]]));
+    const parsed = parseProject(text);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) {
+      return;
+    }
+    expect(parsed.project.document).toEqual(document);
+    const restoredOuter = parsed.project.document.layers[0];
+    expect(restoredOuter.kind).toBe("group");
+    expect(restoredOuter.children.map((node) => node.kind)).toEqual(["layer", "layer", "group"]);
+    expect(restoredOuter.children[2].children.map((node) => node.id)).toEqual([top.id]);
+    expect(parsed.project.elements.map((element) => element.layerId)).toEqual([bottom.id]);
   });
 });

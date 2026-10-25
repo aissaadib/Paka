@@ -1,13 +1,45 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { EditorSnapshot } from "../core/engine/DrawingEngine";
+import type { EditorActions } from "../state/editorStore";
+import type { ToolId } from "../types/tool";
 import {
+  findToolOption,
+  toolOptionsFor,
+  visibleToolOptions,
+  type SliderToolOption,
+  type ToggleToolOption,
+  type ToolOption,
+} from "../core/shell/toolOptions";
+import {
+  DEFAULT_SHAPE_OPTIONS,
   MAX_SHAPE_SIDES,
   MIN_SHAPE_SIDES,
+  normalizeShapeOptions,
   outlineExtent,
   shapeOutline,
   type ShapeDrag,
   type ShapeOptions,
   type ShapePoint,
 } from "../core/tools/shapeGeometry";
+import {
+  DEFAULT_SHAPE_FILL,
+  MAX_SHAPE_INNER_RATIO,
+  MIN_SHAPE_INNER_RATIO,
+  SHAPE_INNER_RATIO_STEP,
+  defaultShapeOptionValue,
+  findShapeOptionField,
+  shapeOptionFieldsFor,
+  shapeOptionLabel,
+  type ShapeNumberOption,
+} from "../core/tools/shapeOptions";
+// The built-in schema is evaluated first, the way the app loads it: `App`
+// imports the workspace - and with it the options bar's schema - before the
+// editor provider, and the editor provider is what reaches the tool registry.
+// So the shape tools append their options to the ones the schema registered.
+// The order matters, so it is written down.
+import "../features/options/toolOptionSchema";
+import { registerShapeToolOptions } from "../core/tools/shapeToolOptions";
+import { TOOL_DEFINITIONS } from "../core/tools/toolDefinitions";
 
 function drag(overrides: Partial<ShapeDrag> = {}): ShapeDrag {
   return {
@@ -560,5 +592,323 @@ describe("outline extent", () => {
         { x: 3, y: 4 },
       ]),
     ).toBe(5);
+  });
+});
+
+/* -------------------------------------------------------------- the model */
+
+describe("shape options: the one model", () => {
+  it("gives every shape kind the options it has", () => {
+    // The line's angle is the drag itself, so it has no options at all.
+    expect(shapeOptionFieldsFor("line").map((field) => field.id)).toEqual([]);
+    expect(shapeOptionFieldsFor("rectangle").map((field) => field.id)).toEqual([
+      "shapeRotation",
+      "shapeFill",
+    ]);
+    expect(shapeOptionFieldsFor("ellipse").map((field) => field.id)).toEqual([
+      "shapeRotation",
+      "shapeFill",
+    ]);
+    expect(shapeOptionFieldsFor("polygon").map((field) => field.id)).toEqual([
+      "shapeSides",
+      "shapeRotation",
+      "shapeFill",
+    ]);
+    expect(shapeOptionFieldsFor("star").map((field) => field.id)).toEqual([
+      "shapeSides",
+      "shapeInnerRatio",
+      "shapeRotation",
+      "shapeFill",
+    ]);
+  });
+
+  it("labels the shared count by the kind that uses it", () => {
+    const sides = findShapeOptionField("shapeSides");
+    expect(sides).toBeDefined();
+    // One number serves both tools: the polygon's sides are the star's points.
+    expect(shapeOptionLabel(sides!, "polygon")).toBe("Sides");
+    expect(shapeOptionLabel(sides!, "star")).toBe("Points");
+  });
+
+  it("keeps the ranges the geometry clamps to", () => {
+    const sides = findShapeOptionField("shapeSides") as ShapeNumberOption;
+    expect(sides.min).toBe(MIN_SHAPE_SIDES);
+    expect(sides.max).toBe(MAX_SHAPE_SIDES);
+    expect(sides.step).toBe(1);
+    const inner = findShapeOptionField("shapeInnerRatio") as ShapeNumberOption;
+    expect(inner.min).toBe(MIN_SHAPE_INNER_RATIO);
+    expect(inner.max).toBe(MAX_SHAPE_INNER_RATIO);
+    expect(inner.step).toBe(SHAPE_INNER_RATIO_STEP);
+    const rotation = findShapeOptionField("shapeRotation") as ShapeNumberOption;
+    expect(rotation.min).toBe(0);
+    expect(rotation.max).toBe(360);
+  });
+
+  it("fills exactly the tools the definitions call fillable", () => {
+    const fillable = TOOL_DEFINITIONS.filter((definition) => definition.fillable)
+      .map((definition) => definition.id)
+      .sort();
+    const kinds = [...findShapeOptionField("shapeFill")!.kinds].sort();
+    // A line's outline bounds no interior, so it is not one of them.
+    expect(kinds).toEqual(fillable);
+    expect(fillable).not.toContain("line");
+  });
+
+  it("starts from the documented defaults", () => {
+    expect(DEFAULT_SHAPE_OPTIONS).toEqual({ sides: 5, innerRatio: 0.5, rotation: 0 });
+    expect(DEFAULT_SHAPE_FILL).toBe(false);
+    expect(defaultShapeOptionValue("shapeSides")).toBe(DEFAULT_SHAPE_OPTIONS.sides);
+    expect(defaultShapeOptionValue("shapeInnerRatio")).toBe(DEFAULT_SHAPE_OPTIONS.innerRatio);
+    expect(defaultShapeOptionValue("shapeRotation")).toBe(DEFAULT_SHAPE_OPTIONS.rotation);
+    expect(defaultShapeOptionValue("shapeFill")).toBe(DEFAULT_SHAPE_FILL);
+    expect(findShapeOptionField("shapeSides")!.defaultValue).toBe(
+      DEFAULT_SHAPE_OPTIONS.sides,
+    );
+    expect(findShapeOptionField("shapeInnerRatio")!.defaultValue).toBe(
+      DEFAULT_SHAPE_OPTIONS.innerRatio,
+    );
+    expect(findShapeOptionField("shapeRotation")!.defaultValue).toBe(
+      DEFAULT_SHAPE_OPTIONS.rotation,
+    );
+  });
+
+  it("clamps the options into their ranges", () => {
+    expect(
+      normalizeShapeOptions({ sides: 1, innerRatio: 0, rotation: -30 }),
+    ).toEqual({
+      sides: MIN_SHAPE_SIDES,
+      innerRatio: MIN_SHAPE_INNER_RATIO,
+      rotation: 0,
+    });
+    expect(
+      normalizeShapeOptions({ sides: 99, innerRatio: 4, rotation: 400 }),
+    ).toEqual({
+      sides: MAX_SHAPE_SIDES,
+      innerRatio: MAX_SHAPE_INNER_RATIO,
+      rotation: 360,
+    });
+    // The counts are whole numbers; the ratio is not.
+    expect(normalizeShapeOptions({ sides: 7.6, innerRatio: 0.25, rotation: 45.4 })).toEqual({
+      sides: 8,
+      innerRatio: 0.25,
+      rotation: 45,
+    });
+  });
+});
+
+/* ------------------------------------------------------------ the controls */
+
+/** Narrows an option to the kind a test expects, so a wrong kind fails loudly. */
+function asSlider(option: ToolOption | undefined): SliderToolOption {
+  if (!option || option.kind !== "slider") {
+    throw new Error(`expected a slider, got "${option?.kind ?? "nothing"}"`);
+  }
+  return option;
+}
+
+function asToggle(option: ToolOption | undefined): ToggleToolOption {
+  if (!option || option.kind !== "toggle") {
+    throw new Error(`expected a toggle, got "${option?.kind ?? "nothing"}"`);
+  }
+  return option;
+}
+
+/** The ids a tool shows, with any group flattened. */
+function optionIds(toolId: ToolId): string[] {
+  const ids: string[] = [];
+  for (const option of toolOptionsFor(toolId)) {
+    if (option.kind === "group") {
+      ids.push(...option.children.map((child) => child.id));
+    } else {
+      ids.push(option.id);
+    }
+  }
+  return ids;
+}
+
+function snapshotFor(toolId: ToolId): EditorSnapshot {
+  return {
+    toolId,
+    shapeFill: true,
+    shapeSides: 7,
+    shapeInnerRatio: 0.42,
+    shapeRotation: 33,
+  } as unknown as EditorSnapshot;
+}
+
+function recorder() {
+  const calls: Array<[string, unknown]> = [];
+  const actions = {
+    setShapeFill: vi.fn((value: boolean) => calls.push(["setShapeFill", value])),
+    setShapeSides: vi.fn((value: number) => calls.push(["setShapeSides", value])),
+    setShapeInnerRatio: vi.fn((value: number) => calls.push(["setShapeInnerRatio", value])),
+    setShapeRotation: vi.fn((value: number) => calls.push(["setShapeRotation", value])),
+  } as unknown as EditorActions;
+  return { actions, calls };
+}
+
+describe("shape options: the controls", () => {
+  it("registers the model's options for every shape tool", () => {
+    // Registering twice is harmless: the contract ignores an option whose id
+    // is already registered for that tool.
+    registerShapeToolOptions();
+    registerShapeToolOptions();
+    // The symmetry controls belong to every stroke tool, not to the shape
+    // model, so they are filtered out here.
+    const shapeIds = (toolId: ToolId) =>
+      optionIds(toolId).filter((id) => !id.startsWith("symmetry"));
+    expect(new Set(shapeIds("rectangle"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
+    expect(new Set(shapeIds("ellipse"))).toEqual(new Set(["shapeFill", "shapeRotation"]));
+    expect(new Set(shapeIds("polygon"))).toEqual(
+      new Set(["shapeSides", "shapeRotation", "shapeFill"]),
+    );
+    expect(new Set(shapeIds("star"))).toEqual(
+      new Set(["shapeSides", "shapeInnerRatio", "shapeRotation", "shapeFill"]),
+    );
+    // The line's angle is the drag, so it has no shape options of its own.
+    expect(shapeIds("line")).toEqual([]);
+  });
+
+  it("gives every control the range the model declares", () => {
+    for (const kind of ["rectangle", "ellipse", "polygon", "star"] as const) {
+      for (const field of shapeOptionFieldsFor(kind)) {
+        const option = findToolOption(kind, field.id);
+        expect(option, `${kind} is missing ${field.id}`).toBeDefined();
+        if (field.control === "number") {
+          const slider = asSlider(option);
+          expect(slider.min).toBe(field.min);
+          expect(slider.max).toBe(field.max);
+          expect(slider.step).toBe(field.step);
+        }
+      }
+    }
+  });
+
+  it("reads the value the engine published", () => {
+    const snapshot = snapshotFor("star");
+    expect(asSlider(findToolOption("star", "shapeSides")).read(snapshot)).toBe(7);
+    expect(asSlider(findToolOption("star", "shapeInnerRatio")).read(snapshot)).toBe(0.42);
+    expect(asSlider(findToolOption("star", "shapeRotation")).read(snapshot)).toBe(33);
+    expect(asToggle(findToolOption("star", "shapeFill")).read(snapshot)).toBe(true);
+    // The rectangle's and the ellipse's new control reads the same value.
+    expect(asSlider(findToolOption("rectangle", "shapeRotation")).read(snapshot)).toBe(33);
+    expect(asSlider(findToolOption("ellipse", "shapeRotation")).read(snapshot)).toBe(33);
+  });
+
+  it("writes through the engine's action, snapped to the step", () => {
+    const { actions, calls } = recorder();
+    asSlider(findToolOption("star", "shapeInnerRatio")).write(actions, 0.333);
+    // The step is 0.05: 0.333 snaps to 0.35, the nearest reachable ratio.
+    expect(calls[0][0]).toBe("setShapeInnerRatio");
+    expect(calls[0][1]).toBeCloseTo(0.35, 10);
+
+    const rotation = recorder();
+    asSlider(findToolOption("rectangle", "shapeRotation")).write(rotation.actions, 45.4);
+    expect(rotation.calls).toEqual([["setShapeRotation", 45]]);
+  });
+
+  it("labels the shared count by the active tool", () => {
+    const polygon = visibleToolOptions("polygon", snapshotFor("polygon"));
+    const star = visibleToolOptions("star", snapshotFor("star"));
+    const polygonSides = polygon.find((option) => option.id === "shapeSides");
+    const starSides = star.find((option) => option.id === "shapeSides");
+    expect(polygonSides?.label).toBeDefined();
+    expect(starSides?.label).toBeDefined();
+    const label = (option: ToolOption | undefined, snapshot: EditorSnapshot): string => {
+      if (!option) {
+        throw new Error("the sides control is missing");
+      }
+      return typeof option.label === "function" ? option.label(snapshot) : option.label;
+    };
+    expect(label(polygonSides, snapshotFor("polygon"))).toBe("Sides");
+    expect(label(starSides, snapshotFor("star"))).toBe("Points");
+  });
+});
+
+/* --------------------------------------- the rectangle and the ellipse turn */
+
+describe("shape geometry: the rectangle and the ellipse turn rigidly", () => {
+  it("turns a non-square rectangle about the centre of its box", () => {
+    // A 100 x 50 box: the two ways of applying a rotation differ here, so
+    // this is the case that tells a rigid turn from a morph.
+    const box = drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } });
+    const centre = { x: 50, y: 25 };
+    const plain = shapeOutline("rectangle", box, options({ rotation: 0 }));
+    const turned = shapeOutline("rectangle", box, options({ rotation: 45 }));
+
+    // Every corner is the unrotated one turned about the centre.
+    for (let index = 0; index < plain.length - 1; index += 1) {
+      const expected = rotate(plain[index], centre, 45);
+      expect(turned[index].x).toBeCloseTo(expected.x, 6);
+      expect(turned[index].y).toBeCloseTo(expected.y, 6);
+    }
+  });
+
+  it("keeps the rectangle's side lengths when it turns", () => {
+    const box = drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } });
+    const plain = shapeOutline("rectangle", box, options({ rotation: 0 }));
+    const turned = shapeOutline("rectangle", box, options({ rotation: 45 }));
+    for (let index = 0; index < plain.length - 1; index += 1) {
+      expect(distance(turned[index], turned[index + 1])).toBeCloseTo(
+        distance(plain[index], plain[index + 1]),
+        6,
+      );
+    }
+  });
+
+  it("turns a non-square ellipse about the centre of its box", () => {
+    const box = drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } });
+    const centre = { x: 50, y: 25 };
+    const plain = shapeOutline("ellipse", box, options({ rotation: 0 }));
+    const turned = shapeOutline("ellipse", box, options({ rotation: 45 }));
+    for (let index = 0; index < plain.length - 1; index += 1) {
+      const expected = rotate(plain[index], centre, 45);
+      expect(turned[index].x).toBeCloseTo(expected.x, 6);
+      expect(turned[index].y).toBeCloseTo(expected.y, 6);
+    }
+  });
+
+  it("closes the turned outline on the turned first point", () => {
+    const box = drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } });
+    for (const kind of ["rectangle", "ellipse"] as const) {
+      const turned = shapeOutline(kind, box, options({ rotation: 45 }));
+      expect(turned[0]).toEqual(turned[turned.length - 1]);
+    }
+  });
+
+  it("leaves the default rectangle exactly as it was", () => {
+    const points = shapeOutline(
+      "rectangle",
+      drag({ anchor: { x: 10, y: 20 }, current: { x: 40, y: 50 } }),
+      options({ rotation: 0 }),
+    );
+    // Exactly, not approximately: a whole turn is the identity and must not
+    // move a single digit.
+    expect(points).toEqual([
+      { x: 10, y: 20 },
+      { x: 40, y: 20 },
+      { x: 40, y: 50 },
+      { x: 10, y: 50 },
+      { x: 10, y: 20 },
+    ]);
+  });
+
+  it("leaves the default ellipse exactly as it was", () => {
+    const points = shapeOutline(
+      "ellipse",
+      drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } }),
+      options({ rotation: 0 }),
+    );
+    expect(points[0]).toEqual({ x: 100, y: 25 });
+    expect(points[points.length - 1]).toEqual(points[0]);
+  });
+
+  it("treats a whole turn as the identity", () => {
+    const box = drag({ anchor: { x: 0, y: 0 }, current: { x: 100, y: 50 } });
+    for (const kind of ["rectangle", "ellipse"] as const) {
+      expect(shapeOutline(kind, box, options({ rotation: 360 }))).toEqual(
+        shapeOutline(kind, box, options({ rotation: 0 })),
+      );
+    }
   });
 });

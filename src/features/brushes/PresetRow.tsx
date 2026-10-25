@@ -1,27 +1,44 @@
 /**
- * One row of the brush library.
+ * One tile of the brush library.
  *
- * The row shows the mark the preset paints, its name and the two states that
- * matter: whether it is the brush in effect, and whether the brush has been
- * changed since it was applied. The star is the user's own note about the
- * brush, so it is a button of its own rather than part of the name.
+ * The library is a grid of square thumbnails, as a paint program's preset
+ * chooser is: the picture is the brush, and the name is the tooltip and the
+ * button's accessible name rather than a caption under every tile. Two states
+ * are drawn on the tile itself - the brush in effect and the tile the keyboard
+ * is on - and two marks sit in its corners: the star the user gave the brush
+ * and the dot that says the live brush has been changed since the preset was
+ * applied.
+ *
+ * The star is the user's own note about the brush, so it is a button of its
+ * own rather than part of the tile's press. It is pinned to the corner and
+ * shown while the tile is under the pointer or the keyboard, or while the
+ * brush is starred, so a grid of unstarred brushes stays a grid of pictures.
+ *
+ * Every brush has an icon. A built-in brush shows the picture drawn for it by
+ * hand; a saved one - a Krita preset or the user's own - is drawn from its
+ * settings, in the same frame and the same manner, so the grid reads as one
+ * set and a tile says what kind of brush it is before it is applied.
  */
 
-import { describePreset, isRecentlyUsed } from "../../core/brushes/presetBrowser";
-import { isBundledPreset, type BrushPreset } from "../../core/brushes/presets";
-import { BrushTipPreview } from "./BrushTipPreview";
+import { useMemo } from "react";
+import { describePreset } from "../../core/brushes/presetBrowser";
+import type { BrushPreset } from "../../core/brushes/presets";
+import { BrushIcon } from "./BrushIcon";
+import { brushIconForPreset } from "./brushIconFromBrush";
 
 export interface PresetRowProps {
   readonly preset: BrushPreset;
-  /** Whether the row is the one the keyboard is on. */
+  /** Whether the brush is one of the built-in ones. */
+  readonly bundled: boolean;
+  /** Whether the tile is the one the keyboard is on. */
   readonly selected: boolean;
-  /** Whether the row is the brush in effect. */
+  /** Whether the brush is the one in effect. */
   readonly current: boolean;
   /** Whether the brush has been changed since the preset was applied. */
   readonly edited: boolean;
-  /** The colour painted behind the swatch: the document's paper. */
-  readonly background: string;
-  /** The row was picked. */
+  /** Whether the brush is starred. */
+  readonly favorite: boolean;
+  /** The tile was picked: the brush is applied to the live brush. */
   readonly onSelect: (id: string) => void;
   /** The star was pressed. */
   readonly onToggleFavorite: (id: string) => void;
@@ -29,58 +46,65 @@ export interface PresetRowProps {
 
 export function PresetRow({
   preset,
+  bundled,
   selected,
   current,
   edited,
-  background,
+  favorite,
   onSelect,
   onToggleFavorite,
 }: PresetRowProps) {
-  const builtin = isBundledPreset(preset);
   const description = describePreset(preset);
-  const title = builtin
+  const icon = useMemo(() => brushIconForPreset(preset), [preset]);
+  const title = bundled
     ? `${preset.name} - ${description} (built-in)`
     : `${preset.name} - ${description}`;
+  // The tile draws no text, so its name has to come from the button.
+  const label = bundled ? `${preset.name} (built-in brush)` : preset.name;
+
+  const className = [
+    "brush-tile",
+    selected ? "is-selected" : "",
+    current ? "is-current" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div
-      id={`brush-option-${preset.id}`}
-      className={[
-        "brush-row",
-        selected ? "is-selected" : "",
-        current ? "is-current" : "",
-        edited ? "is-edited" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      role="option"
-      aria-selected={selected}
-      title={title}
-      onClick={() => onSelect(preset.id)}
+    <li
+      className={className}
+      data-built-in={bundled ? "true" : undefined}
+      data-preset-id={preset.id}
     >
-      <BrushTipPreview brush={preset.brush} background={background} label={`${preset.name}: ${description}`} />
-      <span className="brush-row__name">{preset.name}</span>
-      {isRecentlyUsed(preset) ? (
-        <span className="brush-row__recent" title="Used recently">
-          <span className="brush-row__recent-dot" aria-hidden="true" />
-          <span className="visually-hidden">Used recently</span>
-        </span>
-      ) : null}
-      {builtin ? <span className="brush-row__builtin" title="A built-in brush">built-in</span> : null}
       <button
         type="button"
-        className="brush-row__star"
-        aria-label={preset.favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
-        aria-pressed={preset.favorite}
-        title={preset.favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
-        onClick={(event) => {
-          // The star is its own control: pressing it must not apply the preset.
-          event.stopPropagation();
-          onToggleFavorite(preset.id);
-        }}
+        className="brush-tile__pick"
+        title={title}
+        aria-label={label}
+        aria-current={current ? "true" : undefined}
+        onClick={() => onSelect(preset.id)}
       >
-        {preset.favorite ? "★" : "☆"}
+        <BrushIcon icon={icon} />
       </button>
-    </div>
+      {edited ? (
+        <span
+          className="brush-tile__edited"
+          title="The brush has changed since this preset was applied"
+          aria-hidden="true"
+        >
+          •
+        </span>
+      ) : null}
+      <button
+        type="button"
+        className="brush-tile__star"
+        aria-label={favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
+        aria-pressed={favorite}
+        title={favorite ? `Unstar ${preset.name}` : `Star ${preset.name}`}
+        onClick={() => onToggleFavorite(preset.id)}
+      >
+        {favorite ? "★" : "☆"}
+      </button>
+    </li>
   );
 }

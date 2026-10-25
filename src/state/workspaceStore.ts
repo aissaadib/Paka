@@ -1,5 +1,5 @@
 /**
- * The workspace store: the shell's view of how the window is arranged.
+ * The workspace store: the shell's live view of how the window is arranged.
  *
  * The store is deliberately separate from the editor. The engine owns the
  * drawing and knows nothing about windows, panels or menus, and the
@@ -7,62 +7,128 @@
  * edit, so it pushes no history entry, bumps no revision and never makes a
  * document dirty.
  *
- * It is separate from the panel store too, but not from it in a rival way: the
- * side panels belong to the panel manager, and the workspace only *computes*
- * a panel layout when a profile is applied and hands it over. The workspace
- * keeps its own rows - the tool rail and the status bar - and the colour
- * scheme, the interface scale and the brush panel's density.
+ * It is framework-free, exactly like the panel store, so the whole "hide a
+ * part, resize the column, restore the defaults" cycle can be exercised in
+ * Node. React reads it through `useSyncExternalStore`.
  *
- * The store is framework-free, exactly like the panel store, so the whole
- * "apply a profile, toggle a row, restore the defaults" cycle can be
- * exercised in Node. React reads it through `useSyncExternalStore`.
+ * The store composes three things, and owns only the first:
+ *
+ *  - the **parts** - the shell's own rows - which it owns and persists;
+ *  - the **preferences** - which panels are shown, where they are docked -
+ *    which the shell's preferences document owns, and which the store reads;
+ *  - the **panels** - which come from the registry, and which the store
+ *    reads as well.
+ *
+ * The preferences are read through a port, so the panel manager can hand the
+ * store its own preferences instead of the two of them each keeping a copy.
  */
 
 import {
-  DEFAULT_PANEL_LAYOUT,
-  type PanelLayoutSource,
-} from "../core/panels/panelLayout";
+  listPanels,
+  subscribeToPanelRegistry,
+  type PanelDefinition,
+} from "../core/shell/panelRegistry";
 import {
-  findWorkspaceProfile,
-  profilePanelLayout,
-  profileWorkspaceSettings,
-  resolveWorkspaceProfile,
-} from "../core/workspace/workspaceProfiles";
+  movePanelInPreferences,
+  resetPanelPlacement,
+} from "../core/shell/panelMovement";
 import {
+  DEFAULT_SHELL_PREFERENCES,
+  shellPreferencesEqual,
+  type ShellPreferences,
+} from "../core/shell/preferences";
+import type { ShellSlotId } from "../core/shell/slots";
+import {
+  composeWorkspace,
   DEFAULT_WORKSPACE_SETTINGS,
-  normalizeUiScale,
+  setWorkspacePartOrder,
+  setWorkspacePartShown,
+  setWorkspacePartSize,
   workspaceSettingsEqual,
-  type WorkspaceProfileId,
+  type WorkspaceComposition,
+  type WorkspacePartId,
+  type WorkspacePartSize,
   type WorkspaceSettings,
-  type WorkspaceTheme,
 } from "../core/workspace/workspaceSettings";
 import type { WorkspaceSettingsSource } from "../core/workspace/workspaceSettingsSection";
 import type { Listener } from "../utils/store";
 
+/**
+ * Where the shell preferences come from.
+ *
+ * The store asks for the preferences and is told when they change. A source
+ * that owns its preferences also accepts a write; a profile or a test double
+ * can stay read-only and the store's panel actions then do nothing.
+ */
+export interface WorkspacePreferencesSource {
+  /** The preferences the composition is built from. */
+  getPreferences(): ShellPreferences;
+  /** Subscribes to the preferences' changes. */
+  subscribe(listener: () => void): () => void;
+  /**
+   * Replaces the preferences and tells the listeners.
+   *
+   * Optional because a read-only source - a profile, a test double - has no
+   * business accepting writes. The workspace's own source implements it.
+   */
+  setPreferences?(preferences: ShellPreferences): void;
+}
+
+/** A preferences source the store keeps for itself. */
+export interface MutableWorkspacePreferencesSource extends WorkspacePreferencesSource {
+  /** Replaces the preferences and tells the listeners. */
+  setPreferences(preferences: ShellPreferences): void;
+}
+
+/**
+ * The preferences a store keeps when nobody else owns them.
+ *
+ * They start at the shell's defaults - nothing hidden, the registry's order -
+ * and can be replaced wholesale.
+ */
+export function createWorkspacePreferencesSource(
+  initial: ShellPreferences = DEFAULT_SHELL_PREFERENCES,
+): MutableWorkspacePreferencesSource {
+  let preferences = initial;
+  const listeners = new Set<Listener>();
+  return {
+    getPreferences: () => preferences,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    setPreferences: (next) => {
+      if (shellPreferencesEqual(preferences, next)) {
+        return;
+      }
+      preferences = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+  };
+}
+
+/** The intents the shell offers for the workspace. */
 export interface WorkspaceActions {
-  /** Chooses the colour scheme. */
-  setTheme(theme: WorkspaceTheme): void;
-  /** Sets the interface scale, clamped into the range the shell supports. */
-  setUiScale(scale: number): void;
-  /** Shows or hides the advanced brush controls. */
-  setAdvancedBrushControls(advanced: boolean): void;
-  /** Shows or hides the brush preset library row. */
-  setBrushPresetRow(presets: boolean): void;
-  /** Shows or hides the tool rail. */
-  setToolRailVisible(visible: boolean): void;
+  /** Shows or hides one of the shell's parts. */
+  setPartShown(id: WorkspacePartId, shown: boolean): void;
+  /** Moves a part inside its region. */
+  setPartOrder(id: WorkspacePartId, order: number): void;
+  /** Sets how big a part is. The size is clamped into the part's range. */
+  setPartSize(id: WorkspacePartId, size: WorkspacePartSize): void;
   /**
-   * Applies a workspace profile.
+   * Moves a panel to a slot, optionally at a position inside that slot.
    *
-   * The profile sets the whole shell - the side panels included - and the
-   * colour scheme is left alone.
+   * The move is a preference, not an edit: it adds no history step and never
+   * reaches a document.
    */
-  applyProfile(id: WorkspaceProfileId): void;
-  /**
-   * Restores the workspace a fresh installation starts from.
-   *
-   * This is the one action that also resets the colour scheme, because it
-   * means "as if nothing had been changed".
-   */
+  movePanel(id: string, slot: ShellSlotId, index?: number): void;
+  /** Puts every panel back in the registry's slot and order. */
+  resetPanels(): void;
+  /** Restores the parts a fresh installation starts from. */
   restoreDefaults(): void;
 }
 
@@ -73,6 +139,20 @@ export interface WorkspaceStore extends WorkspaceSettingsSource {
   subscribe(listener: Listener): () => void;
   /** Replaces the workspace, e.g. with the one read from the settings file. */
   applySettings(settings: WorkspaceSettings): void;
+  /**
+   * Replaces the shell preferences, e.g. with the panel layout read from the
+   * settings file.
+   */
+  applyPreferences(preferences: ShellPreferences): void;
+  /**
+   * The composition: the parts, the panels and where the panels are docked.
+   *
+   * The same object is returned until something changes, so React can rely
+   * on its identity.
+   */
+  getComposition(): WorkspaceComposition;
+  /** The shell preferences the composition is built from. */
+  getPreferences(): ShellPreferences;
   /** The intents the shell offers. */
   readonly actions: WorkspaceActions;
 }
@@ -81,21 +161,33 @@ export interface WorkspaceStoreOptions {
   /** The workspace the store starts with. */
   readonly initial?: WorkspaceSettings;
   /**
-   * The panel manager's layout.
+   * Where the shell preferences come from.
    *
-   * The workspace needs it for two things: applying a profile has to put the
-   * side panels into the profile's arrangement, and the profile the menu
-   * offers has to be honest about a layout the user changed by hand.
+   * The store keeps its own when none is given, so the shell works before
+   * anything else has been wired up.
    */
-  readonly panels?: PanelLayoutSource;
+  readonly preferences?: WorkspacePreferencesSource;
+  /** The registered panels. Defaults to the shell's own registry. */
+  readonly panels?: () => readonly PanelDefinition[];
 }
 
-export function createWorkspaceStore(options: WorkspaceStoreOptions = {}): WorkspaceStore {
-  const panels = options.panels ?? null;
-  let state = options.initial ?? DEFAULT_WORKSPACE_SETTINGS;
+/** A signature of the panel list, so a new list is noticed. */
+function panelSignature(panels: readonly PanelDefinition[]): string {
+  return panels.map((panel) => `${panel.id}:${panel.slot}:${panel.order}`).join("|");
+}
+
+export function createWorkspaceStore(
+  options: WorkspaceStoreOptions = {},
+): WorkspaceStore {
+  const preferencesSource = options.preferences ?? createWorkspacePreferencesSource();
+  const listRegisteredPanels = options.panels ?? listPanels;
+
+  let settings = options.initial ?? DEFAULT_WORKSPACE_SETTINGS;
+  let preferences = preferencesSource.getPreferences();
+  let composition: WorkspaceComposition | null = null;
+  let signature = "";
+
   const listeners = new Set<Listener>();
-  /** True while the store is applying something, so its own echoes are ignored. */
-  let applying = false;
 
   const notify = (): void => {
     for (const listener of listeners) {
@@ -103,111 +195,92 @@ export function createWorkspaceStore(options: WorkspaceStoreOptions = {}): Works
     }
   };
 
-  /** The profile the current arrangement matches. */
-  const currentProfile = (candidate: WorkspaceSettings): WorkspaceProfileId => {
-    if (panels === null) {
-      return candidate.profile;
-    }
-    return resolveWorkspaceProfile(candidate, panels.getState());
-  };
-
-  /**
-   * Replaces the workspace, but only when it really changed.
-   *
-   * The profile is always recomputed here, so the store can never claim a
-   * preset that does not match what is on screen.
-   */
+  /** Replaces the workspace, but only when it really changed. */
   const commit = (next: WorkspaceSettings): void => {
-    const resolved: WorkspaceSettings = { ...next, profile: currentProfile(next) };
-    if (workspaceSettingsEqual(state, resolved)) {
+    if (workspaceSettingsEqual(settings, next)) {
       return;
     }
-    state = resolved;
+    settings = next;
+    composition = null;
     notify();
   };
 
-  /** Changes one part of the workspace. */
-  const update = (change: (previous: WorkspaceSettings) => WorkspaceSettings): void => {
-    commit(change(state));
+  /** The composition, rebuilt only when something it depends on changed. */
+  const currentComposition = (): WorkspaceComposition => {
+    const next = preferencesSource.getPreferences();
+    if (!shellPreferencesEqual(preferences, next)) {
+      preferences = next;
+      composition = null;
+    }
+    const panels = listRegisteredPanels();
+    const nextSignature = panelSignature(panels);
+    if (composition !== null && nextSignature === signature) {
+      return composition;
+    }
+    signature = nextSignature;
+    composition = composeWorkspace(settings, preferences, panels);
+    return composition;
   };
 
   const actions: WorkspaceActions = {
-    setTheme: (theme) => {
-      update((previous) => ({ ...previous, theme }));
+    setPartShown: (id, shown) => {
+      commit(setWorkspacePartShown(settings, id, shown));
     },
-    setUiScale: (scale) => {
-      update((previous) => ({ ...previous, uiScale: normalizeUiScale(scale, previous.uiScale) }));
+    setPartOrder: (id, order) => {
+      commit(setWorkspacePartOrder(settings, id, order));
     },
-    setAdvancedBrushControls: (advanced) => {
-      update((previous) => ({
-        ...previous,
-        brushPanel: { ...previous.brushPanel, advanced },
-      }));
+    setPartSize: (id, size) => {
+      commit(setWorkspacePartSize(settings, id, size));
     },
-    setBrushPresetRow: (presets) => {
-      update((previous) => ({
-        ...previous,
-        brushPanel: { ...previous.brushPanel, presets },
-      }));
+    movePanel: (id, slot, index) => {
+      const current = preferencesSource.getPreferences();
+      preferencesSource.setPreferences?.(
+        movePanelInPreferences(current, { panelId: id, slot, index }),
+      );
     },
-    setToolRailVisible: (visible) => {
-      update((previous) => ({ ...previous, shell: { ...previous.shell, toolRail: visible } }));
-    },
-    applyProfile: (id) => {
-      const profile = findWorkspaceProfile(id);
-      if (profile === null) {
-        // `custom` is not a preset, so there is nothing to apply.
-        return;
-      }
-      applying = true;
-      try {
-        panels?.applyLayout(profilePanelLayout(profile));
-        commit({
-          ...state,
-          ...profileWorkspaceSettings(profile, state.theme),
-        });
-      } finally {
-        applying = false;
-      }
+    resetPanels: () => {
+      preferencesSource.setPreferences?.(
+        resetPanelPlacement(preferencesSource.getPreferences()),
+      );
     },
     restoreDefaults: () => {
-      applying = true;
-      try {
-        panels?.applyLayout(DEFAULT_PANEL_LAYOUT);
-        commit({ ...DEFAULT_WORKSPACE_SETTINGS });
-      } finally {
-        applying = false;
-      }
+      commit(DEFAULT_WORKSPACE_SETTINGS);
     },
   };
 
-  // The user may rearrange the side panels from the panel manager's own menu,
-  // and then the workspace is no longer the profile it claimed to be.
-  if (panels !== null) {
-    panels.subscribe(() => {
-      if (applying) {
-        return;
-      }
-      commit(state);
-    });
-  }
+  // The preferences are somebody else's state, so the store watches them and
+  // rebuilds the composition when they change.
+  preferencesSource.subscribe(() => {
+    composition = null;
+    notify();
+  });
+
+  // The panels are somebody else's state too: they register themselves when
+  // their module is evaluated, and one of them may register after the shell
+  // has painted. The store watches the registry so the composition is read
+  // again when the panel list changes - the notification is what tells
+  // React to look, and the composition's own signature decides whether the
+  // result is a new one.
+  subscribeToPanelRegistry(() => {
+    notify();
+  });
 
   return {
-    getState: () => state,
+    getState: () => settings,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
-    applySettings: (settings) => {
-      applying = true;
-      try {
-        commit(settings);
-      } finally {
-        applying = false;
-      }
+    applySettings: (next) => {
+      commit(next);
     },
+    applyPreferences: (next) => {
+      preferencesSource.setPreferences?.(next);
+    },
+    getComposition: currentComposition,
+    getPreferences: () => preferencesSource.getPreferences(),
     actions,
   };
 }

@@ -1,5 +1,23 @@
 /** Colour panel: the HSV wheel, its sliders and the colour readout. */
 
+/* The dock's body: the wheel, the palette and the readout, stacked in the
+   shell's side column. The chrome around it - the heading, the fold button -
+   belongs to the shell, so the body is only the controls. */
+.color-dock {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* The palette under the wheel: the same swatches the toolbar offers, centred
+   so they sit under the disc instead of against the panel's edge. */
+.color-dock__palette {
+  display: flex;
+  justify-content: center;
+  padding: 2px 4px 4px;
+}
+
 .color-wheel {
   display: flex;
   flex-direction: column;
@@ -38,6 +56,23 @@
       #ff0000 360deg
     );
   box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+/* The disc is the tallest control in the colour dock. The dock is tabbed and
+   shares the column with the layers list, so at a short window the disc gives
+   way rather than pushing the sliders and the hex field out of the panel. */
+@media (max-height: 820px) {
+  .color-wheel__disc {
+    width: 124px;
+    height: 124px;
+  }
+}
+
+@media (max-height: 660px) {
+  .color-wheel__disc {
+    width: 104px;
+    height: 104px;
+  }
 }
 
 /* The value overlay: the disc is drawn at full brightness and dimmed to the

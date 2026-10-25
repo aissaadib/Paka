@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
-import type { DrawingRenderer } from "../core/rendering/types";
 import {
-  docToScreen,
-  rotateView,
-  screenToDoc,
-  toggleViewMirror,
-} from "../core/rendering/viewport";
+  OverviewCache,
+  actualSizeViewport,
+  centerViewOn,
+  fitSelectionView,
+  sameOverviewKey,
+} from "../core/engine/canvasViews";
+import type { DrawingRenderer } from "../core/rendering/types";
+import { docToScreen, screenToDoc } from "../core/rendering/viewport";
+import { viewportFromState, viewportStateFrom } from "../core/shell/viewportState";
 import {
   boundsOf,
+  clipToDocument,
   documentToNavigator,
   navigatorCorners,
   navigatorGrab,
@@ -18,13 +22,45 @@ import {
   navigatorToDocument,
   pointInPolygon,
   viewportCenter,
+  viewportRect,
 } from "../features/navigator/navigatorGeometry";
+import {
+  centerOnPoint,
+  resolveViewNavigation,
+  zoomToActualSize,
+  zoomToFit,
+  zoomToSelection,
+} from "../features/view/viewNavigation";
 import type { Size } from "../types/geometry";
+import type { PointerSample } from "../types/pointer";
 import type { Viewport } from "../types/viewport";
 
 const documentSize: Size = { width: 1600, height: 1200 };
 const panelSize: Size = { width: 200, height: 150 };
 const viewportSize: Size = { width: 800, height: 600 };
+
+/** A pointer sample, in the shape the engine's gestures take. */
+function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
+  return {
+    phase: "move",
+    pointerId: 1,
+    kind: "pen",
+    isPrimary: true,
+    button: 0,
+    buttons: 1,
+    docX: 0,
+    docY: 0,
+    screenX: 0,
+    screenY: 0,
+    pressure: 0.7,
+    hasPressure: true,
+    tiltX: 0,
+    tiltY: 0,
+    timeStamp: 0,
+    modifiers: { shift: false, alt: false, ctrl: false, meta: false },
+    ...overrides,
+  };
+}
 
 /**
  * A renderer that records what the engine asks of it.
@@ -73,10 +109,13 @@ function createEngine() {
           visible: true,
           opacity: 1,
           blendMode: "normal",
+          kind: "layer",
+          children: [],
         },
       ],
       activeLayerId: "layer-1",
       guides: [],
+      references: [],
     },
   });
   engine.setViewportSize(viewportSize.width, viewportSize.height);
@@ -155,30 +194,19 @@ describe("the navigator's view of the viewport", () => {
     expect(near.height).toBeCloseTo(far.height * 4, 6);
   });
 
-  it("marks the tilted area a turned view really shows", () => {
+  it("boxes the visible area and clips it to the paper", () => {
     const layout = navigatorLayout(documentSize, panelSize);
-    const turned = rotateView({ zoom: 1, offsetX: 0, offsetY: 0 }, viewportSize, Math.PI / 4);
-    const bounds = boundsOf(navigatorCorners(layout, turned, viewportSize));
+    const viewport: Viewport = { zoom: 1, offsetX: -100, offsetY: -50 };
+    const rect = viewportRect(layout, viewport, viewportSize);
+    expect(rect.x).toBeCloseTo(100 * layout.scale, 9);
+    expect(rect.width).toBeCloseTo(800 * layout.scale, 9);
 
-    // A canvas of 800 x 600 document pixels turned by 45 degrees covers a
-    // square whose side is (800 + 600) / sqrt(2) document pixels.
-    const side = ((viewportSize.width + viewportSize.height) / Math.SQRT2) * layout.scale;
-    expect(bounds.width).toBeCloseTo(side, 6);
-    expect(bounds.height).toBeCloseTo(side, 6);
-  });
-
-  it("mirrors the marked area with the view", () => {
-    const layout = navigatorLayout(documentSize, panelSize);
-    const plain = { zoom: 1, offsetX: -100, offsetY: -50 };
-    const mirrored = toggleViewMirror(plain, viewportSize);
-    const plainCorners = navigatorCorners(layout, plain, viewportSize);
-    const mirroredCorners = navigatorCorners(layout, mirrored, viewportSize);
-
-    // The mirror flips the view left to right, so the marked area's top-left
-    // corner is the upright view's top-right corner.
-    expect(mirroredCorners[0].x).toBeCloseTo(plainCorners[1].x, 6);
-    expect(mirroredCorners[0].y).toBeCloseTo(plainCorners[1].y, 6);
-    expect(mirroredCorners[2].x).toBeCloseTo(plainCorners[3].x, 6);
+    // A rectangle that reaches past the paper is clipped to it.
+    const clipped = clipToDocument(layout, { x: -50, y: -50, width: 500, height: 500 });
+    expect(clipped.x).toBeCloseTo(layout.offsetX, 9);
+    expect(clipped.y).toBeCloseTo(layout.offsetY, 9);
+    expect(clipped.width).toBeLessThanOrEqual(layout.width);
+    expect(clipped.height).toBeLessThanOrEqual(layout.height);
   });
 });
 
@@ -264,21 +292,11 @@ describe("the engine's navigator intents", () => {
 
     const state = engine.getState();
     expect(state.viewport.zoom).toBe(zoom);
-    const screen = docToScreen(state.viewport, documentSize.width / 2, documentSize.height / 2);
-    expect(screen.x).toBeCloseTo(viewportSize.width / 2, 9);
-    expect(screen.y).toBeCloseTo(viewportSize.height / 2, 9);
-  });
-
-  it("keeps a rotated view's point in the middle of the canvas", () => {
-    const { engine } = createEngine();
-    // The view is turned and mirrored through the viewport's own pure
-    // functions, so the test does not depend on how the transform is spelled.
-    const turned = rotateView(engine.getState().viewport, viewportSize, Math.PI / 4);
-    engine.setViewport(toggleViewMirror(turned, viewportSize));
-    engine.centerViewportOn(400, 300);
-
-    const state = engine.getState();
-    const screen = docToScreen(state.viewport, 400, 300);
+    const screen = docToScreen(
+      state.viewport,
+      documentSize.width / 2,
+      documentSize.height / 2,
+    );
     expect(screen.x).toBeCloseTo(viewportSize.width / 2, 9);
     expect(screen.y).toBeCloseTo(viewportSize.height / 2, 9);
   });
@@ -302,6 +320,53 @@ describe("the engine's navigator intents", () => {
   it("publishes the canvas size so the navigator knows what is visible", () => {
     const { engine } = createEngine();
     expect(engine.getState().viewportSize).toEqual(viewportSize);
+  });
+
+  it("zooms to the selection when there is one", () => {
+    const { engine } = createEngine();
+    // Nothing is selected, so the view stays where it is.
+    const before = engine.getState().viewport;
+    engine.zoomToSelection();
+    expect(engine.getState().viewport).toBe(before);
+  });
+
+  it("shows the whole selection when the view is zoomed to it", () => {
+    const { engine } = createEngine();
+    // A stroke in the top-left corner of the document.
+    engine.setTool("brush");
+    engine.beginStroke(createSample({ docX: 100, docY: 100 }));
+    engine.extendStroke(createSample({ docX: 200, docY: 150 }));
+    engine.finishStroke();
+
+    engine.setTool("select");
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 300, docY: 250 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 300, docY: 250 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+
+    engine.zoomToSelection();
+    const state = engine.getState();
+    // The stroke is now in the middle of the canvas.
+    const screen = docToScreen(state.viewport, 150, 125);
+    expect(screen.x).toBeCloseTo(viewportSize.width / 2, 6);
+    expect(screen.y).toBeCloseTo(viewportSize.height / 2, 6);
+    // The whole selection fits: its corners are on the canvas.
+    const topLeft = docToScreen(state.viewport, 100, 100);
+    const bottomRight = docToScreen(state.viewport, 200, 150);
+    expect(topLeft.x).toBeGreaterThanOrEqual(0);
+    expect(topLeft.y).toBeGreaterThanOrEqual(0);
+    expect(bottomRight.x).toBeLessThanOrEqual(viewportSize.width);
+    expect(bottomRight.y).toBeLessThanOrEqual(viewportSize.height);
+  });
+
+  it("publishes the new size when the canvas is resized", () => {
+    const { engine } = createEngine();
+    const listener = vi.fn();
+    engine.subscribe(listener);
+
+    engine.setViewportSize(1200, 400);
+    expect(engine.getState().viewportSize).toEqual({ width: 1200, height: 400 });
+    expect(listener).toHaveBeenCalled();
   });
 });
 
@@ -353,6 +418,168 @@ describe("the engine's overview cache", () => {
     expect(engine.getState().file.dirty).toBe(false);
     expect(engine.getState().history.depth).toBe(0);
   });
+
+  it("has no overview without a renderer", () => {
+    const engine = new DrawingEngine();
+    expect(engine.getOverview(100, 80)).toBeNull();
+  });
+});
+
+describe("the overview cache itself", () => {
+  it("hands the value back while the key matches", () => {
+    const cache = new OverviewCache<string>();
+    const key = { document: {}, revision: 1, width: 10, height: 10 };
+    expect(cache.read(key, () => "first")).toBe("first");
+    expect(cache.read(key, () => "second")).toBe("first");
+    expect(cache.buildCount).toBe(1);
+  });
+
+  it("rebuilds when the document, the revision or the size changes", () => {
+    const cache = new OverviewCache<string>();
+    const document = {};
+    const key = { document, revision: 1, width: 10, height: 10 };
+    cache.read(key, () => "first");
+
+    expect(cache.read({ ...key, revision: 2 }, () => "second")).toBe("second");
+    expect(cache.read({ ...key, document: {} }, () => "third")).toBe("third");
+    expect(cache.read({ ...key, width: 20 }, () => "fourth")).toBe("fourth");
+    expect(cache.buildCount).toBe(4);
+  });
+
+  it("compares keys by the document's identity", () => {
+    const document = {};
+    expect(
+      sameOverviewKey(
+        { document, revision: 1, width: 10, height: 10 },
+        { document, revision: 1, width: 10, height: 10 },
+      ),
+    ).toBe(true);
+    expect(
+      sameOverviewKey(
+        { document, revision: 1, width: 10, height: 10 },
+        { document: {}, revision: 1, width: 10, height: 10 },
+      ),
+    ).toBe(false);
+  });
+
+  it("peeks without building and forgets a value that could not be made", () => {
+    const cache = new OverviewCache<string>();
+    const key = { document: {}, revision: 1, width: 10, height: 10 };
+    expect(cache.peek()).toBeNull();
+    expect(cache.read(key, () => null)).toBeNull();
+    expect(cache.peek()).toBeNull();
+    expect(cache.buildCount).toBe(1);
+  });
+});
+
+describe("the view navigation intents", () => {
+  it("fits the whole document into the canvas", () => {
+    const fitted = zoomToFit(viewportSize, documentSize);
+    const topLeft = docToScreen(fitted, 0, 0);
+    const bottomRight = docToScreen(fitted, documentSize.width, documentSize.height);
+    expect(topLeft.x).toBeGreaterThanOrEqual(0);
+    expect(topLeft.y).toBeGreaterThanOrEqual(0);
+    expect(bottomRight.x).toBeLessThanOrEqual(viewportSize.width);
+    expect(bottomRight.y).toBeLessThanOrEqual(viewportSize.height);
+  });
+
+  it("shows a point at actual size", () => {
+    const view = zoomToActualSize(viewportSize, 400, 300);
+    expect(view.zoom).toBe(1);
+    const screen = docToScreen(view, 400, 300);
+    expect(screen.x).toBeCloseTo(viewportSize.width / 2, 9);
+    expect(screen.y).toBeCloseTo(viewportSize.height / 2, 9);
+  });
+
+  it("fits a selection into the canvas", () => {
+    const view = zoomToSelection(viewportSize, { x: 100, y: 100, width: 200, height: 100 });
+    expect(view).not.toBeNull();
+    // The width is the limit: 736 / 200 is smaller than 536 / 100? No: the
+    // height is 536 / 100 = 5.36, the width 736 / 200 = 3.68.
+    expect(view?.zoom).toBeCloseTo(3.68, 6);
+    const centre = docToScreen(view!, 200, 150);
+    expect(centre.x).toBeCloseTo(viewportSize.width / 2, 6);
+    expect(centre.y).toBeCloseTo(viewportSize.height / 2, 6);
+  });
+
+  it("has no view for an empty selection", () => {
+    expect(zoomToSelection(viewportSize, null)).toBeNull();
+    expect(zoomToSelection(viewportSize, { x: 10, y: 10, width: 0, height: 0 })).toBeNull();
+  });
+
+  it("centres on a point at the zoom it already had", () => {
+    const viewport: Viewport = { zoom: 2, offsetX: 0, offsetY: 0 };
+    const view = centerOnPoint(viewport, viewportSize, 640, 480);
+    expect(view.zoom).toBe(2);
+    const screen = docToScreen(view, 640, 480);
+    expect(screen.x).toBeCloseTo(viewportSize.width / 2, 9);
+    expect(screen.y).toBeCloseTo(viewportSize.height / 2, 9);
+  });
+
+  it("resolves an intent into a view", () => {
+    const context = {
+      viewport: { zoom: 1, offsetX: 0, offsetY: 0 } as Viewport,
+      viewportSize,
+      documentSize,
+    };
+    const fitted = resolveViewNavigation({ kind: "fit" }, context);
+    expect(fitted).not.toBeNull();
+
+    const centred = resolveViewNavigation(
+      { kind: "point", point: { x: 200, y: 300 } },
+      context,
+    );
+    expect(centred).not.toBeNull();
+    const screen = docToScreen(centred!, 200, 300);
+    expect(screen.x).toBeCloseTo(viewportSize.width / 2, 9);
+
+    expect(
+      resolveViewNavigation({ kind: "selection", bounds: null }, context),
+    ).toBeNull();
+  });
+});
+
+describe("the engine's view geometry", () => {
+  it("centres a view on a document point", () => {
+    const view = centerViewOn({ zoom: 2, offsetX: 0, offsetY: 0 }, viewportSize, 100, 50);
+    expect(view.zoom).toBe(2);
+    expect(view.offsetX).toBeCloseTo(viewportSize.width / 2 - 200, 9);
+    expect(view.offsetY).toBeCloseTo(viewportSize.height / 2 - 100, 9);
+  });
+
+  it("shows a point at actual size", () => {
+    const view = actualSizeViewport(viewportSize, 0, 0);
+    expect(view.zoom).toBe(1);
+    expect(view.offsetX).toBeCloseTo(viewportSize.width / 2, 9);
+  });
+
+  it("has no view for a selection with no area", () => {
+    expect(fitSelectionView(viewportSize, { x: 5, y: 5, width: 0, height: 10 })).toBeNull();
+  });
+});
+
+describe("the navigator and the remembered viewport agree", () => {
+  it("reads the centred point back as the same centre", () => {
+    const { engine } = createEngine();
+    engine.centerViewportOn(800, 600);
+
+    const state = engine.getState();
+    const remembered = viewportStateFrom(state.viewport, viewportSize);
+    expect(remembered.centerX).toBeCloseTo(800, 6);
+    expect(remembered.centerY).toBeCloseTo(600, 6);
+  });
+
+  it("rebuilds the same view from the remembered state", () => {
+    const { engine } = createEngine();
+    engine.centerViewportOn(800, 600);
+    const state = engine.getState();
+
+    const remembered = viewportStateFrom(state.viewport, viewportSize);
+    const rebuilt = viewportFromState(remembered, viewportSize, documentSize);
+    expect(rebuilt.zoom).toBeCloseTo(state.viewport.zoom, 9);
+    expect(rebuilt.offsetX).toBeCloseTo(state.viewport.offsetX, 6);
+    expect(rebuilt.offsetY).toBeCloseTo(state.viewport.offsetY, 6);
+  });
 });
 
 describe("the navigator's mapping agrees with the canvas", () => {
@@ -371,7 +598,11 @@ describe("the navigator's mapping agrees with the canvas", () => {
     expect(screen.y).toBeCloseTo(viewportSize.height / 2, 9);
 
     // The document point under the canvas centre is the one that was picked.
-    const underCentre = screenToDoc(state.viewport, viewportSize.width / 2, viewportSize.height / 2);
+    const underCentre = screenToDoc(
+      state.viewport,
+      viewportSize.width / 2,
+      viewportSize.height / 2,
+    );
     expect(underCentre.x).toBeCloseTo(doc.x, 6);
     expect(underCentre.y).toBeCloseTo(doc.y, 6);
   });

@@ -13,14 +13,13 @@
  *
  *  - **document** - the artwork's own pixels, zoom-independent.
  *  - **canvas** - the drawing surface's CSS pixels, where a document point
- *    maps through the view transform (scale, rotation, mirror; see
- *    `core/rendering/viewport.ts`).
+ *    maps through the view transform (see `core/rendering/viewport.ts`).
  *  - **navigator** - the overview panel's CSS pixels.
  *
- * The navigator always shows the document **upright**: a rotation or a mirror
- * is a property of the window, not of the artwork, so the overview shows the
- * artwork as it is and the visible area is drawn as the (possibly tilted)
- * quadrilateral the canvas is really showing.
+ * The navigator always shows the document **upright**: a turn or a mirror is
+ * a property of the window, not of the artwork, so the overview shows the
+ * artwork as it is and the visible area is drawn as the quadrilateral the
+ * canvas is really showing.
  */
 
 import type { Bounds, Point, Size } from "../../types/geometry";
@@ -130,9 +129,9 @@ export function navigatorToDocument(layout: NavigatorLayout, navX: number, navY:
  * The four corners of the canvas viewport, in document space.
  *
  * The corners are in canvas order (top-left, top-right, bottom-right,
- * bottom-left). With an upright view they are a rectangle; with a rotated or
- * mirrored one they are the tilted quadrilateral the canvas really shows,
- * which is what the navigator has to draw.
+ * bottom-left). They follow the viewport's own transform, so a turned or
+ * mirrored view is the tilted quadrilateral the canvas really shows, which is
+ * what the navigator has to draw.
  */
 export function viewportCorners(viewport: Viewport, viewportSize: Size): Point[] {
   const width = Math.max(0, viewportSize.width);
@@ -177,7 +176,7 @@ export function boundsOf(points: readonly Point[]): Bounds {
 /**
  * The bounding box of the visible area, in navigator pixels.
  *
- * The rectangle the overlays have to cover: with a rotated view the visible
+ * The rectangle the overlays have to cover: with a turned view the visible
  * area is a quadrilateral, and its box is what a rectangular overlay (a
  * highlight, a hit area) can honestly use.
  */
@@ -191,7 +190,11 @@ export function viewportRect(
 
 /** The centre of the visible area, in document pixels. */
 export function viewportCenter(viewport: Viewport, viewportSize: Size): Point {
-  return screenToDoc(viewport, Math.max(0, viewportSize.width) / 2, Math.max(0, viewportSize.height) / 2);
+  return screenToDoc(
+    viewport,
+    Math.max(0, viewportSize.width) / 2,
+    Math.max(0, viewportSize.height) / 2,
+  );
 }
 
 /**
@@ -203,14 +206,19 @@ export function viewportCenter(viewport: Viewport, viewportSize: Size): Point {
  */
 export function pointInPolygon(point: Point, polygon: readonly Point[]): boolean {
   let inside = false;
-  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+  for (
+    let index = 0, previous = polygon.length - 1;
+    index < polygon.length;
+    previous = index, index += 1
+  ) {
     const current = polygon[index];
     const last = polygon[previous];
     const straddles = current.y > point.y !== last.y > point.y;
     if (!straddles) {
       continue;
     }
-    const crossing = ((last.x - current.x) * (point.y - current.y)) / (last.y - current.y) + current.x;
+    const crossing =
+      ((last.x - current.x) * (point.y - current.y)) / (last.y - current.y) + current.x;
     if (point.x < crossing) {
       inside = !inside;
     }
@@ -221,8 +229,8 @@ export function pointInPolygon(point: Point, polygon: readonly Point[]): boolean
 /**
  * Resolves a pointer position in the navigator against the current view.
  *
- * The result says where the pointer is in the document, how far it is from the
- * centre of the visible area, and whether it landed inside that area.
+ * The result says where the pointer is in the document, how far it is from
+ * the centre of the visible area, and whether it landed inside that area.
  */
 export function navigatorGrab(
   layout: NavigatorLayout,
@@ -233,7 +241,10 @@ export function navigatorGrab(
 ): NavigatorGrab {
   const doc = navigatorToDocument(layout, navX, navY);
   const center = viewportCenter(viewport, viewportSize);
-  const inside = pointInPolygon({ x: navX, y: navY }, navigatorCorners(layout, viewport, viewportSize));
+  const inside = pointInPolygon(
+    { x: navX, y: navY },
+    navigatorCorners(layout, viewport, viewportSize),
+  );
   return {
     doc,
     offset: { x: doc.x - center.x, y: doc.y - center.y },

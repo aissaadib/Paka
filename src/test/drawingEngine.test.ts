@@ -20,8 +20,9 @@ import { DEFAULT_GRID_SPACING } from "../core/document/grid";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import { parseProject } from "../core/project/projectFormat";
 import type { DrawingRenderer, RendererSelection, Rgb } from "../core/rendering/types";
-import type { StrokeRecord } from "../core/document/types";
-import { isFillPatch, isGradient } from "../core/document/types";
+import type { ShapeRecord, StrokeRecord } from "../core/document/types";
+import { isFillPatch, isGradient, isShape, isStroke } from "../core/document/types";
+import { shapeRecordOutline } from "../core/document/shapeRecord";
 import type { Guide } from "../core/document/types";
 import type { CursorReport, PointerSample } from "../types/pointer";
 import type { Bounds, Point } from "../types/geometry";
@@ -105,18 +106,15 @@ function createSpyRenderer(
     setSelection: (selection) => {
       selections.push(selection);
     },
-    setGradientOverlay: () => {},
     setSelectedGuide: (guideId) => {
       selectedGuides.push(guideId);
     },
+    setReferenceSources: () => {},
+    setSelectedReference: () => {},
     setGrid: () => {},
-    setRulers: () => {},
-    setSymmetry: () => {},
-    setReferenceOverlay: () => {},
     composeDocumentImage: () => {
       throw new Error("composeDocumentImage is not used in these tests.");
     },
-    renderOverview: () => null,
     readCompositePixel: (docX, docY) => {
       sampled.push({ x: docX, y: docY });
       return compositePixel;
@@ -374,8 +372,9 @@ describe("DrawingEngine stroke capture", () => {
     engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 40, timeStamp: 32 }));
 
     // A shape is an outline, not a chain of dabs, so its record says so.
-    expect(engine.listStrokes(layerId)).toHaveLength(1);
-    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].brush.stamp).toBe(false);
   });
 
   it("settles a stabilized stroke on the release point before committing", () => {
@@ -391,37 +390,15 @@ describe("DrawingEngine stroke capture", () => {
       createSample({ phase: "down", docX: 10, docY: 10, pressure: 0.2, timeStamp: 0 }),
     );
     engine.extendStroke(createSample({ docX: 110, docY: 10, pressure: 1, timeStamp: 16 }));
-    engine.finishStroke(createSample({ phase: "up", docX: 110, docY: 10, pressure: 1, timeStamp: 32 }));
+    engine.finishStroke();
 
-    // The captured point trails the pointer, and the catch-up lands the
-    // stroke on the release point exactly.
+    // follow = 0.25: 10 -> 35, then finish settles on the raw release point.
     const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs[0]).toBe(10);
-    expect(stroke.xs[1]).toBeGreaterThan(10);
-    expect(stroke.xs[1]).toBeLessThan(110);
-    expect(stroke.xs[stroke.xs.length - 1]).toBe(110);
-    expect(stroke.ys[stroke.ys.length - 1]).toBe(10);
-    // The pressure is the device's own, not a smoothed one.
-    expect(stroke.pressures[0]).toBe(0.2);
-    expect(stroke.pressures[stroke.pressures.length - 1]).toBe(1);
+    expect(stroke.xs).toEqual([10, 35, 110]);
+    expect(stroke.pressures).toEqual([0.2, 0.4, 1]);
     // The settle was previewed through the renderer before the stroke ended.
-    expect(spy.extended[spy.extended.length - 1].fromIndex).toBeGreaterThan(0);
+    expect(spy.extended.map((entry) => entry.fromIndex)).toEqual([0, 1, 2]);
     expect(spy.ended[0]).toBe(stroke);
-  });
-
-  it("ends a stroke exactly on the release point it is given", () => {
-    const engine = new DrawingEngine({
-      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
-    });
-    const layerId = engine.getState().document.activeLayerId as string;
-
-    engine.beginStroke(createSample({ phase: "down", docX: 10, docY: 10 }));
-    engine.extendStroke(createSample({ docX: 60, docY: 10, timeStamp: 16 }));
-    engine.finishStroke(createSample({ phase: "up", docX: 95, docY: 42, timeStamp: 32 }));
-
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs[stroke.xs.length - 1]).toBe(95);
-    expect(stroke.ys[stroke.ys.length - 1]).toBe(42);
   });
 
   it("does not append a settle point when the pointer stopped exactly on the path", () => {
@@ -530,64 +507,6 @@ describe("DrawingEngine stroke capture", () => {
 
     expect(engine.listStrokes(layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
-  });
-
-  it("commits a lost pointer capture as one history step", () => {
-    const engine = createEngine();
-    const layerId = engine.getState().document.activeLayerId as string;
-
-    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
-    engine.handlePointerSample(
-      createSample({ phase: "move", docX: 60, docY: 20, timeStamp: 16 }),
-    );
-    // The browser took the pointer away: the ink is already on the canvas,
-    // so the stroke is committed rather than thrown away.
-    engine.handlePointerSample(
-      createSample({ phase: "cancel", docX: 80, docY: 20, timeStamp: 32 }),
-    );
-
-    expect(engine.listStrokes(layerId)).toHaveLength(1);
-    expect(engine.getState().history).toMatchObject({ depth: 1, undoLabel: "Stroke" });
-  });
-
-  it("ends a stroke cancelled by a lost capture on the last position it saw", () => {
-    const engine = new DrawingEngine({
-      brush: { ...DEFAULT_BRUSH, size: 200, spacing: 2, stabilizer: 1 },
-    });
-    const layerId = engine.getState().document.activeLayerId as string;
-
-    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
-    engine.handlePointerSample(
-      createSample({ phase: "move", docX: 60, docY: 20, timeStamp: 16 }),
-    );
-    engine.handlePointerSample(
-      createSample({ phase: "cancel", docX: 95, docY: 20, timeStamp: 32 }),
-    );
-
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs[stroke.xs.length - 1]).toBe(95);
-    expect(engine.getState().history.depth).toBe(1);
-  });
-
-  it("records a whole stroke as a single history step", () => {
-    const engine = createEngine();
-    const layerId = engine.getState().document.activeLayerId as string;
-
-    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
-    for (let index = 1; index <= 20; index += 1) {
-      engine.handlePointerSample(
-        createSample({ phase: "move", docX: 20 + index * 5, docY: 20, timeStamp: index * 8 }),
-      );
-    }
-    engine.handlePointerSample(
-      createSample({ phase: "up", docX: 120, docY: 20, timeStamp: 168 }),
-    );
-
-    // Twenty samples, one stroke, one undo step.
-    expect(engine.listStrokes(layerId)).toHaveLength(1);
-    expect(engine.getState().history.depth).toBe(1);
-    expect(engine.undo()).toBe(true);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
   });
 
   it("ignores a second begin without a finish", () => {
@@ -1008,7 +927,12 @@ describe("DrawingEngine colour picker", () => {
 });
 
 describe("DrawingEngine shape tools", () => {
-  it("previews in the stroke buffer and commits one stroke on release", () => {
+  /** The native shapes on a layer, bottom-most first. */
+  function shapesOf(engine: DrawingEngine, layerId: string): ShapeRecord[] {
+    return engine.listElements(layerId).filter(isShape);
+  }
+
+  it("previews in the stroke buffer and commits one native shape on release", () => {
     const spy = createSpyRenderer();
     const engine = new DrawingEngine({
       document: createDocument({ name: "Test", width: 400, height: 300 }),
@@ -1020,23 +944,33 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "down", docX: 100, docY: 100 }));
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 150 }));
 
-    // Mid-drag the shape is only a preview: one full-buffer redraw, no stroke,
+    // Mid-drag the shape is only a preview: one full-buffer redraw, no element,
     // no history entry.
     expect(spy.began).toHaveLength(1);
     expect(spy.replaced).toHaveLength(1);
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
 
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 150 }));
 
-    expect(spy.ended).toHaveLength(1);
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
-    // A closed rectangle: four corners plus the repeated first point.
-    expect(strokes[0].xs).toEqual([100, 200, 200, 100, 100]);
-    expect(strokes[0].ys).toEqual([100, 100, 150, 150, 100]);
-    expect(strokes[0].pressures).toEqual([1, 1, 1, 1, 1]);
+    // The preview is discarded, not composited: the committed shape is
+    // re-rasterized from its record like an undone or reopened one.
+    expect(spy.ended).toHaveLength(0);
+    expect(spy.getCancelled()).toBe(1);
+    const shapes = shapesOf(engine, layerId);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({
+      shape: "rectangle",
+      x: 100,
+      y: 100,
+      width: 100,
+      height: 50,
+    });
+    // The outline the renderer derives: four corners plus the repeated first.
+    const outline = shapeRecordOutline(shapes[0]);
+    expect(outline.map((point) => point.x)).toEqual([100, 200, 200, 100, 100]);
+    expect(outline.map((point) => point.y)).toEqual([100, 100, 150, 150, 100]);
     expect(engine.getState().history.depth).toBe(1);
     expect(engine.getState().file.dirty).toBe(true);
   });
@@ -1058,19 +992,19 @@ describe("DrawingEngine shape tools", () => {
     expect(engine.getState().shapeFill).toBe(false);
     engine.setTool("rectangle");
     rectangle(50);
-    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[0].fill).toBe(false);
 
     engine.setShapeFill(true);
     expect(engine.getState().shapeFill).toBe(true);
     rectangle(100);
-    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
+    expect(shapesOf(engine, layerId)[1].fill).toBe(true);
 
-    // Each stroke keeps the setting it was drawn with: turning the fill off
+    // Each shape keeps the setting it was drawn with: turning the fill off
     // does not rewrite the shapes already committed.
     engine.setShapeFill(false);
     rectangle(150);
-    expect(engine.listStrokes(layerId)[1].fill).toBe(true);
-    expect(engine.listStrokes(layerId)[2].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[1].fill).toBe(true);
+    expect(shapesOf(engine, layerId)[2].fill).toBe(false);
 
     // Drawing filled shapes is a change like any other, but the setting itself
     // is not: it describes the next shape, so it neither dirties the file nor
@@ -1092,7 +1026,7 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 0 }));
 
-    expect(engine.listStrokes(layerId)[0].fill).toBe(false);
+    expect(shapesOf(engine, layerId)[0].fill).toBe(false);
   });
 
   it("keeps the fill setting across a tool switch", () => {
@@ -1127,11 +1061,14 @@ describe("DrawingEngine shape tools", () => {
       createSample({ phase: "up", docX: 100, docY: 10, modifiers: shiftHeld }),
     );
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs).toHaveLength(2);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry.shape).toBe("line");
+    if (shape.geometry.shape !== "line") {
+      return;
+    }
     // Snapped to horizontal: the y offset collapses to zero.
-    expect(stroke.ys[1]).toBeCloseTo(0, 10);
-    expect(stroke.xs[1]).toBeCloseTo(Math.hypot(100, 10), 6);
+    expect(shape.geometry.y2).toBeCloseTo(0, 10);
+    expect(shape.geometry.x2).toBeCloseTo(Math.hypot(100, 10), 6);
   });
 
   it("draws a rectangle from its centre under Alt", () => {
@@ -1152,11 +1089,8 @@ describe("DrawingEngine shape tools", () => {
       createSample({ phase: "up", docX: 150, docY: 130, modifiers: altHeld }),
     );
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(Math.min(...stroke.xs)).toBe(50);
-    expect(Math.max(...stroke.xs)).toBe(150);
-    expect(Math.min(...stroke.ys)).toBe(70);
-    expect(Math.max(...stroke.ys)).toBe(130);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry).toMatchObject({ shape: "rectangle", x: 50, y: 70, width: 100, height: 60 });
   });
 
   it("commits the geometry of the release point, not the last move", () => {
@@ -1172,9 +1106,8 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 100, docY: 0 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 60, docY: 80 }));
 
-    const stroke = engine.listStrokes(layerId)[0];
-    expect(stroke.xs).toEqual([0, 60]);
-    expect(stroke.ys).toEqual([0, 80]);
+    const shape = shapesOf(engine, layerId)[0];
+    expect(shape.geometry).toMatchObject({ shape: "line", x1: 0, y1: 0, x2: 60, y2: 80 });
   });
 
   it("discards a click that never moved", () => {
@@ -1191,7 +1124,7 @@ describe("DrawingEngine shape tools", () => {
 
     expect(spy.replaced).toHaveLength(0);
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1209,7 +1142,7 @@ describe("DrawingEngine shape tools", () => {
     engine.handlePointerSample(createSample({ phase: "up", docX: 100, docY: 100 }));
 
     expect(spy.began).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1228,7 +1161,7 @@ describe("DrawingEngine shape tools", () => {
 
     expect(spy.ended).toHaveLength(0);
     expect(spy.getCancelled()).toBe(1);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
   });
 
@@ -1246,7 +1179,7 @@ describe("DrawingEngine shape tools", () => {
     engine.setTool("brush");
 
     expect(spy.ended).toHaveLength(0);
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(shapesOf(engine, layerId)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().toolId).toBe("brush");
   });
@@ -1288,19 +1221,20 @@ describe("DrawingEngine polygon and star tools", () => {
     );
   }
 
-  it("commits a polygon as one ordinary stroke", () => {
+  it("commits a polygon as one native shape", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({ shape: "polygon", sides: 5 });
     // Five sides plus the repeated first point.
-    expect(strokes[0].xs).toHaveLength(6);
-    expect(strokes[0].ys).toHaveLength(6);
-    expect(strokes[0].xs[0]).toBeCloseTo(strokes[0].xs[5], 9);
-    expect(strokes[0].ys[0]).toBeCloseTo(strokes[0].ys[5], 9);
+    const outline = shapeRecordOutline(shapes[0]);
+    expect(outline).toHaveLength(6);
+    expect(outline[0].x).toBeCloseTo(outline[5].x, 9);
+    expect(outline[0].y).toBeCloseTo(outline[5].y, 9);
     expect(engine.getState().history.depth).toBe(1);
     expect(engine.getState().file.dirty).toBe(true);
   });
@@ -1311,10 +1245,11 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("star");
     dragShape(engine, [100, 100], [200, 200]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(1);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0].geometry).toMatchObject({ shape: "star", sides: 5 });
     // Five points: five tips and five valleys, plus the repeated first point.
-    expect(strokes[0].xs).toHaveLength(11);
+    expect(shapeRecordOutline(shapes[0])).toHaveLength(11);
     expect(engine.getState().history.depth).toBe(1);
   });
 
@@ -1327,10 +1262,10 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("star");
     dragShape(engine, [200, 50], [300, 150]);
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes).toHaveLength(2);
-    expect(strokes[0].fill).toBe(true);
-    expect(strokes[1].fill).toBe(true);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes).toHaveLength(2);
+    expect(shapes[0].fill).toBe(true);
+    expect(shapes[1].fill).toBe(true);
   });
 
   it("treats the options as editor state: no history step, no dirty flag", () => {
@@ -1377,8 +1312,9 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
 
-    const strokes = engine.listStrokes(layerId);
-    expect(strokes[0].xs).toHaveLength(7);
+    const shapes = engine.listElements(layerId).filter(isShape);
+    expect(shapes[0].geometry).toMatchObject({ shape: "polygon", sides: 6 });
+    expect(shapeRecordOutline(shapes[0])).toHaveLength(7);
   });
 
   it("keeps the inner ratio and the rotation it started with", () => {
@@ -1394,20 +1330,22 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 200, docY: 200 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 200, docY: 200 }));
 
-    const star = engine.listStrokes(layerId)[0];
+    const star = engine.listElements(layerId).filter(isShape)[0];
+    expect(star.geometry).toMatchObject({ shape: "star", innerRatio: 0.25, rotation: 90 });
     // The box is 100..200 by 100..200, so the centre is (150, 150) and the
     // circle's radius is 50.
+    const outline = shapeRecordOutline(star);
     const centre = { x: 150, y: 150 };
     const radius = (index: number): number =>
-      Math.hypot(star.xs[index] - centre.x, star.ys[index] - centre.y);
+      Math.hypot(outline[index].x - centre.x, outline[index].y - centre.y);
     // A tip is on the circle, a valley at a quarter of it: the inner ratio of
     // 0.25 the star started with.
     expect(radius(0)).toBeCloseTo(50, 6);
     expect(radius(1)).toBeCloseTo(12.5, 6);
     // The rotation of 90 degrees the star started with: the first tip, which
     // starts at the top, is now at the right.
-    expect(star.xs[0]).toBeCloseTo(200, 6);
-    expect(star.ys[0]).toBeCloseTo(150, 6);
+    expect(outline[0].x).toBeCloseTo(200, 6);
+    expect(outline[0].y).toBeCloseTo(150, 6);
   });
 
   it("never rewrites a committed shape when an option changes", () => {
@@ -1415,16 +1353,15 @@ describe("DrawingEngine polygon and star tools", () => {
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
-    const committed = engine.listStrokes(layerId)[0];
-    const before = { xs: [...committed.xs], ys: [...committed.ys] };
+    const committed = engine.listElements(layerId).filter(isShape)[0];
+    const before = structuredClone(committed.geometry);
 
     engine.setShapeSides(3);
     engine.setShapeInnerRatio(0.9);
     engine.setShapeRotation(45);
 
-    const after = engine.listStrokes(layerId)[0];
-    expect(after.xs).toEqual(before.xs);
-    expect(after.ys).toEqual(before.ys);
+    const after = engine.listElements(layerId).filter(isShape)[0];
+    expect(after.geometry).toEqual(before);
     // And the option changes are not edits of their own.
     expect(engine.getState().history.depth).toBe(1);
   });
@@ -1434,23 +1371,23 @@ describe("DrawingEngine polygon and star tools", () => {
 
     engine.setTool("polygon");
     dragShape(engine, [150, 150], [250, 200], { alt: true });
-    const centred = engine.listStrokes(layerId)[0];
+    const centred = shapeRecordOutline(engine.listElements(layerId).filter(isShape)[0]);
     // The mean of the vertices is the shape's centre; the closing repeat is
     // not a vertex, so it is left out.
-    const vertices = centred.xs.length - 1;
+    const vertices = centred.length - 1;
     const centreX =
-      centred.xs.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+      centred.slice(0, vertices).reduce((sum, point) => sum + point.x, 0) / vertices;
     const centreY =
-      centred.ys.slice(0, vertices).reduce((sum, value) => sum + value, 0) / vertices;
+      centred.slice(0, vertices).reduce((sum, point) => sum + point.y, 0) / vertices;
     expect(centreX).toBeCloseTo(150, 6);
     expect(centreY).toBeCloseTo(150, 6);
 
     dragShape(engine, [100, 100], [200, 140], { shift: true });
-    const squared = engine.listStrokes(layerId)[1];
+    const squared = shapeRecordOutline(engine.listElements(layerId).filter(isShape)[1]);
     // Shift squares the drag's box (100 by 100), so the polygon is regular:
     // every vertex is the same distance from the box's centre.
-    for (let index = 0; index < squared.xs.length; index += 1) {
-      const radius = Math.hypot(squared.xs[index] - 150, squared.ys[index] - 150);
+    for (const point of squared) {
+      const radius = Math.hypot(point.x - 150, point.y - 150);
       expect(radius).toBeCloseTo(50, 6);
     }
   });
@@ -1461,42 +1398,52 @@ describe("DrawingEngine polygon and star tools", () => {
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [100, 100]);
 
-    expect(engine.listStrokes(layerId)).toHaveLength(0);
+    expect(engine.listElements(layerId).filter(isShape)).toHaveLength(0);
     expect(engine.getState().history.depth).toBe(0);
     expect(engine.getState().file.dirty).toBe(false);
   });
 
-  it("draws a shape with the plain segment path, even when the brush is stamped", () => {
+  it("keeps the plain segment path even when the brush is stamped", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setBrush({ stamp: true });
     engine.setTool("star");
     dragShape(engine, [100, 100], [200, 200]);
 
-    expect(engine.listStrokes(layerId)[0].brush.stamp).toBe(false);
+    expect(engine.listElements(layerId).filter(isShape)[0].brush.stamp).toBe(false);
   });
 
-  it("selects a polygon and moves it in one undo step", () => {
+  it("selects a polygon with the shape editor and moves it in one undo step", () => {
     const { engine, layerId } = createShapeEngine();
 
     engine.setTool("polygon");
     dragShape(engine, [100, 100], [200, 200]);
-    const before = [...engine.listStrokes(layerId)[0].xs];
+    const before = structuredClone(engine.listElements(layerId).filter(isShape)[0].geometry);
 
-    engine.setTool("select");
-    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
-    engine.handlePointerSample(createSample({ phase: "move", docX: 280, docY: 280 }));
-    engine.handlePointerSample(createSample({ phase: "up", docX: 280, docY: 280 }));
-    expect(engine.getState().selectedStrokes).toBe(1);
+    engine.setTool("shapeEdit");
+    // A press on the outline selects the shape and starts a move. The point is
+    // a polygon vertex, so it is on the shape and clear of the frame handles.
+    const vertexX = 150 + 50 * Math.cos(-Math.PI / 10);
+    const vertexY = 150 + 50 * Math.sin(-Math.PI / 10);
+    engine.handlePointerSample(createSample({ phase: "down", docX: vertexX, docY: vertexY }));
+    expect(engine.getState().selectedShapeId).not.toBeNull();
+    engine.handlePointerSample(
+      createSample({ phase: "move", docX: vertexX + 20, docY: vertexY }),
+    );
+    engine.handlePointerSample(
+      createSample({ phase: "up", docX: vertexX + 20, docY: vertexY }),
+    );
 
-    const depth = engine.getState().history.depth;
-    engine.handlePointerSample(createSample({ phase: "down", docX: 150, docY: 150 }));
-    engine.handlePointerSample(createSample({ phase: "move", docX: 170, docY: 150 }));
-    engine.handlePointerSample(createSample({ phase: "up", docX: 170, docY: 150 }));
+    const moved = engine.listElements(layerId).filter(isShape)[0];
+    expect(moved.geometry).toMatchObject({ shape: "polygon", x: 120, y: 100 });
+    expect(moved.id).toBe(engine.getState().selectedShapeId);
+    expect(engine.getState().history.depth).toBe(2);
 
-    const moved = engine.listStrokes(layerId)[0];
-    expect(moved.xs[0]).toBeCloseTo(before[0] + 20, 6);
-    expect(engine.getState().history.depth).toBe(depth + 1);
+    engine.undo();
+    const restored = engine.listElements(layerId).filter(isShape)[0];
+    expect(restored.geometry).toEqual(before);
+    engine.redo();
+    expect(engine.listElements(layerId).filter(isShape)[0].geometry).toEqual(moved.geometry);
   });
 });
 
@@ -2467,6 +2414,207 @@ describe("DrawingEngine selection", () => {
     expect(engine.flipSelection("horizontal")).toBe(false);
     expect(engine.getState().history.depth).toBe(depth);
   });
+
+  /** Drags a marquee with the given modifiers held at the press. */
+  function marqueeWith(
+    engine: DrawingEngine,
+    points: ReadonlyArray<readonly [number, number]>,
+    modifiers: { readonly shift?: boolean; readonly alt?: boolean } = {},
+  ): void {
+    const first = points[0];
+    engine.handlePointerSample(
+      createSample({
+        phase: "down",
+        docX: first[0],
+        docY: first[1],
+        modifiers: { shift: false, alt: false, ctrl: false, meta: false, ...modifiers },
+      }),
+    );
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase: "up", docX: last[0], docY: last[1] }));
+  }
+
+  function selectedIds(spy: ReturnType<typeof createSpyRenderer>): string[] {
+    const overlay = spy.selections[spy.selections.length - 1];
+    return (overlay?.strokes ?? []).map((stroke) => stroke.id).sort();
+  }
+
+  it("selects with a freehand lasso inside the traced region", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    expect(engine.getState().selectionShape).toBe("rect");
+    engine.setSelectionShape("lasso");
+    expect(engine.getState().selectionShape).toBe("lasso");
+    const [inside] = engine.listStrokes(layerId);
+
+    // While the lasso is in flight the overlay carries the path, not a box.
+    engine.handlePointerSample(createSample({ phase: "down", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 140, docY: 20 }));
+    const dragging = spy.selections[spy.selections.length - 1];
+    expect(dragging?.bounds).toBeNull();
+    expect(dragging?.path?.length).toBe(2);
+
+    engine.handlePointerSample(createSample({ phase: "move", docX: 140, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 20, docY: 100 }));
+    engine.handlePointerSample(createSample({ phase: "move", docX: 20, docY: 20 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 20, docY: 20 }));
+
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(selectedIds(spy)).toEqual([inside.id]);
+    // The committed overlay is the selection again: a frame, not the path.
+    const committed = spy.selections[spy.selections.length - 1];
+    expect(committed?.path ?? null).toBeNull();
+    expect(committed?.bounds?.width).toBeCloseTo(50 + DEFAULT_BRUSH.size, 6);
+  });
+
+  it("treats a lasso click as a click, not as an empty region", () => {
+    const { engine, spy } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    engine.setTool("select");
+    engine.setSelectionShape("lasso");
+
+    engine.handlePointerSample(createSample({ phase: "down", docX: 50, docY: 50 }));
+    engine.handlePointerSample(createSample({ phase: "up", docX: 50, docY: 50 }));
+    expect(engine.getState().selectedStrokes).toBe(1);
+    expect(spy.selections[spy.selections.length - 1]?.strokes).toHaveLength(1);
+  });
+
+  it("adds, subtracts and intersects the selection with modifier keys", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [50, 150],
+      [100, 150],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    const [a, b, c] = engine.listStrokes(layerId);
+
+    marqueeWith(engine, [
+      [10, 10],
+      [150, 80],
+    ]);
+    expect(selectedIds(spy)).toEqual([a.id]);
+
+    // Shift adds the second stroke.
+    marqueeWith(
+      engine,
+      [
+        [10, 110],
+        [150, 180],
+      ],
+      { shift: true },
+    );
+    expect(selectedIds(spy)).toEqual([a.id, b.id].sort());
+
+    // Alt removes the first stroke again.
+    marqueeWith(
+      engine,
+      [
+        [10, 10],
+        [150, 80],
+      ],
+      { alt: true },
+    );
+    expect(selectedIds(spy)).toEqual([b.id]);
+
+    // Shift+Alt keeps only what both regions meet: B is not inside A's box.
+    marqueeWith(
+      engine,
+      [
+        [10, 10],
+        [150, 80],
+      ],
+      { shift: true, alt: true },
+    );
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+
+    // A combine with nothing selected builds a new selection, not a no-op.
+    marqueeWith(
+      engine,
+      [
+        [290, 240],
+        [360, 260],
+      ],
+      { shift: true },
+    );
+    expect(selectedIds(spy)).toEqual([c.id]);
+  });
+
+  it("selects all and inverts without touching history", () => {
+    const { engine, spy, layerId } = createSelectingEngine();
+    paint(engine, [
+      [50, 50],
+      [100, 50],
+    ]);
+    paint(engine, [
+      [300, 250],
+      [350, 250],
+    ]);
+    engine.setTool("select");
+    const [a, b] = engine.listStrokes(layerId);
+    const depth = engine.getState().history.depth;
+    const dirty = engine.getState().file.dirty;
+
+    expect(engine.selectAll()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+    expect(selectedIds(spy)).toEqual([a.id, b.id].sort());
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(dirty);
+
+    // Inverting everything selects nothing, and the overlay disappears.
+    expect(engine.invertSelection()).toBe(false);
+    expect(engine.getState().selectedStrokes).toBe(0);
+    expect(spy.selections[spy.selections.length - 1]).toBeNull();
+
+    // Inverting nothing selects everything.
+    expect(engine.invertSelection()).toBe(true);
+    expect(engine.getState().selectedStrokes).toBe(2);
+
+    // Inverting one selects the other.
+    marqueeWith(engine, [
+      [10, 10],
+      [150, 80],
+    ]);
+    expect(selectedIds(spy)).toEqual([a.id]);
+    expect(engine.invertSelection()).toBe(true);
+    expect(selectedIds(spy)).toEqual([b.id]);
+    expect(engine.getState().history.depth).toBe(depth);
+  });
+
+  it("keeps the marquee shape as editor state, across tool switches", () => {
+    const { engine } = createSelectingEngine();
+    const depth = engine.getState().history.depth;
+    engine.setSelectionShape("lasso");
+    engine.setSelectionShape("lasso");
+    engine.setTool("brush");
+    expect(engine.getState().selectionShape).toBe("lasso");
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(false);
+    engine.setSelectionShape("rect");
+    expect(engine.getState().selectionShape).toBe("rect");
+  });
 });
 
 /** White RGBA image with a one-pixel black frame around the edge. */
@@ -2919,6 +3067,69 @@ describe("DrawingEngine bucket fill", () => {
     expect(engine.getState().fillTolerance).toBe(13);
     engine.setFillTolerance(Number.NaN);
     expect(engine.getState().fillTolerance).toBe(13);
+  });
+
+  it("fills every matching region when the mode is global", () => {
+    const width = 9;
+    const data = new Uint8ClampedArray(width * 3 * 4).fill(255);
+    // A black background with two white islands of the same colour, far apart.
+    for (let y = 0; y < 3; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (x === 1 || x === 7) {
+          continue;
+        }
+        const offset = (y * width + x) * 4;
+        data[offset] = 0;
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+      }
+    }
+    const composite = { data, width, height: 3, colorSpace: "srgb" } as ImageData;
+
+    const contiguous = createBucketEngine({ compositeImage: composite });
+    contiguous.engine.setFillTolerance(0);
+    pressBucket(contiguous.engine, 1, 1);
+    releaseBucket(contiguous.engine, 1, 1);
+    const first = contiguous.engine.listElements(
+      contiguous.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(first) && first.width).toBe(1);
+
+    const global = createBucketEngine({ compositeImage: composite });
+    global.engine.setFillTolerance(0);
+    const depth = global.engine.getState().history.depth;
+    global.engine.setFillMode("global");
+    // The mode describes the next fill: no history step, no dirty document.
+    expect(global.engine.getState().fillMode).toBe("global");
+    expect(global.engine.getState().history.depth).toBe(depth);
+    expect(global.engine.getState().file.dirty).toBe(false);
+
+    pressBucket(global.engine, 1, 1);
+    releaseBucket(global.engine, 1, 1);
+    const patch = global.engine.listElements(
+      global.engine.getState().document.activeLayerId as string,
+    )[0];
+    expect(isFillPatch(patch) && patch.x).toBe(1);
+    expect(isFillPatch(patch) && patch.width).toBe(7);
+  });
+
+  it("normalizes and applies the sample scale", () => {
+    const { engine } = createBucketEngine({ compositeImage: framedComposite(12, 12) });
+    expect(engine.getState().fillSampleScale).toBe(1);
+    engine.setFillSampleScale(3);
+    expect(engine.getState().fillSampleScale).toBe(2);
+    engine.setFillSampleScale(99);
+    expect(engine.getState().fillSampleScale).toBe(8);
+    engine.setFillSampleScale(Number.NaN);
+    expect(engine.getState().fillSampleScale).toBe(1);
+
+    // A coarser scan still commits real document pixels, in one undo step.
+    engine.setFillSampleScale(2);
+    pressBucket(engine, 6, 6);
+    releaseBucket(engine, 6, 6);
+    const layerId = engine.getState().document.activeLayerId as string;
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
   });
 
   it("leaves the document untouched for an out-of-bounds press", () => {
@@ -3703,7 +3914,8 @@ describe("DrawingEngine secondary colour", () => {
     shapeEngine.setTool("rectangle");
     shapeEngine.setSecondaryColor("#00ff00");
     drawStroke(shapeEngine, 2, { x: 2, y: 2 }, { x: 14, y: 12 });
-    expect(shapeEngine.listStrokes(shapeLayer)[0].brush.color).toBe("#00ff00");
+    const shape = shapeEngine.listElements(shapeLayer).filter(isShape)[0];
+    expect(shape.brush.color).toBe("#00ff00");
 
     const gradientEngine = createColourEngine();
     const gradientLayer = gradientEngine.getState().document.activeLayerId as string;
@@ -3733,5 +3945,153 @@ describe("DrawingEngine secondary colour", () => {
     expect(engine.getState().secondaryColor).toBe("#ff0000");
     expect(engine.getState().file.dirty).toBe(false);
     expect(engine.getState().history.depth).toBe(0);
+  });
+});
+
+describe("DrawingEngine symmetry", () => {
+  function createSymmetryEngine() {
+    const spy = createSpyRenderer();
+    const engine = new DrawingEngine({
+      document: createDocument({ name: "Test", width: 400, height: 300 }),
+      renderer: spy.renderer,
+    });
+    return { engine, spy, layerId: engine.getState().document.activeLayerId as string };
+  }
+
+  /** Draws one brush stroke through the pointer lifecycle. */
+  function draw(engine: DrawingEngine, points: ReadonlyArray<readonly [number, number]>): void {
+    engine.setTool("brush");
+    const first = points[0];
+    engine.handlePointerSample(createSample({ phase: "down", docX: first[0], docY: first[1] }));
+    for (const point of points.slice(1)) {
+      engine.handlePointerSample(createSample({ phase: "move", docX: point[0], docY: point[1] }));
+    }
+    const last = points[points.length - 1];
+    engine.handlePointerSample(createSample({ phase: "up", docX: last[0], docY: last[1] }));
+  }
+
+  it("is off until asked for, then places its axes in the middle", () => {
+    const { engine } = createSymmetryEngine();
+    expect(engine.getState().symmetryEnabled).toBe(false);
+    expect(engine.getState().symmetryMode).toBe("vertical");
+
+    engine.setSymmetryMode("both");
+    const state = engine.getState();
+    expect(state.symmetryEnabled).toBe(true);
+    expect(state.symmetryMode).toBe("both");
+    // 400 x 300: the middle is 200, 150.
+    expect(state.symmetryVerticalAxis).toBe(200);
+    expect(state.symmetryHorizontalAxis).toBe(150);
+    // The switch is editor state: no history step and no dirty document.
+    expect(state.history.depth).toBe(0);
+    expect(state.file.dirty).toBe(false);
+
+    // Switching off keeps the mode and the placed axes for the next time.
+    engine.setSymmetryMode("off");
+    expect(engine.getState().symmetryEnabled).toBe(false);
+    expect(engine.getState().symmetryMode).toBe("both");
+    expect(engine.getState().symmetryVerticalAxis).toBe(200);
+  });
+
+  it("mirrors a stroke across a vertical axis as one undo step", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    draw(engine, [
+      [100, 100],
+      [120, 100],
+    ]);
+
+    const elements = engine.listElements(layerId);
+    expect(elements).toHaveLength(2);
+    const [original, copy] = elements;
+    if (!isStroke(original) || !isStroke(copy)) {
+      throw new Error("expected two strokes");
+    }
+    // The copy is the reflection about x = 200, sample for sample.
+    expect(copy.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(copy.ys).toEqual(original.ys);
+    expect(copy.id).not.toBe(original.id);
+    expect(copy.brush).toEqual(original.brush);
+    expect(copy.pressures).toEqual(original.pressures);
+
+    // One gesture, one history entry.
+    expect(engine.getState().history.depth).toBe(1);
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(0);
+    expect(engine.redo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(2);
+  });
+
+  it("makes four-way copies in the both mode", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("both");
+    draw(engine, [
+      [100, 100],
+      [120, 110],
+    ]);
+
+    const elements = engine.listElements(layerId);
+    expect(elements).toHaveLength(4);
+    const [original, vertical, horizontal, halfTurn] = elements;
+    if (
+      !isStroke(original) ||
+      !isStroke(vertical) ||
+      !isStroke(horizontal) ||
+      !isStroke(halfTurn)
+    ) {
+      throw new Error("expected four strokes");
+    }
+    // Original, left-right flip, top-bottom flip, half turn.
+    expect(vertical.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(vertical.ys).toEqual(original.ys);
+    expect(horizontal.xs).toEqual(original.xs);
+    expect(horizontal.ys).toEqual(original.ys.map((y) => 300 - y));
+    expect(halfTurn.xs).toEqual(original.xs.map((x) => 400 - x));
+    expect(halfTurn.ys).toEqual(original.ys.map((y) => 300 - y));
+    expect(engine.getState().history.depth).toBe(1);
+
+    // Undoing the gesture takes all four away, not one copy at a time.
+    expect(engine.undo()).toBe(true);
+    expect(engine.listElements(layerId)).toHaveLength(0);
+  });
+
+  it("drops a copy that would land exactly on the original", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    // A stroke drawn along the axis is its own mirror.
+    draw(engine, [
+      [200, 100],
+      [200, 160],
+    ]);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("leaves the document alone while the symmetry is off", () => {
+    const { engine, layerId } = createSymmetryEngine();
+    draw(engine, [
+      [100, 100],
+      [120, 100],
+    ]);
+    expect(engine.listElements(layerId)).toHaveLength(1);
+    expect(engine.getState().history.depth).toBe(1);
+  });
+
+  it("clamps the axes to the document without a history step", () => {
+    const { engine } = createSymmetryEngine();
+    engine.setSymmetryMode("vertical");
+    const depth = engine.getState().history.depth;
+
+    engine.setSymmetryAxis("vertical", 999);
+    expect(engine.getState().symmetryVerticalAxis).toBe(400);
+    engine.setSymmetryAxis("vertical", -5);
+    expect(engine.getState().symmetryVerticalAxis).toBe(0);
+    engine.setSymmetryAxis("vertical", Number.NaN);
+    expect(engine.getState().symmetryVerticalAxis).toBe(0);
+    engine.setSymmetryAxis("horizontal", 120.6);
+    expect(engine.getState().symmetryHorizontalAxis).toBe(121);
+
+    expect(engine.getState().history.depth).toBe(depth);
+    expect(engine.getState().file.dirty).toBe(false);
   });
 });

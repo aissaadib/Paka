@@ -6,11 +6,6 @@
  * makes it the brush colour. The tool therefore owns no gesture state - there
  * is nothing to finish, cancel or reset.
  *
- * A **reference image** under the pointer is sampled instead of the artwork,
- * and `Alt` puts the sampled colour into the secondary colour rather than the
- * brush one. Both are the engine's business: the tool only says "the user
- * pressed here", and the engine knows what is under the pointer.
- *
  * The tool stays selected after a pick, consistent with the eraser: tools in
  * this app are chosen explicitly, and `B` returns to the brush. A pick is not an
  * edit, so it also must not switch tools behind the user's back.

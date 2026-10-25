@@ -9,6 +9,17 @@
  */
 
 /**
+ * The closed set of shapes a stamped dab can be masked with.
+ *
+ * A tip is a **mask**, not a colour: it multiplies a dab's coverage before
+ * the dabs are unioned, so it can only ever take ink away, and the union
+ * stays a maximum. The shapes live in `core/rendering/brushTip.ts`, which
+ * owns the geometry and the validation; this is the type the configuration
+ * carries.
+ */
+export type BrushTipShape = "round" | "felt" | "chisel" | "blot" | "bristle";
+
+/**
  * One point of a pressure-response curve.
  *
  * `x` is the raw pressure the device reported and `y` is the pressure the
@@ -19,18 +30,6 @@ export interface PressureCurvePoint {
   readonly x: number;
   readonly y: number;
 }
-
-/**
- * How the stabilizer treats the pointer path.
- *
- * - `off` stores the pointer's own path, sample for sample.
- * - `smooth` filters the path adaptively: heavily while the pointer is slow,
- *   which is where hand tremor lives, and almost not at all while it is
- *   fast, so a flick and a corner survive.
- * - `pull` drags the line behind the pointer by a fixed fraction of the
- *   remaining distance: the path is smooth, and it lags.
- */
-export type StabilizerMode = "off" | "smooth" | "pull";
 
 export interface BrushSettings {
   /** Stroke diameter in document pixels at full pressure. */
@@ -81,25 +80,14 @@ export interface BrushSettings {
   /**
    * Pointer smoothing strength in `[0, 1]`.
    *
-   * `0` follows the pointer exactly. Higher values apply the filter named by
-   * {@link stabilizerMode} to the incoming path before the samples are
-   * captured: the line lags behind the pointer while it moves and is caught up
-   * to the release point on `finish()`. The stored samples are the smoothed
-   * path, so live drawing, undo/redo, reopen and export all replay exactly
-   * what was shown. It affects the brush and the eraser, not the shape tools,
-   * whose geometry comes from the drag rather than from the path.
+   * `0` follows the pointer exactly. Higher values apply an exponential average
+   * to the incoming path before samples are captured: the line lags behind the
+   * pointer while moving and settles to the release point on `finish()`. The
+   * stored samples are the smoothed path, so live drawing, undo/redo, reopen and
+   * export all replay exactly what was shown. It affects the brush and eraser,
+   * not shape tools, whose geometry comes from the drag rather than the path.
    */
   readonly stabilizer: number;
-  /**
-   * How the pointer path is filtered before the samples are captured.
-   *
-   * The mode decides *what* the smoothing does and {@link stabilizer} decides
-   * *how much*: `off` stores the raw path, `smooth` filters it adaptively
-   * (quietly while the pointer is slow, almost not at all while it is fast)
-   * and `pull` drags the line behind the pointer. The mode is captured per
-   * stroke, like the rest of the brush.
-   */
-  readonly stabilizerMode: StabilizerMode;
   /**
    * Deterministic grain over the finished stroke coverage, in `[0, 1]`.
    *
@@ -162,4 +150,17 @@ export interface BrushSettings {
    * and in a PNG export, at every zoom and `rasterScale`.
    */
   readonly stampTexture: number;
+  /**
+   * The shape a stamped dab is masked with.
+   *
+   * `round` is the plain disc the stamp engine has always used, byte for
+   * byte. The other shapes - a soft felt pad, a chisel nib held at an angle
+   * to the path, a ragged dry-ink blot, a bundle of bristles - mask a dab's
+   * coverage *before* the dabs are unioned, so the union is still a maximum
+   * and a stroke cannot darken where it crosses itself.
+   *
+   * A brush written before the tip existed reads as the round tip, which is
+   * the coverage it was drawn with.
+   */
+  readonly tip: BrushTipShape;
 }

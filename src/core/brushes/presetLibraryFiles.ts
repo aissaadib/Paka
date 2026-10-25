@@ -1,6 +1,6 @@
 /**
- * The brush library file service: exporting the user's brushes and reading
- * somebody else's.
+ * The brush library file service: writing the user's brushes out and reading
+ * somebody else's in.
  *
  * A library file is not a project file and not the settings file. It is the
  * user's brushes, written out so they can be shared, backed up or moved to
@@ -15,19 +15,38 @@
  * holds, and adding them to the library is the browser's decision. The
  * service is about bytes; the library is about the editor's state.
  *
- * The path belongs to the user: it comes from the native dialog, and the
- * native side checks the extension and writes the file atomically, exactly as
- * it does for a project.
+ * The dialogs live behind a port, so the file dialogs stay outside the model
+ * and the service can be exercised without a window.
  */
 
-import type { ProjectFileGateway } from "../project/projectGateway";
 import { ensureExtension, fileNameOf } from "../../utils/path";
 import type { BrushPreset } from "./presets";
 import {
+  MAX_PRESET_LIBRARY_BYTES,
+  MAX_PRESET_LIBRARY_ENTRIES,
   PRESET_LIBRARY_EXTENSION,
   parsePresetLibrary,
+  presetLibraryByteLength,
   serializePresetLibrary,
+  type PresetLibraryEntry,
 } from "./presetTransfer";
+
+/**
+ * What the service needs from the outside world.
+ *
+ * The same shape as the project file gateway, minus the project and PNG
+ * dialogs: a library file is its own kind of file and has its own filters.
+ */
+export interface PresetLibraryGateway {
+  /** Native open dialog; `null` when the user cancels. */
+  pickPresetLibraryToOpen(): Promise<string | null>;
+  /** Native save dialog pre-filled with `suggestedName`; `null` on cancel. */
+  pickPresetLibraryToSave(suggestedName: string): Promise<string | null>;
+  /** Reads a text file. */
+  readTextFile(path: string): Promise<string>;
+  /** Writes a text file. */
+  writeTextFile(path: string, contents: string): Promise<void>;
+}
 
 /** What an export or an import did. */
 export type PresetLibraryOutcome =
@@ -35,7 +54,7 @@ export type PresetLibraryOutcome =
   | {
       readonly status: "read";
       /** The brushes the file holds, ready to be added to the library. */
-      readonly presets: readonly BrushPreset[];
+      readonly entries: readonly PresetLibraryEntry[];
       /** How many entries in the file were malformed and skipped. */
       readonly skipped: number;
     }
@@ -50,33 +69,52 @@ function describe(error: unknown): string {
 }
 
 export class PresetLibraryFiles {
-  constructor(private readonly gateway: ProjectFileGateway) {}
+  constructor(private readonly gateway: PresetLibraryGateway) {}
 
   /**
    * Writes brushes to a file the user chooses.
    *
    * The built-in brushes are not written: they are code, and every install
-   * already has them.
+   * already has them. The caller hands over the user's own brushes.
    */
   async exportLibrary(
     presets: readonly BrushPreset[],
+    favorites: readonly string[] = [],
     suggestedName = `brushes.${PRESET_LIBRARY_EXTENSION}`,
   ): Promise<PresetLibraryOutcome> {
+    if (presets.length > MAX_PRESET_LIBRARY_ENTRIES) {
+      return {
+        status: "error",
+        message: `A library file holds at most ${MAX_PRESET_LIBRARY_ENTRIES} brushes, and this library holds ${presets.length}.`,
+      };
+    }
+
     let path: string | null;
     try {
       path = await this.gateway.pickPresetLibraryToSave(suggestedName);
     } catch (error) {
-      return { status: "error", message: `The export dialog could not be shown: ${describe(error)}` };
+      return {
+        status: "error",
+        message: `The export dialog could not be shown: ${describe(error)}`,
+      };
     }
     if (path === null) {
       return { status: "cancelled" };
     }
 
     const target = ensureExtension(path, PRESET_LIBRARY_EXTENSION);
-    const count = presets.filter((preset) => !preset.builtin).length;
+    const contents = serializePresetLibrary(presets, favorites);
+    if (presetLibraryByteLength(contents) > MAX_PRESET_LIBRARY_BYTES) {
+      return {
+        status: "error",
+        message: `The library is too large to write (limit ${Math.floor(
+          MAX_PRESET_LIBRARY_BYTES / 1024,
+        )} KB).`,
+      };
+    }
 
     try {
-      await this.gateway.writeTextFile(target, serializePresetLibrary(presets));
+      await this.gateway.writeTextFile(target, contents);
     } catch (error) {
       return {
         status: "error",
@@ -84,7 +122,7 @@ export class PresetLibraryFiles {
       };
     }
 
-    return { status: "exported", path: target, count };
+    return { status: "exported", path: target, count: presets.length };
   }
 
   /**
@@ -99,7 +137,10 @@ export class PresetLibraryFiles {
     try {
       path = await this.gateway.pickPresetLibraryToOpen();
     } catch (error) {
-      return { status: "error", message: `The import dialog could not be shown: ${describe(error)}` };
+      return {
+        status: "error",
+        message: `The import dialog could not be shown: ${describe(error)}`,
+      };
     }
     if (path === null) {
       return { status: "cancelled" };
@@ -123,6 +164,6 @@ export class PresetLibraryFiles {
       };
     }
 
-    return { status: "read", presets: parsed.presets, skipped: parsed.skipped };
+    return { status: "read", entries: parsed.entries, skipped: parsed.skipped };
   }
 }

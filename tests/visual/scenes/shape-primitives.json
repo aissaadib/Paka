@@ -1,0 +1,84 @@
+{
+  "id": "shape-primitives",
+  "width": 200,
+  "height": 160,
+  "background": "#ffffff",
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        {
+          "kind": "shape",
+          "geometry": {
+            "shape": "rectangle",
+            "x": 10,
+            "y": 10,
+            "width": 60,
+            "height": 40,
+            "rotation": 0,
+            "sides": 5,
+            "innerRatio": 0.5
+          },
+          "brush": { "color": "#ff0000", "size": 4, "hardness": 1 },
+          "fill": true
+        },
+        {
+          "kind": "shape",
+          "geometry": {
+            "shape": "ellipse",
+            "x": 90,
+            "y": 10,
+            "width": 60,
+            "height": 40,
+            "rotation": 0,
+            "sides": 5,
+            "innerRatio": 0.5
+          },
+          "brush": { "color": "#0000ff", "size": 4, "hardness": 1 },
+          "fill": true
+        },
+        {
+          "kind": "shape",
+          "geometry": {
+            "shape": "polygon",
+            "x": 10,
+            "y": 80,
+            "width": 60,
+            "height": 60,
+            "rotation": 0,
+            "sides": 5,
+            "innerRatio": 0.5
+          },
+          "brush": { "color": "#008000", "size": 4, "hardness": 1 },
+          "fill": true
+        },
+        {
+          "kind": "shape",
+          "geometry": {
+            "shape": "star",
+            "x": 90,
+            "y": 80,
+            "width": 60,
+            "height": 60,
+            "rotation": 0,
+            "sides": 6,
+            "innerRatio": 0.4
+          },
+          "brush": { "color": "#000000", "size": 4, "hardness": 1 },
+          "fill": true
+        },
+        {
+          "kind": "shape",
+          "geometry": {
+            "shape": "line",
+            "x1": 170,
+            "y1": 10,
+            "x2": 170,
+            "y2": 150
+          },
+          "brush": { "color": "#000000", "size": 10, "hardness": 1 }
+        }
+      ]
+    }
+  ]
+}

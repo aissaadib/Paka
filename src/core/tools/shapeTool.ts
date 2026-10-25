@@ -10,9 +10,11 @@
  * normal entry in the project file, and pixels that re-rasterize identically
  * after undo, reopen or resize.
  *
- * The polygon and the star read their options (the side count, the inner ratio
- * and the rotation) once, when the gesture starts, so the shape keeps the
- * values that were active when the user pressed.
+ * The shape reads its options (the side count, the inner ratio and the
+ * rotation) once, when the gesture starts, so it keeps the values that were
+ * active when the user pressed. The options come from the one model
+ * (`shapeOptions.ts`), and they are editor state: changing one is not an
+ * edit.
  *
  * A release that cancels, a tool switch or a lost capture *discards* the
  * preview rather than committing it: unlike a brush stroke, nothing has been
@@ -23,15 +25,21 @@
 
 import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolDefinition } from "../../types/tool";
+import type { ShapeGeometry } from "../document/types";
 import {
   DEFAULT_SHAPE_OPTIONS,
   outlineExtent,
-  shapeOutline,
+  shapeGeometryOutline,
+  shapeSpecFromDrag,
   type ShapeDrag,
   type ShapeKind,
   type ShapeOptions,
   type ShapePoint,
 } from "./shapeGeometry";
+// The shape tools bring their own options: the module registers them in the
+// shared per-tool registry when it is loaded, so the options bar shows the
+// controls the one model describes without the options bar knowing about them.
+import "./shapeToolOptions";
 import type { Tool, ToolContext } from "./types";
 
 /** Below this document-space size a shape is treated as a click, not a shape. */
@@ -71,7 +79,7 @@ export class ShapeTool implements Tool {
     if (!this.anchor) {
       return;
     }
-    context.setShapeOutline(this.outlineFor(this.anchor, sample));
+    context.setShapeSpec(this.specFor(this.anchor, sample));
   }
 
   onPointerUp(context: ToolContext, sample: PointerSample): void {
@@ -83,12 +91,12 @@ export class ShapeTool implements Tool {
 
     // The release point can differ from the last move, so the committed shape
     // is recomputed here rather than trusting whatever the buffer last drew.
-    const outline = this.outlineFor(anchor, sample);
-    if (outlineExtent(outline) < MIN_SHAPE_EXTENT) {
+    const geometry = this.specFor(anchor, sample);
+    if (outlineExtent(shapeGeometryOutline(geometry)) < MIN_SHAPE_EXTENT) {
       context.cancelShape();
       return;
     }
-    context.setShapeOutline(outline);
+    context.setShapeSpec(geometry);
     context.finishShape();
   }
 
@@ -108,13 +116,13 @@ export class ShapeTool implements Tool {
     context.cancelShape();
   }
 
-  private outlineFor(anchor: ShapePoint, sample: PointerSample): ShapePoint[] {
+  private specFor(anchor: ShapePoint, sample: PointerSample): ShapeGeometry {
     const drag: ShapeDrag = {
       anchor,
       current: { x: sample.docX, y: sample.docY },
       shift: sample.modifiers.shift,
       alt: sample.modifiers.alt,
     };
-    return shapeOutline(this.kind, drag, this.options);
+    return shapeSpecFromDrag(this.kind, drag, this.options);
   }
 }

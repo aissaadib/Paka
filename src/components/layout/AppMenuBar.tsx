@@ -2,60 +2,64 @@
  * Top menu bar.
  *
  * Only entries backed by real functionality are present: the file operations,
- * undo, redo, the selection transforms, the view actions and the panels the
- * user can show or hide. Disabled states come from the command stack, the
- * selection and the panel layout, so the menu never offers an action that
- * cannot run. The file entries are
+ * undo, redo, the selection transforms and the view actions. Disabled states
+ * come from the command stack and the selection, so the menu never offers an
+ * action that cannot run. The file entries are
  * callbacks rather than direct service calls because discarding unsaved work
  * needs a confirmation the workspace owns.
  *
- * The menu is keyboard driven: the arrow keys open a menu and walk its
- * items, the disabled items are skipped, Home and End jump to the ends, and
- * Escape closes the menu and puts the focus back on the menu it came from.
+ * The keyboard rules live in `utils/menuNavigation.ts`; this component is the
+ * thin shell over them. Two things are kept apart:
+ *
+ *  - the rules decide *where the focus is* (which menu, which entry);
+ *  - the action registry owns the *chords* and the *commands*.
+ *
+ * So the menu writes no chord of its own: an entry names the registry action
+ * it stands for and the menu shows the shortcut that action defines. The menu
+ * and the keyboard can therefore never disagree about a shortcut. The two
+ * entries whose registry action is context-sensitive (the guides tool owns
+ * Delete and Escape) keep the menu's own command and borrow only the
+ * shortcut.
  */
 
-import { useEffect, useRef, useState } from "react";
-import type { ComponentType, KeyboardEvent as ReactKeyboardEvent, SVGProps } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+} from "react";
+import { currentPlatform } from "../../core/actions/keyboard";
+import type { ActionContext, ActionId } from "../../core/actions/types";
 import {
   FIXED_ROTATION_DEGREES,
   FIXED_SCALE_FACTOR,
 } from "../../core/document/selectionTransform";
-import {
-  isDefaultPanelLayout,
-  isPanelVisible,
-} from "../../core/panels/panelLayout";
-import { sidePanelDefinitions } from "../../core/panels/panelRegistry";
-import { WORKSPACE_PROFILES } from "../../core/workspace/workspaceProfiles";
-import { UI_SCALE_STEPS, WORKSPACE_THEMES } from "../../core/workspace/workspaceSettings";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { usePanelActions, usePanelState } from "../../hooks/usePanels";
-import { useRecentFiles } from "../../hooks/useRecentFiles";
-import { useWorkspaceActions, useWorkspaceSettings } from "../../hooks/useWorkspace";
-import { VIEW_ROTATION_DEGREES } from "../../features/view/viewNavigation";
-import { IconCheck, IconChevronDown } from "../icons";
-import { panelIcon } from "../panels/panelIcons";
+import { useWorkspaceActions } from "../../hooks/useWorkspace";
 import {
-  firstMenuIndex,
-  lastMenuIndex,
-  nextMenuIndex,
+  menuKeyFromEvent,
+  menuNavigationKey,
+  menuShortcutLabel,
+  runMenuAction,
+  type MenuNavigationModel,
+  type MenuNavigationState,
 } from "../../utils/menuNavigation";
-import { fileNameOf } from "../../utils/path";
-
-/** How many recent files the File menu shows. */
-const RECENT_FILES_IN_MENU = 5;
+import { IconChevronDown } from "../icons";
 
 interface MenuItemSpec {
   readonly type: "item";
   readonly label: string;
-  readonly shortcut?: string;
+  /**
+   * The registry action this entry stands for.
+   *
+   * The entry shows the shortcut that action defines and, unless it also has
+   * an `onSelect`, runs it.
+   */
+  readonly actionId?: ActionId;
+  /** Runs the entry. Overrides the registry action when it is present. */
+  readonly onSelect?: () => void;
   readonly disabled?: boolean;
-  /** The item's state, for an item that toggles something. */
-  readonly checked?: boolean;
-  /** The item's glyph, when it has one. */
-  readonly icon?: ComponentType<SVGProps<SVGSVGElement>>;
-  /** A line of explanation, shown as the item's tooltip. */
-  readonly description?: string;
-  readonly onSelect: () => void;
 }
 
 interface MenuSeparatorSpec {
@@ -73,193 +77,38 @@ interface MenuSpec {
 export interface AppMenuBarProps {
   readonly onNewDocument: () => void;
   readonly onOpenProject: () => void;
-  /** Opens a file from the recent list. */
-  readonly onOpenRecent: (path: string) => void;
-  /** Forgets the recent list. */
-  readonly onClearRecentFiles: () => void;
   readonly onSaveProject: () => void;
   readonly onSaveProjectAs: () => void;
   readonly onExportPng: () => void;
 }
 
-/** The items of the open menu, in order. The separators are not items. */
-function menuItems(popup: HTMLDivElement | null): HTMLButtonElement[] {
-  if (popup === null) {
-    return [];
-  }
-  return Array.from(popup.querySelectorAll<HTMLButtonElement>("button[role^='menuitem']"));
+/** The key under which a popup entry is remembered. */
+function entryKey(menuIndex: number, entryIndex: number): string {
+  return `${menuIndex}:${entryIndex}`;
 }
 
 export function AppMenuBar({
   onNewDocument,
   onOpenProject,
-  onOpenRecent,
-  onClearRecentFiles,
   onSaveProject,
   onSaveProjectAs,
   onExportPng,
 }: AppMenuBarProps) {
-  const { actions } = useEditor();
-  const { history, document: drawingDocument, selectedStrokes, secondaryViewOpen } =
-    useEditorState();
-  const recentFiles = useRecentFiles();
-  const layout = usePanelState();
-  const panelActions = usePanelActions();
-  const workspace = useWorkspaceSettings();
-  const workspaceActions = useWorkspaceActions();
-  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const { engine, actions } = useEditor();
+  const { history, document: drawingDocument, selectedStrokes } = useEditorState();
+  const workspace = useWorkspaceActions();
+  const [navigation, setNavigation] = useState<MenuNavigationState>({ mode: "outside" });
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const popupRef = useRef<HTMLDivElement | null>(null);
-  const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
-  /** Where the focus goes when the open menu appears. */
-  const pendingFocus = useRef<"first" | "last" | null>(null);
+  const triggerRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const entryRefs = useRef(new Map<string, HTMLButtonElement>());
+  const platform = currentPlatform();
 
-  useEffect(() => {
-    if (openMenu === null) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && containerRef.current && !containerRef.current.contains(target)) {
-        setOpenMenu(null);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpenMenu(null);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [openMenu]);
-
-  // The focus lands on the first (or the last) item as soon as the menu is
-  // open, so the keyboard can walk the menu without a mouse.
-  useEffect(() => {
-    if (openMenu === null) {
-      pendingFocus.current = null;
-      return;
-    }
-    const focus = pendingFocus.current;
-    pendingFocus.current = null;
-    if (focus === null) {
-      return;
-    }
-    const items = menuItems(popupRef.current);
-    const enabled = items.map((item) => !item.disabled);
-    const index = focus === "first" ? firstMenuIndex(enabled) : lastMenuIndex(enabled);
-    if (index >= 0) {
-      items[index]?.focus();
-    }
-  }, [openMenu]);
-
-  /** Opens a menu, optionally moving the focus into it. */
-  const openWith = (id: string, focus: "first" | "last" | null): void => {
-    pendingFocus.current = focus;
-    setOpenMenu(id);
+  const actionContext: ActionContext = {
+    engine,
+    actions,
+    file: { save: onSaveProject, saveAs: onSaveProjectAs, open: onOpenProject },
+    shift: false,
   };
-
-  /** Closes the menu and, when asked, puts the focus back on its trigger. */
-  const closeWith = (id: string | null, refocus: boolean): void => {
-    setOpenMenu(null);
-    if (refocus && id !== null) {
-      triggerRefs.current.get(id)?.focus();
-    }
-  };
-
-  const handleTriggerKeyDown = (
-    event: ReactKeyboardEvent<HTMLButtonElement>,
-    id: string,
-  ): void => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      openWith(id, "first");
-      return;
-    }
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      openWith(id, "last");
-    }
-  };
-
-  const handlePopupKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    const items = menuItems(popupRef.current);
-    const enabled = items.map((item) => !item.disabled);
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-
-    switch (event.key) {
-      case "ArrowDown": {
-        const next = nextMenuIndex(enabled, current, 1);
-        if (next >= 0) {
-          event.preventDefault();
-          items[next]?.focus();
-        }
-        return;
-      }
-      case "ArrowUp": {
-        const previous = nextMenuIndex(enabled, current, -1);
-        if (previous >= 0) {
-          event.preventDefault();
-          items[previous]?.focus();
-        }
-        return;
-      }
-      case "Home": {
-        const first = firstMenuIndex(enabled);
-        if (first >= 0) {
-          event.preventDefault();
-          items[first]?.focus();
-        }
-        return;
-      }
-      case "End": {
-        const last = lastMenuIndex(enabled);
-        if (last >= 0) {
-          event.preventDefault();
-          items[last]?.focus();
-        }
-        return;
-      }
-      case "Escape": {
-        event.preventDefault();
-        closeWith(openMenu, true);
-        return;
-      }
-      case "Tab": {
-        // The focus leaves the menu, so the menu closes behind it.
-        closeWith(openMenu, false);
-        return;
-      }
-      default:
-    }
-  };
-
-  // The recent files, as entries in the File menu.
-  //
-  // The path is the item's explanation, so the menu shows the file name and
-  // the full path is one hover away. A file that has been moved stays in the
-  // list: opening it then fails and says so, which is more use than an entry
-  // that quietly disappeared.
-  const recentFileEntries: readonly MenuEntry[] =
-    recentFiles.length === 0
-      ? []
-      : [
-          { type: "separator" },
-          ...recentFiles.slice(0, RECENT_FILES_IN_MENU).map((path) => ({
-            type: "item" as const,
-            label: fileNameOf(path),
-            description: path,
-            onSelect: () => onOpenRecent(path),
-          })),
-          { type: "separator" },
-          { type: "item" as const, label: "Clear Recent Files", onSelect: onClearRecentFiles },
-        ];
 
   const menus: readonly MenuSpec[] = [
     {
@@ -267,11 +116,10 @@ export function AppMenuBar({
       label: "File",
       entries: [
         { type: "item", label: "New Document…", onSelect: onNewDocument },
-        { type: "item", label: "Open…", shortcut: "Ctrl+O", onSelect: onOpenProject },
-        ...recentFileEntries,
+        { type: "item", label: "Open…", actionId: "open" },
         { type: "separator" },
-        { type: "item", label: "Save", shortcut: "Ctrl+S", onSelect: onSaveProject },
-        { type: "item", label: "Save As…", shortcut: "Ctrl+Shift+S", onSelect: onSaveProjectAs },
+        { type: "item", label: "Save", actionId: "save" },
+        { type: "item", label: "Save As…", actionId: "saveAs" },
         { type: "separator" },
         { type: "item", label: "Export PNG…", onSelect: onExportPng },
       ],
@@ -283,29 +131,21 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Undo",
-          shortcut: "Ctrl+Z",
+          actionId: "undo",
           disabled: !history.canUndo,
-          onSelect: actions.undo,
         },
         {
           type: "item",
           label: "Redo",
-          shortcut: "Ctrl+Shift+Z",
+          actionId: "redo",
           disabled: !history.canRedo,
-          onSelect: actions.redo,
         },
         { type: "separator" },
         {
           type: "item",
           label: "Duplicate Layer",
-          shortcut: "Ctrl+J",
+          actionId: "duplicateLayer",
           disabled: drawingDocument.activeLayerId === null,
-          onSelect: () => {
-            const activeLayerId = drawingDocument.activeLayerId;
-            if (activeLayerId !== null) {
-              actions.duplicateLayer(activeLayerId);
-            }
-          },
         },
       ],
     },
@@ -316,38 +156,33 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Duplicate",
-          shortcut: "Ctrl+D",
+          actionId: "duplicateSelection",
           disabled: selectedStrokes === 0,
-          onSelect: actions.duplicateSelection,
         },
         { type: "separator" },
         {
           type: "item",
           label: "Nudge Left",
-          shortcut: "←",
+          actionId: "nudgeLeft",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.nudgeSelection(-1, 0),
         },
         {
           type: "item",
           label: "Nudge Right",
-          shortcut: "→",
+          actionId: "nudgeRight",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.nudgeSelection(1, 0),
         },
         {
           type: "item",
           label: "Nudge Up",
-          shortcut: "↑",
+          actionId: "nudgeUp",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.nudgeSelection(0, -1),
         },
         {
           type: "item",
           label: "Nudge Down",
-          shortcut: "↓",
+          actionId: "nudgeDown",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.nudgeSelection(0, 1),
         },
         { type: "separator" },
         {
@@ -372,124 +207,31 @@ export function AppMenuBar({
         {
           type: "item",
           label: "Flip Horizontal",
-          shortcut: "Ctrl+Shift+H",
+          actionId: "flipHorizontal",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.flipSelection("horizontal"),
         },
         {
           type: "item",
           label: "Flip Vertical",
-          shortcut: "Ctrl+Shift+V",
+          actionId: "flipVertical",
           disabled: selectedStrokes === 0,
-          onSelect: () => actions.flipSelection("vertical"),
         },
         { type: "separator" },
         {
           type: "item",
           label: "Delete Selected",
-          shortcut: "Delete",
+          actionId: "delete",
           disabled: selectedStrokes === 0,
+          // The registry's Delete belongs to the guides tool while that tool
+          // is active; the menu deletes the stroke selection.
           onSelect: actions.deleteSelection,
         },
         {
           type: "item",
           label: "Clear Selection",
-          shortcut: "Esc",
+          actionId: "escape",
           disabled: selectedStrokes === 0,
           onSelect: actions.clearSelection,
-        },
-      ],
-    },
-    {
-      id: "panels",
-      label: "Panels",
-      entries: [
-        ...sidePanelDefinitions().map((definition) => ({
-          type: "item" as const,
-          label: definition.title,
-          checked: isPanelVisible(layout, definition.id),
-          icon: panelIcon(definition.icon),
-          description: definition.description,
-          onSelect: () => panelActions.togglePanel(definition.id),
-        })),
-        { type: "separator" as const },
-        {
-          type: "item" as const,
-          label: "Show All Panels",
-          disabled: layout.hidden.length === 0,
-          onSelect: panelActions.showAllPanels,
-        },
-        {
-          type: "item" as const,
-          label: "Hide All Panels",
-          disabled: layout.hidden.length === sidePanelDefinitions().length,
-          onSelect: panelActions.hideAllPanels,
-        },
-        {
-          type: "item" as const,
-          label: "Reset Layout",
-          disabled: isDefaultPanelLayout(layout),
-          onSelect: panelActions.resetLayout,
-        },
-      ],
-    },
-    {
-      id: "workspace",
-      label: "Workspace",
-      entries: [
-        ...WORKSPACE_PROFILES.map((profile) => ({
-          type: "item" as const,
-          label: profile.label,
-          checked: workspace.profile === profile.id,
-          description: profile.description,
-          onSelect: () => workspaceActions.applyProfile(profile.id),
-        })),
-        { type: "separator" as const },
-        {
-          type: "item",
-          label: "Tool Rail",
-          checked: workspace.shell.toolRail,
-          description: "The row of tools down the left of the canvas.",
-          onSelect: () => workspaceActions.setToolRailVisible(!workspace.shell.toolRail),
-        },
-        { type: "separator" as const },
-        {
-          type: "item",
-          label: "Advanced Brush Controls",
-          checked: workspace.brushPanel.advanced,
-          description:
-            "The sampling, the stabilizer, the grain, the dab settings and the pressure mapping.",
-          onSelect: () =>
-            workspaceActions.setAdvancedBrushControls(!workspace.brushPanel.advanced),
-        },
-        {
-          type: "item",
-          label: "Brush Preset Library",
-          checked: workspace.brushPanel.presets,
-          description: "The row of saved brushes above the brush controls.",
-          onSelect: () => workspaceActions.setBrushPresetRow(!workspace.brushPanel.presets),
-        },
-        { type: "separator" as const },
-        ...UI_SCALE_STEPS.map((step) => ({
-          type: "item" as const,
-          label: `Scale ${Math.round(step * 100)}%`,
-          checked: workspace.uiScale === step,
-          onSelect: () => workspaceActions.setUiScale(step),
-        })),
-        { type: "separator" as const },
-        ...WORKSPACE_THEMES.map((theme) => ({
-          type: "item" as const,
-          label: theme === "dark" ? "Dark Scheme" : "Light Scheme",
-          checked: workspace.theme === theme,
-          onSelect: () => workspaceActions.setTheme(theme),
-        })),
-        { type: "separator" as const },
-        {
-          type: "item",
-          label: "Restore Workspace Defaults",
-          description:
-            "The panels, the rows, the scale, the brush panel and the colour scheme, as they were on a fresh install.",
-          onSelect: workspaceActions.restoreDefaults,
         },
       ],
     },
@@ -497,117 +239,203 @@ export function AppMenuBar({
       id: "view",
       label: "View",
       entries: [
-        { type: "item", label: "Zoom In", shortcut: "Ctrl+=", onSelect: actions.zoomIn },
-        { type: "item", label: "Zoom Out", shortcut: "Ctrl+-", onSelect: actions.zoomOut },
+        { type: "item", label: "Zoom In", actionId: "zoomIn" },
+        { type: "item", label: "Zoom Out", actionId: "zoomOut" },
         { type: "separator" },
-        {
-          type: "item",
-          label: "Actual Size",
-          shortcut: "Ctrl+1",
-          onSelect: () => actions.zoomTo(1),
-        },
-        { type: "item", label: "Fit to Window", shortcut: "Ctrl+0", onSelect: actions.zoomToFit },
+        { type: "item", label: "Actual Size", actionId: "zoomActual" },
+        { type: "item", label: "Fit to Window", actionId: "zoomFit" },
         { type: "separator" },
+        { type: "item", label: "Show Rulers", actionId: "toggleRulers" },
+      ],
+    },
+    {
+      id: "panels",
+      label: "Panels",
+      entries: [
         {
           type: "item",
-          label: "Rotate View 90° Clockwise",
-          shortcut: "Shift+R",
-          onSelect: () => actions.rotateView(VIEW_ROTATION_DEGREES),
-        },
-        {
-          type: "item",
-          label: "Mirror View Horizontally",
-          shortcut: "Shift+M",
-          onSelect: actions.toggleViewMirror,
-        },
-        {
-          type: "item",
-          label: "Reset View",
-          shortcut: "Ctrl+Shift+0",
-          onSelect: actions.resetView,
-        },
-        { type: "separator" },
-        {
-          type: "item",
-          label: "New View of Canvas",
-          checked: secondaryViewOpen,
-          onSelect: actions.toggleSecondaryView,
+          label: "Reset Panel Layout",
+          onSelect: workspace.resetPanels,
         },
       ],
     },
   ];
 
+  /**
+   * The shape the rules work on: one flag per popup entry.
+   *
+   * A separator and a disabled entry cannot take the focus, so the arrow keys
+   * step over them.
+   */
+  const model: MenuNavigationModel = {
+    menus: menus.map((menu) => ({
+      enabled: menu.entries.map(
+        (entry) => entry.type === "item" && entry.disabled !== true,
+      ),
+    })),
+  };
+
+  const activate = (entry: MenuItemSpec) => {
+    if (entry.onSelect) {
+      entry.onSelect();
+      return;
+    }
+    if (entry.actionId) {
+      runMenuAction(entry.actionId, actionContext);
+    }
+  };
+
+  useEffect(() => {
+    if (navigation.mode === "outside") {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && containerRef.current && !containerRef.current.contains(target)) {
+        setNavigation({ mode: "outside" });
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [navigation.mode]);
+
+  // The state says where the focus belongs; the DOM follows it.
+  useEffect(() => {
+    if (navigation.mode === "bar") {
+      triggerRefs.current[navigation.menuIndex]?.focus();
+      return;
+    }
+    if (navigation.mode === "menu") {
+      if (navigation.itemIndex < 0) {
+        triggerRefs.current[navigation.menuIndex]?.focus();
+        return;
+      }
+      entryRefs.current.get(entryKey(navigation.menuIndex, navigation.itemIndex))?.focus();
+    }
+  }, [navigation]);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const result = menuNavigationKey(
+      navigation,
+      menuKeyFromEvent(event.nativeEvent),
+      model,
+    );
+    if (result.consumed) {
+      // The menu owns the key: the editor's own shortcuts must not fire.
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    if (result.state !== navigation) {
+      setNavigation(result.state);
+    }
+    if (result.effect.kind === "activate") {
+      const menu = menus[result.effect.menuIndex];
+      const entry = menu?.entries[result.effect.itemIndex];
+      if (entry && entry.type === "item") {
+        activate(entry);
+      }
+    }
+  };
+
+  /** A trigger took the focus: the bar mode starts there. */
+  const handleFocus = (event: FocusEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    const menuIndex = triggerRefs.current.findIndex((node) => node === target);
+    if (menuIndex < 0) {
+      return;
+    }
+    setNavigation((current) =>
+      current.mode === "outside" ? { mode: "bar", menuIndex } : current,
+    );
+  };
+
+  /** The focus left the menu bar: every popup closes. */
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (next && containerRef.current?.contains(next)) {
+      return;
+    }
+    setNavigation((current) => (current.mode === "outside" ? current : { mode: "outside" }));
+  };
+
+  const handleTriggerClick = (menuIndex: number) => {
+    const isOpen = navigation.mode === "menu" && navigation.menuIndex === menuIndex;
+    setNavigation(
+      isOpen
+        ? { mode: "bar", menuIndex }
+        : { mode: "menu", menuIndex, itemIndex: -1 },
+    );
+  };
+
   return (
-    <div className="menu-bar" ref={containerRef}>
+    <div
+      className="menu-bar"
+      ref={containerRef}
+      role="menubar"
+      onKeyDown={handleKeyDown}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+    >
       <span className="menu-bar__brand">Paka</span>
-      {menus.map((menu) => {
-        const isOpen = openMenu === menu.id;
-        // A menu that shows a state column keeps it for every item, so the
-        // labels line up.
-        const hasChecks = menu.entries.some(
-          (entry) => entry.type === "item" && entry.checked !== undefined,
-        );
+      {menus.map((menu, menuIndex) => {
+        const isOpen = navigation.mode === "menu" && navigation.menuIndex === menuIndex;
         return (
           <div className="menu" key={menu.id}>
             <button
               type="button"
+              role="menuitem"
               className={["menu__trigger", isOpen ? "is-open" : ""].filter(Boolean).join(" ")}
               aria-haspopup="menu"
               aria-expanded={isOpen}
               ref={(node) => {
-                if (node === null) {
-                  triggerRefs.current.delete(menu.id);
-                } else {
-                  triggerRefs.current.set(menu.id, node);
-                }
+                triggerRefs.current[menuIndex] = node;
               }}
-              onClick={() => (isOpen ? closeWith(menu.id, true) : openWith(menu.id, "first"))}
-              onKeyDown={(event) => handleTriggerKeyDown(event, menu.id)}
+              onClick={() => handleTriggerClick(menuIndex)}
             >
               {menu.label}
               <IconChevronDown width="12" height="12" />
             </button>
             {isOpen ? (
-              <div
-                className="menu__popup"
-                role="menu"
-                ref={popupRef}
-                onKeyDown={handlePopupKeyDown}
-              >
-                {menu.entries.map((entry, index) =>
-                  entry.type === "separator" ? (
-                    <div className="menu__separator" key={`separator-${index}`} />
-                  ) : (
+              <div className="menu__popup" role="menu">
+                {menu.entries.map((entry, entryIndex) => {
+                  if (entry.type === "separator") {
+                    return (
+                      <div className="menu__separator" role="separator" key={`separator-${entryIndex}`} />
+                    );
+                  }
+                  const shortcut = entry.actionId
+                    ? menuShortcutLabel(entry.actionId, platform)
+                    : null;
+                  return (
                     <button
                       type="button"
-                      role={entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-                      aria-checked={entry.checked}
+                      role="menuitem"
                       className="menu__item"
                       key={entry.label}
-                      title={entry.description}
+                      tabIndex={-1}
                       disabled={entry.disabled ?? false}
+                      ref={(node) => {
+                        const key = entryKey(menuIndex, entryIndex);
+                        if (node) {
+                          entryRefs.current.set(key, node);
+                        } else {
+                          entryRefs.current.delete(key);
+                        }
+                      }}
                       onClick={() => {
-                        // The focus goes back to the menu it came from, so the
-                        // keyboard can carry on from there.
-                        closeWith(menu.id, true);
-                        entry.onSelect();
+                        setNavigation({ mode: "bar", menuIndex });
+                        activate(entry);
                       }}
                     >
-                      {hasChecks ? (
-                        <span className="menu__check" aria-hidden="true">
-                          {entry.checked ? <IconCheck width="12" height="12" /> : null}
-                        </span>
-                      ) : null}
-                      {entry.icon ? (
-                        <span className="menu__icon" aria-hidden="true">
-                          <entry.icon width="14" height="14" />
-                        </span>
-                      ) : null}
-                      <span className="menu__label">{entry.label}</span>
-                      {entry.shortcut ? <span className="menu__shortcut">{entry.shortcut}</span> : null}
+                      <span>{entry.label}</span>
+                      {shortcut ? <span className="menu__shortcut">{shortcut}</span> : null}
                     </button>
-                  ),
-                )}
+                  );
+                })}
               </div>
             ) : null}
           </div>

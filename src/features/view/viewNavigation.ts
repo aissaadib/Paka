@@ -1,101 +1,142 @@
 /**
- * View navigation helpers.
+ * View navigation: what a "go to" command should do to the view.
  *
- * The rules that decide what a zoom readout says and what a typed zoom means,
- * kept apart from React so they can be unit tested without a DOM.
+ * Four intents a user can ask for - fit the document, show it at actual size,
+ * fit the selection, centre on a point - live here as pure functions. Each one
+ * takes the current view and returns the view the intent asks for, so the
+ * rules can be unit tested without a DOM and the UI can stay a thin shell
+ * over them.
  *
- * Everything here is about the *view*: a zoom percentage, a rotation, a
- * mirror. None of it touches the document, so none of it can dirty a file.
+ * None of them touches the document: a view is a view, so none of these can
+ * dirty a file, enter history or reach a project file.
+ *
+ * The geometry itself is in `core/engine/canvasViews.ts` and the transform in
+ * `core/rendering/viewport.ts`; this module is the vocabulary the user
+ * interface speaks.
  */
 
-import { MAX_ZOOM, MIN_ZOOM, clampZoom } from "../../core/rendering/viewport";
-import type { ViewTransform } from "../../types/viewport";
+import {
+  actualSizeViewport,
+  centerViewOn,
+  fitSelectionView,
+} from "../../core/engine/canvasViews";
+import { fitToViewport } from "../../core/rendering/viewport";
+import type { Bounds, Point, Size } from "../../types/geometry";
+import type { Viewport } from "../../types/viewport";
 
-export { VIEW_ROTATION_DEGREES } from "../../core/rendering/viewport";
+/** The room left around a fitted area, in canvas pixels. */
+export const VIEW_FIT_PADDING = 32;
 
 /**
- * The zoom as a percentage, with the precision the value deserves.
+ * The view that shows the whole document.
  *
- * A whole number of percent reads as a whole number (`100`), and a small zoom
- * keeps one decimal (`12.5%`), because at 2 % the difference between 2 and 3
- * is a quarter of the screen.
+ * The document is fitted with a margin around it, so the edge of the paper is
+ * visible rather than flush with the edge of the canvas.
  */
-export function formatZoomPercent(zoom: number): string {
-  const percent = zoom * 100;
-  if (!Number.isFinite(percent)) {
-    return "0%";
-  }
-  const rounded = Math.round(percent * 10) / 10;
-  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}%`;
+export function zoomToFit(
+  viewportSize: Size,
+  documentSize: Size,
+  padding = VIEW_FIT_PADDING,
+): Viewport {
+  return fitToViewport(viewportSize, documentSize, padding);
 }
 
 /**
- * The zoom as the plain number an editable field shows.
+ * The view at actual size, centred on a document point.
  *
- * The field holds a number and the unit sits next to it, so the user can
- * select the number and type over it.
+ * One document pixel to one canvas pixel. The point is the one the user
+ * asked about; without one the centre of the canvas is kept.
  */
-export function zoomPercentText(zoom: number): string {
-  const percent = Math.round(zoom * 100 * 10) / 10;
-  if (!Number.isFinite(percent)) {
-    return "0";
-  }
-  return Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
+export function zoomToActualSize(
+  viewportSize: Size,
+  docX: number,
+  docY: number,
+): Viewport {
+  return actualSizeViewport(viewportSize, docX, docY);
 }
 
 /**
- * Reads a zoom out of what the user typed.
+ * The view that shows a selection.
  *
- * Three forms are understood, because all three are natural to type:
- *
- *  - `150` - a percentage, the way the field is labelled;
- *  - `150%` - the same, written out;
- *  - `1.5x` - a factor, the way a scale is written.
- *
- * The result is clamped to the zoom range the viewport supports, so the field
- * can never ask for a zoom the canvas cannot show. `null` means the text is
- * not a zoom at all, and the caller keeps what it had.
+ * `null` when there is nothing selected to show: an empty selection cannot
+ * be fitted, and the caller keeps the view it had rather than guessing.
  */
-export function parseZoomPercent(text: string): number | null {
-  const trimmed = text.trim();
-  if (trimmed === "") {
+export function zoomToSelection(
+  viewportSize: Size,
+  bounds: Bounds | null,
+  padding = VIEW_FIT_PADDING,
+): Viewport | null {
+  if (!bounds) {
     return null;
   }
-
-  let body = trimmed;
-  let factor = false;
-  if (/[%]$/.test(body)) {
-    body = body.slice(0, -1).trim();
-  } else if (/x$/i.test(body)) {
-    body = body.slice(0, -1).trim();
-    factor = true;
-  }
-  if (body === "") {
-    return null;
-  }
-
-  const value = Number(body);
-  if (!Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  return clampZoom(factor ? value : value / 100);
+  return fitSelectionView(viewportSize, bounds, padding);
 }
 
-/** The zoom range the field accepts, as a percentage. */
-export const MIN_ZOOM_PERCENT = MIN_ZOOM * 100;
-export const MAX_ZOOM_PERCENT = MAX_ZOOM * 100;
+/**
+ * The view with a document point in the middle, at the zoom it already had.
+ *
+ * This is what a click in the navigator does: the view moves, the zoom does
+ * not.
+ */
+export function centerOnPoint(
+  viewport: Viewport,
+  viewportSize: Size,
+  docX: number,
+  docY: number,
+): Viewport {
+  return centerViewOn(viewport, viewportSize, docX, docY);
+}
+
+/** The things a user can ask the view to do. */
+export type ViewNavigationIntent =
+  /** Show the whole document. */
+  | { readonly kind: "fit" }
+  /** Show a point at actual size. */
+  | { readonly kind: "actual-size"; readonly point: Point }
+  /** Show a selection. */
+  | { readonly kind: "selection"; readonly bounds: Bounds | null }
+  /** Put a point in the middle, at the current zoom. */
+  | { readonly kind: "point"; readonly point: Point };
+
+/** What the intents need to know about the current view. */
+export interface ViewNavigationContext {
+  /** The view as it is now. */
+  readonly viewport: Viewport;
+  /** The CSS size of the canvas. */
+  readonly viewportSize: Size;
+  /** The size of the document. */
+  readonly documentSize: Size;
+}
 
 /**
- * A short description of how the view is turned.
+ * The view an intent asks for, or `null` when it cannot be satisfied.
  *
- * Only the facts that are not the default are named, so an upright view has no
- * label at all and a turned one says by how much.
+ * One place to turn "zoom to the selection" into a viewport, so a menu, a
+ * keyboard chord and a panel all mean the same thing.
  */
-export function describeViewTransform(transform: ViewTransform): string {
-  const degrees = Math.round((transform.rotation * 180) / Math.PI);
-  if (degrees === 0) {
-    return transform.mirrored ? "mirrored" : "upright";
+export function resolveViewNavigation(
+  intent: ViewNavigationIntent,
+  context: ViewNavigationContext,
+): Viewport | null {
+  switch (intent.kind) {
+    case "fit":
+      return zoomToFit(context.viewportSize, context.documentSize);
+    case "actual-size":
+      return zoomToActualSize(
+        context.viewportSize,
+        intent.point.x,
+        intent.point.y,
+      );
+    case "selection":
+      return zoomToSelection(context.viewportSize, intent.bounds);
+    case "point":
+      return centerOnPoint(
+        context.viewport,
+        context.viewportSize,
+        intent.point.x,
+        intent.point.y,
+      );
+    default:
+      return null;
   }
-  const turned = `rotated ${Math.abs(degrees)}°`;
-  return transform.mirrored ? `${turned} · mirrored` : turned;
 }

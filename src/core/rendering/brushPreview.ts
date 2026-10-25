@@ -9,10 +9,21 @@
  *
  * The preview reuses the engine's own primitives - `rasterizeStroke`,
  * `strokeDiameter`, `strokeOpacity`, `strokeFeatherRadius`, `textureCoverage`
- * and the stamp engine's dab plan - so a property that changes a stroke
- * changes the preview the same way. The one thing the preview cannot show is
- * the brush's absolute size: it is zoomed so the brush fits the swatch, and
- * the size is read from the number box beside it.
+ * and the stamp engine's dab plan and coverage map - so a property that
+ * changes a stroke changes the preview the same way. The preview is a *view*
+ * of the same rules, not a second implementation of them: the coverage it
+ * paints is produced by the rasterizer's own functions, and the tests pin
+ * that down against `canvas2dStroke.ts` and `stampCoverage.ts` rather than
+ * asserting it.
+ *
+ * Two things the preview cannot show are deliberate:
+ *
+ *  - The brush's absolute size. The stroke is zoomed so the brush fits the
+ *    swatch, so the preview shows the *shape* of the mark; the size is read
+ *    from the number box beside it.
+ *  - The grain's anchor. The grain tile is the renderer's own, but it is
+ *    anchored to the preview's origin rather than to the document's, because
+ *    the preview is not in the document's space.
  */
 
 import type { BrushSettings } from "../../types/brush";
@@ -32,6 +43,7 @@ import {
   stampDabs,
   stampTextureLaneWidth,
   unionStampRect,
+  type StampDab,
   type StampRect,
 } from "./stampCoverage";
 
@@ -113,6 +125,59 @@ export function buildPreviewStroke(brush: BrushSettings): StrokeRecord {
   };
 }
 
+/**
+ * How the preview's coverage is produced.
+ *
+ * The plan is the engine's own decision, spelled out: the segment path is
+ * rasterized by `rasterizeStroke`, the stamp path by the dab plan and the
+ * coverage map of `stampCoverage.ts`. Nothing here decides anything the
+ * rasterizer would decide differently - the plan only says which of the two
+ * paths the brush takes and with what parameters.
+ */
+export type PreviewCoveragePlan =
+  | {
+      /** The stroke is drawn as round-capped segments. */
+      readonly kind: "segments";
+      /** The stroke the rasterizer is given. */
+      readonly stroke: StrokeRecord;
+    }
+  | {
+      /** The stroke is drawn as a chain of round dabs. */
+      readonly kind: "dabs";
+      /** The dabs, from the stamp engine's own plan. */
+      readonly dabs: readonly StampDab[];
+      /** The dab's radial falloff. */
+      readonly hardness: number;
+      /** The distance between the bristle lanes, in device pixels. */
+      readonly laneWidth: number;
+      /** How strongly the bristle lanes modulate the coverage. */
+      readonly texture: number;
+      /** The colour the dabs are painted in. */
+      readonly color: string;
+    };
+
+/**
+ * The coverage the preview paints for a stroke.
+ *
+ * `scale` is the number of device pixels per document pixel the preview draws
+ * at, which is what the bristle lanes are measured against - exactly as the
+ * renderer measures them against its own raster scale.
+ */
+export function previewCoveragePlan(stroke: StrokeRecord, scale: number): PreviewCoveragePlan {
+  const brush = stroke.brush;
+  if (!brush.stamp) {
+    return { kind: "segments", stroke };
+  }
+  return {
+    kind: "dabs",
+    dabs: stampDabs(stroke, brush),
+    hardness: brush.stampHardness,
+    laneWidth: stampTextureLaneWidth(brush, scale),
+    texture: brush.stampTexture,
+    color: brush.color,
+  };
+}
+
 /** How the preview is drawn. */
 export interface BrushPreviewOptions {
   /** Device pixels per CSS pixel. */
@@ -152,10 +217,11 @@ export function renderBrushPreview(
   }
   resetContext(coverageCtx);
   coverageCtx.setTransform(scale, 0, 0, scale, 0, 0);
-  if (brush.stamp) {
-    paintStampCoverage(coverageCtx, stroke, scale);
-  } else {
+  const plan = previewCoveragePlan(stroke, scale);
+  if (plan.kind === "segments") {
     rasterizeStroke(coverageCtx, stroke, 0);
+  } else {
+    paintStampCoverage(coverageCtx, plan, scale);
   }
 
   const radius = strokeFeatherRadius(brush);
@@ -208,25 +274,24 @@ function resetContext(ctx: CanvasRenderingContext2D): void {
  */
 function paintStampCoverage(
   ctx: CanvasRenderingContext2D,
-  stroke: StrokeRecord,
+  plan: Extract<PreviewCoveragePlan, { kind: "dabs" }>,
   scale: number,
 ): void {
-  const brush = stroke.brush;
-  const dabs = stampDabs(stroke, brush);
+  const dabs = plan.dabs;
   if (dabs.length === 0) {
     return;
   }
   const coverage = new StampCoverage();
-  const laneWidth = stampTextureLaneWidth(brush, scale);
-  const strength = brush.stampTexture;
   let dirty: StampRect | null = null;
   for (const dab of dabs) {
     const rect = coverage.paintDab(
       dab.x * scale,
       dab.y * scale,
       dab.radius * scale,
-      brush.stampHardness,
-      strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+      plan.hardness,
+      plan.texture > 0
+        ? { angle: dab.angle, laneWidth: plan.laneWidth, strength: plan.texture }
+        : null,
     );
     if (rect) {
       dirty = unionStampRect(dirty, rect);
@@ -235,7 +300,7 @@ function paintStampCoverage(
   if (!dirty) {
     return;
   }
-  const rgb = hexToRgb(brush.color) ?? { r: 0, g: 0, b: 0 };
+  const rgb = hexToRgb(plan.color) ?? { r: 0, g: 0, b: 0 };
   const image = ctx.createImageData(dirty.width, dirty.height);
   coverage.writeRect(image.data, dirty.width, dirty, rgb);
   ctx.putImageData(image, dirty.left, dirty.top);
@@ -249,7 +314,7 @@ function paintStampCoverage(
  * the grain the preview shows.
  */
 function applyGrain(ctx: CanvasRenderingContext2D, strength: number, scale: number): void {
-  const pattern = ctx.createPattern(grainTile(strength), "repeat");
+  const pattern = ctx.createPattern(previewGrainTile(strength), "repeat");
   if (!pattern) {
     return;
   }
@@ -263,8 +328,14 @@ function applyGrain(ctx: CanvasRenderingContext2D, strength: number, scale: numb
   ctx.restore();
 }
 
-/** The white grain tile for one strength, cached. */
-function grainTile(strength: number): HTMLCanvasElement {
+/**
+ * The white grain tile for one strength, cached.
+ *
+ * The tile is the renderer's own rule - `textureCoverage` over a 128 pixel
+ * grid - so the grain the preview shows is the grain a stroke carries. It is
+ * exported so the tests can compare the tile with the rule itself.
+ */
+export function previewGrainTile(strength: number): HTMLCanvasElement {
   const key = Math.round(clamp(strength, 0, 1) * 20) / 20;
   const cached = grainTiles.get(key);
   if (cached) {

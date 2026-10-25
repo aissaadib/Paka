@@ -34,9 +34,9 @@ export interface PanelActions {
   togglePanel(id: PanelId): void;
   /** Folds a panel to its header, or unfolds it. */
   setPanelCollapsed(id: PanelId, collapsed: boolean): void;
-  /** Shows every registered panel. */
+  /** Shows every catalogued panel. */
   showAllPanels(): void;
-  /** Hides every registered panel, so the canvas takes the whole window. */
+  /** Hides every catalogued panel, so the canvas takes the whole window. */
   hideAllPanels(): void;
   /** Restores the layout a fresh installation starts from. */
   resetLayout(): void;

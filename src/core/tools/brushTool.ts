@@ -13,6 +13,9 @@
 import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolContext, Tool } from "./types";
 import { BRUSH_TOOL } from "./toolDefinitions";
+// The brush's tip control: the options bar's list of the five tip shapes is
+// registered with the brush tool, so it is registered when the tool is.
+import "../brushes/brushTipOptions";
 
 export class BrushTool implements Tool {
   readonly definition: Tool["definition"];
@@ -39,21 +42,15 @@ export class BrushTool implements Tool {
     context.extendStroke(sample);
   }
 
-  onPointerUp(context: ToolContext, sample: PointerSample): void {
+  onPointerUp(context: ToolContext): void {
     if (context.isStrokeActive()) {
-      // The release sample is where the stroke ends, so a stabilized path is
-      // caught up on it rather than on the last position the pointer moved
-      // through.
-      context.finishStroke(sample);
+      context.finishStroke();
     }
   }
 
-  onPointerCancel(context: ToolContext, sample: PointerSample): void {
+  onPointerCancel(context: ToolContext): void {
     if (context.isStrokeActive()) {
-      // The ink is already on the canvas, so a cancelled gesture commits what
-      // was drawn - as one history step - and ends on the last position the
-      // pointer reported.
-      context.finishStroke(sample);
+      context.finishStroke();
     }
   }
 

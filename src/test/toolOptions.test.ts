@@ -1,402 +1,191 @@
 /**
- * Tool-options tests.
+ * Tool-option schema tests.
  *
- * The schema is the options bar's contract: which groups a tool shows, which
- * controls each group holds, what every control reads, and which editor
- * action it reaches. These tests pin that contract against the *real* engine,
- * so a control that stops changing something real fails here rather than in
- * the app.
+ * The point of the schema is behavioural equivalence with the hand-written
+ * controls it replaced, so these tests pin the fields each tool shows, the
+ * labels, and the exact action each write reaches.
+ *
+ * The second half of the file covers the options bar: the control the bar
+ * draws for every kind the contract defines, the layout it lays them out in,
+ * and the path a feature takes when it adds an option to a tool it does not
+ * own.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { DEFAULT_BRUSH } from "../core/brushes/defaults";
 import type { EditorSnapshot } from "../core/engine/DrawingEngine";
+import type { EditorActions, Editor } from "../state/editorStore";
+import { EditorContext } from "../state/editorContext";
+import type { ToolId } from "../types/tool";
 import {
-  isToolOptionDisabled,
-  TOOL_OPTION_GROUP_IDS,
-  toolOptionFields,
-  toolOptionGroups,
+  appendToolOptions,
+  TOOL_OPTION_KINDS,
+  unregisterToolOptions,
+  type ToolOptionKind,
+} from "../core/shell/toolOptions";
+import {
+  colorInputValue,
+  groupToolOptions,
+  optionControl,
+  optionStepValue,
+  OPTION_CONTROL_KINDS,
+} from "../core/options/optionControl";
+import { OptionControl } from "../features/options/OptionControl";
+import { ToolOptionsBar } from "../features/options/ToolOptionsBar";
+import {
+  TOOL_OPTION_FIELDS,
   toolOptionLabel,
   toolShowsBrushControls,
-  toolUsesWholeBrush,
+  visibleToolOptions,
+  type ColorToolOption,
+  type GroupToolOption,
+  type NumberToolOption,
+  type SelectToolOption,
   type SliderToolOption,
+  type ToggleToolOption,
   type ToolOption,
-  type ToolOptionGroupId,
 } from "../features/options/toolOptionSchema";
-import { createEditor, type Editor, type EditorActions } from "../state/editorStore";
-import type { ToolId } from "../types/tool";
-import { MemoryProjectGateway } from "./support/memoryGateway";
 
-const ALL_TOOLS: readonly ToolId[] = [
-  "brush",
-  "eraser",
-  "select",
-  "line",
-  "rectangle",
-  "ellipse",
-  "polygon",
-  "star",
-  "bucket",
-  "gradient",
-  "picker",
-  "guides",
-  "pan",
-];
-
-function createTestEditor(): Editor {
-  return createEditor({ fileGateway: new MemoryProjectGateway() });
+/** Narrows an option to the kind a test expects, so a wrong kind fails loudly. */
+function asSlider(option: ToolOption): SliderToolOption {
+  if (option.kind !== "slider") {
+    throw new Error(`expected a slider, got "${option.kind}"`);
+  }
+  return option;
 }
 
-/** An editor whose active tool is `toolId`. */
-function editorFor(toolId: ToolId): Editor {
-  const editor = createTestEditor();
-  editor.actions.setTool(toolId);
-  return editor;
+function asToggle(option: ToolOption): ToggleToolOption {
+  if (option.kind !== "toggle") {
+    throw new Error(`expected a toggle, got "${option.kind}"`);
+  }
+  return option;
 }
 
 function snapshotFor(toolId: ToolId): EditorSnapshot {
   return {
     toolId,
-    brush: { ...DEFAULT_BRUSH },
     shapeFill: true,
     shapeSides: 7,
     shapeInnerRatio: 0.42,
     shapeRotation: 33,
     fillTolerance: 19,
-    fillReference: "merged",
-    fillReferenceLayerId: null,
-    fillExpand: 2,
-    fillAntialias: 1,
-    fillCloseGaps: 3,
-    document: {
-      activeLayerId: "layer-a",
-      layers: [
-        { id: "layer-a", name: "Paper", visible: true, opacity: 1, blendMode: "normal" },
-        { id: "layer-b", name: "Lines", visible: false, opacity: 1, blendMode: "normal" },
-      ],
-    },
+    fillMode: "contiguous",
+    fillSampleScale: 1,
+    selectionShape: "rect",
+    symmetryEnabled: false,
+    symmetryMode: "vertical",
+    symmetryVerticalAxis: 100,
+    symmetryHorizontalAxis: 100,
+    // The bar draws the brush's primary controls for a brush-using tool, so
+    // the snapshot carries the brush and the preset list the real one does.
+    brush: DEFAULT_BRUSH,
+    presets: [],
+    document: { background: "#ffffff" },
   } as unknown as EditorSnapshot;
-  return editorFor(toolId).getState();
 }
 
-function groupIds(toolId: ToolId): readonly ToolOptionGroupId[] {
-  return toolOptionGroups(toolId, snapshotFor(toolId)).map((group) => group.id);
-}
-
-function fieldIds(groupId: ToolOptionGroupId, toolId: ToolId): readonly string[] {
-  return toolOptionFields(groupId, toolId, snapshotFor(toolId)).map((option) => option.id);
-}
-
-/** Records which editor action each control reaches. */
 function recorder() {
-  const calls: Array<[string, unknown]> = [];
+  const calls: Array<[string, ...unknown[]]> = [];
   const actions = {
-    setBrush: vi.fn((patch: unknown) => calls.push(["setBrush", patch])),
     setShapeFill: vi.fn((value: boolean) => calls.push(["setShapeFill", value])),
     setShapeSides: vi.fn((value: number) => calls.push(["setShapeSides", value])),
     setShapeInnerRatio: vi.fn((value: number) => calls.push(["setShapeInnerRatio", value])),
     setShapeRotation: vi.fn((value: number) => calls.push(["setShapeRotation", value])),
     setFillTolerance: vi.fn((value: number) => calls.push(["setFillTolerance", value])),
-    setFillReference: vi.fn((value: string) => calls.push(["setFillReference", value])),
-    setFillReferenceLayer: vi.fn((value: string | null) => calls.push(["setFillReferenceLayer", value])),
-    setFillExpand: vi.fn((value: number) => calls.push(["setFillExpand", value])),
-    setFillAntialias: vi.fn((value: number) => calls.push(["setFillAntialias", value])),
-    setFillCloseGaps: vi.fn((value: number) => calls.push(["setFillCloseGaps", value])),
-    setGradientType: vi.fn((value: string) => calls.push(["setGradientType", value])),
-    setGradientEndColor: vi.fn((value: string) => calls.push(["setGradientEndColor", value])),
-    duplicateSelection: vi.fn(() => calls.push(["duplicateSelection", undefined])),
-    flipSelection: vi.fn((axis: string) => calls.push(["flipSelection", axis])),
-    deleteSelection: vi.fn(() => calls.push(["deleteSelection", undefined])),
-    clearSelection: vi.fn(() => calls.push(["clearSelection", undefined])),
+    setFillMode: vi.fn((value: string) => calls.push(["setFillMode", value])),
+    setFillSampleScale: vi.fn((value: number) => calls.push(["setFillSampleScale", value])),
+    setSelectionShape: vi.fn((value: string) => calls.push(["setSelectionShape", value])),
+    setSymmetryMode: vi.fn((value: string) => calls.push(["setSymmetryMode", value])),
+    setSymmetryAxis: vi.fn((kind: string, value: number) =>
+      calls.push(["setSymmetryAxis", kind, value]),
+    ),
+    setGridSnapping: vi.fn((value: boolean) => calls.push(["setGridSnapping", value])),
   } as unknown as EditorActions;
   return { actions, calls };
 }
 
-const ids = (toolId: ToolId, groupId: ToolOptionGroupId = "shape") =>
-  toolOptionFields(groupId, toolId, snapshotFor(toolId)).map((option) => option.id);
-/** The values a control could be moved to, best first. */
-function candidateValues(option: ToolOption, snapshot: EditorSnapshot): Array<number | boolean | string> {
-  if (option.kind === "action") {
-    return [];
-  }
-  if (option.kind === "toggle") {
-    return [!option.read(snapshot)];
-  }
-  if (option.kind === "color") {
-    return ["#123456", "#654321", "#00ff00", "#000000"];
-  }
-  const current = option.read(snapshot);
-  const span = option.max - option.min;
-  const values: number[] = [];
-  for (const fraction of [0.1, 0.25, 0.5, 0.75, 0.9, 0, 1]) {
-    values.push(option.min + span * fraction);
-  }
-  values.push(current + option.step, current - option.step);
-  return values;
-}
+const ids = (toolId: ToolId) =>
+  visibleToolOptions(toolId, snapshotFor(toolId)).map((option) => option.id);
 
-/** Writes a value through a control, whatever kind it is. */
-function write(option: ToolOption, actions: EditorActions, value: number | boolean | string): void {
-  if (option.kind === "toggle") {
-    option.write(actions, value as boolean);
-    return;
-  }
-  if (option.kind === "color") {
-    option.write(actions, value as string);
-    return;
-  }
-  if (option.kind === "slider") {
-    option.write(actions, value as number);
-  }
-}
-
-/** The slider control with the given id, or a failure. */
-function sliderWithId(fields: readonly ToolOption[], id: string): SliderToolOption {
-  const option = fields.find((field) => field.id === id);
-  if (!option || option.kind !== "slider") {
-    throw new Error(`the slider "${id}" is missing`);
-  }
-  return option;
-}
-
-describe("the groups each tool shows", () => {
-  it("shows the brush for the tools that paint with one", () => {
-    expect(groupIds("brush")).toEqual(["brush"]);
-    expect(groupIds("eraser")).toEqual(["brush"]);
-    expect(groupIds("line")).toEqual(["brush"]);
-  });
-
-  it("shows the brush and the shape for the shape tools", () => {
-    expect(groupIds("rectangle")).toEqual(["brush", "shape"]);
-    expect(groupIds("ellipse")).toEqual(["brush", "shape"]);
-    expect(groupIds("polygon")).toEqual(["brush", "shape"]);
-    expect(groupIds("star")).toEqual(["brush", "shape"]);
-  });
-
-  it("shows the selection actions for the select tool", () => {
-    expect(groupIds("select")).toEqual(["selection"]);
-  });
-
-  it("shows the tolerance for the bucket and the gradient's own controls", () => {
-    expect(groupIds("bucket")).toEqual(["fill"]);
-    expect(groupIds("gradient")).toEqual(["brush", "gradient"]);
-  });
-
-  it("gives the tools without options no group at all", () => {
-    expect(groupIds("picker")).toEqual([]);
-    expect(groupIds("guides")).toEqual([]);
-    expect(groupIds("pan")).toEqual([]);
-  });
-
-  it("names a group for every tool it lists", () => {
-    for (const toolId of ALL_TOOLS) {
-      const ids = TOOL_OPTION_GROUP_IDS[toolId] ?? [];
-      expect(new Set(ids).size, `${toolId} lists a group twice`).toBe(ids.length);
-    }
-  });
-});
-
-describe("the controls inside a group", () => {
-  it("shows only the shape controls that belong to the tool", () => {
-    expect(fieldIds("shape", "rectangle")).toEqual(["shapeFill"]);
-    expect(fieldIds("shape", "ellipse")).toEqual(["shapeFill"]);
-    expect(fieldIds("shape", "polygon")).toEqual(["shapeSides", "shapeRotation", "shapeFill"]);
-    expect(fieldIds("shape", "star")).toEqual([
+describe("tool option fields", () => {
+  it("shows only the fields that belong to each tool", () => {
+    expect(ids("rectangle")).toEqual(["shapeFill", "symmetryMode"]);
+    expect(ids("ellipse")).toEqual(["shapeFill", "symmetryMode"]);
+    expect(ids("polygon")).toEqual([
+      "shapeSides",
+      "shapeRotation",
+      "shapeFill",
+      "symmetryMode",
+    ]);
+    expect(ids("star")).toEqual([
       "shapeSides",
       "shapeInnerRatio",
       "shapeRotation",
       "shapeFill",
+      "symmetryMode",
     ]);
+    expect(ids("bucket")).toEqual(["fillTolerance", "fillMode", "fillSampleScale"]);
+    expect(ids("select")).toEqual(["selectionShape"]);
   });
 
-  it("shows the bucket the options the scanner really implements", () => {
-    expect(ids("bucket", "fill")).toEqual([
-      "fillReference",
-      "fillTolerance",
-      "fillExpand",
-      "fillAntialias",
-      "fillCloseGaps",
-    ]);
-  });
-
-  it("only offers the layer picker in the layer reference mode", () => {
-    const merged = toolOptionFields("fill", "bucket", snapshotFor("bucket"));
-    expect(merged.map((option) => option.id)).not.toContain("fillReferenceLayer");
-
-    const layered = toolOptionFields("fill", "bucket", {
-      ...snapshotFor("bucket"),
-      fillReference: "layer",
-    } as EditorSnapshot);
-    expect(layered.map((option) => option.id)).toContain("fillReferenceLayer");
+  it("offers the symmetry switch on every tool that draws a stroke", () => {
+    for (const toolId of [
+      "brush",
+      "eraser",
+      "line",
+      "rectangle",
+      "ellipse",
+      "polygon",
+      "star",
+    ] as const) {
+      expect(ids(toolId)).toContain("symmetryMode");
+    }
   });
 
   it("gives tools without options an empty list", () => {
-    // A tool the schema lists no group for shows nothing at all.
-    for (const toolId of ["picker", "pan"] as const) {
-      expect(TOOL_OPTION_GROUP_IDS[toolId] ?? []).toEqual([]);
-      expect(toolOptionGroups(toolId, snapshotFor(toolId))).toEqual([]);
+    for (const toolId of ["picker", "guides", "pan"] as const) {
+      expect(ids(toolId)).toEqual([]);
     }
   });
 
   it("keeps option ids unique within a tool", () => {
-    for (const toolId of ["brush", "eraser", "line", "rectangle", "ellipse", "polygon", "star", "select", "bucket", "gradient"] as const) {
-      const list = toolOptionGroups(toolId, snapshotFor(toolId)).flatMap((group) =>
-        group.fields.map((field) => field.id),
-      );
-      expect(new Set(list).size).toBe(list.length);
+    for (const fields of Object.values(TOOL_OPTION_FIELDS)) {
+      const list = fields ?? [];
+      expect(new Set(list.map((field) => field.id)).size).toBe(list.length);
     }
-  });
-
-  it("shows only the brush controls the tool really reads", () => {
-    // The brush and the eraser sample a path, so they use the whole brush.
-    expect(fieldIds("brush", "brush")).toContain("brushStabilizer");
-    expect(fieldIds("brush", "eraser")).toContain("brushStabilizer");
-    // A shape traces an outline: no sample density, no stabilizer, no dabs and
-    // no pressure, but it does have a width, an opacity, an edge and a grain.
-    expect(fieldIds("brush", "star")).not.toContain("brushStabilizer");
-    expect(fieldIds("brush", "star")).not.toContain("brushStamp");
-    expect(fieldIds("brush", "star")).not.toContain("brushPressureSize");
-    expect(fieldIds("brush", "star")).toContain("brushTexture");
-    expect(fieldIds("brush", "star")).toContain("brushHardness");
-    // A gradient captures the brush's opacity and nothing else.
-    expect(fieldIds("brush", "gradient")).toEqual(["brushOpacity"]);
-  });
-
-  it("keeps the size and the opacity in the strip and the rest behind the popover", () => {
-    const fields = toolOptionFields("brush", "brush", snapshotFor("brush"));
-    const inline = fields.filter((field) => field.placement !== "popover").map((f) => f.id);
-    const popover = fields.filter((field) => field.placement === "popover").map((f) => f.id);
-    expect(inline).toEqual(["brushSize", "brushOpacity"]);
-    expect(popover).toContain("brushHardness");
-    expect(popover).toContain("brushSampling");
-    expect(popover).toContain("brushTexture");
-    expect(popover).toContain("brushStamp");
-  });
-
-  it("hides the stamp's own controls while the stamp is off", () => {
-    const off = fieldIds("brush", "brush");
-    expect(off).not.toContain("brushStampSpacing");
-
-    const editor = editorFor("brush");
-    editor.actions.setBrush({ stamp: true });
-    const on = toolOptionFields("brush", "brush", editor.getState()).map((f) => f.id);
-    expect(on).toContain("brushStampSpacing");
-    expect(on).toContain("brushStampHardness");
-    expect(on).toContain("brushStampTexture");
   });
 
   it("follows the active tool in the shared sides/points label", () => {
-    const polygon = toolOptionFields("shape", "polygon", snapshotFor("polygon"))[0];
-    const star = toolOptionFields("shape", "star", snapshotFor("star"))[0];
+    const polygon = visibleToolOptions("polygon", snapshotFor("polygon"))[0];
+    const star = visibleToolOptions("star", snapshotFor("star"))[0];
     expect(toolOptionLabel(polygon, snapshotFor("polygon"))).toBe("Sides");
     expect(toolOptionLabel(star, snapshotFor("star"))).toBe("Points");
   });
-
-  it("gives every control a label and a tooltip", () => {
-    for (const toolId of ALL_TOOLS) {
-      for (const group of toolOptionGroups(toolId, snapshotFor(toolId))) {
-        for (const option of group.fields) {
-          const label = toolOptionLabel(option, snapshotFor(toolId));
-          expect(label, `${toolId}/${option.id} has no label`).not.toBe("");
-          expect(option.title, `${toolId}/${option.id} has no tooltip`).toBeTruthy();
-        }
-      }
-    }
-  });
 });
 
-describe("reading the controls", () => {
+describe("tool option reads and writes", () => {
   it("reads the current snapshot values", () => {
     const snapshot = snapshotFor("star");
-    const shape = toolOptionFields("shape", "star", snapshot);
-    const sides = shape.find((option) => option.id === "shapeSides");
-    const inner = shape.find((option) => option.id === "shapeInnerRatio");
-    const rotation = shape.find((option) => option.id === "shapeRotation");
-    const fill = shape.find((option) => option.id === "shapeFill");
-    expect(sides?.kind === "slider" && sides.read(snapshot)).toBe(7);
-    expect(inner?.kind === "slider" && inner.read(snapshot)).toBe(0.42);
-    expect(rotation?.kind === "slider" && rotation.read(snapshot)).toBe(33);
-    expect(fill?.kind === "toggle" && fill.read(snapshot)).toBe(true);
-
-    const bucket = toolOptionFields("fill", "bucket", snapshot);
-    const reference = bucket.find((option) => option.id === "fillReference");
-    const tolerance = bucket.find((option) => option.id === "fillTolerance");
-    const expand = bucket.find((option) => option.id === "fillExpand");
-    const antialias = bucket.find((option) => option.id === "fillAntialias");
-    const closeGaps = bucket.find((option) => option.id === "fillCloseGaps");
-    expect(reference?.kind === "select" && reference.read(snapshot)).toBe("merged");
-    expect(tolerance?.kind === "slider" && tolerance.read(snapshot)).toBe(19);
-    expect(expand?.kind === "slider" && expand.read(snapshot)).toBe(2);
-    expect(antialias?.kind === "slider" && antialias.read(snapshot)).toBe(1);
-    expect(closeGaps?.kind === "slider" && closeGaps.read(snapshot)).toBe(3);
+    const [sides, inner, rotation, fill] = visibleToolOptions("star", snapshot);
+    expect(asSlider(sides).read(snapshot)).toBe(7);
+    expect(asSlider(inner).read(snapshot)).toBe(0.42);
+    expect(asSlider(rotation).read(snapshot)).toBe(33);
+    expect(asToggle(fill).read(snapshot)).toBe(true);
+    expect(asSlider(visibleToolOptions("bucket", snapshot)[0]).read(snapshot)).toBe(19);
   });
 
-  it("reads back what the editor wrote", () => {
-    const editor = editorFor("star");
-    editor.actions.setShapeSides(7);
-    editor.actions.setShapeInnerRatio(0.42);
-    editor.actions.setShapeRotation(33);
-    editor.actions.setShapeFill(true);
-    const snapshot = editor.getState();
-    const fields = toolOptionFields("shape", "star", snapshot);
-    expect(sliderWithId(fields, "shapeSides").read(snapshot)).toBe(7);
-    expect(sliderWithId(fields, "shapeInnerRatio").read(snapshot)).toBe(0.42);
-    expect(sliderWithId(fields, "shapeRotation").read(snapshot)).toBe(33);
-    const fill = fields.find((field) => field.id === "shapeFill");
-    if (fill?.kind !== "toggle") {
-      throw new Error("the fill toggle is missing");
-    }
-    expect(fill.read(snapshot)).toBe(true);
-  });
-
-  it("reads the brush values the brush group shows", () => {
-    const editor = editorFor("brush");
-    editor.actions.setBrush({ size: 24, opacity: 0.5, hardness: 0.25 });
-    const snapshot = editor.getState();
-    const fields = toolOptionFields("brush", "brush", snapshot);
-    expect(sliderWithId(fields, "brushSize").read(snapshot)).toBe(24);
-    expect(sliderWithId(fields, "brushOpacity").read(snapshot)).toBe(0.5);
-    expect(sliderWithId(fields, "brushHardness").read(snapshot)).toBe(0.25);
-  });
-});
-
-describe("writing the controls", () => {
-  it("changes the engine's real state for every visible control", () => {
-    for (const toolId of ALL_TOOLS) {
-      const editor = editorFor(toolId);
-      // The stamp's own controls only exist while the stamp is on, so the
-      // whole brush group is exercised with it on.
-      if (toolId === "brush" || toolId === "eraser") {
-        editor.actions.setBrush({ stamp: true });
-      }
-      const snapshot = editor.getState();
-      for (const group of toolOptionGroups(toolId, snapshot)) {
-        for (const option of group.fields) {
-          if (option.kind === "action") {
-            continue;
-          }
-          const before = JSON.stringify(editor.getState());
-          const changed = candidateValues(option, snapshot).some((value) => {
-            write(option, editor.actions, value);
-            return JSON.stringify(editor.getState()) !== before;
-          });
-          expect(
-            changed,
-            `${toolId}/${group.id}/${option.id} changed nothing in the engine`,
-          ).toBe(true);
-        }
-      }
-    }
-  });
-
-  it("reaches the matching editor action", () => {
+  it("writes through the matching editor action", () => {
     const { actions, calls } = recorder();
     const snapshot = snapshotFor("star");
-    for (const option of toolOptionFields("shape", "star", snapshot)) {
+    for (const option of visibleToolOptions("star", snapshot)) {
       if (option.kind === "toggle") {
         option.write(actions, false);
-      } else if (option.kind === "slider") {
-        option.write(actions, option.id === "shapeSides" ? 5 : 0.25);
+      } else if (option.kind === "select") {
+        option.write(actions, "both");
+      } else {
+        asSlider(option).write(actions, option.id === "shapeSides" ? 5 : 0.25);
       }
     }
     expect(calls).toEqual([
@@ -404,121 +193,105 @@ describe("writing the controls", () => {
       ["setShapeInnerRatio", 0.25],
       ["setShapeRotation", 0.25],
       ["setShapeFill", false],
+      ["setSymmetryMode", "both"],
     ]);
   });
 
-  it("writes the bucket's options through their own actions", () => {
+  it("shows only the axis a symmetry mode uses", () => {
+    const snapshot = { ...snapshotFor("brush"), symmetryEnabled: true } as EditorSnapshot;
+    const visibleFor = (mode: string) =>
+      visibleToolOptions("brush", { ...snapshot, symmetryMode: mode } as EditorSnapshot).map(
+        (option) => option.id,
+      );
+    expect(visibleFor("vertical")).toEqual(["symmetryMode", "symmetryVerticalAxis"]);
+    expect(visibleFor("horizontal")).toEqual(["symmetryMode", "symmetryHorizontalAxis"]);
+    expect(visibleFor("both")).toEqual([
+      "symmetryMode",
+      "symmetryVerticalAxis",
+      "symmetryHorizontalAxis",
+    ]);
+    // Switching the symmetry off hides both axis fields but keeps the switch.
+    expect(
+      visibleToolOptions("brush", { ...snapshot, symmetryEnabled: false }).map(
+        (option) => option.id,
+      ),
+    ).toEqual(["symmetryMode"]);
+  });
+
+  it("reads and writes the symmetry controls", () => {
     const { actions, calls } = recorder();
-    const snapshot = snapshotFor("bucket");
-    for (const option of toolOptionFields("fill", "bucket", snapshot)) {
-      if (option.kind === "select") {
-        option.write(actions, "active");
-      } else if (option.kind === "slider") {
-        option.write(actions, 5);
-      }
+    const snapshot = {
+      ...snapshotFor("brush"),
+      symmetryEnabled: true,
+      symmetryMode: "both",
+      symmetryVerticalAxis: 320,
+      symmetryHorizontalAxis: 180,
+    } as EditorSnapshot;
+    const options = visibleToolOptions("brush", snapshot);
+    const mode = options.find((option) => option.id === "symmetryMode") as SelectToolOption;
+    const axisX = options.find((option) => option.id === "symmetryVerticalAxis");
+    const axisY = options.find((option) => option.id === "symmetryHorizontalAxis");
+
+    expect(mode.read(snapshot)).toBe("both");
+    expect(mode.read({ ...snapshot, symmetryEnabled: false })).toBe("off");
+    mode.write(actions, "off");
+    if (axisX?.kind !== "number" || axisY?.kind !== "number") {
+      throw new Error("symmetry axis fields are missing");
     }
+    expect(axisX.read(snapshot)).toBe(320);
+    expect(axisY.read(snapshot)).toBe(180);
+    axisX.write(actions, 275);
+    axisY.write(actions, 90);
+
     expect(calls).toEqual([
-      ["setFillReference", "active"],
-      ["setFillTolerance", 5],
-      ["setFillExpand", 5],
-      ["setFillAntialias", 5],
-      ["setFillCloseGaps", 5],
+      ["setSymmetryMode", "off"],
+      ["setSymmetryAxis", "vertical", 275],
+      ["setSymmetryAxis", "horizontal", 90],
     ]);
+
+    // An unknown mode is ignored rather than handed to the engine.
+    mode.write(actions, "diagonal");
+    expect(calls).toHaveLength(3);
   });
 
-  it("writes the brush through the brush setter", () => {
+  it("writes the fill mode, the sample scale and the marquee shape", () => {
     const { actions, calls } = recorder();
-    const snapshot = snapshotFor("brush");
-    const size = sliderWithId(toolOptionFields("brush", "brush", snapshot), "brushSize");
-    size.write(actions, 42);
-    expect(calls).toEqual([["setBrush", { size: 42 }]]);
+    const bucket = visibleToolOptions("bucket", snapshotFor("bucket"));
+    const mode = bucket.find((option) => option.id === "fillMode") as SelectToolOption;
+    const sample = bucket.find((option) => option.id === "fillSampleScale") as SelectToolOption;
+    const shape = visibleToolOptions("select", snapshotFor("select"))[0] as SelectToolOption;
+
+    mode.write(actions, "global");
+    sample.write(actions, "4");
+    shape.write(actions, "lasso");
+    expect(calls).toEqual([
+      ["setFillMode", "global"],
+      ["setFillSampleScale", 4],
+      ["setSelectionShape", "lasso"],
+    ]);
+
+    // An unknown value is ignored rather than sent to the engine.
+    mode.write(actions, "diagonal");
+    shape.write(actions, "polygon");
+    expect(calls).toHaveLength(3);
   });
 
   it("snaps the star's inner radius to its step", () => {
     const { actions, calls } = recorder();
-    const inner = sliderWithId(
-      toolOptionFields("shape", "star", snapshotFor("star")),
-      "shapeInnerRatio",
+    const inner = visibleToolOptions("star", snapshotFor("star")).find(
+      (option) => option.id === "shapeInnerRatio",
     );
+    if (!inner || inner.kind !== "slider") {
+      throw new Error("star inner radius control is missing");
+    }
     inner.write(actions, 0.333);
     const [, value] = calls[0];
     // The step is 0.05: 0.333 snaps to 0.35, the nearest reachable ratio.
     expect(value).toBeCloseTo(0.35, 10);
   });
-
-  it("keeps the options when the tool changes", () => {
-    const editor = createTestEditor();
-    editor.actions.setTool("polygon");
-    editor.actions.setShapeSides(11);
-    editor.actions.setShapeRotation(45);
-    editor.actions.setBrush({ size: 23 });
-
-    editor.actions.setTool("brush");
-    editor.actions.setBrush({ size: 31 });
-
-    editor.actions.setTool("polygon");
-    const state = editor.getState();
-    expect(state.shapeSides).toBe(11);
-    expect(state.shapeRotation).toBe(45);
-    expect(state.brush.size).toBe(31);
-  });
-
-  it("does not make the document dirty", () => {
-    const editor = editorFor("star");
-    editor.actions.setShapeSides(9);
-    editor.actions.setShapeRotation(12);
-    editor.actions.setBrush({ size: 19 });
-    expect(editor.getState().file.dirty).toBe(false);
-  });
 });
 
-describe("the selection actions", () => {
-  it("reaches the editor's selection actions", () => {
-    const { actions, calls } = recorder();
-    const snapshot = snapshotFor("select");
-    for (const option of toolOptionFields("selection", "select", snapshot)) {
-      if (option.kind === "action") {
-        option.run(actions);
-      }
-    }
-    expect(calls).toEqual([
-      ["duplicateSelection", undefined],
-      ["flipSelection", "horizontal"],
-      ["flipSelection", "vertical"],
-      ["deleteSelection", undefined],
-      ["clearSelection", undefined],
-    ]);
-  });
-
-  it("is disabled while nothing is selected", () => {
-    const editor = editorFor("select");
-    const snapshot = editor.getState();
-    expect(snapshot.selectedStrokes).toBe(0);
-    for (const option of toolOptionFields("selection", "select", snapshot)) {
-      expect(isToolOptionDisabled(option, snapshot), option.id).toBe(true);
-    }
-  });
-
-  it("is enabled once strokes are selected", () => {
-    const selected = { ...snapshotFor("select"), selectedStrokes: 3 };
-    for (const option of toolOptionFields("selection", "select", selected)) {
-      expect(isToolOptionDisabled(option, selected), option.id).toBe(false);
-    }
-  });
-
-  it("names the shortcut the action already has", () => {
-    const snapshot = snapshotFor("select");
-    const duplicate = toolOptionFields("selection", "select", snapshot).find(
-      (option) => option.id === "selectionDuplicate",
-    );
-    if (duplicate?.kind !== "action") {
-      throw new Error("the duplicate action is missing");
-    }
-    expect(duplicate.shortcut).toBe("Ctrl+D");
-  });
-});
-
-describe("the brush group", () => {
+describe("brush group visibility", () => {
   it("shows the brush group for tools that paint with a brush", () => {
     for (const toolId of [
       "brush",
@@ -530,20 +303,336 @@ describe("the brush group", () => {
       "star",
       "gradient",
     ] as const) {
-      expect(toolShowsBrushControls(toolId), toolId).toBe(true);
+      expect(toolShowsBrushControls(toolId)).toBe(true);
     }
   });
 
   it("hides the brush group for tools that do not use it", () => {
     for (const toolId of ["select", "bucket", "picker", "guides", "pan"] as const) {
-      expect(toolShowsBrushControls(toolId), toolId).toBe(false);
+      expect(toolShowsBrushControls(toolId)).toBe(false);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ options bar */
+
+const sliderOption: SliderToolOption = {
+  id: "slider",
+  kind: "slider",
+  label: "Slider",
+  min: 0,
+  max: 10,
+  step: 1,
+  read: () => 4,
+  write: () => undefined,
+};
+
+const numberOption: NumberToolOption = {
+  id: "number",
+  kind: "number",
+  label: "Number",
+  min: 0,
+  max: 10,
+  step: 1,
+  read: () => 6,
+  write: () => undefined,
+};
+
+const toggleOption: ToggleToolOption = {
+  id: "toggle",
+  kind: "toggle",
+  label: "Toggle",
+  read: () => true,
+  write: () => undefined,
+};
+
+const selectOption: SelectToolOption = {
+  id: "select",
+  kind: "select",
+  label: "Select",
+  choices: [
+    { value: "a", label: "Alpha" },
+    { value: "b", label: "Beta" },
+  ],
+  read: () => "b",
+  write: () => undefined,
+};
+
+const colorOption: ColorToolOption = {
+  id: "color",
+  kind: "color",
+  label: "Colour",
+  read: () => "#ff8800",
+  write: () => undefined,
+};
+
+const groupOption: GroupToolOption = {
+  id: "group",
+  kind: "group",
+  label: "Group",
+  children: [toggleOption, sliderOption],
+};
+
+/** One option of each kind the contract defines. */
+const optionByKind: Record<ToolOptionKind, ToolOption> = {
+  slider: sliderOption,
+  number: numberOption,
+  toggle: toggleOption,
+  select: selectOption,
+  color: colorOption,
+  group: groupOption,
+};
+
+/** The markup the options bar draws for one option. */
+function markupOf(option: ToolOption): string {
+  const { actions } = recorder();
+  return renderToStaticMarkup(
+    createElement(OptionControl, {
+      option,
+      snapshot: snapshotFor("brush"),
+      actions,
+    }),
+  );
+}
+
+describe("the option control", () => {
+  it("builds a control for every kind the contract defines", () => {
+    expect([...TOOL_OPTION_KINDS]).toEqual([
+      "slider",
+      "number",
+      "toggle",
+      "select",
+      "color",
+      "group",
+    ]);
+    const { actions } = recorder();
+    for (const kind of TOOL_OPTION_KINDS) {
+      const control = optionControl(optionByKind[kind], snapshotFor("brush"), actions);
+      expect(control.kind).toBe(kind);
     }
   });
 
-  it("offers the whole brush only to the tools that use all of it", () => {
-    expect(toolUsesWholeBrush("brush")).toBe(true);
-    expect(toolUsesWholeBrush("eraser")).toBe(true);
-    expect(toolUsesWholeBrush("star")).toBe(false);
-    expect(toolUsesWholeBrush("gradient")).toBe(false);
+  it("has a drawing for every kind the contract lists", () => {
+    // The dispatch on the kind lives in one place, and it is exhaustive
+    // against the contract's list: a kind the contract gains without a
+    // builder is a compile error in the module that holds the dispatch, and
+    // in no other. The options bar draws the drawing, not the kind, so a
+    // new kind does not reach it.
+    const { actions } = recorder();
+    for (const kind of TOOL_OPTION_KINDS) {
+      const control = optionControl(optionByKind[kind], snapshotFor("brush"), actions);
+      expect(OPTION_CONTROL_KINDS).toContain(control.kind);
+    }
+  });
+
+  it("knows the drawings it can draw", () => {
+    expect([...OPTION_CONTROL_KINDS]).toEqual([
+      "slider",
+      "number",
+      "toggle",
+      "select",
+      "color",
+      "group",
+    ]);
+  });
+
+  it("draws a control for every kind", () => {
+    expect(markupOf(sliderOption)).toContain('type="range"');
+    expect(markupOf(numberOption)).toContain('type="number"');
+    expect(markupOf(toggleOption)).toContain('type="checkbox"');
+    expect(markupOf(selectOption)).toContain("<select");
+    expect(markupOf(colorOption)).toContain('type="color"');
+    expect(markupOf(groupOption)).toContain("<fieldset");
+  });
+
+  it("draws a group's children with the same control", () => {
+    const markup = markupOf(groupOption);
+    expect(markup).toContain("Toggle");
+    expect(markup).toContain("Slider");
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain('type="range"');
+  });
+
+  it("refuses a kind it does not know rather than showing nothing", () => {
+    const bogus = {
+      id: "bogus",
+      kind: "hologram",
+      label: "Bogus",
+    } as unknown as ToolOption;
+    const { actions } = recorder();
+    expect(() => optionControl(bogus, snapshotFor("brush"), actions)).toThrow(
+      /Unknown tool option kind/,
+    );
+    expect(() => markupOf(bogus)).toThrow(/Unknown tool option kind/);
+  });
+
+  it("keeps a value inside the option's range", () => {
+    const { actions } = recorder();
+    const control = optionControl(
+      { ...sliderOption, read: () => 99 },
+      snapshotFor("brush"),
+      actions,
+    );
+    expect(control).toMatchObject({ kind: "slider", value: 10 });
+  });
+
+  it("falls back to the first choice when the value is not one of them", () => {
+    const { actions } = recorder();
+    const control = optionControl(
+      { ...selectOption, read: () => "missing" },
+      snapshotFor("brush"),
+      actions,
+    );
+    expect(control).toMatchObject({ kind: "select", value: "a" });
+  });
+
+  it("writes a number on the option's step", () => {
+    const write = vi.fn();
+    const { actions } = recorder();
+    const control = optionControl({ ...numberOption, write }, snapshotFor("brush"), actions);
+    if (control.kind !== "number") {
+      throw new Error("expected a number control");
+    }
+    control.write(4.4);
+    expect(write).toHaveBeenCalledWith(actions, 4);
+  });
+
+  it("writes nothing for a value that is not a number", () => {
+    const write = vi.fn();
+    const { actions } = recorder();
+    const control = optionControl({ ...numberOption, write }, snapshotFor("brush"), actions);
+    if (control.kind !== "number") {
+      throw new Error("expected a number control");
+    }
+    control.write(Number.NaN);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("shows a colour the native colour well understands", () => {
+    expect(colorInputValue("#abc")).toBe("#aabbcc");
+    expect(colorInputValue("#112233")).toBe("#112233");
+    expect(colorInputValue("#11223344")).toBe("#112233");
+    expect(colorInputValue("nonsense")).toBe("#000000");
+  });
+
+  it("snaps a value onto the step and inside the range", () => {
+    expect(optionStepValue(0.333, 0, 1, 0.05)).toBeCloseTo(0.35, 10);
+    expect(optionStepValue(-4, 0, 10, 1)).toBe(0);
+    expect(optionStepValue(40, 0, 10, 1)).toBe(10);
+  });
+});
+
+describe("the options bar layout", () => {
+  it("keeps the options in the order they were registered", () => {
+    const groups = groupToolOptions([toggleOption, sliderOption, numberOption]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].options.map((option) => option.id)).toEqual([
+      "toggle",
+      "slider",
+      "number",
+    ]);
+  });
+
+  it("groups the options under the heading they carry", () => {
+    const groups = groupToolOptions([
+      { ...toggleOption, group: "Behaviour" },
+      sliderOption,
+      { ...numberOption, group: "Behaviour" },
+    ]);
+    expect(groups.map((group) => group.id)).toEqual(["Behaviour", ""]);
+    expect(groups[0].label).toBe("Behaviour");
+    expect(groups[0].options.map((option) => option.id)).toEqual(["toggle", "number"]);
+    expect(groups[1].options.map((option) => option.id)).toEqual(["slider"]);
+  });
+
+  it("has no groups when there are no options", () => {
+    expect(groupToolOptions([])).toEqual([]);
+  });
+});
+
+describe("the options bar", () => {
+  it("shows the active tool's name and the options it registered", () => {
+    const snapshot = snapshotFor("star");
+    const editor = {
+      engine: {},
+      actions: {},
+      files: {},
+      getState: () => snapshot,
+      subscribe: () => () => undefined,
+    } as unknown as Editor;
+    const markup = renderToStaticMarkup(
+      createElement(
+        EditorContext.Provider,
+        { value: editor },
+        createElement(ToolOptionsBar),
+      ),
+    );
+    expect(markup).toContain("Star");
+    expect(markup).toContain("Points");
+    expect(markup).toContain("Fill shape");
+  });
+
+  it("says what a tool with no options is for", () => {
+    const snapshot = snapshotFor("pan");
+    const editor = {
+      engine: {},
+      actions: {},
+      files: {},
+      getState: () => snapshot,
+      subscribe: () => () => undefined,
+    } as unknown as Editor;
+    const markup = renderToStaticMarkup(
+      createElement(
+        EditorContext.Provider,
+        { value: editor },
+        createElement(ToolOptionsBar),
+      ),
+    );
+    expect(markup).toContain("Pan");
+    expect(markup).not.toContain('type="range"');
+  });
+});
+
+describe("a feature that adds an option to a tool it does not own", () => {
+  afterEach(() => {
+    unregisterToolOptions("brush");
+  });
+
+  it("shows the appended option in the bar", () => {
+    const write = vi.fn();
+    appendToolOptions("brush", [
+      {
+        id: "featureToggle",
+        kind: "toggle",
+        label: "Feature",
+        read: () => false,
+        write,
+      },
+    ]);
+    const visible = visibleToolOptions("brush", snapshotFor("brush"));
+    // The built-in symmetry switch comes first; the feature's own option is
+    // appended after it.
+    expect(visible.map((option) => option.id)).toEqual(["symmetryMode", "featureToggle"]);
+    expect(markupOf(visible[1])).toContain("Feature");
+  });
+
+  it("reaches the action the feature named", () => {
+    const { actions, calls } = recorder();
+    appendToolOptions("brush", [
+      {
+        id: "featureToggle",
+        kind: "toggle",
+        label: "Feature",
+        read: () => false,
+        write: (editorActions, value) => editorActions.setGridSnapping(value),
+      },
+    ]);
+    const visible = visibleToolOptions("brush", snapshotFor("brush"));
+    const option = visible[0];
+    if (option.kind !== "toggle") {
+      throw new Error("expected a toggle");
+    }
+    option.write(actions, true);
+    expect(calls).toEqual([["setGridSnapping", true]]);
   });
 });
