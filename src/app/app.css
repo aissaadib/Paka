@@ -4,6 +4,8 @@
   display: grid;
   grid-template-rows: 30px auto 1fr 22px;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-app);
 }
 
@@ -11,21 +13,37 @@
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 216px;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* The right-hand column: the colour panel on top, the layers panel taking the
-   rest of the height and scrolling as it always has. */
+/* The two top rows: the contextual options bar and the document bar. They are
+   separate rows so the document controls never move when the tool changes. */
+.top-bars {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The right-hand column: a tabbed dock over the layers list. The dock takes a
+   little over half the height and the layers list the rest, both with a
+   minimum: at a short window the column scrolls rather than squeezing the
+   layers list to a header. */
 .side-panels {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .side-panels__layers {
   display: flex;
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 1 45%;
+  min-height: 150px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
 }
 
 .side-panels__layers > .panel {
@@ -118,13 +136,17 @@
 
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 8px;
-  padding: 4px 8px;
+  height: 34px;
+  padding: 0 8px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .toolbar__group {
@@ -135,13 +157,14 @@
 }
 
 .toolbar__divider {
+  flex: 0 0 auto;
   width: 1px;
   height: 18px;
   background: var(--border);
 }
 
 .toolbar__spacer {
-  flex: 1;
+  flex: 1 0 8px;
 }
 
 .toolbar__hint {
@@ -151,22 +174,160 @@
   white-space: nowrap;
 }
 
-.brush-controls {
-  /* A dedicated, wrapping row: five sliders plus the pressure toggles are wider
-     than a typical window, and clipping them made settings unreachable. */
-  flex-wrap: wrap;
+/* The hint is guidance, not a control: at a narrow window it is the first
+   thing to go, so the controls that matter keep their room. */
+@media (max-width: 1180px) {
+  .toolbar__hint {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------ brush controls */
+
+/* The primary stroke controls, in the options bar: preview, preset, and the
+   three sliders a stroke is actually adjusted with. */
+.brush-primary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.brush-primary .slider-field {
+  gap: 5px;
+}
+
+.tool-options-bar .brush-primary .slider-field__range {
+  width: 60px;
+}
+
+.tool-options-bar .brush-primary .slider-field__value {
+  width: 42px;
+}
+
+.tool-options-bar .brush-primary .slider-field__display {
+  display: none;
+}
+
+/* The advanced settings panel: a column of labelled rows, wide enough for the
+   labels and the pressure curve. */
+.brush-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 320px;
+  padding: 10px;
+}
+
+.brush-advanced__hint {
+  margin: 0 0 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.brush-advanced .slider-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 48px;
+  gap: 6px;
+}
+
+.brush-advanced .slider-field__range {
   width: 100%;
-  gap: 4px 12px;
+}
+
+.brush-advanced .slider-field__display {
+  display: none;
+}
+
+.brush-advanced__curve-toggle {
+  align-self: flex-start;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.brush-advanced__curve-toggle:hover,
+.brush-advanced__curve-toggle[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.brush-advanced .pressure-curve {
+  width: 100%;
+  border-top: 1px solid var(--border);
+}
+
+.brush-advanced .pressure-curve__plot {
+  width: 100%;
+  height: 130px;
+}
+
+/* The preset manager: a small form under its trigger. */
+.brush-preset-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+}
+
+.brush-preset-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+.brush-preset-editor__field .text-input {
+  width: 100%;
+}
+
+.brush-preset-editor__current {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brush-preset-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gradient-stops-panel {
+  width: 300px;
+  padding: 10px;
+}
+
+@media (max-width: 1100px) {
+  /* The swatch shows a shape, not a value: at a narrow window the sliders and
+     the preset select are worth more than the picture. */
+  .brush-primary .brush-preview,
+  .brush-presets__label {
+    display: none;
+  }
 }
 
 .brush-presets {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 4px 6px;
-  width: 100%;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+}
+
+.brush-presets__state {
+  min-width: 0;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
 /* ------------------------------------------------------- pressure curve */
@@ -315,14 +476,6 @@
 .brush-presets__select:focus {
   border-color: var(--accent);
   outline: none;
-}
-
-.brush-presets__name {
-  width: 150px;
-}
-
-.brush-presets__action {
-  padding: 0 8px;
 }
 
 .color-controls {
@@ -539,7 +692,214 @@
   padding: 6px 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
+  /* The rail scrolls when the window is short: every tool stays reachable
+     instead of the bottom of the palette being clipped away. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.tool-rail__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.tool-rail__divider {
+  width: 18px;
+  height: 1px;
+  margin: 3px 0;
+  background: var(--border);
+}
+
+/* The buttons keep their size when the rail scrolls; a squashed target is
+   worse than a scrolled one. */
+.tool-rail .icon-button {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.tool-rail .icon-button:hover:not(:disabled) {
+  background: var(--bg-raised-hover);
+}
+
+.tool-rail .icon-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tool-rail .icon-button.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+/* The slot of a collapsed group: the tool's icon with a caret that says
+   there is a flyout behind it. */
+.tool-rail__slot-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tool-rail__slot-caret {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  display: inline-flex;
+  color: var(--text-dim);
+}
+
+.tool-rail .icon-button.is-active .tool-rail__slot-caret {
+  color: var(--accent);
+}
+
+/* The description a screen reader reads after the tool's name. */
+.tool-rail__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
   overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The flyout of a collapsed group. */
+.tool-rail__menu {
+  min-width: 156px;
+  padding: 3px;
+}
+
+.tool-rail__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 2px;
+  text-align: left;
+  color: var(--text);
+}
+
+.tool-rail__menu-item:hover,
+.tool-rail__menu-item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.tool-rail__menu-item[aria-current="true"] {
+  color: var(--text-strong);
+}
+
+.tool-rail__menu-item[aria-current="true"] .tool-rail__menu-icon {
+  color: var(--accent);
+}
+
+.tool-rail__menu-icon {
+  display: inline-flex;
+  color: var(--text-dim);
+}
+
+.tool-rail__menu-label {
+  flex: 1 1 auto;
+}
+
+.tool-rail__menu-shortcut {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The rail's own tooltip. It is anchored to its button, so it never follows
+   the pointer and never sits under the cursor. */
+.tool-rail__tooltip {
+  width: max-content;
+  max-width: 244px;
+  padding: 5px 8px;
+  pointer-events: none;
+}
+
+.tool-rail__tooltip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.tool-rail__tooltip-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.tool-rail__tooltip-shortcut {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-rail__tooltip-text {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+}
+
+.tool-rail__tooltip-hint {
+  margin: 3px 0 0;
+  color: var(--accent);
+}
+
+/* A short window tightens the rail rather than clipping it: the gaps and
+   the group separators shrink, the targets keep their size. */
+@media (max-height: 520px) {
+  .tool-rail {
+    gap: 1px;
+    padding: 2px 0;
+  }
+
+  .tool-rail__group {
+    gap: 1px;
+  }
+
+  .tool-rail__divider {
+    margin: 1px 0;
+  }
+}
+
+/* ----------------------------------------------------------------- popover */
+
+/* The floating panel the rail's flyout and its tooltip share. It is fixed,
+   so the rail's own scrolling never clips it. */
+.popover__panel {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+
+.popover {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.popover__trigger {
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.popover__trigger:hover {
+  background: var(--bg-raised-hover);
 }
 
 /* ------------------------------------------------------------ canvas stage */
@@ -667,6 +1027,62 @@
 .dialog__row {
   display: flex;
   gap: 10px;
+}
+
+/* The one-click canvas sizes. They are a grid rather than a row so the
+   longest label (A4 300 dpi) still fits in the 320 px dialog at a narrow
+   window, and the selected preset is visible without reading the inputs. */
+.dialog__presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.dialog__preset {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dialog__preset:hover {
+  background: var(--bg-raised-hover);
+}
+
+.dialog__preset.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.dialog__preset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dialog__preset-label {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog__preset-size {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog__field {

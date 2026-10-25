@@ -21,7 +21,7 @@
  */
 import { Canvas2DRenderer } from "/src/core/rendering/Canvas2DRenderer";
 import { FrameScheduler } from "/src/core/rendering/frameScheduler";
-import { createDocument, createLayer } from "/src/core/document/document";
+import { createDocument } from "/src/core/document/document";
 import { DEFAULT_BRUSH } from "/src/core/brushes/defaults";
 import {
   createRotateTransform,
@@ -32,11 +32,14 @@ import type {
   DrawingDocument,
   FillPatchRecord,
   GradientRecord,
+  Layer,
   LayerElement,
   LayerId,
+  ShapeRecord,
   StrokeRecord,
 } from "/src/core/document/types";
 import type { DrawingRenderer } from "/src/core/rendering/types";
+import type { ReferenceImage } from "/src/core/reference/types";
 import type { BrushSettings } from "/src/types/brush";
 import { isSceneStroke } from "./scene";
 import type {
@@ -44,6 +47,7 @@ import type {
   SceneElement,
   SceneGuide,
   SceneLayer,
+  SceneReference,
   SceneTransform,
   SceneVerdict,
 } from "./scene";
@@ -160,6 +164,27 @@ function toGradient(
   };
 }
 
+/**
+ * A scene shape as the document's own record.
+ *
+ * The geometry is copied verbatim, so the scene states the primitive and its
+ * parameters rather than a polyline. The brush goes through the shape rule -
+ * the stamp strategy is always off - exactly as a committed shape's does.
+ */
+function toShape(
+  element: Extract<SceneElement, { kind: "shape" }>,
+  layerId: LayerId,
+): ShapeRecord {
+  return {
+    id: nextId("shape"),
+    layerId,
+    kind: "shape",
+    geometry: { ...element.geometry },
+    brush: { ...toBrush(element.brush), stamp: false },
+    fill: element.fill ?? false,
+  };
+}
+
 function toElements(
   layers: readonly SceneLayer[],
   layerIds: readonly LayerId[],
@@ -169,9 +194,10 @@ function toElements(
     const layerId = layerIds[index];
     map.set(
       layerId,
-      layer.elements.map((element) => {
+      (layer.elements ?? []).map((element) => {
         if (element.kind === "stroke") return toStroke(element, layerId);
         if (element.kind === "fill") return toFill(element, layerId);
+        if (element.kind === "shape") return toShape(element, layerId);
         return toGradient(element, layerId);
       }),
     );
@@ -179,10 +205,41 @@ function toElements(
   return map;
 }
 
+/** The paintable leaves of a scene tree, in compositing order. */
+function sceneLeaves(layers: readonly SceneLayer[]): SceneLayer[] {
+  const leaves: SceneLayer[] = [];
+  const visit = (nodes: readonly SceneLayer[]): void => {
+    for (const node of nodes) {
+      if (node.kind === "group") {
+        visit(node.children ?? []);
+      } else {
+        leaves.push(node);
+      }
+    }
+  };
+  visit(layers);
+  return leaves;
+}
+
+/** A scene node as the document's own layer tree. */
+function toLayer(sceneLayer: SceneLayer): Layer {
+  return {
+    id: sceneLayer.id,
+    name: sceneLayer.id,
+    visible: sceneLayer.visible ?? true,
+    opacity: sceneLayer.opacity ?? 1,
+    blendMode: sceneLayer.blendMode ?? "normal",
+    kind: sceneLayer.kind ?? "layer",
+    children: (sceneLayer.children ?? []).map(toLayer),
+  };
+}
+
 function buildDocument(
   scene: Scene,
-  layers: ReturnType<typeof createLayer>[],
+  layers: readonly Layer[],
   guides: readonly SceneGuide[] = [],
+  activeLayerId?: LayerId,
+  references: readonly ReferenceImage[] = [],
 ): DrawingDocument {
   const base = createDocument({
     width: scene.width,
@@ -192,13 +249,58 @@ function buildDocument(
   return {
     ...base,
     layers,
-    activeLayerId: layers[0]?.id ?? base.activeLayerId,
+    activeLayerId: activeLayerId ?? layers[0]?.id ?? base.activeLayerId,
     guides: guides.map((guide, index) => ({
       id: `guide-${index + 1}`,
       axis: guide.axis,
       position: guide.position,
     })),
+    references,
   };
+}
+
+/** The document's reference records, in drawing order. */
+function toReferences(scene: Scene): ReferenceImage[] {
+  return (scene.references ?? []).map((reference, index) => ({
+    id: `reference-${index + 1}`,
+    name: `reference-${index + 1}`,
+    x: reference.x,
+    y: reference.y,
+    width: reference.width,
+    height: reference.height,
+    naturalWidth: reference.naturalWidth ?? 64,
+    naturalHeight: reference.naturalHeight ?? 64,
+    rotation: reference.rotation ?? 0,
+    opacity: reference.opacity ?? 1,
+    blendMode: reference.blendMode ?? "normal",
+    behind: reference.behind ?? false,
+    visible: reference.visible ?? true,
+  }));
+}
+
+/**
+ * Builds the picture a scene's reference is drawn from.
+ *
+ * A real canvas, because that is exactly what `drawImage` receives in the
+ * product: the harness must not fake the draw call, only the picture.
+ */
+function referenceSource(reference: SceneReference): HTMLCanvasElement {
+  const width = reference.naturalWidth ?? 64;
+  const height = reference.naturalHeight ?? 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("the harness needs a 2d context for a reference");
+  }
+  context.fillStyle = reference.color;
+  context.fillRect(0, 0, width, height);
+  if (reference.accent) {
+    context.fillStyle = reference.accent;
+    context.fillRect(0, 0, width / 2, height);
+  }
+  return canvas;
 }
 
 function readPixels(canvas: HTMLCanvasElement): Uint8ClampedArray {
@@ -262,22 +364,35 @@ export function runScene(
 ): SceneVerdict {
   elementCounter = 0;
 
-  const layers = scene.layers.map((layer) => {
-    const created = createLayer(layer.id);
-    created.opacity = layer.opacity ?? 1;
-    created.blendMode = layer.blendMode ?? "normal";
-    created.visible = layer.visible ?? true;
-    return created;
-  });
-  const layerIds = layers.map((layer) => layer.id);
-  const drawingDocument = buildDocument(scene, layers, scene.guides ?? []);
-  // The same document without its guides: the guides are display-only, so
-  // this is the picture the export has to agree with.
-  const plainDocument = buildDocument(scene, layers);
+  const leaves = sceneLeaves(scene.layers);
+  const layers = scene.layers.map(toLayer);
+  const layerIds = leaves.map((layer) => layer.id);
+  const references = toReferences(scene);
+  const drawingDocument = buildDocument(
+    scene,
+    layers,
+    scene.guides ?? [],
+    layerIds[0],
+    references,
+  );
+  // The same document without its references: they are not artwork, so this
+  // is the picture the export has to agree with.
+  const withoutReferencesDocument = buildDocument(
+    scene,
+    layers,
+    scene.guides ?? [],
+    layerIds[0],
+    [],
+  );
+  // The same document without its guides: the guides are display-only too, so
+  // the difference between the two displays is the guides' own contribution.
+  const withoutGuidesDocument = buildDocument(scene, layers, [], layerIds[0], references);
+  // Neither guides nor references: the exported artwork.
+  const artworkDocument = buildDocument(scene, layers, [], layerIds[0], []);
 
   // The map the renderer's stroke source reads. It is mutated in place, so the
   // renderer always sees the content the step below asks it to draw.
-  const elements = toElements(scene.layers, layerIds);
+  const elements = toElements(leaves, layerIds);
   const allElements = new Map(elements);
 
   const display = document.createElement("canvas");
@@ -295,6 +410,14 @@ export function runScene(
     scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
   });
   renderer.setDocument(drawingDocument);
+  const referenceSources = new Map<string, CanvasImageSource>();
+  references.forEach((reference, index) => {
+    const definition = scene.references?.[index];
+    if (definition) {
+      referenceSources.set(reference.id, referenceSource(definition));
+    }
+  });
+  renderer.setReferenceSources(referenceSources);
   renderer.setViewport({ zoom: 1, offsetX: 0, offsetY: 0 });
   renderer.setDisplaySize(scene.width, scene.height, 1);
   renderer.setRasterScale(1);
@@ -305,9 +428,10 @@ export function runScene(
     : NO_GRID;
   renderer.setGrid(gridSettings);
 
-  const lastLayerIndex = scene.layers.length - 1;
-  const lastLayer = scene.layers[lastLayerIndex];
-  const lastElement = lastLayer?.elements[lastLayer.elements.length - 1];
+  const lastLayerIndex = leaves.length - 1;
+  const lastLayer = leaves[lastLayerIndex];
+  const lastElements = lastLayer?.elements ?? [];
+  const lastElement = lastElements[lastElements.length - 1];
   const liveCapable = lastElement !== undefined && isSceneStroke(lastElement);
 
   const setContent = (source: Map<LayerId, LayerElement[]>): void => {
@@ -352,9 +476,17 @@ export function runScene(
 
   // 4. The same display without the guides. The guides are display-only, so
   // the difference between the two displays is the guides' own contribution.
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(withoutGuidesDocument);
   renderer.render();
   const withoutGuidesPixels = readPixels(display);
+  renderer.setDocument(drawingDocument);
+  renderer.render();
+
+  // 4b. The same display without the references. References are not artwork,
+  // so the difference is the references' own contribution.
+  renderer.setDocument(withoutReferencesDocument);
+  renderer.render();
+  const withoutReferencesPixels = readPixels(display);
   renderer.setDocument(drawingDocument);
   renderer.render();
 
@@ -366,10 +498,10 @@ export function runScene(
   renderer.setGrid(gridSettings);
   renderer.render();
 
-  // 6. The display without either of them: the picture the export has to
-  // agree with, because neither a guide nor a grid reaches an export.
+  // 6. The display of the artwork alone: the picture the export has to agree
+  // with, because neither a guide, a grid nor a reference reaches an export.
   renderer.setGrid(NO_GRID);
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(artworkDocument);
   renderer.render();
   const plainPixels = readPixels(display);
   renderer.setGrid(gridSettings);
@@ -406,9 +538,15 @@ export function runScene(
 
   // The export of the same document without its guides: the two must be the
   // same picture, because a guide never reaches an export.
-  renderer.setDocument(plainDocument);
+  renderer.setDocument(withoutGuidesDocument);
   const plainExport = renderer.composeDocumentImage();
   const plainExportPixels = readPixels(plainExport);
+
+  // The export of the same document without its references: the two must be
+  // the same picture, because a reference is not artwork.
+  renderer.setDocument(withoutReferencesDocument);
+  const exportWithoutReferences = renderer.composeDocumentImage();
+  const exportWithoutReferencesPixels = readPixels(exportWithoutReferences);
   renderer.setDocument(drawingDocument);
 
   // The export of the same document with the grid off: it must be the same
@@ -454,6 +592,12 @@ export function runScene(
   const gridNotExported =
     compare(exportedPixels, exportWithoutGridPixels, scene.width, scene.height, false).differing ===
     0;
+  // The references' own contribution, and their exclusion from the export.
+  const referencesVisible =
+    compare(rebuiltPixels, withoutReferencesPixels, scene.width, scene.height, false).differing > 0;
+  const referencesNotExported =
+    compare(exportedPixels, exportWithoutReferencesPixels, scene.width, scene.height, false)
+      .differing === 0;
 
   return {
     sceneId: scene.id,
@@ -464,6 +608,8 @@ export function runScene(
     guidesNotExported,
     gridVisible,
     gridNotExported,
+    referencesVisible,
+    referencesNotExported,
     liveVsRebuiltDiffering: liveVsRebuilt.differing,
     rebuiltVsExportedDiffering: rebuiltVsExported.differing,
     firstDifference: liveVsRebuilt.first ?? rebuiltVsExported.first,

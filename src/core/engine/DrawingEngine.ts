@@ -18,13 +18,14 @@
  */
 
 import type { BrushSettings } from "../../types/brush";
-import type { Bounds, Point } from "../../types/geometry";
+import type { Bounds, Point, Size } from "../../types/geometry";
 import type { CursorReport, PointerSample } from "../../types/pointer";
 import type { ToolId } from "../../types/tool";
 import type { FlipAxis } from "../../types/transform";
 import type { Viewport } from "../../types/viewport";
 import { hexToRgb, rgbToHex } from "../../utils/color";
 import { createId } from "../../utils/id";
+import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
@@ -55,15 +56,26 @@ import {
 import { StrokeBuilder, cloneStroke, createStrokeRecord } from "../brushes/strokeBuilder";
 import { CommandStack, DEFAULT_HISTORY_LIMIT } from "../commands/commandStack";
 import {
+  createAddGroupCommand,
+  createDissolveGroupCommand,
   createDocumentCommand,
+  createMoveLayerToParentCommand,
+  createRenameGroupCommand,
   type DocumentCommandHost,
   type ElementTransfer,
 } from "../commands/documentCommand";
 import { createFillCommand } from "../commands/fillCommand";
 import { createGradientCommand } from "../commands/gradientCommand";
 import {
+  createShapeCommand,
+  createShapeDeleteCommand,
+  createShapeEditCommand,
+  createShapesCommand,
+} from "../commands/shapeCommand";
+import {
   createStrokeCommand,
   createStrokeCommandHost,
+  createStrokesCommand,
   type StrokeCommandHost,
 } from "../commands/strokeCommand";
 import {
@@ -101,6 +113,34 @@ import {
   setGuidePosition,
 } from "../document/guides";
 import {
+  REFERENCE_HANDLE_CURSORS,
+  applyReferencePatch,
+  findReferenceHandle,
+  fitReferenceToDocument,
+  referenceEqual,
+  referenceVisibleContains,
+  resizeReferenceFromCorner,
+  setReferenceRotation,
+  type ReferenceHandleId,
+} from "../reference/geometry";
+import {
+  ReferenceDecodeError,
+  decodeReferenceImage,
+  detectImageFormat,
+  referenceMimeType,
+  type DecodedReference,
+} from "../reference/decode";
+import { ReferenceImageStore, createReferenceImage } from "../reference/store";
+import type { ReferenceImage, ReferenceImagePatch } from "../reference/types";
+import {
+  findLayer,
+  flattenLayers,
+  isGroup,
+  layerLocation,
+  newLayerIds,
+  paintableLayers,
+} from "../document/layerGroups";
+import {
   cornerOf,
   findSelectionHandle,
   HANDLE_CURSORS,
@@ -121,11 +161,51 @@ import {
   snapRotationAngle,
   type SampleTransform,
 } from "../document/selectionTransform";
+import {
+  combineSelectionIds,
+  normalizeSelectionShape,
+  selectionCombineFor,
+  type SelectionCombine,
+  type SelectionShape,
+} from "../document/selectionModes";
+import {
+  DEFAULT_SYMMETRY_SETTINGS,
+  centeredSymmetrySettings,
+  mirrorMovesAny,
+  mirrorPoint,
+  normalizeSymmetryMode,
+  symmetryMirrors,
+  symmetrySettingsEqual,
+  type SymmetryAxisKind,
+  type SymmetryMode,
+  type SymmetrySettings,
+} from "../document/symmetry";
 import { StrokeStore } from "../document/strokeStore";
+import {
+  cloneShape,
+  findShapeHandle,
+  mirrorShape,
+  resizeShape,
+  rotateShape,
+  setShapeBrush,
+  setShapeFill,
+  setShapeInnerRatio,
+  setShapeRotation,
+  setShapeSides,
+  setShapeSize,
+  shapeBrush,
+  shapeHitTest,
+  shapeRecordFrame,
+  shapeRecordHandles,
+  shapeRecordOutline,
+  shapeRecordsEqual,
+  translateShape,
+} from "../document/shapeRecord";
 import {
   boundsContainPoint,
   boundsFromCorners,
   strokeIntersectsBounds,
+  strokeIntersectsPolygon,
 } from "../document/strokeSelection";
 import type {
   DrawingDocument,
@@ -137,11 +217,21 @@ import type {
   LayerBlendMode,
   LayerElement,
   LayerId,
+  ShapeGeometry,
+  ShapeRecord,
   StrokeRecord,
 } from "../document/types";
-import { isFillPatch, isGradient, isStroke } from "../document/types";
+import { isFillPatch, isGradient, isShape, isStroke } from "../document/types";
 import { cloneFillPatch, createFillPatch } from "../fill/fillPatch";
-import { MAX_FILL_SCAN_PIXELS, floodFill } from "../fill/floodFill";
+import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
+import {
+  DEFAULT_FILL_MODE,
+  DEFAULT_FILL_SAMPLE_SCALE,
+  normalizeFillMode,
+  normalizeFillSampleScale,
+  type FillMode,
+} from "../fill/fillOptions";
+import { scanFill } from "../fill/fillScan";
 import {
   DEFAULT_GRADIENT_END_COLOR,
   cloneGradient,
@@ -160,6 +250,8 @@ import { toStrokeSample } from "../input/pointer";
 import { serializeProject, type ParsedProject } from "../project/projectFormat";
 import { Canvas2DRenderer } from "../rendering/Canvas2DRenderer";
 import { strokeDiameter } from "../rendering/canvas2dStroke";
+import { setRulerOverlayState } from "../rendering/rulerOverlay";
+import { setSymmetryOverlaySettings } from "../rendering/symmetryAxesOverlay";
 import type { DrawingRenderer, StrokeSource } from "../rendering/types";
 import {
   ZOOM_STEP,
@@ -176,15 +268,26 @@ import {
   DEFAULT_SHAPE_ROTATION,
   DEFAULT_SHAPE_SIDES,
   normalizeShapeOptions,
+  shapeGeometryOutline,
   type ShapeOptions,
-  type ShapePoint,
 } from "../tools/shapeGeometry";
 import type { Tool, ToolContext } from "../tools/types";
+import { OverviewCache, centerViewOn, fitSelectionView } from "./canvasViews";
 
 /** Low-frequency state React is allowed to render from. */
 export interface EditorSnapshot {
   readonly document: DrawingDocument;
   readonly viewport: Viewport;
+  /**
+   * The CSS size of the drawing surface.
+   *
+   * View state, like the viewport itself: it changes when the window is
+   * resized and it is never part of the document. A panel that has to know
+   * what the canvas is showing (the navigator's marked area) needs it,
+   * because the visible area is the canvas' size mapped through the
+   * viewport.
+   */
+  readonly viewportSize: Size;
   readonly brush: BrushSettings;
   /**
    * The colour a right-button stroke paints with.
@@ -230,6 +333,13 @@ export interface EditorSnapshot {
    */
   readonly selectedStrokes: number;
   /**
+   * The shape the next marquee traces: a rectangle or a freehand lasso.
+   *
+   * Editor state, like the tool itself: it describes how the next selection is
+   * drawn, not what the committed selection is.
+   */
+  readonly selectionShape: SelectionShape;
+  /**
    * The id of the composition guide the guides tool has selected, or `null`.
    *
    * Editor state, like `selectedStrokes`: the guides themselves are document
@@ -237,6 +347,28 @@ export interface EditorSnapshot {
    * the tool that owns the selection.
    */
   readonly selectedGuideId: string | null;
+  /**
+   * The id of the reference the reference tool has selected, or `null`.
+   *
+   * Editor state, like `selectedGuideId`: the references are document state,
+   * but which one is framed on the canvas belongs to the tool.
+   */
+  readonly selectedReferenceId: string | null;
+  /**
+   * The id of the native shape the shape editor has selected, or `null`.
+   *
+   * Editor state, like `selectedReferenceId`: the shape is document content,
+   * but which one is framed belongs to the tool that owns the selection.
+   */
+  readonly selectedShapeId: string | null;
+  /**
+   * The selected native shape itself, or `null`.
+   *
+   * The compact shape editor reads its fields from this record, so every
+   * control shows the shape's real values rather than a separate copy that
+   * could drift from the document.
+   */
+  readonly selectedShape: ShapeRecord | null;
   /**
    * Whether the shape tools fill their outline instead of tracing it.
    *
@@ -269,6 +401,17 @@ export interface EditorSnapshot {
    */
   readonly fillTolerance: number;
   /**
+   * Whether the next fill paints the whole colour region or only the part
+   * reachable from the seed. Editor state, like the tolerance: a committed
+   * fill stores its pixels, so changing the mode never rewrites one.
+   */
+  readonly fillMode: FillMode;
+  /**
+   * How finely the next fill samples the composite: one document pixel in
+   * `fillSampleScale` is examined. Editor state, like the mode.
+   */
+  readonly fillSampleScale: number;
+  /**
    * Gradient shape the next drag commits. Editor state: it describes the next
    * gradient, while a committed gradient carries its own geometry.
    */
@@ -299,6 +442,28 @@ export interface EditorSnapshot {
    * committed strokes already are. Off by default.
    */
   readonly gridSnapping: boolean;
+  /**
+   * Whether the canvas rulers are drawn.
+   *
+   * Editor state like the grid: the rulers are chrome on the display canvas,
+   * so they add no history step, dirty nothing and never reach a layer
+   * surface, a project file or an export. Off by default.
+   */
+  readonly rulersVisible: boolean;
+  /**
+   * Whether the next stroke is mirrored across one axis or both.
+   *
+   * Editor state, like the grid: it describes the next gesture and never
+   * reaches the document, an export or a project file. The copies it makes are
+   * ordinary strokes, so they do.
+   */
+  readonly symmetryEnabled: boolean;
+  /** The axes the symmetry mirrors across, when it is on. */
+  readonly symmetryMode: SymmetryMode;
+  /** Where the vertical mirror line stands (its x), in document pixels. */
+  readonly symmetryVerticalAxis: number;
+  /** Where the horizontal mirror line stands (its y), in document pixels. */
+  readonly symmetryHorizontalAxis: number;
   /**
    * A user-facing message from an editor action that could not complete, or
    * `null`. The status bar shows it; it is not a file message and is not
@@ -340,6 +505,14 @@ export interface DrawingEngineOptions {
    * not create a Canvas 2D renderer, and the caller owns its configuration.
    */
   readonly renderer?: DrawingRenderer;
+  /**
+   * How an imported picture's bytes become a drawable surface.
+   *
+   * Defaults to the browser decoder (`createImageBitmap`). It is a seam so the
+   * import path can be exercised without a browser, and so a host without
+   * `createImageBitmap` can supply its own decoder instead of failing.
+   */
+  readonly decodeReference?: (bytes: Uint8Array) => Promise<DecodedReference>;
 }
 
 const DEFAULT_DOCUMENT_WIDTH = 1600;
@@ -379,12 +552,37 @@ const SNAPPING_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
 ]);
 
 /**
+ * The tools whose press only previews a native shape.
+ *
+ * A shape press places nothing until the release, so Escape can discard it
+ * exactly; a brush stroke, by contrast, has already inked the layer and is
+ * committed on release.
+ */
+const SHAPE_TOOL_IDS: ReadonlySet<ToolId> = new Set<ToolId>([
+  "line",
+  "rectangle",
+  "ellipse",
+  "polygon",
+  "star",
+]);
+
+/**
  * Shown when a layer operation is refused because a pointer gesture is still
  * in flight. One explanation per gesture is enough; see
  * `refuseLayerChangeDuringGesture`.
  */
 const GESTURE_REFUSAL_NOTICE =
   "Finish the current stroke, selection or guide drag before changing layers.";
+
+/**
+ * Shown when a drawing gesture starts while a group is the active node.
+ *
+ * A group owns no content: it holds layers. The gesture is refused rather than
+ * recorded against a container that can never be displayed, and the user is
+ * told which choice fixes it.
+ */
+const GROUP_DRAW_NOTICE =
+  "This is a layer group. Select a layer inside it to draw.";
 
 /**
  * True when a document-space point lies on the document rectangle.
@@ -401,18 +599,6 @@ function isInsideDocument(document: DrawingDocument, x: number, y: number): bool
 }
 
 /**
- * The brush a shape is drawn with.
- *
- * The stamp engine draws a chain of round dabs along a path, which suits the
- * brush and the eraser but not a shape: a shape is an outline, and a filled
- * shape is a flat polygon. So a shape records the plain segment path even when
- * the brush is stamped, and the stroke stays self-describing.
- */
-function shapeBrush(brush: BrushSettings): BrushSettings {
-  return brush.stamp ? { ...brush, stamp: false } : brush;
-}
-
-/**
  * The union of the painted bounds of `strokes`, or `null` when there are none.
  *
  * The rule itself lives in `core/document/selectionTransform.ts`, which is
@@ -420,6 +606,20 @@ function shapeBrush(brush: BrushSettings): BrushSettings {
  */
 function boundsOfStrokes(strokes: readonly StrokeRecord[]): Bounds | null {
   return selectionFrame(strokes, (stroke) => strokeDiameter(stroke.brush, 1) / 2);
+}
+
+/** The centre of a frame's corners, or the document origin for an empty frame. */
+function frameCentre(corners: readonly Point[]): Point {
+  if (corners.length === 0) {
+    return { x: 0, y: 0 };
+  }
+  let x = 0;
+  let y = 0;
+  for (const corner of corners) {
+    x += corner.x;
+    y += corner.y;
+  }
+  return { x: x / corners.length, y: y / corners.length };
 }
 
 /**
@@ -453,9 +653,20 @@ interface Selection {
 interface MarqueeGesture {
   readonly mode: "marquee";
   readonly anchor: Point;
-  /** The rubber band, replaced on every move. */
+  /** Whether the band is a rectangle or a freehand lasso. */
+  readonly shape: SelectionShape;
+  /** How the release combines with the selection that is already there. */
+  readonly combine: SelectionCombine;
+  /** The rubber band, replaced on every move (rectangle only). */
   bounds: Bounds | null;
+  /** The freehand path, in document order (lasso only). */
+  points: Point[];
 }
+
+/** The spacing between stored lasso points, in document pixels. */
+const LASSO_SAMPLE_DISTANCE = 2;
+/** A ceiling so a very long lasso stays cheap to hit-test. */
+const MAX_LASSO_POINTS = 2000;
 
 interface MoveGesture {
   readonly mode: "move";
@@ -561,6 +772,78 @@ interface GuideGesture {
 }
 
 /**
+ * A reference gesture in flight.
+ *
+ * Like a guide gesture, it is a *preview*: the document is replaced as the
+ * pointer moves, without touching history, and the press-time document is what
+ * a cancel restores and what the committed command reverts to. That is what
+ * makes one drag one undo step.
+ */
+interface ReferenceGesture {
+  readonly mode: "move" | "resize" | "rotate";
+  /** The document at press time: the revert point and the cancel state. */
+  readonly before: DrawingDocument;
+  /** The reference as it was at press time: every delta is measured from it. */
+  readonly initial: ReferenceImage;
+  readonly referenceId: string;
+  /** The corner being dragged, or `null` for a move and a rotation. */
+  readonly handle: ReferenceHandleId | null;
+  /** The press point, in document space. */
+  readonly pressX: number;
+  readonly pressY: number;
+  /** The reference's centre at press time, for the rotation angle. */
+  readonly centreX: number;
+  readonly centreY: number;
+  /** The pointer's angle about the centre at press time, in radians. */
+  readonly startAngle: number;
+}
+
+/**
+ * A shape edit gesture in flight.
+ *
+ * Like a reference gesture, it is a *preview*: the record in the store is
+ * replaced as the pointer moves, without touching history, and the press-time
+ * record is what a cancel restores and what the committed command reverts to.
+ * Every preview is computed from `initial`, never from the previous preview, so
+ * a drag that wanders and returns ends exactly where it began.
+ */
+interface ShapeEditGesture {
+  readonly mode: "move" | "resize" | "rotate";
+  /** The shape as it was at press time: the revert point and every delta's origin. */
+  readonly initial: ShapeRecord;
+  readonly shapeId: string;
+  /** The corner being dragged, or `null` for a move and a rotation. */
+  readonly handle: SelectionHandleId | null;
+  /** The press point, in document space. */
+  readonly pressX: number;
+  readonly pressY: number;
+  /** The shape frame's centre at press time, for the rotation angle. */
+  readonly centreX: number;
+  readonly centreY: number;
+  /** The pointer's angle about the centre at press time, in radians. */
+  readonly startAngle: number;
+}
+
+/** Why an imported reference was refused. */
+export type ReferenceImportFailure =
+  | "not-an-image"
+  | "too-large"
+  | "unsupported"
+  | "malformed"
+  | "budget";
+
+/** The outcome of importing a reference image. */
+export type ReferenceImportResult =
+  | { readonly ok: true; readonly reference: ReferenceImage }
+  | { readonly ok: false; readonly reason: ReferenceImportFailure; readonly message: string };
+
+/** What an import hands the engine: a file name and its bytes. */
+export interface ReferenceImportInput {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
+/**
  * Copies one element into a layer, generating a fresh id.
  *
  * Used when a layer is duplicated. Fills keep their raster mask and gradients
@@ -572,6 +855,9 @@ function cloneElement(element: LayerElement, layerId: LayerId): LayerElement {
   }
   if (isGradient(element)) {
     return cloneGradient(element, layerId);
+  }
+  if (isShape(element)) {
+    return cloneShape(element, layerId, createId("shape"));
   }
   return cloneStroke(element, layerId);
 }
@@ -615,6 +901,8 @@ export class DrawingEngine implements StrokeSource {
   private shapeRotation = DEFAULT_SHAPE_ROTATION;
   /** Bucket-fill tolerance in 8-bit channel units. */
   private fillTolerance = 24;
+  private fillMode: FillMode = DEFAULT_FILL_MODE;
+  private fillSampleScale = DEFAULT_FILL_SAMPLE_SCALE;
   private activeFill: ActiveFill | null = null;
   /** Gradient options for the next drag, captured when the gesture starts. */
   private gradientType: "linear" | "radial" = "linear";
@@ -628,6 +916,8 @@ export class DrawingEngine implements StrokeSource {
   private gridVisible = DEFAULT_GRID_SETTINGS.visible;
   private gridSpacing = DEFAULT_GRID_SETTINGS.spacing;
   private gridSnapping = DEFAULT_GRID_SETTINGS.snap;
+  private rulersVisible = false;
+  private symmetry: SymmetrySettings = DEFAULT_SYMMETRY_SETTINGS;
   private notice: string | null = null;
   /**
    * Whether the gesture-refusal notice has already been raised for the
@@ -637,10 +927,49 @@ export class DrawingEngine implements StrokeSource {
   private refusalNoticeShown = false;
   private selection: Selection | null = null;
   private selectionGesture: SelectionGesture | null = null;
+  private selectionShape: SelectionShape = "rect";
   /** The guide the guides tool has selected, or `null`. */
   private selectedGuideId: string | null = null;
   /** The guide gesture in flight, or `null`. */
   private guideGesture: GuideGesture | null = null;
+  /** The reference the reference tool has selected, or `null`. */
+  private selectedReferenceId: string | null = null;
+  /** The reference gesture in flight, if any. */
+  private referenceGesture: ReferenceGesture | null = null;
+  /** The native shape the shape editor has selected, or `null`. */
+  private selectedShapeId: string | null = null;
+  /** The shape edit gesture in flight, if any. */
+  private shapeGesture: ShapeEditGesture | null = null;
+  /**
+   * The geometry of the shape being drawn, before it is committed.
+   *
+   * The preview stroke is a temporary `StrokeRecord` derived from this value,
+   * so the shape tool's live outline and the record the engine commits are
+   * the same parameters. `null` between gestures.
+   */
+  private activeShapeSpec: ShapeGeometry | null = null;
+  /**
+   * True between a shape tool's press and its release.
+   *
+   * The preview stroke alone cannot say this: a press that has not moved yet
+   * has no geometry. The flag is what lets Escape discard an abandoned shape
+   * press, and it is cleared by every path that ends one - release, cancel,
+   * a lost capture or a tool switch.
+   */
+  private shapePressActive = false;
+  /**
+   * The decoded surfaces of the document's references.
+   *
+   * A cache, not a source of truth: the document says which references exist
+   * and where they sit, the store holds the pixels keyed by id. A reference
+   * whose picture has not decoded yet is simply not painted; it is still
+   * saved, selected and manipulated.
+   */
+  private readonly referenceStore = new ReferenceImageStore();
+  /** Reference ids whose bytes are being decoded, so one is decoded once. */
+  private readonly pendingReferenceDecodes = new Set<string>();
+  /** The decoder the import path and a reopened project share. */
+  private readonly decodeReference: (bytes: Uint8Array) => Promise<DecodedReference>;
   /**
    * Identity counter for the current selection, restarted whenever the
    * selection is replaced. It is what scopes nudge coalescing to *one* run: two
@@ -650,6 +979,14 @@ export class DrawingEngine implements StrokeSource {
   private selectionRun = 0;
   private cursor: CursorReport | null = null;
   private viewportSize = { width: 0, height: 0 };
+  /**
+   * The cached overview of the document, for a navigator panel.
+   *
+   * A rebuildable cache: it is thrown away when the document changes and
+   * built again from it. It never reaches a layer surface, a project file
+   * or a PNG export.
+   */
+  private readonly overviewCache = new OverviewCache<HTMLCanvasElement>();
   private laidOut = false;
   private devicePixelRatio = 1;
   private rasterScale = 1;
@@ -682,6 +1019,7 @@ export class DrawingEngine implements StrokeSource {
     this.brush = normalizeBrush(options.brush ?? DEFAULT_BRUSH);
     this.currentToolId = options.toolId ?? "brush";
     this.renderer = options.renderer ?? null;
+    this.decodeReference = options.decodeReference ?? ((bytes) => decodeReferenceImage(bytes));
     this.tools = createToolRegistry();
     this.middlePanTool = this.tools.pan;
     this.commands = new CommandStack({ limit: options.historyLimit ?? DEFAULT_HISTORY_LIMIT });
@@ -715,9 +1053,16 @@ export class DrawingEngine implements StrokeSource {
       finishStroke: () => engine.finishStroke(),
       cancelStroke: () => engine.cancelStroke(),
       beginShape: (sample) => engine.beginShape(sample),
-      setShapeOutline: (points) => engine.setShapeOutline(points),
+      setShapeSpec: (geometry) => engine.setShapeSpec(geometry),
       finishShape: () => engine.finishShape(),
       cancelShape: () => engine.cancelShape(),
+      findShapeAt: (docX, docY) => engine.findShapeAt(docX, docY),
+      findShapeHandleAt: (docX, docY) => engine.findShapeHandleAt(docX, docY),
+      selectShape: (shapeId) => engine.selectShape(shapeId),
+      beginShapeGesture: (sample, handle) => engine.beginShapeGesture(sample, handle),
+      updateShapeGesture: (sample) => engine.updateShapeGesture(sample),
+      finishShapeGesture: () => engine.finishShapeGesture(),
+      cancelShapeGesture: () => engine.cancelShapeGesture(),
       isStrokeActive: () => engine.activeStroke !== null,
       isInsideSelection: (docX, docY) => engine.isInsideSelection(docX, docY),
       findSelectionHandleAt: (docX, docY) => engine.findSelectionHandleAt(docX, docY),
@@ -747,6 +1092,14 @@ export class DrawingEngine implements StrokeSource {
       finishGuideGesture: () => engine.finishGuideGesture(),
       cancelGuideGesture: () => engine.cancelGuideGesture(),
       selectGuide: (guideId) => engine.selectGuide(guideId),
+      findReferenceAt: (docX, docY) => engine.findReferenceAt(docX, docY),
+      findReferenceHandleAt: (docX, docY) => engine.findReferenceHandleAt(docX, docY),
+      selectReference: (referenceId) => engine.selectReference(referenceId),
+      beginReferenceGesture: (sample, handle) =>
+        engine.beginReferenceGesture(sample, handle),
+      updateReferenceGesture: (sample) => engine.updateReferenceGesture(sample),
+      finishReferenceGesture: () => engine.finishReferenceGesture(),
+      cancelReferenceGesture: () => engine.cancelReferenceGesture(),
     };
 
     this.commands.subscribe(() => this.publish());
@@ -769,6 +1122,7 @@ export class DrawingEngine implements StrokeSource {
       rasterScale: this.rasterScale,
     });
     renderer.setDocument(this.doc);
+    renderer.setReferenceSources(this.referenceSourceMap());
     renderer.setViewport(this.viewport);
     renderer.setGrid({
       visible: this.gridVisible,
@@ -779,6 +1133,9 @@ export class DrawingEngine implements StrokeSource {
       renderer.setDisplaySize(this.viewportSize.width, this.viewportSize.height, this.devicePixelRatio);
     }
     this.renderer = renderer;
+    // A document handed to the constructor may already carry references: their
+    // bytes are decoded now that there is somewhere to draw them.
+    this.decodeMissingReferenceSources();
 
     const handlers: CanvasInputHandlers = {
       getViewport: () => this.viewport,
@@ -814,7 +1171,14 @@ export class DrawingEngine implements StrokeSource {
     if (width <= 0 || height <= 0) {
       return;
     }
-    this.viewportSize = { width, height };
+    // The size object is only replaced when the size really changed, so the
+    // snapshot's `viewportSize` keeps its identity and a repeated report of
+    // the same size does not republish the state.
+    const sizeChanged =
+      this.viewportSize.width !== width || this.viewportSize.height !== height;
+    if (sizeChanged) {
+      this.viewportSize = { width, height };
+    }
 
     if (!this.laidOut) {
       this.laidOut = true;
@@ -831,6 +1195,11 @@ export class DrawingEngine implements StrokeSource {
         this.renderer.setRasterScale(this.rasterScale);
       }
       this.renderer.setDisplaySize(width, height, dpr);
+    }
+
+    if (sizeChanged) {
+      // The visible area moved, so a panel that marks it has to redraw.
+      this.publish();
     }
   }
 
@@ -870,7 +1239,12 @@ export class DrawingEngine implements StrokeSource {
     this.abortStroke();
     this.resetSelection();
     this.resetGuideGesture();
+    this.resetReferenceGesture();
+    this.resetShapeGesture();
     this.doc = documentOps.createDocument(options);
+    this.referenceStore.clear();
+    this.pendingReferenceDecodes.clear();
+    this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
     this.notice = null;
@@ -902,7 +1276,12 @@ export class DrawingEngine implements StrokeSource {
     this.abortStroke();
     this.resetSelection();
     this.resetGuideGesture();
+    this.resetReferenceGesture();
     this.doc = project.document;
+    this.referenceStore.clear();
+    this.pendingReferenceDecodes.clear();
+    this.syncReferences();
+    this.resetSymmetryAxes();
     this.strokes.clear();
     this.commands.clear();
     this.notice = null;
@@ -919,7 +1298,9 @@ export class DrawingEngine implements StrokeSource {
           ? createFillCommand(element, index, this.commandHost)
           : isGradient(element)
             ? createGradientCommand(element, index, this.commandHost)
-            : createStrokeCommand(element, index, this.commandHost),
+            : isShape(element)
+              ? createShapeCommand(element, index, this.commandHost)
+              : createStrokeCommand(element, index, this.commandHost),
       );
       nextIndex.set(element.layerId, index + 1);
     }
@@ -973,7 +1354,10 @@ export class DrawingEngine implements StrokeSource {
   markSaved(path: string): void {
     this.filePath = path;
     this.savedRevision = this.revision;
-    this.fileHoldsPreview = this.guideGesture !== null;
+    this.fileHoldsPreview =
+      this.guideGesture !== null ||
+      this.referenceGesture !== null ||
+      this.shapeGesture !== null;
     this.publish();
   }
 
@@ -1002,17 +1386,16 @@ export class DrawingEngine implements StrokeSource {
     if (after === before) {
       return;
     }
-    const copy = after.layers.find(
-      (layer) => !before.layers.some((known) => known.id === layer.id),
-    );
-    if (!copy) {
+    // The copy may be inside a group, so a root-list diff would not find it.
+    const copyId = newLayerIds(before.layers, after.layers)[0];
+    if (!copyId) {
       return;
     }
     const elements = this.strokes
       .listElements(layerId)
-      .map((element) => cloneElement(element, copy.id));
+      .map((element) => cloneElement(element, copyId));
     this.commitDocumentChange("Duplicate Layer", before, after, {
-      addedElements: { layerId: copy.id, elements },
+      addedElements: [{ layerId: copyId, elements }],
     });
   }
 
@@ -1021,17 +1404,28 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     const before = this.doc;
+    const node = findLayer(before.layers, layerId);
+    if (!node) {
+      return;
+    }
     const after = documentOps.removeLayer(before, layerId);
     if (after === before) {
       return;
     }
     // `listElements` returns the live array, which the command clears when it
-    // applies, so the elements to restore are copied out first.
-    const removedElements: ElementTransfer = {
-      layerId,
-      elements: [...this.strokes.listElements(layerId)],
-    };
-    this.commitDocumentChange("Delete Layer", before, after, { removedElements });
+    // applies, so the elements to restore are copied out first. A group is
+    // removed with everything it holds: every paintable layer inside it needs
+    // its own transfer, or undo would bring the rows back with no content.
+    const removedElements: ElementTransfer[] = paintableLayers([node]).map((layer) => ({
+      layerId: layer.id,
+      elements: [...this.strokes.listElements(layer.id)],
+    }));
+    this.commitDocumentChange(
+      isGroup(node) ? "Delete Group" : "Delete Layer",
+      before,
+      after,
+      { removedElements },
+    );
   }
 
   renameLayer(layerId: LayerId, name: string): void {
@@ -1065,7 +1459,8 @@ export class DrawingEngine implements StrokeSource {
   }
 
   toggleLayerVisibility(layerId: LayerId): void {
-    const layer = this.doc.layers.find((candidate) => candidate.id === layerId);
+    // A nested layer is found through the tree, not just the root list.
+    const layer = findLayer(this.doc.layers, layerId);
     if (layer) {
       this.setLayerVisibility(layerId, !layer.visible);
     }
@@ -1110,6 +1505,89 @@ export class DrawingEngine implements StrokeSource {
       documentOps.moveLayer(before, layerId, delta),
       { preserveActiveLayer: true },
     );
+  }
+
+  /**
+   * Creates an empty group directly above the active node, at its level.
+   *
+   * The active layer is kept: a group owns no content, so making it active
+   * would take the brush away from the artist for no reason. The panel focuses
+   * the new row and starts renaming it, which is why the id is returned.
+   *
+   * Returns `null` when a gesture is in flight or the active node's level
+   * cannot hold a group.
+   */
+  createGroup(): LayerId | null {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return null;
+    }
+    const before = this.doc;
+    const activeId = before.activeLayerId;
+    const location = activeId === null ? undefined : layerLocation(before.layers, activeId);
+    const parentId = location?.parentId ?? null;
+    const destination =
+      parentId === null
+        ? before.layers
+        : (findLayer(before.layers, parentId)?.children ?? []);
+    const index = location ? location.index + 1 : destination.length;
+    const outcome = createAddGroupCommand(
+      before,
+      { parentId, index },
+      this.documentCommandHost,
+    );
+    if (!outcome.ok) {
+      return null;
+    }
+    this.executeDocumentCommand(outcome.command);
+    return outcome.groupId;
+  }
+
+  /** Renames a group in one undoable step. Empty names are refused. */
+  renameGroup(groupId: LayerId, name: string): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createRenameGroupCommand(before, groupId, name, this.documentCommandHost);
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
+  }
+
+  /**
+   * Moves a layer to an explicit parent and sibling index.
+   *
+   * This is the engine side of a tree drop: one command lands the node where
+   * the drop marker said, even across levels, and the tree rules are checked
+   * by the pure operation before any history entry exists.
+   */
+  moveLayerToParent(layerId: LayerId, parentId: LayerId | null, index: number): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createMoveLayerToParentCommand(
+      before,
+      layerId,
+      parentId,
+      index,
+      this.documentCommandHost,
+    );
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
+  }
+
+  /** Dissolves a group in one undoable step; its children keep their pixels. */
+  dissolveGroup(groupId: LayerId): void {
+    if (this.refuseLayerChangeDuringGesture()) {
+      return;
+    }
+    const before = this.doc;
+    const outcome = createDissolveGroupCommand(before, groupId, this.documentCommandHost);
+    if (outcome.ok) {
+      this.executeDocumentCommand(outcome.command);
+    }
   }
 
   /**
@@ -1617,6 +2095,42 @@ export class DrawingEngine implements StrokeSource {
     this.publish();
   }
 
+  /**
+   * Chooses whether the next fill is the contiguous region around the seed or
+   * every matching pixel in the composite.
+   *
+   * Editor state, like the tolerance: it describes the next fill, and a
+   * committed fill carries its own pixels, so switching modes never rewrites
+   * one and adds no history step.
+   */
+  setFillMode(mode: FillMode): void {
+    const next = normalizeFillMode(mode);
+    if (next === this.fillMode) {
+      return;
+    }
+    this.fillMode = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Sets how coarsely the next fill samples the composite (`1`, `2`, `4` or
+   * `8` document pixels per examined pixel).
+   *
+   * Editor state, like the mode. The scanner clamps the value to the scales it
+   * supports, so an out-of-range number lands on the nearest real one instead
+   * of becoming a scan that never finishes.
+   */
+  setFillSampleScale(scale: number): void {
+    const next = normalizeFillSampleScale(scale);
+    if (next === this.fillSampleScale) {
+      return;
+    }
+    this.fillSampleScale = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
   /** Chooses linear or radial for the next gradient drag. */
   setGradientType(type: "linear" | "radial"): void {
     if (type !== "linear" && type !== "radial") {
@@ -1678,6 +2192,126 @@ export class DrawingEngine implements StrokeSource {
     this.syncGridToRenderer();
     this.commands.breakMerge();
     this.publish();
+  }
+
+  /**
+   * Shows or hides the canvas rulers.
+   *
+   * Display state, not an edit: the rulers are chrome painted on the display
+   * canvas over the artwork, so they add no history step, dirty nothing and
+   * never reach a layer surface, a project file or an export. A no-op change
+   * asks for no frame.
+   */
+  setRulersVisible(visible: boolean): void {
+    if (this.rulersVisible === visible) {
+      return;
+    }
+    this.rulersVisible = visible;
+    // The overlay reads its visibility from its own state, so the toggle is
+    // what turns the painter on; the frame below is what makes it appear.
+    setRulerOverlayState({ visible });
+    this.commands.breakMerge();
+    this.renderer?.requestRender();
+    this.publish();
+  }
+
+  /**
+   * Switches the stroke symmetry on or off.
+   *
+   * Enabling for the first time puts the axes in the middle of the document:
+   * an axis at the origin would mirror the whole drawing off the paper. Axes
+   * the user has already moved are left where they are.
+   *
+   * Editor state, like the grid: the axes are display-only and the switch adds
+   * no history step and dirties nothing. What does enter the document is the
+   * mirrored **copy**, which is an ordinary stroke.
+   */
+  setSymmetryEnabled(enabled: boolean): void {
+    if (enabled === this.symmetry.enabled) {
+      return;
+    }
+    const size = this.documentSize();
+    const placed = this.symmetry.verticalAxis !== 0 || this.symmetry.horizontalAxis !== 0;
+    const next =
+      enabled && !placed
+        ? {
+            ...centeredSymmetrySettings(size.width, size.height, this.symmetry.mode),
+            enabled: true,
+          }
+        : { ...this.symmetry, enabled };
+    this.applySymmetry(next);
+  }
+
+  /**
+   * Chooses the axes the symmetry mirrors across, or `"off"`.
+   *
+   * Choosing a mode switches the symmetry on, so the mode picker needs no
+   * second switch. It also places the axes at the document's middle when they
+   * have never been placed.
+   */
+  setSymmetryMode(mode: SymmetryMode | "off"): void {
+    if (mode === "off") {
+      this.setSymmetryEnabled(false);
+      return;
+    }
+    const nextMode = normalizeSymmetryMode(mode);
+    const size = this.documentSize();
+    const placed = this.symmetry.verticalAxis !== 0 || this.symmetry.horizontalAxis !== 0;
+    const next =
+      !this.symmetry.enabled && !placed
+        ? { ...centeredSymmetrySettings(size.width, size.height, nextMode), enabled: true }
+        : { ...this.symmetry, enabled: true, mode: nextMode };
+    this.applySymmetry(next);
+  }
+
+  /**
+   * Moves one mirror axis to a whole document pixel, clamped to the document.
+   *
+   * Editor state: the axis is a registration mark, and moving it rewrites no
+   * stroke that has already been drawn.
+   */
+  setSymmetryAxis(kind: SymmetryAxisKind, position: number): void {
+    if (!Number.isFinite(position)) {
+      return;
+    }
+    const size = this.documentSize();
+    const limit = kind === "vertical" ? size.width : size.height;
+    const next = Math.round(clamp(position, 0, limit));
+    this.applySymmetry(
+      kind === "vertical"
+        ? { ...this.symmetry, verticalAxis: next }
+        : { ...this.symmetry, horizontalAxis: next },
+    );
+  }
+
+  /** Commits a symmetry settings change and tells the overlay about it. */
+  private applySymmetry(next: SymmetrySettings): void {
+    if (symmetrySettingsEqual(next, this.symmetry)) {
+      return;
+    }
+    this.symmetry = next;
+    // The axes are painted by the shell's overlay registry; the settings live
+    // here because the engine is what decides the next stroke's copies.
+    setSymmetryOverlaySettings(next);
+    this.commands.breakMerge();
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Puts the mirror axes in the middle of the document that is now open.
+   *
+   * A document swap keeps the mode and the switch but not the old axis
+   * positions: an axis placed for a 400-pixel canvas is in the wrong place on a
+   * 2000-pixel one. Display state only - no history step, no dirty flag.
+   */
+  private resetSymmetryAxes(): void {
+    const size = this.documentSize();
+    this.symmetry = {
+      ...centeredSymmetrySettings(size.width, size.height, this.symmetry.mode),
+      enabled: this.symmetry.enabled,
+    };
+    setSymmetryOverlaySettings(this.symmetry);
   }
 
   /**
@@ -1793,6 +2427,15 @@ export class DrawingEngine implements StrokeSource {
     if (toolId !== "guides") {
       this.clearGuideSelection();
     }
+    // The reference selection belongs to the reference tool, exactly as the
+    // stroke selection belongs to the select tool.
+    if (toolId !== "reference") {
+      this.clearReferenceSelection();
+    }
+    // The shape selection belongs to the shape editor.
+    if (toolId !== "shapeEdit") {
+      this.clearShapeSelection();
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -1834,6 +2477,118 @@ export class DrawingEngine implements StrokeSource {
     this.setViewport(fitToViewport(this.viewportSize, this.documentSize()));
   }
 
+  /**
+   * Moves the view so that a document point sits in the middle of the canvas.
+   *
+   * The zoom stays where it is; only the pan changes. This is what a click in
+   * the navigator does.
+   *
+   * View state: no history entry, no revision bump and no dirty flag. The
+   * offset is the same one `core/shell/viewportState.ts` uses to put a
+   * remembered point in the middle of the canvas, so the view and the
+   * remembered viewport always agree.
+   */
+  centerViewportOn(docX: number, docY: number): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    this.setViewport(centerViewOn(this.viewport, this.viewportSize, docX, docY));
+  }
+
+  /**
+   * Moves the view so that the whole document sits in the middle of the canvas.
+   *
+   * The zoom stays where it is; only the pan changes. View state: no history
+   * entry, no revision bump and no dirty flag.
+   */
+  centerViewport(): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    const document = this.documentSize();
+    this.centerViewportOn(document.width / 2, document.height / 2);
+  }
+
+  /**
+   * Moves and zooms the view so that the whole selection is visible.
+   *
+   * Nothing happens when there is no selection to show: the view is left
+   * where the user put it rather than jumping to a guess. View state: no
+   * history entry, no revision bump and no dirty flag.
+   */
+  zoomToSelection(): void {
+    if (this.viewportSize.width <= 0 || this.viewportSize.height <= 0) {
+      return;
+    }
+    const bounds = this.selectionBounds();
+    if (!bounds) {
+      return;
+    }
+    const view = fitSelectionView(this.viewportSize, bounds);
+    if (view) {
+      this.setViewport(view);
+    }
+  }
+
+  /**
+   * A small overview of the document, for a navigator panel.
+   *
+   * The overview is cached: it is rebuilt only when the document changed or a
+   * different size was asked for, so panning, zooming and redrawing the panel
+   * cost nothing. A gesture in flight owns content that is not in the document
+   * yet, so the cached overview is returned unchanged until the gesture ends.
+   *
+   * A read: no document pixel changes, nothing enters history and the
+   * document is not marked dirty.
+   */
+  getOverview(width: number, height: number): HTMLCanvasElement | null {
+    const renderer = this.renderer;
+    if (!renderer) {
+      return null;
+    }
+    if (this.isGestureActive()) {
+      // The document is mid-gesture: the cached overview is the honest
+      // picture, and a half-drawn stroke is not part of the document yet.
+      return this.overviewCache.peek();
+    }
+    const targetWidth = Math.max(1, Math.round(width));
+    const targetHeight = Math.max(1, Math.round(height));
+    return this.overviewCache.read(
+      {
+        document: this.doc,
+        revision: this.revision,
+        width: targetWidth,
+        height: targetHeight,
+      },
+      () => this.produceOverview(renderer, targetWidth, targetHeight),
+    );
+  }
+
+  /**
+   * Makes the overview itself.
+   *
+   * A renderer that can make an overview is asked for one; a renderer that
+   * cannot falls back to the document's own composite, which the panel
+   * scales down when it draws it. Either way the picture is the document as
+   * it is - the overview never shows the grid, the guides, the selection or
+   * the in-progress stroke.
+   */
+  private produceOverview(
+    renderer: DrawingRenderer,
+    width: number,
+    height: number,
+  ): HTMLCanvasElement | null {
+    const render = renderer.renderOverview;
+    if (typeof render === "function") {
+      const canvas = render.call(renderer, width, height);
+      if (canvas) {
+        return canvas;
+      }
+    }
+    const composite = renderer.composeDocumentImage();
+    return composite ?? null;
+  }
+
   // ------------------------------------------------------------------ history
 
   /** True while a pointer gesture owns content that is not yet in history. */
@@ -1843,7 +2598,9 @@ export class DrawingEngine implements StrokeSource {
       this.activeFill !== null ||
       this.activeGradient !== null ||
       this.selectionGesture !== null ||
-      this.guideGesture !== null
+      this.guideGesture !== null ||
+      this.referenceGesture !== null ||
+      this.shapeGesture !== null
     );
   }
 
@@ -1860,7 +2617,7 @@ export class DrawingEngine implements StrokeSource {
 
   /** True when `layerId` is still part of the current document. */
   private layerExists(layerId: LayerId): boolean {
-    return this.doc.layers.some((layer) => layer.id === layerId);
+    return findLayer(this.doc.layers, layerId) !== undefined;
   }
 
   /**
@@ -1918,11 +2675,34 @@ export class DrawingEngine implements StrokeSource {
 
   // ----------------------------------------------------------- stroke capture
 
+  /**
+   * The layer a drawing or selection gesture may target.
+   *
+   * A group is selectable for metadata (rename, visibility, opacity, blend,
+   * moving), but it owns no content. Recording a stroke or a selection against
+   * it would create data no renderer can show, so the gesture is refused and
+   * the user is told what to select instead.
+   */
+  private activePaintableLayerId(): LayerId | null {
+    const activeId = this.doc.activeLayerId;
+    if (activeId === null) {
+      return null;
+    }
+    const layer = findLayer(this.doc.layers, activeId);
+    if (layer && !isGroup(layer)) {
+      return layer.id;
+    }
+    if (layer) {
+      this.raiseNotice(GROUP_DRAW_NOTICE);
+    }
+    return null;
+  }
+
   beginStroke(sample: PointerSample): void {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return;
     }
@@ -1963,16 +2743,17 @@ export class DrawingEngine implements StrokeSource {
   /**
    * Starts a shape gesture.
    *
-   * Shapes do not trace the pointer: the tool computes a whole outline from the
-   * drag and replaces it on every move (see `setShapeOutline`). The engine holds
-   * the in-flight stroke and the renderer previews it exactly as for a brush
-   * stroke, so committing is the same one-step path.
+   * Shapes do not trace the pointer: the tool computes a whole primitive from
+   * the drag and replaces it on every move (see `setShapeSpec`). The engine
+   * holds a temporary preview stroke derived from the geometry and the
+   * renderer previews it exactly as for a brush stroke; the released gesture
+   * commits the *geometry*, not the samples.
    */
   private beginShape(sample: PointerSample): void {
     if (this.activeStroke) {
       return;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return;
     }
@@ -1988,7 +2769,7 @@ export class DrawingEngine implements StrokeSource {
       // segment path even when the brush is stamped.
       shapeBrush(this.brushForSample(sample)),
       this.activeTool().erases === true,
-      // Read here, at press time, so the preview and the committed stroke agree:
+      // Read here, at press time, so the preview and the committed shape agree:
       // a shape keeps the fill setting it was started with. A line's definition
       // is not fillable, so the setting cannot produce a degenerate sliver.
       this.shapeFill && this.activeTool().definition.fillable === true,
@@ -1996,23 +2777,28 @@ export class DrawingEngine implements StrokeSource {
     stroke.startTime = sample.timeStamp;
     this.beginGesture();
     this.strokeBuilder = null;
+    this.activeShapeSpec = null;
+    this.shapePressActive = true;
     this.activeStroke = stroke;
     this.renderer?.beginStroke(stroke);
   }
 
   /**
-   * Replaces the in-progress shape's samples with a new outline.
+   * Replaces the in-progress shape's geometry.
    *
-   * Pressure is fixed at 1 so a shape has constant width, and `times` are zero
-   * because a shape has no timing - they exist only to keep the sample arrays
-   * parallel. The renderer redraws the whole buffer, so the preview shows the
-   * current geometry and nothing accumulates across moves.
+   * The preview stroke's samples are derived from the geometry through the
+   * same `shapeGeometryOutline` the renderer uses for a committed shape, so
+   * what is previewed and what is committed cannot drift. Pressure is fixed at
+   * 1 and `times` are zero: a shape has constant width and no timing, and the
+   * arrays exist only to keep the preview a valid stroke record.
    */
-  private setShapeOutline(points: readonly ShapePoint[]): void {
+  private setShapeSpec(geometry: ShapeGeometry): void {
     const stroke = this.activeStroke;
     if (!stroke) {
       return;
     }
+    this.activeShapeSpec = geometry;
+    const points = shapeGeometryOutline(geometry);
     stroke.xs.length = 0;
     stroke.ys.length = 0;
     stroke.pressures.length = 0;
@@ -2026,19 +2812,453 @@ export class DrawingEngine implements StrokeSource {
     this.renderer?.replaceStroke(stroke);
   }
 
-  /** Commits the in-progress shape; an empty outline is discarded, not stored. */
+  /**
+   * Commits the in-progress shape as one native element.
+   *
+   * The preview is discarded, never composited: the committed record is
+   * inserted into the store and the layer is re-rasterized from it, which is
+   * exactly the path an undo, a redo and a reopened project take. A gesture
+   * with no geometry - a click - is cancelled, so a stray press cannot leave a
+   * dot behind.
+   */
   private finishShape(): void {
     const stroke = this.activeStroke;
-    if (!stroke || stroke.xs.length === 0) {
-      this.cancelShape();
+    const geometry = this.activeShapeSpec;
+    this.shapePressActive = false;
+    this.strokeBuilder = null;
+    this.activeStroke = null;
+    this.activeShapeSpec = null;
+    if (!stroke || !geometry) {
+      this.renderer?.cancelStroke();
       return;
     }
-    this.finishStroke();
+    if (!this.layerExists(stroke.layerId)) {
+      // Same last-resort guard as `finishStroke`: never insert into a layer
+      // that is no longer part of the document.
+      this.renderer?.cancelStroke();
+      this.publish();
+      return;
+    }
+    const outline = shapeGeometryOutline(geometry);
+    if (outline.length < 2) {
+      this.renderer?.cancelStroke();
+      return;
+    }
+    this.renderer?.cancelStroke();
+
+    const shape: ShapeRecord = {
+      id: stroke.id,
+      layerId: stroke.layerId,
+      kind: "shape",
+      geometry,
+      brush: stroke.brush,
+      fill: stroke.fill === true,
+    };
+    const index = this.strokes.elementCount(shape.layerId);
+    const copies = this.symmetryShapeCopies(shape);
+    this.strokes.insert(shape);
+    copies.forEach((copy, position) => {
+      this.strokes.insert(copy, index + position + 1);
+    });
+    this.renderer?.invalidateLayer(shape.layerId);
+
+    // The revision is bumped before the command is recorded, so the single
+    // snapshot the command stack publishes already carries the dirty flag.
+    this.revision += 1;
+    // One gesture is one history step, mirrors included.
+    this.commands.push(
+      createShapesCommand(
+        [shape, ...copies],
+        [index, ...copies.map((_, position) => index + position + 1)],
+        this.commandHost,
+      ),
+    );
+    this.publish();
   }
 
   /** Discards the in-progress shape without touching the layer. */
   private cancelShape(): void {
-    this.cancelStroke();
+    this.shapePressActive = false;
+    this.strokeBuilder = null;
+    this.activeStroke = null;
+    this.activeShapeSpec = null;
+    this.renderer?.cancelStroke();
+  }
+
+  /**
+   * The symmetry copies of a just-finished shape, in painting order.
+   *
+   * A copy is an ordinary shape: the same primitive, parameters and brush,
+   * mirrored. That is what keeps the document self-describing - a reopened
+   * project, an undo and an export reproduce the copies without knowing a
+   * symmetry was ever on.
+   *
+   * A copy whose outline lies entirely on its mirror is dropped: it would land
+   * exactly on the original and paint it twice.
+   */
+  private symmetryShapeCopies(shape: ShapeRecord): ShapeRecord[] {
+    const mirrors = symmetryMirrors(this.symmetry);
+    if (mirrors.length === 0) {
+      return [];
+    }
+    const points = shapeRecordOutline(shape);
+    const copies: ShapeRecord[] = [];
+    for (const mirror of mirrors) {
+      if (!mirrorMovesAny(points, mirror)) {
+        continue;
+      }
+      copies.push({ ...mirrorShape(shape, mirror), id: createId("shape") });
+    }
+    return copies;
+  }
+
+  // ------------------------------------------------------------- shape editing
+
+  /** The shape the editor has selected, or `null` when it is gone. */
+  selectedShape(): ShapeRecord | null {
+    const id = this.selectedShapeId;
+    if (id === null) {
+      return null;
+    }
+    return this.shapeById(id);
+  }
+
+  private shapeById(id: string): ShapeRecord | null {
+    const layerId = this.activePaintableLayerId();
+    if (!layerId) {
+      return null;
+    }
+    for (const element of this.strokes.listElements(layerId)) {
+      if (isShape(element) && element.id === id) {
+        return element;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The top-most shape under a document point, on the active paintable layer.
+   *
+   * The tolerance is the brush's half-width and the screen grab radius,
+   * whichever is larger: a thin shape is as easy to click as a thick one, and
+   * the target stays the same size on screen at any zoom.
+   */
+  findShapeAt(docX: number, docY: number): ShapeRecord | null {
+    const layerId = this.activePaintableLayerId();
+    if (!layerId) {
+      return null;
+    }
+    const elements = this.strokes.listElements(layerId);
+    for (let index = elements.length - 1; index >= 0; index -= 1) {
+      const element = elements[index];
+      if (!isShape(element)) {
+        continue;
+      }
+      const tolerance = Math.max(
+        element.brush.size / 2,
+        HANDLE_GRAB_RADIUS_PX / this.viewport.zoom,
+      );
+      if (shapeHitTest(element, docX, docY, tolerance)) {
+        return element;
+      }
+    }
+    return null;
+  }
+
+  /** The handle of the selected shape a press grabs, or `null`. */
+  findShapeHandleAt(docX: number, docY: number): SelectionHandleId | null {
+    const shape = this.selectedShape();
+    if (!shape) {
+      return null;
+    }
+    return findShapeHandle(
+      shape,
+      docX,
+      docY,
+      this.rotationHandleOffset(),
+      HANDLE_GRAB_RADIUS_PX / this.viewport.zoom,
+    );
+  }
+
+  /** Selects a shape, or clears the selection with `null`. */
+  selectShape(shapeId: string | null): void {
+    if (this.selectedShapeId === shapeId) {
+      return;
+    }
+    // A new selection starts a new coalescing run: the next slider drag must
+    // not merge into the previous shape's step.
+    this.commands.breakMerge();
+    this.selectedShapeId = shapeId;
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Starts moving, resizing or rotating the selected shape.
+   *
+   * A press with no handle grabs the top-most shape under the point and starts
+   * a move; a press on a handle transforms the selected one. Returns whether a
+   * gesture started, so the tool can clear the selection on empty canvas.
+   */
+  beginShapeGesture(sample: PointerSample, handle: SelectionHandleId | null): boolean {
+    if (!Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return false;
+    }
+    let shape = this.selectedShape();
+    if (handle === null) {
+      const hit = this.findShapeAt(sample.docX, sample.docY);
+      if (!hit) {
+        this.selectShape(null);
+        return false;
+      }
+      if (hit.id !== this.selectedShapeId) {
+        this.selectShape(hit.id);
+      }
+      shape = hit;
+    }
+    if (!shape) {
+      return false;
+    }
+
+    const frame = shapeRecordFrame(shape);
+    const centre = frameCentre(frame);
+    this.abortShapeGesture();
+    this.beginGesture();
+    this.shapeGesture = {
+      mode: handle === "rotate" ? "rotate" : handle === null ? "move" : "resize",
+      initial: shape,
+      shapeId: shape.id,
+      handle,
+      pressX: sample.docX,
+      pressY: sample.docY,
+      centreX: centre.x,
+      centreY: centre.y,
+      startAngle: Math.atan2(sample.docY - centre.y, sample.docX - centre.x),
+    };
+    return true;
+  }
+
+  /** Previews the shape gesture at the pointer. Nothing enters history yet. */
+  updateShapeGesture(sample: PointerSample): void {
+    const gesture = this.shapeGesture;
+    if (!gesture || !Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return;
+    }
+
+    let next: ShapeRecord;
+    if (gesture.mode === "move") {
+      next = translateShape(
+        gesture.initial,
+        sample.docX - gesture.pressX,
+        sample.docY - gesture.pressY,
+      );
+    } else if (gesture.mode === "resize") {
+      if (gesture.handle === null || gesture.handle === "rotate") {
+        return;
+      }
+      next = resizeShape(
+        gesture.initial,
+        gesture.handle,
+        { x: sample.docX, y: sample.docY },
+        sample.modifiers.shift,
+      );
+    } else {
+      const angle = Math.atan2(sample.docY - gesture.centreY, sample.docX - gesture.centreX);
+      const degrees = ((angle - gesture.startAngle) * 180) / Math.PI;
+      next = rotateShape(gesture.initial, degrees, sample.modifiers.shift);
+    }
+
+    const current = this.shapeById(gesture.shapeId);
+    if (current && shapeRecordsEqual(current, next)) {
+      return;
+    }
+    // The preview lives in the store, so the layer rebuild and the overlay see
+    // the real record; history is untouched until release.
+    this.strokes.replace(next);
+    this.renderer?.invalidateLayer(next.layerId);
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+  }
+
+  /**
+   * Commits the gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click, or a drag that ended where it
+   * started - commits nothing, so history never holds an empty step.
+   */
+  finishShapeGesture(): void {
+    const gesture = this.shapeGesture;
+    if (!gesture) {
+      return;
+    }
+    this.shapeGesture = null;
+    const final = this.shapeById(gesture.shapeId);
+    if (!final || shapeRecordsEqual(gesture.initial, final)) {
+      this.syncSelectionOverlay();
+      this.requestRender();
+      return;
+    }
+    const label =
+      gesture.mode === "move"
+        ? "Move Shape"
+        : gesture.mode === "resize"
+          ? "Resize Shape"
+          : "Rotate Shape";
+    this.revision += 1;
+    this.commands.push(
+      createShapeEditCommand(gesture.initial, final, this.commandHost, { label }),
+    );
+    this.publish();
+    this.syncSelectionOverlay();
+    this.requestRender();
+  }
+
+  /**
+   * Aborts the gesture and restores the press-time record.
+   *
+   * Escape cancels the drag *and* drops the frame, exactly as it clears the
+   * guide and reference selections: the user asked to stop, not to keep
+   * editing.
+   */
+  cancelShapeGesture(): void {
+    this.abortShapeGesture();
+    this.selectedShapeId = null;
+    this.tools.shapeEdit.reset(this.toolContext);
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+  }
+
+  /** Clears an in-flight gesture without telling the tool. */
+  private abortShapeGesture(): void {
+    const gesture = this.shapeGesture;
+    if (!gesture) {
+      return;
+    }
+    this.shapeGesture = null;
+    this.strokes.replace(gesture.initial);
+    this.renderer?.invalidateLayer(gesture.initial.layerId);
+  }
+
+  /** Deletes the selected shape as one history step. */
+  deleteSelectedShape(): boolean {
+    const shape = this.selectedShape();
+    if (!shape) {
+      return false;
+    }
+    const index = this.strokes.indexOf(shape.layerId, shape.id);
+    if (index === -1) {
+      return false;
+    }
+    this.selectedShapeId = null;
+    this.revision += 1;
+    // `execute` applies the removal and records it; `push` alone records a
+    // command that has already been applied.
+    this.commands.execute(createShapeDeleteCommand(shape, index, this.commandHost));
+    this.publish();
+    this.syncSelectionOverlay();
+    this.requestRender();
+    return true;
+  }
+
+  /** Sets whether the selected shape's interior is filled. */
+  setSelectedShapeFill(filled: boolean): boolean {
+    return this.editSelectedShape((shape) => setShapeFill(shape, filled), "fill");
+  }
+
+  /** Sets the selected polygon's sides or the selected star's points. */
+  setSelectedShapeSides(sides: number): boolean {
+    return this.editSelectedShape((shape) => setShapeSides(shape, sides), "sides");
+  }
+
+  /** Sets the selected star's inner radius. */
+  setSelectedShapeInnerRatio(ratio: number): boolean {
+    return this.editSelectedShape((shape) => setShapeInnerRatio(shape, ratio), "innerRatio");
+  }
+
+  /** Sets the selected box shape's absolute rotation. */
+  setSelectedShapeRotation(degrees: number): boolean {
+    return this.editSelectedShape((shape) => setShapeRotation(shape, degrees), "rotation");
+  }
+
+  /** Sets the selected box shape's size, keeping its top-left corner. */
+  setSelectedShapeSize(width: number, height: number): boolean {
+    return this.editSelectedShape((shape) => setShapeSize(shape, width, height), "size");
+  }
+
+  /** Sets the selected box shape's width, keeping its height and corner. */
+  setSelectedShapeWidth(width: number): boolean {
+    return this.editSelectedShape(
+      (shape) =>
+        shape.geometry.shape === "line"
+          ? shape
+          : setShapeSize(shape, width, shape.geometry.height),
+      "width",
+    );
+  }
+
+  /** Sets the selected box shape's height, keeping its width and corner. */
+  setSelectedShapeHeight(height: number): boolean {
+    return this.editSelectedShape(
+      (shape) =>
+        shape.geometry.shape === "line"
+          ? shape
+          : setShapeSize(shape, shape.geometry.width, height),
+      "height",
+    );
+  }
+
+  /**
+   * Patches the selected shape's appearance.
+   *
+   * Every appearance field the compact editor offers is a brush field. The
+   * patch is normalized and `stamp` is forced off, so an appearance edit can
+   * never turn a shape into a chain of dabs.
+   */
+  setSelectedShapeBrush(patch: Partial<BrushSettings>): boolean {
+    // The merge key names the fields being patched, so a drag of one slider
+    // coalesces into one step while changing a different field - the colour
+    // after the width - starts a new one.
+    const fields = Object.keys(patch).sort().join("+");
+    return this.editSelectedShape(
+      (shape) => setShapeBrush(shape, patch),
+      `brush:${fields}`,
+    );
+  }
+
+  /**
+   * Applies a pure edit to the selected shape as one coalescing history step.
+   *
+   * The merge key names the field: consecutive writes of the same field - a
+   * slider drag - collapse into one entry, while a different field or a new
+   * selection starts a new step.
+   */
+  private editSelectedShape(
+    edit: (shape: ShapeRecord) => ShapeRecord,
+    field: string,
+  ): boolean {
+    const current = this.selectedShape();
+    if (!current) {
+      return false;
+    }
+    const next = edit(current);
+    if (shapeRecordsEqual(current, next)) {
+      return false;
+    }
+    this.strokes.replace(next);
+    this.renderer?.invalidateLayer(next.layerId);
+    this.revision += 1;
+    this.commands.push(
+      createShapeEditCommand(current, next, this.commandHost, {
+        mergeKey: `shape:${next.id}:${field}`,
+      }),
+    );
+    this.publish();
+    this.syncSelectionOverlay();
+    this.requestRender();
+    return true;
   }
 
   // -------------------------------------------------------------- bucket fill
@@ -2061,7 +3281,7 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return false;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       return false;
     }
@@ -2086,15 +3306,39 @@ export class DrawingEngine implements StrokeSource {
     const seedX = Math.min(this.doc.width - 1, Math.max(0, Math.floor(sample.docX)));
     const seedY = Math.min(this.doc.height - 1, Math.max(0, Math.floor(sample.docY)));
     const colour = this.brushForSample(sample).color;
-    const region = floodFill(image, seedX, seedY, this.fillTolerance);
-    if (!region) {
+    // The scanner decides the region from the same composite the user sees:
+    // `contiguous` walks out from the seed, `global` takes every matching
+    // pixel, and `sampleScale` trades boundary precision for scan cost.
+    const outcome = scanFill(
+      image,
+      seedX,
+      seedY,
+      {
+        tolerance: this.fillTolerance,
+        mode: this.fillMode,
+        sampleScale: this.fillSampleScale,
+      },
+      MAX_FILL_SCAN_PIXELS,
+    );
+    if (outcome.status === "over-budget") {
+      this.raiseNotice(
+        `Bucket fill would examine ${outcome.pixels.toLocaleString("en-US")} pixels; ` +
+          `the limit is ${outcome.limit.toLocaleString("en-US")}. ` +
+          "Raise the sample scale or fill a smaller document.",
+      );
       return false;
     }
+    if (outcome.status !== "region") {
+      return false;
+    }
+    const region = outcome.region;
 
-    // At tolerance 0 every selected pixel is exactly the seed colour. Painting
-    // that colour back is a no-op, and recording an invisible undo step would
-    // make the history button look broken.
-    if (this.fillTolerance === 0) {
+    // At tolerance 0 and full sampling every selected pixel is exactly the seed
+    // colour. Painting that colour back is a no-op, and recording an invisible
+    // undo step would make the history button look broken. A coarser sample
+    // compares a sampled colour, so the exact seed pixel is no longer the rule
+    // the scan followed and the guard would be wrong.
+    if (this.fillTolerance === 0 && this.fillSampleScale === 1) {
       const offset = (seedY * image.width + seedX) * 4;
       const seedColour = hexToRgb(colour);
       if (
@@ -2182,7 +3426,7 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke || this.activeFill || this.activeGradient) {
       return false;
     }
-    const layerId = this.doc.activeLayerId;
+    const layerId = this.activePaintableLayerId();
     if (!layerId || !isInsideDocument(this.doc, sample.docX, sample.docY)) {
       return false;
     }
@@ -2306,12 +3550,64 @@ export class DrawingEngine implements StrokeSource {
 
     this.renderer?.endStroke(stroke);
     const index = this.strokes.elementCount(stroke.layerId);
+    const copies = this.symmetryCopies(stroke);
     this.strokes.insert(stroke);
+    copies.forEach((copy, position) => {
+      this.strokes.insert(copy, index + position + 1);
+    });
+    if (copies.length > 0) {
+      // `endStroke` composited the original's buffer into the layer surface.
+      // The copies are new elements, so the surface has to be rebuilt from the
+      // list to include them.
+      this.renderer?.invalidateLayer(stroke.layerId);
+    }
     // The revision is bumped before the command is recorded, so the single
     // snapshot the command stack publishes already carries the dirty flag.
     this.revision += 1;
-    this.commands.push(createStrokeCommand(stroke, index, this.commandHost));
+    // One gesture is one history step, mirrors included: undoing a symmetric
+    // stroke must take the whole gesture away, not one copy at a time.
+    this.commands.push(
+      createStrokesCommand(
+        [stroke, ...copies],
+        [index, ...copies.map((_, position) => index + position + 1)],
+        this.commandHost,
+      ),
+    );
     this.publish();
+  }
+
+  /**
+   * The symmetry copies of a just-finished stroke, in painting order.
+   *
+   * A copy is an ordinary stroke: the same brush, colour, pressure and timing,
+   * with every sample reflected. That is what keeps the document
+   * self-describing - a reopened project, an undo and an export reproduce the
+   * copies without knowing a symmetry was ever on.
+   *
+   * A copy whose samples all lie on its mirror is dropped: it would land
+   * exactly on the original and paint it twice, darkening the line.
+   */
+  private symmetryCopies(stroke: StrokeRecord): StrokeRecord[] {
+    const mirrors = symmetryMirrors(this.symmetry);
+    if (mirrors.length === 0 || stroke.xs.length === 0) {
+      return [];
+    }
+    const points: Point[] = stroke.xs.map((x, index) => ({ x, y: stroke.ys[index] }));
+    const copies: StrokeRecord[] = [];
+    for (const mirror of mirrors) {
+      if (!mirrorMovesAny(points, mirror)) {
+        continue;
+      }
+      const xs = new Array<number>(points.length);
+      const ys = new Array<number>(points.length);
+      for (let index = 0; index < points.length; index += 1) {
+        const mirrored = mirrorPoint(points[index], mirror);
+        xs[index] = mirrored.x;
+        ys[index] = mirrored.y;
+      }
+      copies.push({ ...stroke, id: createId("stroke"), xs, ys });
+    }
+    return copies;
   }
 
   cancelStroke(): void {
@@ -2320,7 +3616,36 @@ export class DrawingEngine implements StrokeSource {
     }
     this.strokeBuilder = null;
     this.activeStroke = null;
+    this.shapePressActive = false;
+    // A shape preview is carried in the same stroke buffer, so cancelling the
+    // stroke must forget its geometry too: otherwise the next release would
+    // commit a shape the user had already abandoned.
+    this.activeShapeSpec = null;
     this.renderer?.cancelStroke();
+  }
+
+  /**
+   * Discards a shape press that has not been released.
+   *
+   * A shape tool places nothing on the layer while the pointer is down, so
+   * Escape can throw the preview away exactly - unlike a brush stroke, which
+   * has already inked the layer and is committed on release. Returns whether
+   * a press was in flight, so the caller can let Escape fall through to its
+   * other meanings when it was not.
+   *
+   * The active tool is reset as well as the engine, so the tool forgets its
+   * anchor: moving the still-captured pointer after Escape cannot revive the
+   * abandoned outline, and the release commits nothing.
+   */
+  cancelShapeCreation(): boolean {
+    if (!this.shapePressActive || !SHAPE_TOOL_IDS.has(this.currentToolId)) {
+      return false;
+    }
+    this.shapePressActive = false;
+    this.activeTool().reset(this.toolContext);
+    this.publish();
+    this.requestRender();
+    return true;
   }
 
   // ---------------------------------------------------------------- selection
@@ -2354,6 +3679,23 @@ export class DrawingEngine implements StrokeSource {
     return findSelectionHandle(handles, docX, docY, this.handleGrabRadius());
   }
 
+  /**
+   * Chooses the shape the next marquee traces: a rectangle or a lasso.
+   *
+   * Editor state, like the fill mode: it changes how the next selection is
+   * drawn, never the committed selection, so it adds no history step and cannot
+   * dirty the document.
+   */
+  setSelectionShape(shape: SelectionShape): void {
+    const next = normalizeSelectionShape(shape);
+    if (next === this.selectionShape) {
+      return;
+    }
+    this.selectionShape = next;
+    this.commands.breakMerge();
+    this.publish();
+  }
+
   /** Drops the selection and its overlay. Not an edit: nothing enters history. */
   clearSelection(): void {
     this.cancelSelectionGesture();
@@ -2366,6 +3708,59 @@ export class DrawingEngine implements StrokeSource {
     this.syncSelectionOverlay();
     this.publish();
     this.requestRender();
+  }
+
+  /**
+   * Selects every stroke on the active layer.
+   *
+   * Selection is editor state, so this records no history step and dirties
+   * nothing. Returns whether anything was selected; an empty layer clears the
+   * selection instead of leaving an empty one behind.
+   */
+  selectAll(): boolean {
+    const layerId = this.activePaintableLayerId();
+    if (!layerId) {
+      this.clearSelection();
+      return false;
+    }
+    const strokeIds = this.strokes.list(layerId).map((stroke) => stroke.id);
+    if (strokeIds.length === 0) {
+      this.clearSelection();
+      return false;
+    }
+    this.setSelection({ layerId, strokeIds });
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return true;
+  }
+
+  /**
+   * Selects the strokes of the active layer that are **not** selected.
+   *
+   * With nothing selected this is select-all; with everything selected it
+   * clears the selection. Selection is editor state: no history step, no dirty
+   * flag. Returns whether the result selects anything.
+   */
+  invertSelection(): boolean {
+    const layerId = this.activePaintableLayerId();
+    if (!layerId) {
+      this.clearSelection();
+      return false;
+    }
+    const current =
+      this.selection && this.selection.layerId === layerId
+        ? new Set(this.selection.strokeIds)
+        : new Set<string>();
+    const strokeIds = this.strokes
+      .list(layerId)
+      .filter((stroke) => !current.has(stroke.id))
+      .map((stroke) => stroke.id);
+    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
+    this.syncSelectionOverlay();
+    this.publish();
+    this.requestRender();
+    return strokeIds.length > 0;
   }
 
   /**
@@ -2655,10 +4050,16 @@ export class DrawingEngine implements StrokeSource {
     }
     this.cancelSelectionGesture();
     this.beginGesture();
+    const shape = this.selectionShape;
     this.selectionGesture = {
       mode: "marquee",
       anchor: { x: sample.docX, y: sample.docY },
+      shape,
+      // Fixed at press time: releasing a modifier mid-drag must not change
+      // what the release means.
+      combine: selectionCombineFor(sample.modifiers),
       bounds: { x: sample.docX, y: sample.docY, width: 0, height: 0 },
+      points: shape === "lasso" ? [{ x: sample.docX, y: sample.docY }] : [],
     };
     this.syncSelectionOverlay();
     this.requestRender();
@@ -2785,7 +4186,11 @@ export class DrawingEngine implements StrokeSource {
     }
 
     if (gesture.mode === "marquee") {
-      gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      if (gesture.shape === "lasso") {
+        this.extendLasso(gesture.points, { x: sample.docX, y: sample.docY });
+      } else {
+        gesture.bounds = boundsFromCorners(gesture.anchor, { x: sample.docX, y: sample.docY });
+      }
       this.syncSelectionOverlay();
       this.requestRender();
       return;
@@ -2880,9 +4285,22 @@ export class DrawingEngine implements StrokeSource {
     this.selectionGesture = null;
 
     if (gesture.mode === "marquee") {
-      this.selectInBounds(
-        gesture.bounds ?? { x: gesture.anchor.x, y: gesture.anchor.y, width: 0, height: 0 },
-      );
+      if (gesture.shape === "lasso" && gesture.points.length >= 3) {
+        this.selectInPolygon(gesture.points, gesture.combine);
+      } else {
+        // A lasso that never became a polygon is a click: hit-test the strokes
+        // under the press with the rectangle rule's zero-size box.
+        const bounds =
+          gesture.shape === "lasso"
+            ? { x: gesture.anchor.x, y: gesture.anchor.y, width: 0, height: 0 }
+            : (gesture.bounds ?? {
+                x: gesture.anchor.x,
+                y: gesture.anchor.y,
+                width: 0,
+                height: 0,
+              });
+        this.selectInBounds(bounds, gesture.combine);
+      }
       this.syncSelectionOverlay();
       this.publish();
       this.requestRender();
@@ -2980,22 +4398,66 @@ export class DrawingEngine implements StrokeSource {
     this.commands.breakMerge();
   }
 
-  /** Selects the strokes of the active layer that the marquee meets. */
-  private selectInBounds(bounds: Bounds): void {
-    const layerId = this.doc.activeLayerId;
+  /** Appends the pointer to a lasso path, spaced and capped. */
+  private extendLasso(points: Point[], point: Point): void {
+    if (points.length >= MAX_LASSO_POINTS) {
+      return;
+    }
+    const last = points[points.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) < LASSO_SAMPLE_DISTANCE) {
+      return;
+    }
+    points.push(point);
+  }
+
+  /**
+   * Selects the strokes of the active layer that the marquee meets.
+   *
+   * A stroke is widened by half its painted width, so a stroke whose pixels
+   * reach into the region selects even when its centreline stays outside.
+   */
+  private selectInBounds(bounds: Bounds, combine: SelectionCombine): void {
+    this.selectWhere(
+      (stroke) => strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2),
+      combine,
+    );
+  }
+
+  /** Selects the strokes of the active layer that the lasso polygon meets. */
+  private selectInPolygon(points: readonly Point[], combine: SelectionCombine): void {
+    this.selectWhere(
+      (stroke) => strokeIntersectsPolygon(stroke, points, strokeDiameter(stroke.brush, 1) / 2),
+      combine,
+    );
+  }
+
+  /**
+   * Commits a region test's result, combined with the selection already there.
+   *
+   * The caller decides the region and applies the stroke's padding; this method
+   * only turns the matched ids into the next selection. A combine builds on the
+   * current selection only when it belongs to the same layer, which is also the
+   * layer the region was tested against.
+   */
+  private selectWhere(
+    matches: (stroke: StrokeRecord) => boolean,
+    combine: SelectionCombine,
+  ): void {
+    const layerId = this.activePaintableLayerId();
     if (!layerId) {
       this.setSelection(null);
       return;
     }
     const strokeIds: string[] = [];
     for (const stroke of this.strokes.list(layerId)) {
-      // Widened by half the stroke's painted width, so a stroke whose pixels
-      // reach into the marquee selects even when its centreline stays outside.
-      if (strokeIntersectsBounds(stroke, bounds, strokeDiameter(stroke.brush, 1) / 2)) {
+      if (matches(stroke)) {
         strokeIds.push(stroke.id);
       }
     }
-    this.setSelection(strokeIds.length > 0 ? { layerId, strokeIds } : null);
+    const current =
+      this.selection && this.selection.layerId === layerId ? this.selection.strokeIds : null;
+    const next = combineSelectionIds(current, strokeIds, combine);
+    this.setSelection(next ? { layerId, strokeIds: next } : null);
   }
 
   /**
@@ -3083,9 +4545,19 @@ export class DrawingEngine implements StrokeSource {
     if (!renderer) {
       return;
     }
-    const marquee = this.selectionGesture?.mode === "marquee" ? this.selectionGesture.bounds : null;
+    // The shape editor owns the overlay while it is active, exactly as the
+    // guides and reference tools own theirs. The two selections are exclusive.
+    if (this.selectedShapeId !== null || this.currentToolId === "shapeEdit") {
+      this.syncShapeOverlay();
+      return;
+    }
+    const gesture = this.selectionGesture;
+    const marqueeBounds =
+      gesture?.mode === "marquee" && gesture.shape === "rect" ? gesture.bounds : null;
+    const marqueePath =
+      gesture?.mode === "marquee" && gesture.shape === "lasso" ? gesture.points : null;
     const strokes = this.selectedStrokes();
-    if (marquee === null && strokes.length === 0) {
+    if (marqueeBounds === null && marqueePath === null && strokes.length === 0) {
       renderer.setSelection(null);
       return;
     }
@@ -3093,9 +4565,41 @@ export class DrawingEngine implements StrokeSource {
     // to, and it is not the rubber band.
     const selectionFrame = boundsOfStrokes(strokes);
     renderer.setSelection({
-      bounds: marquee ?? selectionFrame,
+      // A lasso is drawn as its path, not as the box around it.
+      bounds: marqueePath === null ? (marqueeBounds ?? selectionFrame) : null,
+      path: marqueePath,
       strokes,
-      handles: marquee === null ? this.selectionHandleLayout(selectionFrame) : null,
+      handles:
+        marqueeBounds === null && marqueePath === null
+          ? this.selectionHandleLayout(selectionFrame)
+          : null,
+    });
+  }
+
+  /**
+   * Hands the renderer the selected shape's overlay.
+   *
+   * The frame is the shape's own rotated box, so a turned shape offers handles
+   * that turn with it. The outline is traced in the selection accent, which is
+   * what tells the user the selection is a primitive rather than a freehand
+   * path. Both are display-only and never reach an export.
+   */
+  private syncShapeOverlay(): void {
+    const renderer = this.renderer;
+    if (!renderer) {
+      return;
+    }
+    const shape = this.selectedShape();
+    if (!shape) {
+      renderer.setSelection(null);
+      return;
+    }
+    renderer.setSelection({
+      bounds: null,
+      strokes: [],
+      outline: shapeRecordOutline(shape),
+      frame: shapeRecordFrame(shape),
+      handles: shapeRecordHandles(shape, this.rotationHandleOffset()),
     });
   }
 
@@ -3390,6 +4894,510 @@ export class DrawingEngine implements StrokeSource {
     this.tools.guides.reset(this.toolContext);
   }
 
+  // --------------------------------------------------------------- references
+
+  /**
+   * Imports a picture as a reference, as one undoable step.
+   *
+   * The bytes are validated and decoded *before* anything is added, so a
+   * malformed file, an unsupported format or an oversized picture leaves the
+   * document exactly as it was. The decoded surface goes to the session store;
+   * the encoded bytes go into the document, which is what makes a project
+   * portable.
+   */
+  async importReference(input: ReferenceImportInput): Promise<ReferenceImportResult> {
+    let decoded: DecodedReference;
+    try {
+      decoded = await this.decodeReference(input.bytes);
+    } catch (error) {
+      if (error instanceof ReferenceDecodeError) {
+        return { ok: false, reason: error.reason, message: error.message };
+      }
+      return {
+        ok: false,
+        reason: "malformed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const format = detectImageFormat(input.bytes);
+    const source = {
+      mimeType: format ? referenceMimeType(format) : "image/png",
+      base64: bytesToBase64(input.bytes),
+    };
+    const paper = { width: this.doc.width, height: this.doc.height };
+    let reference = createReferenceImage({
+      name: input.name.trim() === "" ? "Reference" : input.name.trim(),
+      naturalWidth: decoded.width,
+      naturalHeight: decoded.height,
+      source,
+    });
+    reference =
+      reference.naturalWidth > paper.width - 48 || reference.naturalHeight > paper.height - 48
+        ? fitReferenceToDocument(reference, paper, 24)
+        : {
+            ...reference,
+            x: (paper.width - reference.width) / 2,
+            y: (paper.height - reference.height) / 2,
+          };
+
+    const added = this.referenceStore.add(reference, decoded);
+    if (!added.ok) {
+      return { ok: false, reason: "budget", message: added.message };
+    }
+
+    const before = this.doc;
+    const after: DrawingDocument = {
+      ...before,
+      references: [...before.references, reference],
+    };
+    this.commitDocumentChange("Add Reference", before, after, { preserveActiveLayer: true });
+    // The reference tool owns the reference selection, so an import hands
+    // ownership over: the user has just placed something and wants to move it.
+    this.setTool("reference");
+    this.selectReference(reference.id);
+    return { ok: true, reference };
+  }
+
+  /** The document's references, in drawing order. */
+  references(): readonly ReferenceImage[] {
+    return this.doc.references;
+  }
+
+  /** One reference by id, or `null`. */
+  findReference(id: string): ReferenceImage | null {
+    return this.doc.references.find((reference) => reference.id === id) ?? null;
+  }
+
+  /** The reference the tool has selected, or `null`. */
+  selectedReference(): ReferenceImage | null {
+    const id = this.selectedReferenceId;
+    return id === null ? null : this.findReference(id);
+  }
+
+  /**
+   * The top-most visible reference under a document point.
+   *
+   * Hit-testing walks the list backwards: the last reference is drawn on top,
+   * so it is the one a press belongs to. Hidden references are skipped - they
+   * are not on the canvas.
+   */
+  findReferenceAt(docX: number, docY: number): ReferenceImage | null {
+    const paper = { width: this.doc.width, height: this.doc.height };
+    for (let index = this.doc.references.length - 1; index >= 0; index -= 1) {
+      const reference = this.doc.references[index];
+      if (reference && reference.visible && referenceVisibleContains(reference, docX, docY, paper)) {
+        return reference;
+      }
+    }
+    return null;
+  }
+
+  /** The handle of the selected reference a press grabs, or `null`. */
+  findReferenceHandleAt(docX: number, docY: number): ReferenceHandleId | null {
+    const reference = this.selectedReference();
+    // A hidden reference shows no chrome, so it has no grabbable handle: the
+    // frame and the hit-test must agree, or a press would grab something the
+    // user cannot see.
+    if (reference === null || !reference.visible) {
+      return null;
+    }
+    return findReferenceHandle(reference, this.viewport, docX, docY);
+  }
+
+  /**
+   * Selects a reference, or clears the selection with `null`.
+   *
+   * Editor state, like the guide selection: the references are document state,
+   * but which one is framed belongs to the tool. Selecting ends the current
+   * history merge run, so two edits of the same reference are two steps.
+   */
+  selectReference(referenceId: string | null): void {
+    this.commands.breakMerge();
+    if (this.selectedReferenceId === referenceId) {
+      this.publish();
+      return;
+    }
+    this.selectedReferenceId = referenceId;
+    this.renderer?.setSelectedReference(referenceId);
+    this.publish();
+    this.requestRender();
+  }
+
+  /** Removes a reference as one undoable step. */
+  removeReference(referenceId: string): boolean {
+    const reference = this.findReference(referenceId);
+    if (!reference) {
+      return false;
+    }
+    if (this.selectedReferenceId === referenceId) {
+      this.clearReferenceSelection();
+    }
+    const before = this.doc;
+    const after: DrawingDocument = {
+      ...before,
+      references: before.references.filter((item) => item.id !== referenceId),
+    };
+    this.commitDocumentChange("Remove Reference", before, after, { preserveActiveLayer: true });
+    return true;
+  }
+
+  /** Removes the selected reference, if there is one. */
+  deleteSelectedReference(): boolean {
+    const id = this.selectedReferenceId;
+    return id === null ? false : this.removeReference(id);
+  }
+
+  /** Shows or hides a reference, as one undoable step. */
+  setReferenceVisible(referenceId: string, visible: boolean): boolean {
+    return this.updateReference(
+      referenceId,
+      { visible },
+      visible ? "Show Reference" : "Hide Reference",
+      `reference-visible:${referenceId}`,
+    );
+  }
+
+  /** Sets a reference's opacity, as one coalescing undoable step. */
+  setReferenceOpacity(referenceId: string, opacity: number): boolean {
+    return this.updateReference(
+      referenceId,
+      { opacity },
+      "Reference Opacity",
+      `reference-opacity:${referenceId}`,
+    );
+  }
+
+  /** Puts a reference behind the artwork or over it, as one undoable step. */
+  setReferenceBehind(referenceId: string, behind: boolean): boolean {
+    return this.updateReference(
+      referenceId,
+      { behind },
+      behind ? "Reference Behind Artwork" : "Reference Over Artwork",
+      `reference-behind:${referenceId}`,
+    );
+  }
+
+  /** Turns a reference, as one coalescing undoable step. */
+  setReferenceRotation(referenceId: string, degrees: number): boolean {
+    return this.updateReference(
+      referenceId,
+      { rotation: degrees },
+      "Rotate Reference",
+      `reference-rotation:${referenceId}`,
+    );
+  }
+
+  /** Renames a reference, as one undoable step. */
+  renameReference(referenceId: string, name: string): boolean {
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      return false;
+    }
+    return this.updateReference(referenceId, { name: trimmed }, "Rename Reference");
+  }
+
+  /**
+   * Applies a metadata patch to one reference as one undoable step.
+   *
+   * The patch is clamped by the pure geometry module, so a slider and a
+   * gesture cannot disagree about what an opacity or a size may be.
+   */
+  updateReference(
+    referenceId: string,
+    patch: ReferenceImagePatch,
+    label = "Edit Reference",
+    mergeKey?: string,
+  ): boolean {
+    const reference = this.findReference(referenceId);
+    if (!reference) {
+      return false;
+    }
+    const next = applyReferencePatch(reference, patch);
+    if (referenceEqual(reference, next)) {
+      return false;
+    }
+    const before = this.doc;
+    this.commitDocumentChange(
+      label,
+      before,
+      {
+        ...before,
+        references: before.references.map((item) =>
+          item.id === referenceId ? next : item,
+        ),
+      },
+      { preserveActiveLayer: true, mergeKey },
+    );
+    return true;
+  }
+
+  /**
+   * Starts moving, resizing or rotating a reference.
+   *
+   * A press with no handle grabs the top-most visible reference under the
+   * point and starts a move. Returns whether a gesture started, so a press on
+   * empty canvas can clear the selection instead.
+   */
+  beginReferenceGesture(sample: PointerSample, handle: ReferenceHandleId | null): boolean {
+    if (!Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return false;
+    }
+    let reference = this.selectedReference();
+    if (handle === null) {
+      const hit = this.findReferenceAt(sample.docX, sample.docY);
+      if (!hit) {
+        this.selectReference(null);
+        return false;
+      }
+      if (hit.id !== this.selectedReferenceId) {
+        this.selectReference(hit.id);
+      }
+      reference = hit;
+    }
+    if (!reference) {
+      return false;
+    }
+
+    const centreX = reference.x + reference.width / 2;
+    const centreY = reference.y + reference.height / 2;
+    this.abortReferenceGesture();
+    this.beginGesture();
+    this.referenceGesture = {
+      mode: handle === "rotate" ? "rotate" : handle === null ? "move" : "resize",
+      before: this.doc,
+      initial: reference,
+      referenceId: reference.id,
+      handle,
+      pressX: sample.docX,
+      pressY: sample.docY,
+      centreX,
+      centreY,
+      startAngle: Math.atan2(sample.docY - centreY, sample.docX - centreX),
+    };
+    return true;
+  }
+
+  /** Previews the reference gesture at the pointer. Nothing enters history yet. */
+  updateReferenceGesture(sample: PointerSample): void {
+    const gesture = this.referenceGesture;
+    if (!gesture || !Number.isFinite(sample.docX) || !Number.isFinite(sample.docY)) {
+      return;
+    }
+
+    let next: ReferenceImage;
+    if (gesture.mode === "move") {
+      next = {
+        ...gesture.initial,
+        x: gesture.initial.x + (sample.docX - gesture.pressX),
+        y: gesture.initial.y + (sample.docY - gesture.pressY),
+      };
+    } else if (gesture.mode === "resize") {
+      if (gesture.handle === null || gesture.handle === "rotate") {
+        return;
+      }
+      next = resizeReferenceFromCorner(
+        gesture.initial,
+        gesture.handle,
+        sample.docX,
+        sample.docY,
+      );
+    } else {
+      const angle = Math.atan2(sample.docY - gesture.centreY, sample.docX - gesture.centreX);
+      const degrees = ((angle - gesture.startAngle) * 180) / Math.PI;
+      next = setReferenceRotation(gesture.initial, gesture.initial.rotation + degrees);
+    }
+
+    const current = this.findReference(gesture.referenceId);
+    if (current && referenceEqual(current, next)) {
+      return;
+    }
+    this.applyDocumentState({
+      ...this.doc,
+      references: this.doc.references.map((item) =>
+        item.id === gesture.referenceId ? next : item,
+      ),
+    });
+  }
+
+  /**
+   * Commits the gesture as one undoable step.
+   *
+   * A gesture that changed nothing - a click, or a drag that ended where it
+   * started - commits nothing, so history never holds an empty step.
+   */
+  finishReferenceGesture(): void {
+    const gesture = this.referenceGesture;
+    if (!gesture) {
+      return;
+    }
+    this.referenceGesture = null;
+    const after = this.doc;
+    const final = this.findReference(gesture.referenceId);
+    if (!final || referenceEqual(gesture.initial, final)) {
+      return;
+    }
+    const label =
+      gesture.mode === "move"
+        ? "Move Reference"
+        : gesture.mode === "resize"
+          ? "Resize Reference"
+          : "Rotate Reference";
+    this.commitDocumentChange(label, gesture.before, after, { preserveActiveLayer: true });
+  }
+
+  /**
+   * Aborts the gesture and restores the press-time document.
+   *
+   * The tool owns its own bookkeeping, so it is told as well: a cancel that
+   * comes from outside the pointer pipeline - the `Esc` key - would otherwise
+   * leave it believing a drag is in flight.
+   */
+  cancelReferenceGesture(): void {
+    this.abortReferenceGesture();
+    // Escape cancels the drag *and* drops the frame, exactly as it clears the
+    // guide selection: the user asked to stop, not to keep editing.
+    this.clearReferenceSelection();
+    this.tools.reference.reset(this.toolContext);
+    this.publish();
+    this.requestRender();
+  }
+
+  /** Clears an in-flight gesture without telling the tool. */
+  private abortReferenceGesture(): void {
+    const gesture = this.referenceGesture;
+    if (!gesture) {
+      return;
+    }
+    this.referenceGesture = null;
+    this.applyDocumentState(gesture.before);
+  }
+
+  /** Forgets the reference selection, e.g. when the reference tool is left. */
+  private clearReferenceSelection(): void {
+    if (this.selectedReferenceId === null) {
+      return;
+    }
+    this.selectedReferenceId = null;
+    this.renderer?.setSelectedReference(null);
+  }
+
+  /**
+   * Forgets the shape selection, e.g. when the shape editor is left.
+   *
+   * The overlay is cleared here rather than waiting for the next tool's
+   * selection sync, so a shape frame can never linger over the canvas after
+   * the artist has moved on.
+   */
+  private clearShapeSelection(): void {
+    if (this.selectedShapeId === null) {
+      return;
+    }
+    this.selectedShapeId = null;
+    this.renderer?.setSelection(null);
+  }
+
+  /**
+   * Reconciles the decoded-pixel cache with the document's references.
+   *
+   * The document is the authority for which references exist; the store keeps
+   * one decoded surface per id. Undo, redo and a reopened project all replace
+   * the list, so this runs on every document change.
+   */
+  private syncReferences(): void {
+    this.referenceStore.sync(this.doc.references);
+    this.renderer?.setReferenceSources(this.referenceSourceMap());
+    if (
+      this.selectedReferenceId !== null &&
+      !this.doc.references.some((reference) => reference.id === this.selectedReferenceId)
+    ) {
+      this.clearReferenceSelection();
+    }
+    // Redo of an import, or undo of a removal, brings back a reference whose
+    // bytes are in the document but whose pixels are not in the cache any
+    // more. Decoding here is what makes those steps show the picture again.
+    this.decodeMissingReferenceSources();
+  }
+
+  /** The decoded surfaces the renderer may draw, keyed by reference id. */
+  private referenceSourceMap(): ReadonlyMap<string, CanvasImageSource> {
+    const sources = new Map<string, CanvasImageSource>();
+    for (const reference of this.doc.references) {
+      const decoded = this.referenceStore.decodedFor(reference.id);
+      if (decoded) {
+        sources.set(reference.id, decoded.source);
+      }
+    }
+    return sources;
+  }
+
+  /**
+   * Decodes the references a reopened project brought, one by one.
+   *
+   * Loading is synchronous, so the project appears at once and the pictures
+   * follow. A picture that cannot be decoded is not painted; its placement and
+   * bytes are still part of the document, so it saves and reopens unchanged.
+   */
+  private decodeMissingReferenceSources(): void {
+    const missing = this.doc.references.filter(
+      (reference) =>
+        reference.source !== undefined &&
+        this.referenceStore.decodedFor(reference.id) === null &&
+        !this.pendingReferenceDecodes.has(reference.id),
+    );
+    if (missing.length === 0) {
+      return;
+    }
+    for (const reference of missing) {
+      this.pendingReferenceDecodes.add(reference.id);
+    }
+    void Promise.all(
+      missing.map(async (reference) => {
+        const source = reference.source;
+        if (!source) {
+          return;
+        }
+        try {
+          const bytes = base64ToBytes(source.base64);
+          if (!bytes) {
+            return;
+          }
+          const decoded = await this.decodeReference(bytes);
+          this.referenceStore.attachDecoded(reference.id, decoded);
+        } catch {
+          // A reference whose picture cannot be decoded stays in the document
+          // but is not painted. Refusing to open the whole project over one
+          // picture would be worse: the placement and the bytes are intact.
+        }
+      }),
+    ).finally(() => {
+      for (const reference of missing) {
+        this.pendingReferenceDecodes.delete(reference.id);
+      }
+      this.renderer?.setReferenceSources(this.referenceSourceMap());
+      this.requestRender();
+    });
+  }
+
+  /** Aborts a reference gesture and forgets the selection, e.g. on new/open. */
+  private resetReferenceGesture(): void {
+    this.referenceGesture = null;
+    this.clearReferenceSelection();
+    this.tools.reference.reset(this.toolContext);
+  }
+
+  /**
+   * Drops the shape gesture and the shape selection, e.g. for a new document.
+   *
+   * The tool is reset too, so its own "a drag is in flight" flag cannot outlive
+   * the document the drag belonged to.
+   */
+  private resetShapeGesture(): void {
+    this.shapeGesture = null;
+    this.clearShapeSelection();
+    this.tools.shapeEdit.reset(this.toolContext);
+  }
+
   requestRender(): void {
     this.renderer?.requestRender();
   }
@@ -3424,8 +5432,8 @@ export class DrawingEngine implements StrokeSource {
     after: DrawingDocument,
     options: {
       readonly mergeKey?: string;
-      readonly removedElements?: ElementTransfer;
-      readonly addedElements?: ElementTransfer;
+      readonly removedElements?: readonly ElementTransfer[];
+      readonly addedElements?: readonly ElementTransfer[];
       readonly preserveActiveLayer?: boolean;
     } = {},
   ): void {
@@ -3465,14 +5473,19 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     const activeLayerChanged = next.activeLayerId !== this.doc.activeLayerId;
+    const referencesChanged = next.references !== this.doc.references;
     this.doc = next;
     this.renderer?.setDocument(next);
+    if (referencesChanged) {
+      this.syncReferences();
+    }
     // A selection is meaningful only on the layer it was made on: activating
     // another layer, or removing that layer, drops it rather than leaving a
     // highlight over strokes that are no longer the ones a transform would move.
     if (
       activeLayerChanged ||
-      (this.selection !== null && !next.layers.some((layer) => layer.id === this.selection?.layerId))
+      (this.selection !== null &&
+        !findLayer(next.layers, this.selection.layerId))
     ) {
       this.resetSelection();
     }
@@ -3493,7 +5506,7 @@ export class DrawingEngine implements StrokeSource {
     if (!this.renderer) {
       return;
     }
-    for (const layer of document.layers) {
+    for (const layer of flattenLayers(document.layers)) {
       this.renderer.invalidateLayer(layer.id);
     }
   }
@@ -3637,6 +5650,28 @@ export class DrawingEngine implements StrokeSource {
    */
   private cursorFor(docX: number, docY: number): string {
     const tool = this.activeTool();
+    if (this.currentToolId === "reference") {
+      const gesture = this.referenceGesture;
+      if (gesture?.handle) {
+        return REFERENCE_HANDLE_CURSORS[gesture.handle];
+      }
+      const handle = this.findReferenceHandleAt(docX, docY);
+      if (handle !== null) {
+        return REFERENCE_HANDLE_CURSORS[handle];
+      }
+      return this.findReferenceAt(docX, docY) ? "move" : tool.cursor;
+    }
+    if (this.currentToolId === "shapeEdit") {
+      const gesture = this.shapeGesture;
+      if (gesture?.handle) {
+        return HANDLE_CURSORS[gesture.handle];
+      }
+      const handle = this.findShapeHandleAt(docX, docY);
+      if (handle !== null) {
+        return HANDLE_CURSORS[handle];
+      }
+      return this.findShapeAt(docX, docY) ? "move" : tool.cursor;
+    }
     if (this.currentToolId !== "select") {
       return tool.cursor;
     }
@@ -3688,6 +5723,9 @@ export class DrawingEngine implements StrokeSource {
     if (this.activeStroke) {
       this.cancelStroke();
     }
+    // A shape edit is a document preview held outside history, so abandoning
+    // the gesture must put the press-time record back.
+    this.abortShapeGesture();
   }
 
   private buildSnapshot(): EditorSnapshot {
@@ -3695,6 +5733,7 @@ export class DrawingEngine implements StrokeSource {
     return {
       document: this.doc,
       viewport: this.viewport,
+      viewportSize: this.viewportSize,
       brush: this.brush,
       secondaryColor: this.secondaryColor,
       palette: this.palette,
@@ -3706,18 +5745,31 @@ export class DrawingEngine implements StrokeSource {
       // Counted from the store rather than from the selection's id list, so a
       // stroke removed by undo or redo cannot be counted as still selected.
       selectedStrokes: this.selectedStrokes().length,
+      selectionShape: this.selectionShape,
       selectedGuideId: this.selectedGuideId,
+      selectedReferenceId: this.selectedReferenceId,
+      selectedShapeId: this.selectedShapeId,
+      // Looked up from the store, so a shape removed by undo or redo cannot be
+      // reported as still selected.
+      selectedShape: this.selectedShape(),
       shapeFill: this.shapeFill,
       shapeSides: this.shapeSides,
       shapeInnerRatio: this.shapeInnerRatio,
       shapeRotation: this.shapeRotation,
       fillTolerance: this.fillTolerance,
+      fillMode: this.fillMode,
+      fillSampleScale: this.fillSampleScale,
       gradientType: this.gradientType,
       gradientEndColor: this.gradientEndColor,
       gradientMidStops: this.gradientMidStops,
       gridVisible: this.gridVisible,
       gridSpacing: this.gridSpacing,
       gridSnapping: this.gridSnapping,
+      rulersVisible: this.rulersVisible,
+      symmetryEnabled: this.symmetry.enabled,
+      symmetryMode: this.symmetry.mode,
+      symmetryVerticalAxis: this.symmetry.verticalAxis,
+      symmetryHorizontalAxis: this.symmetry.horizontalAxis,
       notice: this.notice,
     };
   }
@@ -3729,6 +5781,7 @@ export class DrawingEngine implements StrokeSource {
     if (
       previous.document === next.document &&
       previous.viewport === next.viewport &&
+      previous.viewportSize === next.viewportSize &&
       previous.brush === next.brush &&
       previous.secondaryColor === next.secondaryColor &&
       previous.palette === next.palette &&
@@ -3738,18 +5791,29 @@ export class DrawingEngine implements StrokeSource {
       previous.history === next.history &&
       previous.file === next.file &&
       previous.selectedStrokes === next.selectedStrokes &&
+      previous.selectionShape === next.selectionShape &&
       previous.selectedGuideId === next.selectedGuideId &&
+      previous.selectedReferenceId === next.selectedReferenceId &&
+      previous.selectedShapeId === next.selectedShapeId &&
+      previous.selectedShape === next.selectedShape &&
       previous.shapeFill === next.shapeFill &&
       previous.shapeSides === next.shapeSides &&
       previous.shapeInnerRatio === next.shapeInnerRatio &&
       previous.shapeRotation === next.shapeRotation &&
       previous.fillTolerance === next.fillTolerance &&
+      previous.fillMode === next.fillMode &&
+      previous.fillSampleScale === next.fillSampleScale &&
       previous.gradientType === next.gradientType &&
       previous.gradientEndColor === next.gradientEndColor &&
       gradientStopsEqual(previous.gradientMidStops, next.gradientMidStops) &&
       previous.gridVisible === next.gridVisible &&
       previous.gridSpacing === next.gridSpacing &&
       previous.gridSnapping === next.gridSnapping &&
+      previous.rulersVisible === next.rulersVisible &&
+      previous.symmetryEnabled === next.symmetryEnabled &&
+      previous.symmetryMode === next.symmetryMode &&
+      previous.symmetryVerticalAxis === next.symmetryVerticalAxis &&
+      previous.symmetryHorizontalAxis === next.symmetryHorizontalAxis &&
       previous.notice === next.notice
     ) {
       return;

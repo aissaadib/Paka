@@ -1,8 +1,8 @@
 /**
- * What the colour panel's text field does with what the user typed.
+ * What the colour panel does with the colours the user names.
  *
- * The field accepts a colour string, not a colour: it is where a user pastes
- * `hsl(217 91% 60%)` or `oklch(0.62 0.19 259)`, and it has to answer two
+ * The text field accepts a colour string, not a colour: it is where a user
+ * pastes `hsl(217 91% 60%)` or `oklch(0.62 0.19 259)`, and it has to answer two
  * questions before the brush can change - is this a colour at all, and can it
  * be stored?
  *
@@ -73,4 +73,16 @@ export function resolveColorInput(text: string, current: string): ColorInputOutc
   }
 
   return { kind: "applied", color: rgbToHex(parsed.rgb) };
+}
+
+/**
+ * The value a native colour input accepts.
+ *
+ * `input[type=color]` only understands `#rrggbb`. A brush colour written some
+ * other way - a short `#rgb`, a named colour - cannot be shown in one, so the
+ * control falls back to black rather than rendering nothing. The brush colour
+ * itself is untouched: this only decides what the control draws.
+ */
+export function toColorInputValue(color: string): string {
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#000000";
 }

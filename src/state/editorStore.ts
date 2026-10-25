@@ -11,8 +11,13 @@ import {
   type DrawingEngineOptions,
   type EditorSnapshot,
   type NewDocumentOptions,
+  type ReferenceImportInput,
+  type ReferenceImportResult,
 } from "../core/engine/DrawingEngine";
 import type { GradientStop, LayerBlendMode, LayerId } from "../core/document/types";
+import type { SelectionShape } from "../core/document/selectionModes";
+import type { SymmetryAxisKind, SymmetryMode } from "../core/document/symmetry";
+import type { FillMode } from "../core/fill/fillOptions";
 import { ProjectFiles } from "../core/project/projectFiles";
 import type { ProjectFileGateway } from "../core/project/projectGateway";
 import { createTauriProjectGateway } from "../core/project/tauriGateway";
@@ -70,6 +75,14 @@ export interface EditorActions {
   setShapeRotation(degrees: number): void;
   /** Bucket-fill colour tolerance in 8-bit sRGB channel units (0-255). */
   setFillTolerance(tolerance: number): void;
+  /** Whether the next fill is contiguous or matches every pixel of the colour. */
+  setFillMode(mode: FillMode): void;
+  /** How coarsely the next fill samples the composite (1, 2, 4 or 8). */
+  setFillSampleScale(scale: number): void;
+  /** Chooses the mirror axes, or `"off"`. */
+  setSymmetryMode(mode: SymmetryMode | "off"): void;
+  /** Moves one mirror axis to a whole document pixel. */
+  setSymmetryAxis(kind: SymmetryAxisKind, position: number): void;
   /** Chooses linear or radial for the next gradient drag. */
   setGradientType(type: "linear" | "radial"): void;
   /** Sets the end colour of the next gradient. */
@@ -82,6 +95,8 @@ export interface EditorActions {
   setGridSpacing(spacing: number): void;
   /** Turns snapping to guides and grid lines on or off. */
   setGridSnapping(snap: boolean): void;
+  /** Shows or hides the canvas rulers; display state, never exported. */
+  setRulersVisible(visible: boolean): void;
   /** Clears a status-bar notice raised by an editor action. */
   dismissNotice(): void;
   undo(): void;
@@ -92,6 +107,11 @@ export interface EditorActions {
   zoomToFit(): void;
   newDocument(options: NewDocumentOptions): void;
   addLayer(): void;
+  /** Creates an empty group above the active node; returns it, or `null` if refused. */
+  createGroup(): LayerId | null;
+  dissolveGroup(groupId: LayerId): void;
+  renameGroup(groupId: LayerId, name: string): void;
+  moveLayerToParent(layerId: LayerId, parentId: LayerId | null, index: number): void;
   duplicateLayer(layerId: LayerId): void;
   removeLayer(layerId: LayerId): void;
   renameLayer(layerId: LayerId, name: string): void;
@@ -101,9 +121,62 @@ export interface EditorActions {
   moveLayer(layerId: LayerId, delta: number): void;
   selectLayer(layerId: LayerId): void;
   clearSelection(): void;
+  /** Selects every stroke on the active layer; no history step. */
+  selectAll(): void;
+  /** Swaps the selection for the strokes that were not selected. */
+  invertSelection(): void;
+  /** Chooses the shape the next selection gesture traces. */
+  setSelectionShape(shape: SelectionShape): void;
   deleteSelection(): void;
   /** Removes the guide the guides tool has selected, as one undoable step. */
   deleteSelectedGuide(): void;
+  /**
+   * Imports a picture as a reference image, as one undoable step.
+   *
+   * The bytes come from the panel's file input: the engine validates and
+   * decodes them, and a refused file leaves the document untouched.
+   */
+  importReference(input: ReferenceImportInput): Promise<ReferenceImportResult>;
+  /** Selects a reference, or clears the reference selection with `null`. */
+  selectReference(referenceId: string | null): void;
+  /** Removes a reference, as one undoable step. */
+  removeReference(referenceId: string): void;
+  /** Removes the selected reference, as one undoable step. */
+  deleteSelectedReference(): void;
+  /** Shows or hides a reference, as one undoable step. */
+  setReferenceVisible(referenceId: string, visible: boolean): void;
+  /** Sets a reference's opacity, as one coalescing undoable step. */
+  setReferenceOpacity(referenceId: string, opacity: number): void;
+  /** Puts a reference behind the artwork or over it. */
+  setReferenceBehind(referenceId: string, behind: boolean): void;
+  /** Turns a reference, as one coalescing undoable step. */
+  setReferenceRotation(referenceId: string, degrees: number): void;
+  /** Renames a reference, as one undoable step. */
+  renameReference(referenceId: string, name: string): void;
+  /** Aborts a reference gesture in flight, restoring the document. */
+  cancelReferenceGesture(): void;
+  /** Selects an editable shape, or clears the shape selection with `null`. */
+  selectShape(shapeId: string | null): void;
+  /** Removes the selected shape, as one undoable step. */
+  deleteSelectedShape(): void;
+  /** Aborts a shape gesture in flight, restoring the shape and clearing it. */
+  cancelShapeGesture(): void;
+  /** Whether the selected shape's interior is filled. */
+  setSelectedShapeFill(filled: boolean): void;
+  /** Sides of the selected polygon, or points of the selected star. */
+  setSelectedShapeSides(sides: number): void;
+  /** Inner radius of the selected star, as a fraction of its outer radius. */
+  setSelectedShapeInnerRatio(ratio: number): void;
+  /** Absolute rotation of the selected box shape, in degrees (0-360). */
+  setSelectedShapeRotation(degrees: number): void;
+  /** Size of the selected box shape, keeping its top-left corner. */
+  setSelectedShapeSize(width: number, height: number): void;
+  /** Width of the selected box shape, keeping its height. */
+  setSelectedShapeWidth(width: number): void;
+  /** Height of the selected box shape, keeping its width. */
+  setSelectedShapeHeight(height: number): void;
+  /** Patches the selected shape's appearance; one coalescing history step. */
+  setSelectedShapeBrush(patch: Partial<BrushSettings>): void;
   /** Cancels the guide gesture in flight and clears the guide selection. */
   cancelGuideGesture(): void;
   /** Moves the selection by a fixed delta; repeated calls coalesce into one step. */
@@ -170,12 +243,17 @@ export function createEditor(options: EditorOptions = {}): Editor {
     setShapeInnerRatio: (ratio) => engine.setShapeInnerRatio(ratio),
     setShapeRotation: (degrees) => engine.setShapeRotation(degrees),
     setFillTolerance: (tolerance) => engine.setFillTolerance(tolerance),
+    setFillMode: (mode) => engine.setFillMode(mode),
+    setFillSampleScale: (scale) => engine.setFillSampleScale(scale),
+    setSymmetryMode: (mode) => engine.setSymmetryMode(mode),
+    setSymmetryAxis: (kind, position) => engine.setSymmetryAxis(kind, position),
     setGradientType: (type) => engine.setGradientType(type),
     setGradientEndColor: (color) => engine.setGradientEndColor(color),
     setGradientMidStops: (stops) => engine.setGradientMidStops(stops),
     setGridVisible: (visible) => engine.setGridVisible(visible),
     setGridSpacing: (spacing) => engine.setGridSpacing(spacing),
     setGridSnapping: (snap) => engine.setGridSnapping(snap),
+    setRulersVisible: (visible) => engine.setRulersVisible(visible),
     dismissNotice: () => engine.dismissNotice(),
     undo: () => {
       engine.undo();
@@ -189,6 +267,11 @@ export function createEditor(options: EditorOptions = {}): Editor {
     zoomToFit: () => engine.zoomToFit(),
     newDocument: (documentOptions) => engine.newDocument(documentOptions),
     addLayer: () => engine.addLayer(),
+    createGroup: () => engine.createGroup(),
+    dissolveGroup: (groupId) => engine.dissolveGroup(groupId),
+    renameGroup: (groupId, name) => engine.renameGroup(groupId, name),
+    moveLayerToParent: (layerId, parentId, index) =>
+      engine.moveLayerToParent(layerId, parentId, index),
     duplicateLayer: (layerId) => engine.duplicateLayer(layerId),
     removeLayer: (layerId) => engine.removeLayer(layerId),
     renameLayer: (layerId, name) => engine.renameLayer(layerId, name),
@@ -198,11 +281,77 @@ export function createEditor(options: EditorOptions = {}): Editor {
     moveLayer: (layerId, delta) => engine.moveLayer(layerId, delta),
     selectLayer: (layerId) => engine.selectLayer(layerId),
     clearSelection: () => engine.clearSelection(),
+    selectAll: () => {
+      engine.selectAll();
+    },
+    invertSelection: () => {
+      engine.invertSelection();
+    },
+    setSelectionShape: (shape) => engine.setSelectionShape(shape),
     deleteSelection: () => {
       engine.deleteSelection();
     },
     deleteSelectedGuide: () => {
       engine.deleteSelectedGuide();
+    },
+    importReference: (input) => engine.importReference(input),
+    selectReference: (referenceId) => engine.selectReference(referenceId),
+    removeReference: (referenceId) => {
+      engine.removeReference(referenceId);
+    },
+    deleteSelectedReference: () => {
+      engine.deleteSelectedReference();
+    },
+    setReferenceVisible: (referenceId, visible) => {
+      engine.setReferenceVisible(referenceId, visible);
+    },
+    setReferenceOpacity: (referenceId, opacity) => {
+      engine.setReferenceOpacity(referenceId, opacity);
+    },
+    setReferenceBehind: (referenceId, behind) => {
+      engine.setReferenceBehind(referenceId, behind);
+    },
+    setReferenceRotation: (referenceId, degrees) => {
+      engine.setReferenceRotation(referenceId, degrees);
+    },
+    renameReference: (referenceId, name) => {
+      engine.renameReference(referenceId, name);
+    },
+    cancelReferenceGesture: () => {
+      engine.cancelReferenceGesture();
+    },
+    selectShape: (shapeId) => {
+      engine.selectShape(shapeId);
+    },
+    deleteSelectedShape: () => {
+      engine.deleteSelectedShape();
+    },
+    cancelShapeGesture: () => {
+      engine.cancelShapeGesture();
+    },
+    setSelectedShapeFill: (filled) => {
+      engine.setSelectedShapeFill(filled);
+    },
+    setSelectedShapeSides: (sides) => {
+      engine.setSelectedShapeSides(sides);
+    },
+    setSelectedShapeInnerRatio: (ratio) => {
+      engine.setSelectedShapeInnerRatio(ratio);
+    },
+    setSelectedShapeRotation: (degrees) => {
+      engine.setSelectedShapeRotation(degrees);
+    },
+    setSelectedShapeSize: (width, height) => {
+      engine.setSelectedShapeSize(width, height);
+    },
+    setSelectedShapeWidth: (width) => {
+      engine.setSelectedShapeWidth(width);
+    },
+    setSelectedShapeHeight: (height) => {
+      engine.setSelectedShapeHeight(height);
+    },
+    setSelectedShapeBrush: (patch) => {
+      engine.setSelectedShapeBrush(patch);
     },
     cancelGuideGesture: () => {
       engine.cancelGuideGesture();

@@ -732,6 +732,19 @@ debounced, so a brush-slider drag is one write rather than sixty. A file that
 cannot be read or written is recorded and forgotten - it is a minor
 inconvenience, not something the user has to act on.
 
+**The file is a document of sections.** The engine's own fields sit at the
+top level, exactly as they always did, and a **section** - a named, versioned
+group of fields that belongs in the file but not in the engine, such as the
+panel layout or the shell's preferences - sits beside them under its own key.
+A section is read field by field, with the same tolerance as the rest of the
+file: a missing or malformed field takes its default, and a section written by
+a newer version of itself is ignored, because its meaning is unknown rather
+than wrong. The store owns the file, so it reads each section out, hands it to
+its owner, and writes the owner's state back whenever it changes; a key that
+no section claims is written back untouched, so a build that does not know a
+section cannot destroy it. A section changes no pixels: it adds no history
+step, dirties nothing and never reaches a project file.
+
 ### The autosave seam (not enabled)
 
 `src/core/autosave/` holds the machinery for writing a recovery copy of the
@@ -897,6 +910,22 @@ gesture starts**, so a shape keeps the values that were active when the user
 pressed. One number serves both tools, so the toolbar's slider is labelled
 **Sides** for the polygon and **Points** for the star.
 
+The options are written down **once**, in `core/tools/shapeOptions.ts`: the
+values, their ranges, their defaults, their labels, and the table of which
+shape kind has which option. The geometry, the engine and the options bar's
+controls all read that model, so a slider's range *is* the range the geometry
+clamps to and the **Sides**/**Points** label is not written twice. The
+controls themselves are descriptions built from the model and registered in the
+shared per-tool registry (`core/shell/toolOptions.ts`), which is how a tool
+adds an option to a tool it does not own.
+
+The **rotation** belongs to every shape that has a box, so the rectangle and
+the ellipse turn as well: their corners and their samples are placed first and
+then turned about the centre of the dragged box, rigidly, exactly like the
+polygon's vertices are. A whole turn is the identity, and the identity returns
+the very same points, so the default rectangle and the default ellipse are
+unchanged.
+
 Because the outline is **replaced** rather than appended, the renderer contract
 gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
 index 0. The preview therefore lives in the same buffer as a live brush stroke,
@@ -1021,6 +1050,33 @@ skipped. Gradients are therefore content, not an adjustment or a mask: an opaque
 gradient covers earlier elements on its layer, which is why painting one on its
 own layer is the normal workflow. The editor options (`setGradientType`,
 `setGradientEndColor`) describe the next drag only and are not serialized.
+
+A gradient is edited by moving points, and that geometry is **pure and DOM-free**
+(`core/gradient/gradientHandles.ts`): the two end points of the axis (the start
+and the end of a linear ramp, the centre and the radius handle of a radial one),
+the position of every middle stop along the axis, the grab radius in screen
+pixels and the hit test against the axis or the circle. The handle **positions**
+are in document space and the grab radius is in screen pixels, exactly as the
+selection's transform handles are.
+
+`moveGradientHandle` is the one place that decides what a drag means. It moves
+the geometry, and it slides a stop along the axis - the pointer's place on the
+axis decides the stop's new offset - while holding that stop **between its
+neighbours**. The ramp's offsets have to stay strictly ascending, because that is
+what the file format requires: a ramp that was not ascending would be a file the
+reader refuses, so the drawing would stop being saveable. A move with no valid
+answer (a stop with no room between its neighbours, a handle on a degenerate
+axis) is **refused** rather than repaired, and a record the file could not read
+is rejected by `gradientRecordProblem` rather than quietly fixed.
+
+The edit itself is **one history step**:
+`core/commands/gradientEditCommand.ts` carries the committed record and the
+record that replaced it, so undo puts the very same record back and redo applies
+the very same one. A run of edits that share a merge key collapses into one
+entry, which is what keeps a held arrow key to a single undo step. The handle
+geometry and the command are the model; the on-canvas gesture that drives them
+(selecting a gradient, dragging a handle, the overlay that shows them) is the
+engine's and the renderer's work.
 
 ### Selection and transform
 
@@ -1381,6 +1437,61 @@ byte-identical to one with it off.
 survive a restart. Changing one is not an edit: no history step, no revision
 bump, no dirty flag.
 
+### Reference images
+
+A reference image is a picture the artist places on the canvas to trace over or
+to pick colours from. Unlike a guide or the grid it has **pixels**, and unlike a
+layer it is **not artwork**: it is never composited into an export.
+
+**Document metadata, not editor state.** The placements live in
+`DrawingDocument.references`, next to the guides, because they are part of the
+drawing the user saves. The *decoded* pictures do not: they live in a session
+store (`core/reference/store.ts`) keyed by reference id, because a decoded
+`ImageBitmap` is not serializable and must be rebuilt from the encoded bytes
+after a reopen. The document is the authority for which references exist; the
+store keeps one decoded surface per id and reconciles on every document change
+(`sync`), so undo, redo and a reopen all converge on the same picture set.
+
+**The encoded bytes travel with the file.** A reference stores its original
+encoded bytes (`source: { mimeType, base64 }`) in the project, so a project
+reopened on another machine draws the same references without the original file
+being present. This is why references forced format version 14: a version-13
+reader would silently drop them, and a tracing setup that disappears without a
+word is worse than a refused file. The decoded size is stored too
+(`naturalWidth`/`naturalHeight`), so the placement maps back to image pixels
+without re-measuring the picture.
+
+**Geometry is pure and rotation-aware.** `core/reference/geometry.ts` holds the
+rectangle, the centre, the corners, the hit-test, the source-pixel mapping, the
+resize-from-corner and the patch/clamp rules. Rotation is about the placement's
+centre, so a hit-test rotates the point *back* by `-rotation` before comparing -
+a rotated reference is grabbable where it is drawn, not where its bounding box
+is. Handles are screen-space (8 CSS px grab radius, a rotation handle 26 CSS px
+above the top edge), like the guides', so they are equally easy to grab at every
+zoom.
+
+**One tool, three gestures.** The dedicated **Reference** tool (`Y`) owns pointer
+ownership: a press on a handle resizes or rotates, a press on a visible reference
+selects and moves it, and a press anywhere else clears the selection. A dedicated
+tool is what keeps the brush from guessing whether a press is paint or a grab.
+The engine owns the preview and the history: a gesture mutates the document
+directly (that is how the renderer shows it), the release commits **one**
+document command, and `Esc` restores the document exactly and records nothing.
+Sliders coalesce into one step per run, the same rule as the layer opacity.
+
+**Painting order and export isolation.** `paintDocument` takes an
+`includeReferences` flag: `behind` references are painted after the paper fill and
+before the layers, the rest after the layers, and only `render()` passes `true`.
+`composeDocumentImage` never does, so a reference can never reach a PNG export -
+the exclusion is structural, not a filter that could be forgotten. References
+are clipped to the paper (like a layer), and their selection frame and handles
+are painted in the overlay pass, so they never enter a layer surface either.
+
+**Limits.** One reference is capped at 32 MB of encoded bytes and 24 megapixels;
+a project at 64 megapixels of reference pixels and 32 references. The reader
+bounds the base64 text before decoding it, so a hostile file cannot make the
+reader allocate the bytes it claims.
+
 ### Dirty surfaces
 
 A surface is marked dirty only when its pixels no longer match its element list:
@@ -1644,6 +1755,47 @@ keep it from churning. Two things deliberately bypass React:
 
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
+
+## The panel manager
+
+The shell's side column is rendered from a list, not hard-wired. Two lists
+answer two different questions, and they are joined by the panel id:
+
+- `src/core/shell/panelRegistry.ts` is the **mount registry**: the shared
+  contract by which a panel says "mount me, here, in this order", with a
+  render callback. It answers *where a panel goes* and *what it draws*.
+- `src/core/panels/panelRegistry.ts` is the **catalogue**: the closed, typed
+  list of the panels that exist, with the label, the icon, the stack order,
+  the default visibility, the fold and grow flags, the mount policy and a
+  one-line description. It answers *what a panel is*. `toShellPanelDefinition`
+  and `registerCataloguePanel` map a catalogue entry onto the mount
+  registry's contract, carrying the catalogue's slot and order across, so the
+  two lists cannot drift apart.
+
+The shell reads the **mount registry** to lay out its frame; the panel
+manager reads the **catalogue** to know which panels exist and how they
+behave. `PanelStack` renders the registry's entries for the side slot, so a
+panel that registers itself is mounted without the stack naming it.
+
+The layout - which panels are shown and which are folded - is
+`src/core/panels/panelLayout.ts`: pure functions over a small versioned
+document. It is **shell state, not document state**: showing or hiding a
+panel pushes no history entry, bumps no revision and never makes a document
+dirty. The rules are:
+
+- a **missing** or **malformed** field takes its default;
+- an **id the catalogue does not know** is dropped, so a panel a later build
+  removed cannot break an old file;
+- a document from a **newer version** is ignored wholesale, because its
+  meaning is unknown rather than merely wrong.
+
+`src/core/panels/panelLayoutSection.ts` carries the layout in the
+preferences document under the `panels` key, and `src/state/panelStore.ts`
+holds the live layout; React reads it through `useSyncExternalStore`. The
+mount policy is the one rule that decides whether a panel is mounted at all:
+a panel that keeps React state of its own (`mounting: "always"`) stays
+mounted while it is hidden, and a panel derived from the document
+(`mounting: "when-visible"`) is unmounted, because it has nothing to lose.
 
 ## Native boundary (Rust)
 

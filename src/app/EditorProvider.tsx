@@ -18,6 +18,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { SettingsStore } from "../core/settings/settingsStore";
+import type { SettingsSection } from "../core/settings/settingsSection";
 import { createTauriSettingsGateway } from "../core/settings/tauriSettingsGateway";
 import { EditorContext } from "../state/editorContext";
 import { createEditor, type Editor } from "../state/editorStore";
@@ -26,21 +27,30 @@ export interface EditorProviderProps {
   readonly children: ReactNode;
   /** Optional injected editor, used by tests. */
   readonly editor?: Editor;
+  /**
+   * The settings sections that belong to the shell rather than the engine.
+   *
+   * The provider still owns the file; it only hands each section its part of
+   * the document. That keeps one writer for the settings file while letting
+   * the panel layout and the workspace persist their own state.
+   */
+  readonly sections?: readonly SettingsSection<unknown>[];
 }
 
-export function EditorProvider({ children, editor }: EditorProviderProps) {
+export function EditorProvider({ children, editor, sections }: EditorProviderProps) {
   const [value] = useState(() => editor ?? createEditor());
 
   useEffect(() => {
     const store = new SettingsStore({
       engine: value.engine,
       gateway: createTauriSettingsGateway(),
+      sections,
     });
     void store.load();
     return () => {
       store.destroy();
     };
-  }, [value]);
+  }, [value, sections]);
 
   useEffect(() => {
     return () => {

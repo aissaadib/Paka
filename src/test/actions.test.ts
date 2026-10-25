@@ -14,6 +14,8 @@ interface FakeState {
   activeLayerId: string | null;
   selectedStrokes: number;
   selectedGuideId: string | null;
+  selectedReferenceId: string | null;
+  selectedShapeId: string | null;
   toolId: ToolId;
   gridVisible: boolean;
   gridSnapping: boolean;
@@ -24,17 +26,22 @@ let state: FakeState;
 let actions: EditorActions;
 let engine: DrawingEngine;
 let file: FileActionHandlers;
+/** Whether the fake engine reports an unreleased shape press. */
+let shapePressActive: boolean;
 
 beforeEach(() => {
   state = {
     activeLayerId: "layer-1",
     selectedStrokes: 1,
     selectedGuideId: null,
+    selectedReferenceId: null,
+    selectedShapeId: null,
     toolId: "brush",
     gridVisible: false,
     gridSnapping: false,
     brushSize: 6,
   };
+  shapePressActive = false;
   actions = {
     setTool: vi.fn(),
     setBrush: vi.fn(),
@@ -56,12 +63,21 @@ beforeEach(() => {
     setShapeInnerRatio: vi.fn(),
     setShapeRotation: vi.fn(),
     setFillTolerance: vi.fn(),
+    setFillMode: vi.fn(),
+    setFillSampleScale: vi.fn(),
+    setSymmetryMode: vi.fn(),
+    createGroup: vi.fn(() => null),
+    dissolveGroup: vi.fn(),
+    renameGroup: vi.fn(),
+    moveLayerToParent: vi.fn(),
+    setSymmetryAxis: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
     setGradientMidStops: vi.fn(),
     setGridVisible: vi.fn(),
     setGridSpacing: vi.fn(),
     setGridSnapping: vi.fn(),
+    setRulersVisible: vi.fn(),
     dismissNotice: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -80,9 +96,33 @@ beforeEach(() => {
     moveLayer: vi.fn(),
     selectLayer: vi.fn(),
     clearSelection: vi.fn(),
+    selectAll: vi.fn(),
+    invertSelection: vi.fn(),
+    setSelectionShape: vi.fn(),
     deleteSelection: vi.fn(),
     deleteSelectedGuide: vi.fn(),
     cancelGuideGesture: vi.fn(),
+    importReference: vi.fn(),
+    selectReference: vi.fn(),
+    removeReference: vi.fn(),
+    deleteSelectedReference: vi.fn(),
+    setReferenceVisible: vi.fn(),
+    setReferenceOpacity: vi.fn(),
+    setReferenceBehind: vi.fn(),
+    setReferenceRotation: vi.fn(),
+    renameReference: vi.fn(),
+    cancelReferenceGesture: vi.fn(),
+    selectShape: vi.fn(),
+    deleteSelectedShape: vi.fn(),
+    cancelShapeGesture: vi.fn(),
+    setSelectedShapeFill: vi.fn(),
+    setSelectedShapeSides: vi.fn(),
+    setSelectedShapeInnerRatio: vi.fn(),
+    setSelectedShapeRotation: vi.fn(),
+    setSelectedShapeSize: vi.fn(),
+    setSelectedShapeWidth: vi.fn(),
+    setSelectedShapeHeight: vi.fn(),
+    setSelectedShapeBrush: vi.fn(),
     nudgeSelection: vi.fn(),
     duplicateSelection: vi.fn(),
     flipSelection: vi.fn(),
@@ -90,11 +130,14 @@ beforeEach(() => {
     rotateSelection: vi.fn(),
   };
   engine = {
+    cancelShapeCreation: () => shapePressActive,
     getState: () =>
       ({
         document: { activeLayerId: state.activeLayerId },
         selectedStrokes: state.selectedStrokes,
         selectedGuideId: state.selectedGuideId,
+        selectedReferenceId: state.selectedReferenceId,
+        selectedShapeId: state.selectedShapeId,
         toolId: state.toolId,
         gridVisible: state.gridVisible,
         gridSnapping: state.gridSnapping,
@@ -213,6 +256,18 @@ describe("document and view commands", () => {
     expect(actions.flipSelection).toHaveBeenCalledWith("vertical");
   });
 
+  it("selects all, inverts and deselects", () => {
+    press("a");
+    expect(actions.selectAll).toHaveBeenCalledOnce();
+    press("i", { shift: true });
+    expect(actions.invertSelection).toHaveBeenCalledOnce();
+    press("d", { shift: true });
+    expect(actions.clearSelection).toHaveBeenCalledOnce();
+    // The unshifted chord still duplicates the selection.
+    press("d");
+    expect(actions.duplicateSelection).toHaveBeenCalledOnce();
+  });
+
   it("zooms", () => {
     press("=");
     press("=", { shift: true });
@@ -242,6 +297,13 @@ describe("document and view commands", () => {
   it("clears the selection otherwise", () => {
     press("escape", { code: "Escape", ctrl: false, meta: false });
     expect(actions.clearSelection).toHaveBeenCalledOnce();
+  });
+
+  it("discards an unreleased shape press before clearing the selection", () => {
+    state.toolId = "rectangle";
+    shapePressActive = true;
+    press("escape", { code: "Escape", ctrl: false, meta: false });
+    expect(actions.clearSelection).not.toHaveBeenCalled();
   });
 
   it("deletes a selected guide before touching strokes", () => {

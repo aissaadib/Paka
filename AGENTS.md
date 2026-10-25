@@ -69,24 +69,40 @@ architecture by browsing.
 `types.ts` (tools), `guidesTool.ts` (138),
 `features/color/wheelGeometry.ts` (102),
 `core/brushes/presets.ts` (161: the preset model, its validation and its equality),
+`core/brushes/kritaDefaults.ts` (169: the Krita 4 preset translation, its provenance and its import helper),
 `features/brushes/BrushPresets.tsx` (176),
+`features/brushes/BrushPresetPanel.tsx` (the browser: the grid, the search, the order, the keys),
+`features/brushes/PresetRow.tsx` (one tile of the grid: the thumbnail, the corner star and the edited dot),
+`features/brushes/brushIcons.ts` (the vector model: `BrushIcon`/`BrushIconPath`, the nine `BRUSH_PALETTES`, the shared frame and grip, the nine subjects, `composeBrushIcon`),
+`features/brushes/brushIconFromBrush.ts` (the generated icons: the kind, `BUILT_IN_KINDS`, `brushMark` and its colour, the preset lookup),
+`features/brushes/BrushIcon.tsx` (the icon, one `<path>` per vector shape, at 46 px),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
-`core/color/palette.ts` (288: the swatch model, the name rules, the palette operations),
-`features/color/PalettePanel.tsx` (200: the palette grid, the rename and the remove),
-`features/color/ColorTextField.tsx` (120: the shared colour field and its refusals),
+`features/options/OptionControl.tsx` (134: the one control for every kind),
+`features/document/NewDocumentDialog.tsx` (147: the size fields and presets),
+`features/options/toolOptions.css` (161),
 `core/settings/settingsStore.ts`,
 `core/autosave/autosaveService.ts`,
 feature controls in `features/`, `ProjectFiles`, `project_io.rs`.
 
 **Between 250 and 400 - read targeted windows:** `core/tools/shapeGeometry.ts`
 (395: the line, the rectangle, the ellipse, the polygon, the star, the rigid
-rotation, the shape options and their clamps), `src-tauri/src/window_fit.rs`
+rotation, the shape options and their clamps), `core/tools/shapeOptions.ts`
+(the one options model: the values, the ranges, the defaults and the table of
+which shape kind has which option), `core/tools/shapeToolOptions.ts` (the
+controls built from that model and registered in the shared registry),
+`src-tauri/src/window_fit.rs`
 (~300: the work-area clamp, the physical-pixel arithmetic and the cases),
 `core/document/grid.ts` (283: the grid lattice, the snap candidates and the
 document-space tolerance), `core/settings/appSettings.ts` (269: the settings
-document, its readers and its per-field validation).
+document, its readers and its per-field validation),
+`core/document/symmetry.ts` (278: the modes, the axes, the mirrors, the mirrored point),
+`core/rendering/symmetryAxesOverlay.ts` (152),
+`core/input/ownership.ts` (275: the ownership state, the take/release/cancel
+rules and the routing).
+`core/options/optionControl.ts` (322: the control table for every kind of tool
+option, the exhaustive dispatch and the bar's grouping).
 
 **Over 400 - read targeted windows:** `src/test/shapeGeometry.test.ts` (559: the
 shape geometry), `core/rendering/stampCoverage.ts` (533: the dab plan, the
@@ -99,6 +115,7 @@ and the budget).
 **Small (<100) - safe to read whole:** defaults, fillPatch, gradientRecord,
 pngExport, viewport, frameScheduler, pointer, documentCommand, fill/gradient
 commands, tool definitions, `editorStore.ts`, `features/color/wheelState.ts`,
+`core/document/canvasSizePresets.ts` (the New Document quick sizes),
 `features/color/ColorField.tsx`, `features/color/colorInput.ts`,
 `features/color/ColorDock.tsx`, `features/color/RecentColors.tsx`,
 `features/color/SwatchGrid.tsx`,
@@ -117,8 +134,10 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | --- | --- |
 | Add or change a tool gesture | `core/tools/<tool>.ts` (≈90 lines), `core/tools/types.ts` (Tool/ToolContext), then the matching `begin*/finish*/cancel*` block in `DrawingEngine.ts` (§5) |
 | Change the composition guides | `core/document/guides.ts` (the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule), `core/document/types.ts` (`Guide`), `core/tools/guidesTool.ts`, the guide block in `DrawingEngine.ts`, `paintGuides` in `Canvas2DRenderer.ts` |
+| Change the reference images | `core/reference/types.ts` (`ReferenceImage`, the patch), `core/reference/geometry.ts` (the placement, the rotation, the corners, the handles, the hit-test, the source-pixel mapping, the resize and the patch/clamp rules), `core/reference/decode.ts` (the format sniff, the byte/pixel ceilings), `core/reference/store.ts` (the one decoded copy per id), `core/document/types.ts` (`DrawingDocument.references`), `core/tools/referenceTool.ts` (the three gestures), the reference block in `DrawingEngine.ts` (`importReference`, the setters, `begin`/`update`/`finish`/`cancelReferenceGesture`, `syncReferences`), `Canvas2DRenderer.ts` (`paintReferences`, `paintReferenceSelection`, `includeReferences`), `features/reference/ReferencePanel.tsx`, `projectFormat.ts` (`readReferences`, v14), `src/test/referenceManipulation.test.ts`, `src/test/referenceRendering.test.ts`, `src/test/referenceFormat.test.ts` |
+| Change the symmetry | `core/document/symmetry.ts` (the modes, the axes, the mirrors, the mirrored point), `core/rendering/symmetryAxesOverlay.ts` (the overlay, registered through the shell's registry), `src/test/symmetry.test.ts` |
 | Change the grid or the snapping | `core/document/grid.ts` (the pure rules: the nearest grid line, the lines between two coordinates, the magnet tolerance, the target choice), `core/engine/DrawingEngine.ts` (`SNAPPING_TOOL_IDS`, `snapSample`, the three setters), `core/rendering/Canvas2DRenderer.ts` (`paintGrid`), `core/rendering/types.ts` (`setGrid`), `features/grid/GridControls.tsx`, `core/settings/appSettings.ts` |
-| Change a shape's geometry (polygon, star) | `core/tools/shapeGeometry.ts` (`ShapeOptions` L42, `normalizeShapeOptions` L86, `shapeOutline` L120, `rotateAboutCentre` L305, `polygonOutline` L349, `starOutline` L378), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions` L992, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` L1004-1053), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
+| Change a shape's geometry (polygon, star) | `core/tools/shapeOptions.ts` (`ShapeOptions`, `normalizeShapeOptions`, `SHAPE_OPTION_FIELDS` - the one options model), `core/tools/shapeGeometry.ts` (`shapeOutline`, `rotateAboutCentre`, `polygonOutline`, `starOutline`), `core/tools/shapeToolOptions.ts` (the controls, registered in the shared registry), `core/tools/shapeTool.ts` (the press-time capture), `core/tools/types.ts` (`ToolContext.getShapeOptions`), `DrawingEngine.ts` (`getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation`), `state/editorStore.ts`, `features/shapes/ShapeControls.tsx`, `src/test/shapeGeometry.test.ts` |
 | Register a tool / shortcut | `core/tools/toolDefinitions.ts` (L11-134), `core/tools/toolRegistry.ts`, `types/tool.ts`, `hooks/useKeyboardShortcuts.ts`, `components/toolbar/ToolRail.tsx` |
 | Change stroke rasterization | `core/rendering/canvas2dStroke.ts` (207), `Canvas2DRenderer.ts` `rasterizeStrokeToBuffer`/`compositeStrokeBuffer`/`applyErase` |
 | Change the stamp (dab) engine | `core/rendering/stampCoverage.ts` (`stampDabs`, `StampDabCursor`, `stampDabCoverage`, `StampCoverage`, `STAMP_TEXTURE_LANES`, `stampTextureLaneWidth`, `MAX_STAMP_COVERAGE_WORK`), `Canvas2DRenderer.ts` `extendStampStroke`/`rasterizeStampStroke`/`writeStampCoverage`, `types/brush.ts`, `BrushControls.tsx`, `projectFormat.ts` `readBrush` (v9/v10) |
@@ -127,7 +146,11 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Change brush sampling (spacing/stabilizer) | `core/brushes/strokeBuilder.ts` (`addSample` L114, `STABILIZER_MAX_LAG` L39, `finish` L193), `DrawingEngine.ts` `finishStroke` (L1607), `types/brush.ts`, `BrushControls.tsx`, tests in `strokeBuilder.test.ts`/`drawingEngine.test.ts` |
 | Add a brush field | `types/brush.ts`, `core/brushes/defaults.ts` (the field lists and `readBrushSettings`), `features/brushes/BrushControls.tsx`, `projectFormat.ts` `readBrush`/serialize, `engine.setBrush`. A sampling-only field may be additive; one that changes how stored samples render needs a version bump |
 | Change the brush presets | `core/brushes/presets.ts` (the model, the name rules, `normalizeBrushPresets`), `core/brushes/defaults.ts` (`readBrushSettings`), `core/settings/appSettings.ts` (the `presets` field), `DrawingEngine.ts` (`setPresets`/`saveBrushPreset`/`renameBrushPreset`/`duplicateBrushPreset`/`applyBrushPreset`), `features/brushes/BrushPresets.tsx`, `state/editorStore.ts` |
+| Change a brush icon | `features/brushes/brushIcons.ts` (`BRUSH_ICON_SIZE` the 48-unit box, `BrushIconPath`, `BRUSH_PALETTES` and `BRUSH_ICON_LABELS` per kind, `frame` the tile, `grip` the handle, the nine subject functions, `brushIconSubject`, `composeBrushIcon`), `features/brushes/brushIconFromBrush.ts` (`brushGlyphId` the kind order, `BUILT_IN_KINDS` the six curated subjects, `brushMark` the mark and its colour, `brushIconForPreset`), `features/brushes/BrushIcon.tsx` (one `<path>` per shape, `BRUSH_ICON_CSS_SIZE`), `features/brushes/PresetRow.tsx` (the tile), `src/test/brushIcons.test.ts`, `tests/visual/brush-icons.spec.ts` |
+| Change the brush library's grid | `features/brushes/brushPresets.css` (`.brush-browser__tiles` the grid and the tile minimum, `.brush-tile*` the square, the ring, the corner star and the edited dot, the sticky group heading), `features/brushes/PresetRow.tsx` (one tile: the pick button, the star, `data-built-in`), `features/brushes/BrushPresetPanel.tsx` (`gridColumnCount`, the arrow keys move a tile or a row, the selected tile is scrolled into view), `core/brushes/presetBrowser.ts` (`nextSelectionId` takes a step), `src/test/presetBrowser.test.ts`, `tests/visual/brush-icons.spec.ts` |
+| Add or change the Krita 4 presets | `core/brushes/kritaDefaults.ts` (the specs, the builder, `missingKritaPresets`), `features/brushes/BrushPresetPanel.tsx` (the one-click button), `src/test/kritaPresets.test.ts`, `tests/visual/krita-presets.spec.ts` |
 | Add a layer element kind | `document/types.ts`, `document/strokeStore.ts`, renderer rasterize + rebuild path, a command, `projectFormat.ts`, `PROJECT_FORMAT.md` |
+| Change the layer groups (the tree) | `core/document/layerGroups.ts` (the tree rules: the children, the order, the ancestor rule, dissolving), `core/document/types.ts` (`Layer.kind`, `Layer.children`), `core/document/document.ts` (the tree-aware layer operations), `core/commands/documentCommand.ts` (the group commands), `core/project/projectFormat.ts` (version 13), `features/layers/LayersPanel.tsx`, `PROJECT_FORMAT.md` |
 | Add or change a layer blend mode | `core/document/blendModes.ts` (the closed list, the guard, the formulas), `core/document/types.ts` (`LayerBlendMode`), `Canvas2DRenderer.ts` (`compositeOperationFor`), `features/layers/LayersPanel.tsx`, `projectFormat.ts` (the versioned closed set), `PROJECT_FORMAT.md` |
 | Undo/redo behaviour | `core/commands/commandStack.ts`, the command in `core/commands/`, `engine.executeDocumentCommand`/`recordHistoryChange` |
 | Persistence / format version | `projectFormat.ts` (`PROJECT_VERSION` L108, `serializeProject` L443, `parseProject` L520, `readBrush` L797), `PROJECT_FORMAT.md` (§§ `brush`, `Versioning`) |
@@ -135,6 +158,11 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | Layer operation | `core/document/document.ts`, `core/commands/documentCommand.ts`, `DrawingEngine.ts` L755-868, `features/layers/LayersPanel.tsx` |
 | Selection / transform | `core/document/strokeSelection.ts`, `core/document/selectionTransform.ts` (the pure scale/rotate geometry), `core/document/selectionHandles.ts` (the corner and rotation handles), `core/tools/selectTool.ts`, `DrawingEngine.ts` L1665-1989, `strokeEditCommand.ts` |
 | Add a UI control | matching `features/**/…Controls.tsx`, `state/editorStore.ts` (`EditorActions`), the engine setter and `EditorSnapshot` field |
+| Change the New Document canvas sizes | `core/document/canvasSizePresets.ts` (the presets and their selected state), `core/document/document.ts` (`MIN_DOCUMENT_SIZE`, `MAX_DOCUMENT_SIZE`, `MAX_DOCUMENT_PIXELS`, `isValidDocumentSize`), `features/document/NewDocumentDialog.tsx`, `src/app/app.css` (`.dialog__presets`), `src/test/canvasSizePresets.test.ts`, `tests/visual/new-document-sizes.spec.ts` |
+| Change the top chrome (options bar, document bar) | `components/layout/ToolBar.tsx` (the two rows), `features/options/ToolOptionsBar.tsx` (the contextual row), `features/options/toolOptions.css` (the row, the scroll area, the pinned end), `src/app/app.css` (`.top-bars`, `.toolbar`, `.brush-primary`, `.brush-advanced`) |
+| Change the side dock | `components/layout/Workspace.tsx` (`SideColumn`), `components/panels/PanelDock.tsx` (the tabs), `components/panels/panel.css` (`.panel-dock`, the heights and the minimums), `src/app/app.css` (`.side-panels`, `.side-panels__layers`), `core/workspace/workspaceSettings.ts` (`compositionPanelsInSlot`), `tests/visual/shell-layout.spec.ts` |
+| Move, float or reset a panel | `core/shell/panelMovement.ts` (the pure move and reset rules), `core/shell/preferences.ts` (`panelOrder`, `panelSlots`, `hiddenPanels`), `state/workspaceStore.ts` (`movePanel`, `resetPanels`, `applyPreferences`), `components/panels/PanelDock.tsx` (the tab drag and the actions menu), `components/panels/FloatingPanels.tsx` (the floating window), `components/layout/Workspace.tsx` (the floating layer and the dock wiring), `components/layout/AppMenuBar.tsx` (Panels -> Reset Panel Layout), `app/App.tsx` (the settings sections), `core/panels/panelLayoutSection.ts`, `tests/visual/panel-movement.spec.ts` |
+| Change a tool option or the options bar | `core/shell/toolOptions.ts` (the contract: the kinds, the per-tool registry, the visibility rules), `core/options/optionControl.ts` (the control table for every kind, the exhaustive dispatch, the bar's grouping), `features/options/OptionControl.tsx` (the one control), `features/options/ToolOptionsBar.tsx` (the bar: the tool chip, the scrolling middle row and the pinned Brush settings trigger), `features/brushes/BrushControls.tsx` (the primary and advanced tiers), `features/brushes/BrushAdvancedPopover.tsx` (the advanced panel), `features/brushes/BrushPresets.tsx` (the inline picker and the Manage panel), `core/brushes/brushProperties.ts` (the tier on every field), `features/options/toolOptionSchema.ts` (the built-in options), `src/test/toolOptions.test.ts`, `src/test/brushTiers.test.ts` |
 | Change the colour model or the wheel | `utils/color.ts` (`hsvToRgb`/`rgbToHsv`/`hexToHsv`), `features/color/wheelGeometry.ts` (disc geometry, `resolveWheelHsv`), `features/color/wheelState.ts` (what the wheel shows), `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx`, `features/color/color.css` |
 | Change the colour readout or the colour input | `utils/colorMetrics.ts` (luminance, contrast, CIELAB, CIEDE2000, the nearest swatch, the totality rules), `utils/colorPair.ts`, `features/color/colorInput.ts` (the parsers and the translucent rule), `features/color/ColorField.tsx`, `features/color/ContrastReadout.tsx`, `features/color/ColorPanel.tsx` |
 | Change the colour dock, the palette or the recent colours | `core/color/palette.ts` (the swatch model, the name rules, the palette operations), `core/color/history.ts` (the bounded recency list), `features/color/ColorDock.tsx` (the ink and the alt colour), `features/color/PalettePanel.tsx` (add, rename, remove), `features/color/RecentColors.tsx` (the strip and its clear), `features/color/SwatchGrid.tsx` (the grid and the arrow keys), `features/color/ColorTextField.tsx` (the shared exact field), `core/engine/DrawingEngine.ts` (`setPalette`/`addPaletteSwatch`/`renamePaletteSwatch`/`removePaletteSwatch`/`resetColors`/`clearColorHistory`), `core/settings/appSettings.ts` (the `palette` field), `features/color/color.css` |
@@ -164,6 +192,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `DEFAULT_BRUSH`, `normalizeBrush`, `brushSettingsEqual` | `core/brushes/defaults.ts` | 15, 28, 50 |
 | `BRUSH_NUMBER_FIELDS`, `BRUSH_FLAG_FIELDS`, `BRUSH_COLOR_FIELDS`, `readBrushSettings` | `core/brushes/defaults.ts` | grep the symbol |
 | `BrushPreset`, `normalizeBrushPresets`, `uniquePresetName`, `normalizePresetName`, `duplicatePreset` | `core/brushes/presets.ts` | grep the symbol |
+| `KRITA_DEFAULT_PRESET_ENTRIES`, `KRITA_DEFAULT_PRESET_SOURCE`, `missingKritaPresets` | `core/brushes/kritaDefaults.ts` | grep the symbol |
 | `createStrokeRecord`, `cloneStroke`, `StrokeBuilder` | `core/brushes/strokeBuilder.ts` | 46, 71, 86 |
 | `STABILIZER_MAX_LAG`, `StrokeBuilder.addSample`/`finish` | `core/brushes/strokeBuilder.ts` | 39, 114, 193 |
 | `rasterizeStroke`, `strokeOpacity`, `strokeDiameter`, `stampDot` | `core/rendering/canvas2dStroke.ts` | 121, 67, 52, 87 |
@@ -176,10 +205,24 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `GuideAxis`, `Guide`, `DrawingDocument.guides` | `core/document/types.ts` | 40, 54, 85 |
 | `guideAxisFromDrag`, `roundGuidePosition`, `guideGrabRadius`, `findGuideAt`, `isDuplicateGuide` | `core/document/guides.ts` | 36, 47, 60, 87, 122 |
 | `GuidesTool` | `core/tools/guidesTool.ts` | 43 |
+| `SymmetryMode`, `SymmetrySettings`, `SymmetryAxis`, `SymmetryMirror`, `activeSymmetryAxes`, `symmetryMirrors`, `mirrorPoint`, `mirrorMovesAny`, `centeredSymmetrySettings` | `core/document/symmetry.ts` | grep the symbol |
+| `SYMMETRY_OVERLAY_ID`, `paintSymmetryAxes`, `setSymmetryOverlaySettings` | `core/rendering/symmetryAxesOverlay.ts` | grep the symbol |
+| `BRUSH_TIP_OPTION_ID`, `BRUSH_TIP_CHOICES`, `brushTipOption`, `brushTipPreview`, `registerBrushTipOptions` | `core/brushes/brushTipOptions.ts` | grep the symbol |
+| `OptionPreview`, `OptionPreviewKind`, `registerOptionPreview`, `optionPreviewFor` | `core/options/optionPreviews.ts` | grep the symbol |
+| `getShortcutStore`, `resetShortcutStore` | `core/actions/shortcutSession.ts` | grep the symbol |
+| `SHORTCUT_SECTION_KEY`, `createShortcutSection` | `core/actions/shortcutSection.ts` | grep the symbol |
+| `useShortcutStore`, `useShortcutOverrides` | `hooks/useShortcuts.ts` | grep the symbol |
+| `canonicalPanelId`, `registerPanelIfAbsent`, `isPanelRegistered`, `subscribeToPanelRegistry`, `panelRegistryVersion` | `core/shell/panelRegistry.ts` | grep the symbol |
+| `usePanelRegistryVersion`, `useRegisteredPanels`, `useRegisteredPanelsInSlot` | `hooks/usePanelRegistry.ts` | grep the symbol |
+| `layoutOfPreferences`, `preferencesOfLayout`, `createShellPreferencesLayoutPort` | `core/workspace/shellLayoutPort.ts` | grep the symbol |
+| `createWorkspaceProfileStore`, `WorkspaceLayoutPort`, `sameArrangement`, `createDetachedLayoutPort` | `core/workspace/workspaceProfileStore.ts` | grep the symbol |
+| `WORKSPACE_PROFILE_SECTION_KEY`, `createWorkspaceProfileSection` | `core/workspace/workspaceProfileSection.ts` | grep the symbol |
+| `useWorkspaceProfileStore`, `useWorkspaceProfiles`, `useWorkspaceProfileActions` | `hooks/useWorkspaceProfiles.ts` | grep the symbol |
 | `GridSettings`, `DEFAULT_GRID_SETTINGS`, `nearestGridLine`, `gridLinesBetween`, `snapDocumentPoint`, `snapTolerance` | `core/document/grid.ts` | grep the symbol |
 | `MIN_SCALE_FACTOR`, `ROTATION_SNAP_DEGREES`, `scaleFactorFor`, `rotationAngleFor`, `snapRotationAngle`, `createScaleTransform`, `createRotateTransform`, `selectionFrame` | `core/document/selectionTransform.ts` | grep the symbol |
-| `SelectionHandleId`, `selectionHandles`, `findSelectionHandle`, `HANDLE_CURSORS` | `core/document/selectionHandles.ts` | grep the symbol |
+| `SelectionHandleId`, `selectionHandles`, `visibleSelectionHandles`, `handlesWithGrabbedHandle`, `findSelectionHandle`, `handleCursorAt`, `HANDLE_CURSORS`, `handleGrabRadius`, `rotationHandleOffset` | `core/document/selectionHandles.ts` | grep the symbol |
 | `StrokeStore` (ordered element list) | `core/document/strokeStore.ts` | 24 |
+| `isGroup`, `findLayer`, `findLayerPath`, `isAncestor`, `paintableLayers`, `groupLayers`, `dissolveGroup`, `moveLayerIntoGroup`, `moveLayerOutOfGroup`, `layerTreeRows` | `core/document/layerGroups.ts` | grep the symbol |
 | `floodFill`, `MAX_FILL_SCAN_PIXELS` | `core/fill/floodFill.ts` | 56, 47 |
 | `createGradientRecord`, `MIN_GRADIENT_LENGTH` | `core/gradient/gradientRecord.ts` | 41, 16 |
 | `PROJECT_VERSION`, `serializeProject`, `parseProject` | `core/project/projectFormat.ts` | 108, 443, 520 |
@@ -193,13 +236,16 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `Command`, `CommandStack` | `core/commands/types.ts`, `commandStack.ts` | 10, 27 |
 | `createMoveStrokesCommand` etc. | `core/commands/strokeEditCommand.ts` | 100+ |
 | `Tool`, `ToolContext` | `core/tools/types.ts` | 167, 17 |
-| `ShapeKind`, `ShapeOptions`, `normalizeShapeOptions` | `core/tools/shapeGeometry.ts` | 22, 42, 86 |
+| `ShapeKind`, `ShapeOptions`, `normalizeShapeOptions` | `core/tools/shapeOptions.ts` (the model; re-exported by `core/tools/shapeGeometry.ts`) | grep the symbol |
+| `SHAPE_OPTION_FIELDS`, `shapeOptionFieldsFor`, `shapeOptionLabel`, `findShapeOptionField` | `core/tools/shapeOptions.ts` | grep the symbol |
+| `registerShapeToolOptions` | `core/tools/shapeToolOptions.ts` | grep the symbol |
 | `shapeOutline`, `outlineExtent` | `core/tools/shapeGeometry.ts` | 120, 143 |
 | `rotateAboutCentre`, `polygonOutline`, `starOutline` (private) | `core/tools/shapeGeometry.ts` | 305, 349, 378 |
 | `getShapeOptions`, `setShapeSides`/`setShapeInnerRatio`/`setShapeRotation` | `core/engine/DrawingEngine.ts` | 992, 1004 / 1022 / 1039 |
 | `TOOL_DEFINITIONS`, `findToolByShortcut` | `core/tools/toolDefinitions.ts` | 107, 123 |
 | `EditorActions` | `state/editorStore.ts` | 24 |
 | `createDocument` | `core/document/document.ts` | 183 |
+| `CANVAS_SIZE_PRESETS`, `isCanvasSizePresetSelected`, `findCanvasSizePreset` | `core/document/canvasSizePresets.ts` | grep the symbol |
 | `renderDocumentPng` | `core/export/pngExport.ts` | 57 |
 | `ProjectFiles` | `core/project/projectFiles.ts` | 43 |
 | `hsvToRgb`, `rgbToHsv`, `hexToHsv`, `normalizeHue` | `utils/color.ts` | 103, 149, 188, 88 |
@@ -217,12 +263,35 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `PressureCurveEditor` | `features/brushes/PressureCurveEditor.tsx` | grep the symbol |
 | `GradientStopEditor`, `normalizeGradientMidStops`, `gradientStopsEqual` | `features/gradient/GradientStopEditor.tsx`, `core/gradient/gradientRecord.ts` | grep the symbol |
 | `TOOL_OPTION_FIELDS`, `visibleToolOptions`, `toolShowsBrushControls` | `features/options/toolOptionSchema.ts` | grep the symbol |
-| `ToolOptionsPanel` | `features/options/ToolOptionsPanel.tsx` | grep the symbol |
+| `ToolOption`, `registerToolOptions`, `appendToolOptions`, `visibleToolOptions`, `toolOptionLabel` | `core/shell/toolOptions.ts` | grep the symbol |
+| `TOOL_OPTION_KINDS`, `ToolOptionKind` | `core/shell/toolOptions.ts` | grep the symbol |
+| `optionControl`, `sliderControl`, `numberControl`, `toggleControl`, `selectControl`, `colorControl`, `groupControl` | `core/options/optionControl.ts` | grep the symbol |
+| `groupToolOptions`, `ToolOptionGroup` | `core/options/optionControl.ts` | grep the symbol |
+| `optionNumberValue`, `optionStepValue`, `colorInputValue` | `core/options/optionControl.ts` | grep the symbol |
+| `ShellSlotId`, `ShellLayout`, `placePanel`, `movePanel`, `hidePanel`, `normalizeShellLayout` | `core/shell/slots.ts` | grep the symbol |
+| `PanelDefinition`, `registerPanel`, `listPanels`, `panelsInSlot` | `core/shell/panelRegistry.ts` | grep the symbol |
+| `ViewportState`, `viewportStateFrom`, `viewportFromState`, `normalizeViewportState` | `core/shell/viewportState.ts` | grep the symbol |
+| `OverlayDefinition`, `registerOverlay`, `listOverlays`, `overlaysForLayer` | `core/shell/overlayRegistry.ts` | grep the symbol |
+| `HistoryEntry`, `HistoryState`, `describeHistory`, `canUndo`, `canRedo` | `core/shell/historyModel.ts` | grep the symbol |
+| `ShellPreferences`, `normalizeShellPreferences`, `parseShellPreferences` | `core/shell/preferences.ts` | grep the symbol |
+| `DynamicsModel`, `normalizeDynamicsModel`, `dynamicsSizeFactor`, `registerDynamicsModel` | `core/brushes/dynamics.ts` | grep the symbol |
+| `ToolOptionsBar` | `features/options/ToolOptionsBar.tsx` | grep the symbol |
+| `BrushPrimaryControls`, `BrushAdvancedControls` | `features/brushes/BrushControls.tsx` | grep the symbol |
+| `BrushAdvancedPopover` | `features/brushes/BrushAdvancedPopover.tsx` | grep the symbol |
+| `BrushPresetControls` | `features/brushes/BrushPresets.tsx` | grep the symbol |
+| `BrushIcon`, `BRUSH_ICON_CSS_SIZE` | `features/brushes/BrushIcon.tsx` | grep the symbol |
+| `PresetRow`, `PresetRowProps` | `features/brushes/PresetRow.tsx` | grep the symbol |
+| `gridColumnCount` | `features/brushes/BrushPresetPanel.tsx` | grep the symbol |
+| `nextSelectionId` (a step, not a direction) | `core/brushes/presetBrowser.ts` | grep the symbol |
+| `BRUSH_ICON_SIZE`, `BrushIconId`, `BrushIconPalette`, `BrushIconPath`, `BrushIcon`, `BRUSH_PALETTES`, `BRUSH_ICON_LABELS`, `brushIconSubject`, `composeBrushIcon`, `BORDER` | `features/brushes/brushIcons.ts` | grep the symbol |
+| `brushGlyphId`, `brushIconPalette`, `brushIconFromBrush`, `brushIconForPreset`, `brushIconLabel`, `BrushMark`, `BrushMarkShape`, `brushMark` | `features/brushes/brushIconFromBrush.ts` | grep the symbol |
+| `BrushPropertyTier`, `brushPropertiesInTier`, `primaryBrushProperties`, `advancedBrushProperties` | `core/brushes/brushProperties.ts` | grep the symbol |
+| `PanelDock`, `DockPanel` | `components/panels/PanelDock.tsx` | grep the symbol |
+| `movePanelInPreferences`, `resetPanelPlacement`, `panelSlotOf`, `PanelMove` | `core/shell/panelMovement.ts` | grep the symbol |
+| `FloatingPanels`, `FloatingPanelSpec` | `components/panels/FloatingPanels.tsx` | grep the symbol |
+| `OptionControl`, `OptionControlView` | `features/options/OptionControl.tsx` | grep the symbol |
 | `ColorWheel`, `ColorPanel` | `features/color/ColorWheel.tsx`, `features/color/ColorPanel.tsx` | 69, 12 |
-| `PaletteSwatch`, `DEFAULT_PALETTE`, `normalizePalette`, `addPaletteSwatch`, `renamePaletteSwatch`, `removePaletteSwatch`, `findSwatchByColor` | `core/color/palette.ts` | grep the symbol |
-| `COLOR_HISTORY_LIMIT`, `pushColorHistory`, `normalizeColorHistory`, `colorHistoryEqual`, `ColorPickOptions` | `core/color/history.ts` | 30, 49 |
-| `canSwapColors`, `isDefaultColors` | `core/color/colors.ts` | grep the symbol |
-| `ColorDock`, `PalettePanel`, `RecentColors`, `SwatchGrid`, `ColorTextField` | `features/color/ColorDock.tsx`, `features/color/PalettePanel.tsx`, `features/color/RecentColors.tsx`, `features/color/SwatchGrid.tsx`, `features/color/ColorTextField.tsx` | grep the symbol |
+| `PointerOwnership`, `transitionOwnership`, `reduceOwnership`, `routePointerEvent`, `isDragInFlight`, `gestureForButton` | `core/input/ownership.ts` | grep the symbol |
 
 ## 6. Docs → section
 
@@ -235,6 +304,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
 | `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
 | `docs/qa/T06-IMPLEMENTATION-REPORT.md` | The settings slice: what is implemented, what is blocked on the owner's autosave decisions, and the verified dirty-state invariants |
+| `docs/qa/PAKA-STATE-REPORT.md` | The app at the vector-icon wave: what it does, the brush library, the icon system, the tests and the packaged measurements |
 | `docs/RELEASE-READINESS-R9-R3-PLAN.md` | The R9 (CI licence allow-list) and R3 (attestation countersignature) preparation: what is verified, what is proposed, and the open owner decisions |
 | `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
 | `THIRD_PARTY_NOTICES.md` | The notice file. Generated - read it, do not edit it; edit `scripts/generate-third-party-notices.mjs` or `licenses/dependency-inventory.json` |
@@ -260,9 +330,23 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Area | Test file |
 | --- | --- |
 | Composition guides | `guides.test.ts` (the model, the axis heuristic, the rounding, the grab radius, the hit-test, the duplicate rule) |
+| Reference images | `referenceManipulation.test.ts` (the import, the selection, the gestures, the sliders and their one-step-per-run history, the undo/redo, the save/reopen from embedded bytes, a v13 file), `referenceRendering.test.ts` (the paint order, the rotation, the clip, the export isolation), `referenceFormat.test.ts` (the v14 round trip, the byte/pixel/count ceilings, the malformed and mis-versioned files), `referenceImages.test.ts` (the decode, the store, the sampling), `tests/visual/visual.spec.ts` (the `references` scene: the display golden and the pixel proof that an export is unchanged) |
+| Layer groups (tree, commands, format) | `layerGroups.test.ts` (the tree, grouping, nesting, moves, dissolve, the commands and their refusals), `layerTreeDrag.test.ts` (the drop zones, the cycle guard and the parent options), `layerPanel.test.ts` (the engine facade, group deletion rules, gesture refusal, selection inside a group), `projectFormat.test.ts` (v13 round-trip, empty and nested groups) |
+| Layer groups in a real browser | `tests/visual/layer-groups.spec.ts` (create, rename, drag, collapse, visibility, delete, ungroup, the Inside selector), `tests/visual/layer-groups-render.spec.ts` (group opacity, visibility and blend pixels) |
+| Symmetry | `symmetry.test.ts` (the modes, the axes and where they stand, the mirror about the axis rather than the document's middle, the on-axis rule, the mirrors, and the display-only overlay) |
+| Brush tip control | `brushTipControl.test.ts` (the closed set of five shapes, the refusal of a shape this build does not know, the preview, and the write that is editor state - no history step, no dirty flag) |
+| The shortcut editor's runtime | `shortcutRuntime.test.ts` (the session store, the dispatcher's overrides, the chord a command gives up, the conflict reason, and the round trip through the section) |
+| The named workspace profiles in the file | `workspaceProfilePersistence.test.ts` (the section, the store, the arrangement port, the switch, the custom mark, and the round trip through the settings file) |
+| Pointer ownership | `pointerOwnership.test.ts` (the take/release/cancel rules, the routing, the binder's pointer handling and the cancelled gesture) |
+| Tool options | `toolOptions.test.ts` (the fields each tool shows, the control for every kind, the bar's grouping, and the path a feature takes to add an option to a tool it does not own), `toolOptionsContract.test.ts` (the registry, the visibility rules and the group rules), `brushTiers.test.ts` (the primary/advanced partition of the brush fields) |
+| The shell's layout | `tests/visual/shell-layout.spec.ts` (eight window sizes: no page scroll, the layers and dock bodies, no unreachable or zero-size control; the dock tabs with pointer and keyboard; tool switching; the advanced brush panel; the preset panel) |
+| Movable panels | `panelMovement.test.ts` (the move and reset model, unknown ids and slots, the workspace store seam, the settings-section round trip), `tests/visual/panel-movement.spec.ts` (drag reorder, float from the menu, move and dock a floating window, drag-to-float, reset) |
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
+| The brush icons | `brushIcons.test.ts` (a picture for every preset in the library, coordinates inside the icon, colours the renderer can read, the shared frame, six distinct built-ins with their curated subjects, the same settings drawing the same picture, the kind a set of settings paints and its palette, and the mark: its ink, its length, its fade, its taper and its dots) |
+| The brush browser (the library's grid) | `presetBrowser.test.ts` (the search, the order, the two groups, the favourites, the actions, the selection and its row step, the library file, the malformed file and the import), `tests/visual/brush-icons.spec.ts` (the grid of square thumbnails with no captions, each built-in tile drawing its own picture, and a saved brush drawn from its settings, never a painted dot) |
+| Krita 4 presets | `kritaPresets.test.ts` (the translated set, its bounds and names, the import helper, and the library-file round trip), `tests/visual/krita-presets.spec.ts` (the one-click import and the second press in a real browser) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
 | Colour palette and recent colours | `colorPalette.test.ts` (the swatch model, the engine's palette, a swatch painting a stroke, a shape and a fill, and the settings round trip), `colorHistory.test.ts` (the order, the bound, the de-duplication, what records a colour and what the list must never touch), `tests/visual/color-dock.spec.ts` (the dock, the palette editing and the recent colours in a real browser) |
@@ -284,9 +368,11 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Gradients | `gradient.test.ts` |
 | Layer blend modes | `blendModes.test.ts` (the formulas and their boundaries), `canvas2dRenderer.test.ts` (the canvas operation mapping, exact pixels, alpha, preview and export) |
 | Selection math | `strokeSelection.test.ts` |
-| Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
+| Scale / rotate a selection | `selectionTransform.test.ts` (the scale and rotation about a centre, the clamps, the 15-degree snap, the frame after a transform), `selectionHandles.test.ts` (the corner and rotation handles, the grab radius, the hit-test, when the handles are shown, and the three defects the first review found), `drawingEngine.test.ts` (the gestures, the undo step, the reopen) |
 | Commands | `commandStack.test.ts`, `strokeCommand.test.ts`, `documentCommand.test.ts` |
 | Document/layers | `document.test.ts` |
+| Canvas size presets | `canvasSizePresets.test.ts` (the presets, their limits, the selected state), `tests/visual/new-document-sizes.spec.ts` (the dialog in a real browser) |
+| Layer groups (the tree) | `layerGroups.test.ts` (the children, the order, the ancestor rule, dissolving, the panel rows and the group commands) |
 | Viewport/input | `viewport.test.ts`, `pointer.test.ts`, `path.test.ts` |
 | Export | `pngExport.test.ts` |
 | Misc | `base64`, `color`, `frameScheduler`, `fileMessages` |

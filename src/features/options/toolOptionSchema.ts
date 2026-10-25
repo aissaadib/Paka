@@ -1,15 +1,14 @@
 /**
- * Declarative tool options.
+ * The built-in tool options.
  *
- * A small typed schema for option controls that share one shape: a slider over
- * a numeric field or a toggle over a flag, where the field is read from the
- * editor snapshot and written through an `EditorActions` method.
+ * The contract lives in `core/shell/toolOptions.ts`: the kinds of control, the
+ * per-tool registry and the visibility rules. This module is the *content* -
+ * the options the editor ships with - and it registers them into that
+ * registry when it is evaluated.
  *
- * Only genuinely common fields live here. Brush controls keep their own
- * component because the pressure-curve editor is not a slider, and the gradient
- * stop editor is not a toggle. The schema exists to stop rectangle, ellipse,
- * polygon, star and bucket from each carrying their own copy of the same
- * "visible for this tool, read this field, call this action" wiring.
+ * Keeping the two apart is what lets a feature add an option to a tool it
+ * does not own: it registers its own option in its own module, and the
+ * options bar shows it without either file knowing about the other.
  */
 
 import {
@@ -19,45 +18,48 @@ import {
   MIN_SHAPE_SIDES,
   SHAPE_INNER_RATIO_STEP,
 } from "../../core/tools/shapeGeometry";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+} from "../../core/brushes/defaults";
+import { MIN_SHAPE_SIZE } from "../../core/document/shapeRecord";
+import type { BoxShapeGeometry } from "../../core/document/types";
 import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
-import type { EditorActions } from "../../state/editorStore";
+import {
+  FILL_MODES,
+  FILL_SAMPLE_SCALES,
+} from "../../core/fill/fillOptions";
+import { MAX_DOCUMENT_SIZE } from "../../core/document/document";
+import { SELECTION_SHAPES } from "../../core/document/selectionModes";
+import {
+  registerToolOptions,
+  type ColorToolOption,
+  type NumberToolOption,
+  type SelectToolOption,
+  type SliderToolOption,
+  type ToggleToolOption,
+  type ToolOption,
+} from "../../core/shell/toolOptions";
 import type { ToolId } from "../../types/tool";
 
-/** A label, or a function of the snapshot when the label follows the tool. */
-export type ToolOptionLabel = string | ((snapshot: EditorSnapshot) => string);
-
-interface ToolOptionBase {
-  /** Stable id, unique within one tool's field list. */
-  readonly id: string;
-  readonly label: ToolOptionLabel;
-  readonly title?: string;
-  /** Extra visibility rule on top of the section's tool association. */
-  readonly visible?: (snapshot: EditorSnapshot) => boolean;
-}
-
-export interface SliderToolOption extends ToolOptionBase {
-  readonly kind: "slider";
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly scale?: "linear" | "log";
-  readonly format?: (value: number) => string;
-  readonly read: (snapshot: EditorSnapshot) => number;
-  readonly write: (actions: EditorActions, value: number) => void;
-}
-
-export interface ToggleToolOption extends ToolOptionBase {
-  readonly kind: "toggle";
-  readonly read: (snapshot: EditorSnapshot) => boolean;
-  readonly write: (actions: EditorActions, value: boolean) => void;
-}
-
-export type ToolOption = SliderToolOption | ToggleToolOption;
-
-/** Resolves a label against the current snapshot. */
-export function toolOptionLabel(option: ToolOption, snapshot: EditorSnapshot): string {
-  return typeof option.label === "function" ? option.label(snapshot) : option.label;
-}
+export {
+  findToolOption,
+  toolOptionLabel,
+  toolOptionsFor,
+  toolShowsBrushControls,
+  visibleToolOptions,
+} from "../../core/shell/toolOptions";
+export type {
+  ColorToolOption,
+  GroupToolOption,
+  NumberToolOption,
+  SelectToolOption,
+  SliderToolOption,
+  ToggleToolOption,
+  ToolOption,
+  ToolOptionLabel,
+} from "../../core/shell/toolOptions";
 
 const shapeFillOption: ToggleToolOption = {
   id: "shapeFill",
@@ -126,6 +128,284 @@ const fillToleranceOption: SliderToolOption = {
   write: (actions, value) => actions.setFillTolerance(value),
 };
 
+const fillModeOption: SelectToolOption = {
+  id: "fillMode",
+  kind: "select",
+  label: "Mode",
+  title:
+    "Contiguous fills the region reachable from the click; Global fills every matching pixel in the visible artwork",
+  choices: FILL_MODES.map((mode) => ({
+    value: mode,
+    label: mode === "global" ? "Global" : "Contiguous",
+  })),
+  read: (snapshot) => snapshot.fillMode,
+  write: (actions, value) => {
+    if (value === "contiguous" || value === "global") {
+      actions.setFillMode(value);
+    }
+  },
+};
+
+const fillSampleScaleOption: SelectToolOption = {
+  id: "fillSampleScale",
+  kind: "select",
+  label: "Sample",
+  title:
+    "How finely the fill reads the composite: 1x is exact, coarser scales scan large regions faster",
+  choices: FILL_SAMPLE_SCALES.map((scale) => ({
+    value: String(scale),
+    label: `${scale}x`,
+  })),
+  read: (snapshot) => String(snapshot.fillSampleScale),
+  write: (actions, value) => actions.setFillSampleScale(Number(value)),
+};
+
+const symmetryModeOption: SelectToolOption = {
+  id: "symmetryMode",
+  kind: "select",
+  label: "Symmetry",
+  group: "Symmetry",
+  title:
+    "Mirror the next stroke across a vertical axis, a horizontal axis or both (four-way)",
+  choices: [
+    { value: "off", label: "Off" },
+    { value: "vertical", label: "Vertical" },
+    { value: "horizontal", label: "Horizontal" },
+    { value: "both", label: "Both" },
+  ],
+  read: (snapshot) => (snapshot.symmetryEnabled ? snapshot.symmetryMode : "off"),
+  write: (actions, value) => {
+    if (value === "off" || value === "vertical" || value === "horizontal" || value === "both") {
+      actions.setSymmetryMode(value);
+    }
+  },
+};
+
+const symmetryVerticalAxisOption: NumberToolOption = {
+  id: "symmetryVerticalAxis",
+  kind: "number",
+  label: "Axis X",
+  group: "Symmetry",
+  title: "Where the vertical mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "vertical" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryVerticalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("vertical", value),
+};
+
+const symmetryHorizontalAxisOption: NumberToolOption = {
+  id: "symmetryHorizontalAxis",
+  kind: "number",
+  label: "Axis Y",
+  group: "Symmetry",
+  title: "Where the horizontal mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "horizontal" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryHorizontalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("horizontal", value),
+};
+
+const symmetryOptions: readonly ToolOption[] = [
+  symmetryModeOption,
+  symmetryVerticalAxisOption,
+  symmetryHorizontalAxisOption,
+];
+
+const selectionShapeOption: SelectToolOption = {
+  id: "selectionShape",
+  kind: "select",
+  label: "Shape",
+  title:
+    "Rectangle selects the box you drag; Lasso selects the freehand region you trace",
+  choices: SELECTION_SHAPES.map((shape) => ({
+    value: shape,
+    label: shape === "lasso" ? "Lasso" : "Rectangle",
+  })),
+  read: (snapshot) => snapshot.selectionShape,
+  write: (actions, value) => {
+    if (value === "rect" || value === "lasso") {
+      actions.setSelectionShape(value);
+    }
+  },
+};
+
+/**
+ * The selected shape's box, or `null` when nothing is selected or the
+ * selection is a line.
+ *
+ * A line has endpoints rather than a box, so the box-only controls - rotation,
+ * width, height - must not appear for it: they would edit nothing.
+ */
+function selectedBox(snapshot: EditorSnapshot): BoxShapeGeometry | null {
+  const shape = snapshot.selectedShape;
+  return shape && shape.geometry.shape !== "line" ? shape.geometry : null;
+}
+
+/** Whether the selected shape is one of `kinds`. */
+function selectedShapeIs(snapshot: EditorSnapshot, ...kinds: readonly string[]): boolean {
+  const kind = snapshot.selectedShape?.geometry.shape;
+  return kind !== undefined && kinds.includes(kind);
+}
+
+/**
+ * The compact editor for a committed shape.
+ *
+ * These controls are registered on the shape-editor tool, not on the shape
+ * tools: they edit the **selected** shape rather than the settings for the
+ * next one. Every field is hidden until a shape is selected, and each is
+ * hidden again for the kinds it cannot change - a line has no fill, rotation
+ * or box, and only a polygon has sides and only a star has an inner radius.
+ */
+const shapeEditFillOption: ToggleToolOption = {
+  id: "shapeEditFill",
+  kind: "toggle",
+  label: "Fill",
+  group: "Shape",
+  title: "Fill the selected shape's interior instead of tracing just its outline",
+  visible: (snapshot) =>
+    selectedShapeIs(snapshot, "rectangle", "ellipse", "polygon", "star"),
+  read: (snapshot) => snapshot.selectedShape?.fill ?? false,
+  write: (actions, value) => actions.setSelectedShapeFill(value),
+};
+
+const shapeEditSidesOption: SliderToolOption = {
+  id: "shapeEditSides",
+  kind: "slider",
+  label: (snapshot) =>
+    snapshot.selectedShape?.geometry.shape === "star" ? "Points" : "Sides",
+  group: "Shape",
+  title: "How many sides the selected polygon has, or how many points the selected star has",
+  min: MIN_SHAPE_SIDES,
+  max: MAX_SHAPE_SIDES,
+  step: 1,
+  visible: (snapshot) => selectedShapeIs(snapshot, "polygon", "star"),
+  read: (snapshot) => selectedBox(snapshot)?.sides ?? MIN_SHAPE_SIDES,
+  write: (actions, value) => actions.setSelectedShapeSides(value),
+};
+
+const shapeEditInnerRatioOption: SliderToolOption = {
+  id: "shapeEditInnerRatio",
+  kind: "slider",
+  label: "Inner radius",
+  group: "Shape",
+  title: "How deep the selected star's valleys reach, as a fraction of its outer radius",
+  min: MIN_SHAPE_INNER_RATIO,
+  max: MAX_SHAPE_INNER_RATIO,
+  step: SHAPE_INNER_RATIO_STEP,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => selectedShapeIs(snapshot, "star"),
+  read: (snapshot) => selectedBox(snapshot)?.innerRatio ?? MIN_SHAPE_INNER_RATIO,
+  write: (actions, value) =>
+    actions.setSelectedShapeInnerRatio(
+      Math.round(value / SHAPE_INNER_RATIO_STEP) * SHAPE_INNER_RATIO_STEP,
+    ),
+};
+
+const shapeEditRotationOption: SliderToolOption = {
+  id: "shapeEditRotation",
+  kind: "slider",
+  label: "Rotation",
+  group: "Shape",
+  title: "Turn the selected shape about the centre of its box",
+  min: 0,
+  max: 360,
+  step: 1,
+  format: (value) => `${Math.round(value)}°`,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.rotation ?? 0,
+  write: (actions, value) => actions.setSelectedShapeRotation(value),
+};
+
+const shapeEditWidthOption: NumberToolOption = {
+  id: "shapeEditWidth",
+  kind: "number",
+  label: "Width",
+  group: "Shape",
+  title: "Width of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.width ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeWidth(value),
+};
+
+const shapeEditHeightOption: NumberToolOption = {
+  id: "shapeEditHeight",
+  kind: "number",
+  label: "Height",
+  group: "Shape",
+  title: "Height of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.height ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeHeight(value),
+};
+
+const shapeEditColorOption: ColorToolOption = {
+  id: "shapeEditColor",
+  kind: "color",
+  label: "Color",
+  group: "Appearance",
+  title: "Color of the selected shape's outline",
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.color ?? DEFAULT_BRUSH.color,
+  write: (actions, value) => actions.setSelectedShapeBrush({ color: value }),
+};
+
+const shapeEditStrokeOption: SliderToolOption = {
+  id: "shapeEditStroke",
+  kind: "slider",
+  label: "Stroke",
+  group: "Appearance",
+  title: "Width of the selected shape's outline",
+  min: MIN_BRUSH_SIZE,
+  max: MAX_BRUSH_SIZE,
+  step: 1,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.size ?? MIN_BRUSH_SIZE,
+  write: (actions, value) => actions.setSelectedShapeBrush({ size: value }),
+};
+
+const shapeEditOpacityOption: SliderToolOption = {
+  id: "shapeEditOpacity",
+  kind: "slider",
+  label: "Opacity",
+  group: "Appearance",
+  title: "Opacity of the selected shape",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.opacity ?? 1,
+  write: (actions, value) => actions.setSelectedShapeBrush({ opacity: value }),
+};
+
+const shapeEditOptions: readonly ToolOption[] = [
+  shapeEditFillOption,
+  shapeEditSidesOption,
+  shapeEditInnerRatioOption,
+  shapeEditRotationOption,
+  shapeEditWidthOption,
+  shapeEditHeightOption,
+  shapeEditColorOption,
+  shapeEditStrokeOption,
+  shapeEditOpacityOption,
+];
+
 /**
  * The option fields for each tool, in toolbar order.
  *
@@ -133,46 +413,29 @@ const fillToleranceOption: SliderToolOption = {
  * brush group, the colour panel or nothing at all.
  */
 export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> = {
-  rectangle: [shapeFillOption],
-  ellipse: [shapeFillOption],
-  polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption],
-  star: [shapeSidesOption, shapeInnerRatioOption, shapeRotationOption, shapeFillOption],
-  bucket: [fillToleranceOption],
+  select: [selectionShapeOption],
+  shapeEdit: [...shapeEditOptions],
+  brush: [...symmetryOptions],
+  eraser: [...symmetryOptions],
+  line: [...symmetryOptions],
+  rectangle: [shapeFillOption, ...symmetryOptions],
+  ellipse: [shapeFillOption, ...symmetryOptions],
+  polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption, ...symmetryOptions],
+  star: [
+    shapeSidesOption,
+    shapeInnerRatioOption,
+    shapeRotationOption,
+    shapeFillOption,
+    ...symmetryOptions,
+  ],
+  bucket: [fillToleranceOption, fillModeOption, fillSampleScaleOption],
 };
 
-/** The options a tool shows right now, after per-field visibility rules. */
-export function visibleToolOptions(
-  toolId: ToolId,
-  snapshot: EditorSnapshot,
-): readonly ToolOption[] {
-  const fields = TOOL_OPTION_FIELDS[toolId] ?? [];
-  return fields.filter((option) => option.visible?.(snapshot) ?? true);
-}
-
-/**
- * Tools whose drawing reads the brush group.
- *
- * Colour always stays available through the colour panel. The brush group is
- * hidden for tools that do not paint with a brush: the selection marquee, the
- * picker, the composition guides and pan. The bucket keeps its own tolerance
- * option, and the gradient keeps the brush opacity that its record captures.
- */
-export function toolShowsBrushControls(toolId: ToolId): boolean {
-  switch (toolId) {
-    case "brush":
-    case "eraser":
-    case "line":
-    case "rectangle":
-    case "ellipse":
-    case "polygon":
-    case "star":
-    case "gradient":
-      return true;
-    case "select":
-    case "bucket":
-    case "picker":
-    case "guides":
-    case "pan":
-      return false;
+/** Registers the built-in options into the shared per-tool registry. */
+export function registerBuiltInToolOptions(): void {
+  for (const [toolId, options] of Object.entries(TOOL_OPTION_FIELDS)) {
+    registerToolOptions(toolId as ToolId, options ?? []);
   }
 }
+
+registerBuiltInToolOptions();

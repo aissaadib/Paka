@@ -147,6 +147,17 @@ export function IconGuides(props: IconProps) {
   );
 }
 
+/** A picture in a frame: a reference image. */
+export function IconImage(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.2" />
+      <path d="M3.4 11.2 6.6 8l2.2 2.2 1.6-1.6 2.2 2.4" />
+      <circle cx="6" cy="6" r="0.9" />
+    </Icon>
+  );
+}
+
 export function IconUndo(props: IconProps) {
   return (
     <Icon {...props}>
@@ -202,6 +213,32 @@ export function IconArrowDown(props: IconProps) {
   return (
     <Icon {...props}>
       <path d="M8 3v10M4.5 9.5 8 13l3.5-3.5" />
+    </Icon>
+  );
+}
+
+export function IconFolder(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 4.5h3.4l1.2 1.5h6.4v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M2.5 6h11" />
+    </Icon>
+  );
+}
+
+export function IconFolderPlus(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M2.5 4.5h3.4l1.2 1.5h6.4v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+      <path d="M8 8v3M6.5 9.5h3" />
+    </Icon>
+  );
+}
+
+export function IconChevronRight(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 3.5 10.5 8 6 12.5" />
     </Icon>
   );
 }
@@ -273,6 +310,68 @@ export function IconFile(props: IconProps) {
     <Icon {...props}>
       <path d="M4 2.5h5l3 3v8H4z" />
       <path d="M9 2.5v3h3" />
+    </Icon>
+  );
+}
+
+/** A compass rose: the navigator panel. */
+export function IconNavigator(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="8" cy="8" r="5.6" />
+      <path d="M10.4 5.6 9.2 9.2 5.6 10.4 6.8 6.8z" />
+    </Icon>
+  );
+}
+
+/** A painter's palette: the colour panel's tab. */
+export function IconPalette(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8 2.4a5.6 5.6 0 1 0 0 11.2c.95 0 1.25-.65.8-1.35-.45-.7-.05-1.45.8-1.45h1.1a2.3 2.3 0 0 0 2.3-2.3A5.9 5.9 0 0 0 8 2.4z" />
+      <circle cx="5.6" cy="6" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="4.8" r=".7" fill="currentColor" stroke="none" />
+      <circle cx="10.4" cy="6" r=".7" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
+/** A keyboard: the shortcut reference's tab. */
+export function IconKeyboard(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="1.6" y="4.4" width="12.8" height="7.2" rx="1.3" />
+      <path d="M4.1 6.7h.01M6.3 6.7h.01M8.5 6.7h.01M10.7 6.7h.01M4.4 9.3h.01M11.6 9.3h.01M6 9.3h4" />
+    </Icon>
+  );
+}
+
+/** A small cross: close a floating panel. */
+export function IconClose(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </Icon>
+  );
+}
+
+/** A panel with an arrow: dock a floating panel. */
+export function IconDock(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.2" />
+      <path d="M2.5 6h11M9.5 8.2 7 10.7l2.5 2.5M7 10.7h4.5" />
+    </Icon>
+  );
+}
+
+/** Three dots: a small panel-actions menu. */
+export function IconMore(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="3.4" cy="8" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="8" r=".8" fill="currentColor" stroke="none" />
+      <circle cx="12.6" cy="8" r=".8" fill="currentColor" stroke="none" />
     </Icon>
   );
 }

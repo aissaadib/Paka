@@ -51,6 +51,9 @@ export type ActionId =
   | "open"
   | "duplicateLayer"
   | "duplicateSelection"
+  | "selectAll"
+  | "invertSelection"
+  | "deselect"
   | "flipHorizontal"
   | "flipVertical"
   | "zoomIn"
@@ -59,6 +62,7 @@ export type ActionId =
   | "zoomFit"
   | "toggleGrid"
   | "toggleGridSnapping"
+  | "toggleRulers"
   | "nudgeLeft"
   | "nudgeRight"
   | "nudgeUp"
@@ -79,3 +83,16 @@ export interface ActionDefinition {
   readonly when?: (context: ActionContext) => boolean;
   readonly run: (context: ActionContext) => void;
 }
+
+/**
+ * The user's own chords, keyed by action id.
+ *
+ * A user chord **replaces** the action's built-in chords: the user asked for
+ * this key, so the command no longer answers to the key Paka shipped with.
+ * An action that is not listed keeps its built-in chords, and an empty map is
+ * the built-in behaviour.
+ *
+ * The chords are a preference, not an edit: changing one adds no history step,
+ * dirties nothing and never reaches a project file.
+ */
+export type ShortcutOverrides = Readonly<Record<string, ShortcutSpec>>;

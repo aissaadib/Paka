@@ -18,7 +18,8 @@
  *   Ctrl+Shift+H   flip the selection horizontally
  *   Ctrl+Shift+V   flip the selection vertically
  *   Escape         clear the selection (with the guides tool: cancel the
- *                  guide drag and clear the guide selection)
+ *                  guide drag and clear the guide selection; with a shape
+ *                  tool: discard the outline that has not been released)
  *   Delete         delete the selected strokes (with the guides tool: the
  *                  selected guide)
  *   Ctrl+Z         undo
@@ -38,6 +39,12 @@
  * are separate arguments rather than an options object so their identities can
  * be stable `useCallback`s; an inline object would make this effect re-register
  * its listener on every render.
+ *
+ * The **user's chords** are handed to the dispatcher, so a command answers to
+ * the key the user gave it and to nothing else: the key it gave up is free,
+ * and a chord another command holds is never stolen. The chords are a
+ * preference - changing one adds no history step, dirties nothing and never
+ * reaches a project file.
  */
 
 import { useEffect } from "react";
@@ -48,6 +55,7 @@ import {
 } from "../core/actions/keyboard";
 import { dispatchKeyboardEvent } from "../core/actions/registry";
 import { useEditor } from "./useEditor";
+import { useShortcutOverrides } from "./useShortcuts";
 
 export function useKeyboardShortcuts(
   onSave?: () => void,
@@ -55,6 +63,7 @@ export function useKeyboardShortcuts(
   onOpen?: () => void,
 ): void {
   const { actions, engine } = useEditor();
+  const overrides = useShortcutOverrides();
 
   useEffect(() => {
     const platform = currentPlatform();
@@ -67,6 +76,7 @@ export function useKeyboardShortcuts(
         event,
         { engine, actions, file: { save: onSave, saveAs: onSaveAs, open: onOpen } },
         platform,
+        overrides,
       );
       if (match) {
         event.preventDefault();
@@ -75,5 +85,5 @@ export function useKeyboardShortcuts(
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [actions, engine, onSave, onSaveAs, onOpen]);
+  }, [actions, engine, onSave, onSaveAs, onOpen, overrides]);
 }

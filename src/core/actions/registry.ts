@@ -24,6 +24,7 @@ import type {
   ActionDefinition,
   ActionId,
   FileActionHandlers,
+  ShortcutOverrides,
   ShortcutSpec,
 } from "./types";
 
@@ -84,6 +85,27 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     },
   },
   {
+    id: "selectAll",
+    label: "Select All",
+    shortcuts: [mod("a", "KeyA")],
+    // Selecting is only meaningful on the select tool's canvas; the action
+    // works from any tool and the overlay reports what it selected.
+    run: ({ actions }) => actions.selectAll(),
+  },
+  {
+    id: "invertSelection",
+    label: "Invert Selection",
+    shortcuts: [mod("i", "KeyI", true)],
+    run: ({ actions }) => actions.invertSelection(),
+  },
+  {
+    id: "deselect",
+    label: "Deselect",
+    // Ctrl+D already duplicates the selection, so deselect takes Shift.
+    shortcuts: [mod("d", "KeyD", true)],
+    run: ({ actions }) => actions.clearSelection(),
+  },
+  {
     id: "duplicateSelection",
     label: "Duplicate Selection",
     shortcuts: [mod("d", "KeyD")],
@@ -139,6 +161,13 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     run: ({ actions, engine }) => actions.setGridSnapping(!engine.getState().gridSnapping),
   },
   {
+    id: "toggleRulers",
+    label: "Show Rulers",
+    // Alt is deliberate: Ctrl+R is the webview's reload in a Tauri window.
+    shortcuts: [{ key: "r", code: "KeyR", mod: true, alt: true }],
+    run: ({ actions, engine }) => actions.setRulersVisible(!engine.getState().rulersVisible),
+  },
+  {
     id: "nudgeLeft",
     label: "Nudge Left",
     shortcuts: [key("arrowleft", "ArrowLeft"), { ...key("arrowleft", "ArrowLeft"), shift: true }],
@@ -172,10 +201,29 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     label: "Escape",
     shortcuts: [key("escape", "Escape")],
     run: ({ actions, engine }) => {
+      // A shape tool's press is only a preview, so Escape discards it instead
+      // of letting the release commit an outline the user abandoned. The call
+      // is false when no shape press is in flight, so Escape keeps its other
+      // meanings below.
+      if (engine.cancelShapeCreation()) {
+        return;
+      }
       // The guides tool owns Escape while it is active: it cancels the drag in
       // flight and clears the guide selection.
       if (engine.getState().toolId === "guides") {
         actions.cancelGuideGesture();
+        return;
+      }
+      // The reference tool owns Escape the same way: a drag in flight is
+      // restored and the reference selection is cleared.
+      if (engine.getState().toolId === "reference") {
+        actions.cancelReferenceGesture();
+        return;
+      }
+      // The shape editor owns Escape too: a drag is restored, then the
+      // selection is cleared.
+      if (engine.getState().toolId === "shapeEdit") {
+        actions.cancelShapeGesture();
         return;
       }
       actions.clearSelection();
@@ -191,6 +239,19 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
       // first; the stroke selection is untouched by it.
       if (engine.getState().toolId === "guides" && engine.getState().selectedGuideId !== null) {
         actions.deleteSelectedGuide();
+        return;
+      }
+      // Likewise a selected reference belongs to the reference tool.
+      if (
+        engine.getState().toolId === "reference" &&
+        engine.getState().selectedReferenceId !== null
+      ) {
+        actions.deleteSelectedReference();
+        return;
+      }
+      // A selected native shape belongs to the shape editor.
+      if (engine.getState().toolId === "shapeEdit" && engine.getState().selectedShapeId !== null) {
+        actions.deleteSelectedShape();
         return;
       }
       actions.deleteSelection();
@@ -245,12 +306,34 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
 ];
 
 /**
+ * The chords an action claims.
+ *
+ * A user chord replaces the action's built-in ones: the user asked for this
+ * key, so the command stops answering to the key Paka shipped with, and that
+ * key is free for another command.
+ */
+export function effectiveShortcuts(
+  action: ActionDefinition,
+  overrides?: ShortcutOverrides,
+): readonly ShortcutSpec[] {
+  const override = overrides?.[action.id];
+  return override === undefined ? action.shortcuts : [override];
+}
+
+/**
  * Refuses duplicate action ids and chords.
+ *
+ * The chords that are checked are the ones the actions actually claim, so a
+ * user's chord is validated exactly like a built-in one: two commands may not
+ * claim the same chord, on either platform.
  *
  * Exported for tests: a synthetic registry with a clash must throw rather than
  * let one action shadow another.
  */
-export function validateRegistry(actions: readonly ActionDefinition[]): void {
+export function validateRegistry(
+  actions: readonly ActionDefinition[],
+  overrides?: ShortcutOverrides,
+): void {
   const ids = new Set<string>();
   const chords = new Map<string, string>();
   const platforms: readonly KeyboardPlatform[] = ["mac", "other"];
@@ -260,10 +343,11 @@ export function validateRegistry(actions: readonly ActionDefinition[]): void {
       throw new Error(`Duplicate action id "${action.id}".`);
     }
     ids.add(action.id);
-    if (action.shortcuts.length === 0) {
+    const shortcuts = effectiveShortcuts(action, overrides);
+    if (shortcuts.length === 0) {
       throw new Error(`Action "${action.id}" has no shortcut.`);
     }
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of shortcuts) {
       for (const platform of platforms) {
         const chord = chordId(shortcut, platform);
         const existing = chords.get(chord);
@@ -298,14 +382,18 @@ function baseContext(
  *
  * An action whose `when` guard is false claims nothing, so the key keeps its
  * default behaviour (arrows scroll, for example) instead of being swallowed.
+ *
+ * The user's chords are honoured: an action the user has given a chord of its
+ * own answers to that chord and no longer to the built-in one.
  */
 export function findActionForEvent(
   event: KeyboardEventLike,
   platform: KeyboardPlatform,
   context: ActionContext,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   for (const action of ACTION_DEFINITIONS) {
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of effectiveShortcuts(action, overrides)) {
       if (!matchesShortcut(event, shortcut, platform)) {
         continue;
       }
@@ -335,11 +423,13 @@ export function dispatchKeyboardEvent(
   event: KeyboardEventLike,
   context: DispatchContext,
   platform: KeyboardPlatform,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   const match = findActionForEvent(
     event,
     platform,
     baseContext(context.engine, context.actions, context.file),
+    overrides,
   );
   if (!match) {
     return null;

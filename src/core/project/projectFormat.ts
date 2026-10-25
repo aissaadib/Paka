@@ -46,13 +46,32 @@ import type {
   Layer,
   LayerElement,
   LayerId,
+  ShapeGeometry,
+  ShapeRecord,
   StrokeRecord,
   StrokeSource,
 } from "../document/types";
 import { isLayerBlendMode } from "../document/blendModes";
-import { isFillPatch, isGradient } from "../document/types";
+import { isGroup, paintableLayers } from "../document/layerGroups";
+import { isFillPatch, isGradient, isShape } from "../document/types";
+import { shapeBrush } from "../document/shapeRecord";
+import {
+  MAX_SHAPE_INNER_RATIO,
+  MAX_SHAPE_ROTATION,
+  MAX_SHAPE_SIDES,
+  MIN_SHAPE_INNER_RATIO,
+  MIN_SHAPE_ROTATION,
+  MIN_SHAPE_SIDES,
+} from "../tools/shapeOptions";
 import { MAX_FILL_SCAN_PIXELS } from "../fill/floodFill";
-import type { BrushSettings } from "../../types/brush";
+import { isBrushTipShape } from "../rendering/brushTip";
+import {
+  MAX_REFERENCE_BYTES,
+  MAX_TOTAL_REFERENCE_PIXELS,
+} from "../reference/decode";
+import type { ReferenceImage } from "../reference/types";
+import { normalizeReferenceRotation } from "../reference/geometry";
+import type { BrushSettings, BrushTipShape } from "../../types/brush";
 import { base64ToBytes, bytesToBase64 } from "../../utils/base64";
 import { hexToRgb } from "../../utils/color";
 import { reserveId } from "../../utils/id";
@@ -117,15 +136,49 @@ export const PROJECT_FORMAT_ID = "paka-project";
  * field required. Version-1 to -11 files open unchanged with the identity curve,
  * which is exactly the linear response they were written by.
  *
+ * Version 13: two changes, each of which a version-12 reader cannot ignore.
+ *
+ * First, a stroke's `brush` carries `tip`, the shape a stamped dab is
+ * masked with. It changes how a stamped stroke's samples are rasterized, so a
+ * version-12 reader ignores it and draws the same dabs as plain discs - a
+ * different picture - and the version was bumped. Version-1 to -12 files open
+ * unchanged with the `round` tip, which is exactly the coverage they were
+ * written by.
+ *
+ * Second, a layer may be a **group** - a container that holds other
+ * layers and paints nothing itself. A layer entry gained a `kind` field
+ * ("layer" or "group") and a group entry carries a `children` list. A
+ * version-12 reader knows neither: it would read a group as a paintable layer
+ * with no content, and every layer inside the group would be lost from the
+ * picture - a different drawing, not merely an incomplete one - so the
+ * version was bumped. Version-1 to -12 files open unchanged: they have no
+ * `kind` and no `children`, and every one of their layers is a paintable
+ * layer, exactly as they were written.
+ *
  * Since version 9, `document.guides` is **additive**: the composition guides
  * are display-only, so a reader that does not know the field ignores it and
  * draws the very same picture - the same situation as `stabilizer` within
  * version 6. That is why the version was not bumped for them. A file without
  * the field opens with no guides at all.
  *
+ * Version 14 adds `document.references`: the reference images, each with its
+ * placement and its original encoded bytes. Unlike the guides, the field is
+ * **not** additive: a reader that ignores it would drop the artist's
+ * references the next time the project was saved. A file that claims an older
+ * version and carries references is therefore refused, exactly as a group in a
+ * pre-13 file is, and an older build refuses a v14 file through the version
+ * gate instead of silently losing the images.
+ *
+ * Version 15: an element may be a **native shape** (`kind: "shape"`), carrying
+ * the primitive and its parameters instead of baked samples. A version-14
+ * reader rejects the unknown kind, and a version-14 file's baked shapes stay
+ * baked strokes - they are never guessed back into shapes. A shape is a
+ * different record, not a different rendering rule, so version-1 to -14 files
+ * open unchanged and keep their exact pixels.
+ *
  * Bump when the shape of the file changes in a way older readers cannot read.
  */
-export const PROJECT_VERSION = 12;
+export const PROJECT_VERSION = 15;
 export const PROJECT_FILE_EXTENSION = "paka";
 /** Upper bound on the stroke sample points a file may contain (x/y/pressure/time each). */
 export const MAX_PROJECT_SAMPLES = 5_000_000;
@@ -140,6 +193,18 @@ export const MAX_PROJECT_GRADIENT_STOPS = 64;
  * ceiling is the same kind of guard the sample and fill-pixel ceilings are.
  */
 export const MAX_PROJECT_GUIDES = 10_000;
+
+/**
+ * Upper bound on the references a file may carry.
+ *
+ * A reference is a picture, not a handful of bytes, so the count is small and
+ * the *pixels* are bounded too: {@link MAX_PROJECT_REFERENCE_PIXELS} is the
+ * same session budget the decoder enforces, and the encoded bytes of one
+ * reference are bounded by the decoder's own byte limit.
+ */
+export const MAX_PROJECT_REFERENCES = 32;
+/** Upper bound on the decoded pixels of every reference in one file. */
+export const MAX_PROJECT_REFERENCE_PIXELS = MAX_TOTAL_REFERENCE_PIXELS;
 
 export interface SerializedStroke {
   readonly kind: "stroke";
@@ -169,7 +234,11 @@ export interface SerializedFillPatch {
   readonly mask: string;
 }
 
-export type SerializedElement = SerializedStroke | SerializedFillPatch | SerializedGradient;
+export type SerializedElement =
+  | SerializedStroke
+  | SerializedFillPatch
+  | SerializedGradient
+  | SerializedShape;
 
 /** A gradient: geometry plus colour stops, not a pixel snapshot. */
 export interface SerializedGradient {
@@ -184,15 +253,58 @@ export interface SerializedGradient {
   readonly opacity: number;
 }
 
+/**
+ * A native shape: the primitive and its parameters, not baked samples.
+ *
+ * `geometry` is the shape's identity. Its `shape` field names the primitive
+ * (line, rectangle, ellipse, polygon or star), and the remaining fields are
+ * what reconstruct its outline. `brush` is the complete brush the shape was
+ * drawn with, with `stamp` forced off, so fill colour, width, opacity,
+ * hardness, texture, tip and pressure survive a save and a reopen exactly.
+ *
+ * Required from version 15 on. A version-14 file has no shape elements, and a
+ * file that claims an older version while carrying one is refused rather than
+ * silently converting it into a stroke.
+ */
+export interface SerializedShape {
+  readonly kind: "shape";
+  readonly id: string;
+  readonly geometry: ShapeGeometry;
+  readonly brush: BrushSettings;
+  readonly fill: boolean;
+}
+
 export interface SerializedLayer {
   readonly id: string;
   readonly name: string;
   readonly visible: boolean;
   readonly opacity: number;
   readonly blendMode: string;
-  /** Painting order: strokes, fills and gradients interleave exactly as made. */
-  readonly elements: readonly SerializedElement[];
+  /**
+   * `"layer"` for a paintable layer, `"group"` for a container of layers.
+   *
+   * Required in version 13. A version-12 file has no `kind`: every one of
+   * its layers is a paintable layer.
+   */
+  readonly kind: SerializedLayerKind;
+  /**
+   * Painting order: strokes, fills and gradients interleave exactly as made.
+   *
+   * Present on a paintable layer, absent on a group: a group owns no content
+   * of its own.
+   */
+  readonly elements?: readonly SerializedElement[];
+  /**
+   * The layers a group holds, bottom-first.
+   *
+   * Present on a group, absent on a paintable layer. A group owns no content
+   * of its own: the layers it holds carry the content.
+   */
+  readonly children?: readonly SerializedLayer[];
 }
+
+/** The kinds a layer entry may have. */
+export type SerializedLayerKind = "layer" | "group";
 
 export interface SerializedProject {
   readonly format: string;
@@ -212,6 +324,14 @@ export interface SerializedProject {
      * why the version was not bumped.
      */
     readonly guides: readonly SerializedGuide[];
+    /**
+     * The reference images, in drawing order.
+     *
+     * Required from version 14 on: a file without the field (or claiming an
+     * older version) carries no references, and one that claims an older
+     * version while carrying them is refused.
+     */
+    readonly references: readonly SerializedReference[];
   };
   /** Bottom-first, matching the in-memory document order. */
   readonly layers: readonly SerializedLayer[];
@@ -222,6 +342,32 @@ export interface SerializedGuide {
   readonly id: string;
   readonly axis: GuideAxis;
   readonly position: number;
+}
+
+/**
+ * A reference image: its placement and the file it came from.
+ *
+ * `data` is the original encoded file, base64, exactly as imported. It is not
+ * a path: the project is portable, so it reopens on another machine or after
+ * the original file moved. `naturalWidth`/`naturalHeight` are the decoded
+ * picture's own size, which is what the placement is relative to.
+ */
+export interface SerializedReference {
+  readonly id: string;
+  readonly name: string;
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly naturalWidth: number;
+  readonly naturalHeight: number;
+  readonly rotation: number;
+  readonly opacity: number;
+  readonly blendMode: ReferenceImage["blendMode"];
+  readonly behind: boolean;
+  readonly visible: boolean;
+  readonly mimeType: string;
+  readonly data: string;
 }
 
 export interface ParsedProject {
@@ -452,8 +598,83 @@ function readGradient(
   };
 }
 
-function readInteger(value: unknown, label: string, min: number, max: number): number {
-  const number = readAnyNumber(value, label);
+/**
+ * Reads a native shape.
+ *
+ * The primitive is the identity, so it is validated first and every other
+ * field is then read against the kind that names it. A line stores endpoints;
+ * a box shape stores its normalized box, its rigid rotation and the
+ * polygon/star parameters. The brush goes through the same reader a stroke
+ * uses, then has `stamp` forced off, which is the rule the shape tool has
+ * always applied - a shape is an outline, never a chain of dabs.
+ */
+function readShape(
+  raw: Record<string, unknown>,
+  label: string,
+  layerId: LayerId,
+  version: number,
+): ShapeRecord {
+  const id = readId(raw.id, "shape");
+  const geometry = readShapeGeometry(raw.geometry, `${label} shape geometry`);
+  const brush = shapeBrush(readBrush(raw.brush, label, version));
+  return {
+    id,
+    layerId,
+    kind: "shape",
+    geometry,
+    brush,
+    fill: raw.fill === undefined ? false : readBoolean(raw.fill, `${label} shape fill`),
+  };
+}
+
+function readShapeGeometry(value: unknown, label: string): ShapeGeometry {
+  const record = asRecord(value, label);
+  const shape = readString(record.shape, `${label} primitive`);
+  if (shape === "line") {
+    return {
+      shape: "line",
+      x1: readAnyNumber(record.x1, `${label} x1`),
+      y1: readAnyNumber(record.y1, `${label} y1`),
+      x2: readAnyNumber(record.x2, `${label} x2`),
+      y2: readAnyNumber(record.y2, `${label} y2`),
+    };
+  }
+  if (
+    shape !== "rectangle" &&
+    shape !== "ellipse" &&
+    shape !== "polygon" &&
+    shape !== "star"
+  ) {
+    fail(`${label} primitive must be line, rectangle, ellipse, polygon or star.`);
+  }
+  const width = readAnyNumber(record.width, `${label} width`);
+  const height = readAnyNumber(record.height, `${label} height`);
+  if (width < 0 || height < 0) {
+    fail(`${label} width and height cannot be negative.`);
+  }
+  return {
+    shape,
+    x: readAnyNumber(record.x, `${label} x`),
+    y: readAnyNumber(record.y, `${label} y`),
+    width,
+    height,
+    rotation: readNumber(
+      record.rotation,
+      `${label} rotation`,
+      MIN_SHAPE_ROTATION,
+      MAX_SHAPE_ROTATION,
+    ),
+    sides: readInteger(record.sides, `${label} sides`, MIN_SHAPE_SIDES, MAX_SHAPE_SIDES),
+    innerRatio: readNumber(
+      record.innerRatio,
+      `${label} inner ratio`,
+      MIN_SHAPE_INNER_RATIO,
+      MAX_SHAPE_INNER_RATIO,
+    ),
+  };
+}
+
+function readInteger(value: unknown, label: string, min: number, max: number): number {  const number = readAnyNumber(value, label);
   if (!Number.isInteger(number) || number < min || number > max) {
     fail(`${label} must be a whole number between ${min} and ${max}.`);
   }
@@ -477,18 +698,70 @@ export function serializeProject(document: DrawingDocument, strokes: StrokeSourc
         axis: guide.axis,
         position: guide.position,
       })),
+      references: document.references.map(serializeReference),
     },
-    layers: document.layers.map((layer) => ({
+    layers: document.layers.map((layer) => serializeLayer(layer, strokes)),
+  };
+
+  return JSON.stringify(payload);
+}
+
+/**
+ * Serializes one node of the layer tree.
+ *
+ * A **group** is written as a container: its `children` carry the layers it
+ * holds, and it carries no elements of its own. A paintable layer is written
+ * with its elements and no children.
+ */
+function serializeLayer(layer: Layer, strokes: StrokeSource): SerializedLayer {
+  if (isGroup(layer)) {
+    return {
       id: layer.id,
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
       blendMode: layer.blendMode,
-      elements: strokes.listElements(layer.id).map(serializeElement),
-    })),
+      kind: "group",
+      children: layer.children.map((child) => serializeLayer(child, strokes)),
+    };
+  }
+  return {
+    id: layer.id,
+    name: layer.name,
+    visible: layer.visible,
+    opacity: layer.opacity,
+    blendMode: layer.blendMode,
+    kind: "layer",
+    elements: strokes.listElements(layer.id).map(serializeElement),
   };
+}
 
-  return JSON.stringify(payload);
+/**
+ * Writes one reference: its placement and the file's original bytes.
+ *
+ * The bytes are written even when they are empty, so the reader can refuse a
+ * reference that lost its picture instead of opening a placement with nothing
+ * to draw. Only the engine creates document references, and it always keeps
+ * the bytes it imported.
+ */
+function serializeReference(reference: ReferenceImage): SerializedReference {
+  return {
+    id: reference.id,
+    name: reference.name,
+    x: reference.x,
+    y: reference.y,
+    width: reference.width,
+    height: reference.height,
+    naturalWidth: reference.naturalWidth,
+    naturalHeight: reference.naturalHeight,
+    rotation: reference.rotation,
+    opacity: reference.opacity,
+    blendMode: reference.blendMode,
+    behind: reference.behind,
+    visible: reference.visible,
+    mimeType: reference.source?.mimeType ?? "",
+    data: reference.source?.base64 ?? "",
+  };
 }
 
 function serializeElement(element: LayerElement): SerializedElement {
@@ -515,6 +788,17 @@ function serializeElement(element: LayerElement): SerializedElement {
       y2: element.y2,
       stops: element.stops.map((stop) => ({ offset: stop.offset, color: stop.color })),
       opacity: element.opacity,
+    };
+  }
+  if (isShape(element)) {
+    return {
+      kind: "shape",
+      id: element.id,
+      // The geometry is already plain data; copying it keeps the serialized
+      // value independent of the in-memory record.
+      geometry: { ...element.geometry },
+      brush: element.brush,
+      fill: element.fill,
     };
   }
   return {
@@ -632,91 +916,32 @@ function readProject(
   const layers: Layer[] = [];
   const elements: LayerElement[] = [];
   const strokes: StrokeRecord[] = [];
-  const seenLayerIds = new Set<string>();
-  let sampleCount = 0;
-  let fillPixelCount = 0;
+  const state: LayerReadState = {
+    seenLayerIds: new Set<string>(),
+    elements,
+    strokes,
+    warnings,
+    sampleCount: 0,
+    fillPixelCount: 0,
+    layerCount: 0,
+    groupCount: 0,
+  };
 
-  root.layers.forEach((rawLayer, layerIndex) => {
-    const label = `Layer ${layerIndex + 1}`;
-    const record = asRecord(rawLayer, label);
+  const tree = readLayerTree(
+    root.layers,
+    "Layer",
+    version,
+    width,
+    height,
+    state,
+    maxSamples,
+    maxFillPixels,
+  );
+  layers.push(...tree);
 
-    const id = readId(record.id, "layer");
-    if (seenLayerIds.has(id)) {
-      fail(`Two layers in this project share the id "${id}".`);
-    }
-    seenLayerIds.add(id);
-
-    let layerName = `Layer ${layerIndex + 1}`;
-    if (typeof record.name === "string" && record.name.trim() !== "") {
-      layerName = record.name;
-    } else {
-      warnings.push(`${label} had no name and was renamed.`);
-    }
-
-    const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
-    const visible = readBoolean(record.visible, `${label} visibility`);
-    const blendMode = readString(record.blendMode, `${label} blend mode`);
-    if (!isLayerBlendMode(blendMode)) {
-      fail(`${label} uses the unsupported blend mode "${blendMode}".`);
-    }
-
-    layers.push({ id, name: layerName, visible, opacity, blendMode });
-
-    // Version 4 uses one ordered `elements` list. Older files have a `strokes`
-    // array only, which is exactly a list of stroke elements in the same order.
-    const rawElements =
-      version >= 4
-        ? readElementList(record.elements, `${label} elements`)
-        : readElementList(record.strokes, `${label} strokes`);
-
-    for (const [elementIndex, rawElement] of rawElements.entries()) {
-      const elementLabel = `${label}, element ${elementIndex + 1}`;
-      const element = asRecord(rawElement, elementLabel);
-
-      if (version >= 4) {
-        const kind = readString(element.kind, `${elementLabel} kind`);
-        if (kind === "fill") {
-          const patch = readFillPatch(
-            element,
-            elementLabel,
-            id,
-            width,
-            height,
-            fillPixelCount,
-            maxFillPixels,
-          );
-          fillPixelCount += patch.width * patch.height;
-          elements.push(patch);
-          continue;
-        }
-        if (kind === "gradient") {
-          if (version < 5) {
-            fail(`${elementLabel} uses a gradient, which requires file version 5.`);
-          }
-          elements.push(readGradient(element, elementLabel, id, width, height));
-          continue;
-        }
-        if (kind !== "stroke") {
-          fail(`${elementLabel} has the unknown kind "${kind}".`);
-        }
-      }
-
-      const stroke = readStroke(
-        element,
-        elementLabel,
-        id,
-        sampleCount,
-        maxSamples,
-        version,
-      );
-      sampleCount += stroke.xs.length;
-      elements.push(stroke);
-      strokes.push(stroke);
-    }
-  });
-
-  const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, seenLayerIds, layers, warnings);
+  const activeLayerId = resolveActiveLayer(rawDocument.activeLayerId, state.seenLayerIds, layers, warnings);
   const guides = readGuides(rawDocument.guides, warnings);
+  const references = readReferences(rawDocument.references, version, warnings);
 
   const document: DrawingDocument = {
     id: documentId,
@@ -727,9 +952,225 @@ function readProject(
     layers,
     activeLayerId,
     guides,
+    references,
   };
 
   return { document, elements, strokes, warnings };
+}
+
+/**
+ * The state one read shares across the whole layer tree.
+ *
+ * The ids, the elements and the counters are global to the file: two layers
+ * anywhere in the tree may not share an id, and the elements of every layer
+ * come back in one list, in document order.
+ */
+interface LayerReadState {
+  readonly seenLayerIds: Set<string>;
+  readonly elements: LayerElement[];
+  readonly strokes: StrokeRecord[];
+  readonly warnings: string[];
+  sampleCount: number;
+  fillPixelCount: number;
+  /** How many paintable layers the file holds; names the ones without a name. */
+  layerCount: number;
+  /** How many groups the file holds; names the ones without a name. */
+  groupCount: number;
+}
+
+/**
+ * Reads a list of layer nodes, at the root of the document or inside a group.
+ *
+ * The list is the tree: a group's children are read exactly like the root
+ * list, so a group may hold groups.
+ */
+function readLayerTree(
+  rawLayers: unknown,
+  label: string,
+  version: number,
+  documentWidth: number,
+  documentHeight: number,
+  state: LayerReadState,
+  maxSamples: number,
+  maxFillPixels: number,
+): Layer[] {
+  if (!Array.isArray(rawLayers)) {
+    fail(`${label} list must be an array.`);
+  }
+  const layers: Layer[] = [];
+  rawLayers.forEach((rawLayer, index) => {
+    layers.push(
+      readLayer(
+        rawLayer,
+        `${label} ${index + 1}`,
+        version,
+        documentWidth,
+        documentHeight,
+        state,
+        maxSamples,
+        maxFillPixels,
+      ),
+    );
+  });
+  return layers;
+}
+
+/**
+ * Reads the `kind` of a layer entry.
+ *
+ * Version 13 introduced groups, so the field is required from that version
+ * on. A file that claims an older version and carries a group is refused: it
+ * cannot be read as it stands, and reading it as a flat list of paintable
+ * layers would draw a different picture.
+ */
+function readLayerKind(value: unknown, label: string, version: number): SerializedLayerKind {
+  if (version < 13) {
+    if (value === undefined || value === "layer") {
+      return "layer";
+    }
+    fail(`${label} is a "${String(value)}", which requires file version 13.`);
+  }
+  if (value === undefined) {
+    fail(`${label} has no kind; a layer must say whether it is a layer or a group.`);
+  }
+  const kind = readString(value, `${label} kind`);
+  if (kind !== "layer" && kind !== "group") {
+    fail(`${label} has the unknown kind "${kind}".`);
+  }
+  return kind;
+}
+
+/** Reads one node of the layer tree: a paintable layer or a group. */
+function readLayer(
+  raw: unknown,
+  label: string,
+  version: number,
+  documentWidth: number,
+  documentHeight: number,
+  state: LayerReadState,
+  maxSamples: number,
+  maxFillPixels: number,
+): Layer {
+  const record = asRecord(raw, label);
+
+  const kind = readLayerKind(record.kind, label, version);
+  if (version < 13 && record.children !== undefined) {
+    fail(`${label} holds other layers, which requires file version 13.`);
+  }
+
+  const id = readId(record.id, kind === "group" ? "group" : "layer");
+  if (state.seenLayerIds.has(id)) {
+    fail(`Two layers in this project share the id "${id}".`);
+  }
+  state.seenLayerIds.add(id);
+
+  if (kind === "group") {
+    state.groupCount += 1;
+  } else {
+    state.layerCount += 1;
+  }
+
+  let layerName = kind === "group" ? `Group ${state.groupCount}` : `Layer ${state.layerCount}`;
+  if (typeof record.name === "string" && record.name.trim() !== "") {
+    layerName = record.name;
+  } else {
+    state.warnings.push(`${label} had no name and was renamed.`);
+  }
+
+  const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
+  const visible = readBoolean(record.visible, `${label} visibility`);
+  const blendMode = readString(record.blendMode, `${label} blend mode`);
+  if (!isLayerBlendMode(blendMode)) {
+    fail(`${label} uses the unsupported blend mode "${blendMode}".`);
+  }
+
+  if (kind === "group") {
+    // A group owns no content of its own: the layers it holds carry it.
+    if (record.elements !== undefined) {
+      fail(`${label} is a group and cannot carry elements of its own.`);
+    }
+    if (record.children === undefined) {
+      fail(`${label} does not list the layers it holds.`);
+    }
+    const children = readLayerTree(
+      record.children,
+      `${label}, layer`,
+      version,
+      documentWidth,
+      documentHeight,
+      state,
+      maxSamples,
+      maxFillPixels,
+    );
+    return { id, name: layerName, visible, opacity, blendMode, kind: "group", children };
+  }
+
+  if (record.children !== undefined) {
+    fail(`${label} is a paintable layer and cannot hold other layers.`);
+  }
+
+  // Version 4 uses one ordered `elements` list. Older files have a `strokes`
+  // array only, which is exactly a list of stroke elements in the same order.
+  const rawElements =
+    version >= 4
+      ? readElementList(record.elements, `${label} elements`)
+      : readElementList(record.strokes, `${label} strokes`);
+
+  for (const [elementIndex, rawElement] of rawElements.entries()) {
+    const elementLabel = `${label}, element ${elementIndex + 1}`;
+    const element = asRecord(rawElement, elementLabel);
+
+    if (version >= 4) {
+      const elementKind = readString(element.kind, `${elementLabel} kind`);
+      if (elementKind === "fill") {
+        const patch = readFillPatch(
+          element,
+          elementLabel,
+          id,
+          documentWidth,
+          documentHeight,
+          state.fillPixelCount,
+          maxFillPixels,
+        );
+        state.fillPixelCount += patch.width * patch.height;
+        state.elements.push(patch);
+        continue;
+      }
+      if (elementKind === "gradient") {
+        if (version < 5) {
+          fail(`${elementLabel} uses a gradient, which requires file version 5.`);
+        }
+        state.elements.push(
+          readGradient(element, elementLabel, id, documentWidth, documentHeight),
+        );
+        continue;
+      }
+      if (elementKind === "shape") {
+        if (version < 15) {
+          fail(`${elementLabel} uses a native shape, which requires file version 15.`);
+        }
+        state.elements.push(readShape(element, elementLabel, id, version));
+        continue;
+      }
+      if (elementKind !== "stroke") {
+        fail(`${elementLabel} has the unknown kind "${elementKind}".`);
+      }
+    }
+
+    const stroke = readStroke(
+      element,
+      elementLabel,
+      id,
+      state.sampleCount,
+      maxSamples,
+      version,
+    );
+    state.sampleCount += stroke.xs.length;
+    state.elements.push(stroke);
+    state.strokes.push(stroke);
+  }
+
+  return { id, name: layerName, visible, opacity, blendMode, kind: "layer", children: [] };
 }
 
 /**
@@ -791,6 +1232,133 @@ function readGuides(value: unknown, warnings: string[]): Guide[] {
   });
 
   return guides;
+}
+
+/**
+ * Reads the reference images.
+ *
+ * A reference is a picture, so a malformed one is **refused**, not ignored: a
+ * project that silently dropped a reference would look different from the one
+ * the artist saved. The version gate is the same one groups use - a file that
+ * claims an older version cannot carry references, because an older build
+ * would have dropped them on the next save.
+ */
+function readReferences(
+  value: unknown,
+  version: number,
+  warnings: string[],
+): ReferenceImage[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (version < 14) {
+    // An older file that carries actual references is refused: an older build
+    // would have dropped them on the next save. An empty list is not content -
+    // a newer serializer writes it for a document without references - so it
+    // is read as "none" rather than treated as a version lie.
+    if (Array.isArray(value) && value.length === 0) {
+      return [];
+    }
+    fail("This project carries reference images, which require file version 14.");
+  }
+  if (!Array.isArray(value)) {
+    fail("The reference list must be an array.");
+  }
+  if (value.length > MAX_PROJECT_REFERENCES) {
+    fail(
+      `This project contains ${value.length} references, more than the ${MAX_PROJECT_REFERENCES} allowed.`,
+    );
+  }
+
+  const references: ReferenceImage[] = [];
+  const seenIds = new Set<string>();
+  let decodedPixels = 0;
+
+  value.forEach((raw, index) => {
+    const label = `Reference ${index + 1}`;
+    const record = asRecord(raw, label);
+    const id = readId(record.id, "reference");
+    if (seenIds.has(id)) {
+      fail(`${label} repeats the id "${id}".`);
+    }
+    seenIds.add(id);
+
+    let name = typeof record.name === "string" ? record.name.trim() : "";
+    if (name === "") {
+      name = `Reference ${index + 1}`;
+      warnings.push(`${label} had no name; it was called "${name}".`);
+    }
+
+    const x = readAnyNumber(record.x, `${label} x`);
+    const y = readAnyNumber(record.y, `${label} y`);
+    const width = readNumber(record.width, `${label} width`, 1, Number.MAX_SAFE_INTEGER);
+    const height = readNumber(record.height, `${label} height`, 1, Number.MAX_SAFE_INTEGER);
+    const naturalWidth = Math.round(
+      readNumber(record.naturalWidth, `${label} natural width`, 1, Number.MAX_SAFE_INTEGER),
+    );
+    const naturalHeight = Math.round(
+      readNumber(record.naturalHeight, `${label} natural height`, 1, Number.MAX_SAFE_INTEGER),
+    );
+    const rotation = normalizeReferenceRotation(
+      readAnyNumber(record.rotation, `${label} rotation`),
+    );
+    const opacity = readNumber(record.opacity, `${label} opacity`, 0, 1);
+    const blendMode = readString(record.blendMode, `${label} blend mode`);
+    if (!isLayerBlendMode(blendMode)) {
+      fail(`${label} has an unknown blend mode "${blendMode}".`);
+    }
+    const behind = readBoolean(record.behind, `${label} behind flag`);
+    const visible = readBoolean(record.visible, `${label} visible flag`);
+
+    const mimeType = readString(record.mimeType, `${label} MIME type`);
+    if (!mimeType.startsWith("image/")) {
+      fail(`${label} does not say what kind of image it is.`);
+    }
+    const data = readString(record.data, `${label} image data`);
+    if (data === "") {
+      fail(`${label} carries no image data.`);
+    }
+    // The base64 text is bounded before it is decoded, so an enormous string
+    // cannot make the reader allocate the bytes it encodes.
+    if (data.length > Math.ceil(MAX_REFERENCE_BYTES / 3) * 4) {
+      fail(`${label} is larger than the ${Math.round(MAX_REFERENCE_BYTES / (1024 * 1024))} MB limit.`);
+    }
+    const bytes = base64ToBytes(data);
+    if (!bytes || bytes.length === 0) {
+      fail(`${label} has image data that is not valid base64.`);
+    }
+    if (bytes.length > MAX_REFERENCE_BYTES) {
+      fail(`${label} is larger than the ${Math.round(MAX_REFERENCE_BYTES / (1024 * 1024))} MB limit.`);
+    }
+
+    decodedPixels += naturalWidth * naturalHeight;
+    if (decodedPixels > MAX_PROJECT_REFERENCE_PIXELS) {
+      fail(
+        `The references in this project need more than the ${Math.round(
+          MAX_PROJECT_REFERENCE_PIXELS / (1024 * 1024),
+        )} megapixels the editor allows in one session.`,
+      );
+    }
+
+    references.push({
+      id,
+      name,
+      x,
+      y,
+      width,
+      height,
+      naturalWidth,
+      naturalHeight,
+      rotation,
+      opacity,
+      blendMode,
+      behind,
+      visible,
+      source: { mimeType, base64: data },
+    });
+  });
+
+  return references;
 }
 
 /** Keeps generated ids from colliding with ids that came out of a file. */
@@ -884,7 +1452,32 @@ function readBrush(value: unknown, label: string, version: number): BrushSetting
     // curve, which is the linear response they were written by.
     pressureCurve:
       version >= 12 ? normalizePressureCurve(record.pressureCurve) : DEFAULT_PRESSURE_CURVE,
+    // The tip changes how a stamped stroke's samples are rasterized, so it
+    // became a field of version 13: a version-12 reader ignores it and draws
+    // the same dabs as plain discs, which is a different picture. Earlier
+    // files had no tip at all, and the round tip is exactly the coverage they
+    // were written by.
+    tip: version >= 13 ? readTip(record.tip, `${label} brush tip`) : DEFAULT_BRUSH.tip,
   });
+}
+
+/**
+ * The tip of a stroke's brush.
+ *
+ * The tip is a closed set of shapes, so a shape this build does not know is
+ * refused rather than drawn as the wrong thing - the same rule the layer
+ * blend modes follow. A *missing* tip falls back to the round tip, the
+ * coverage every earlier version was written by.
+ */
+function readTip(value: unknown, label: string): BrushTipShape {
+  if (value === undefined || value === null) {
+    return DEFAULT_BRUSH.tip;
+  }
+  const shape = readString(value, label);
+  if (!isBrushTipShape(shape)) {
+    fail(`${label} uses the unsupported brush tip "${shape}".`);
+  }
+  return shape;
 }
 
 function resolveActiveLayer(
@@ -899,6 +1492,8 @@ function resolveActiveLayer(
   if (value !== null && value !== undefined) {
     warnings.push("The active layer recorded in the project no longer exists; the bottom layer was selected.");
   }
-  const first = layers[0];
+  // The fallback has to be a layer that paints: a group owns no content, so
+  // it cannot be the destination of a drawing.
+  const first = paintableLayers(layers)[0];
   return first ? first.id : null;
 }

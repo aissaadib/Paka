@@ -1,0 +1,124 @@
+/** The shortcut editor panel: the list of commands and the chords they answer to. */
+
+.shortcuts__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/**
+ * One command.
+ *
+ * The row is a grid, so the chord always sits in the same place and the list
+ * reads as a column of keys rather than a column of sentences.
+ */
+.shortcuts__row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 1px 2px;
+  border-radius: var(--radius);
+}
+
+.shortcuts__row:hover {
+  background: var(--bg-raised);
+}
+
+.shortcuts__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 11px;
+}
+
+/** The chord the command answers to. */
+.shortcuts__chord {
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/** The built-in chord a command gave up. */
+.shortcuts__was {
+  color: var(--text-dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/**
+ * The field a chord is captured in.
+ *
+ * It is a text field on purpose: the application's own shortcuts leave a text
+ * field alone, so the key the user presses to record a chord cannot fire the
+ * command it is being recorded for.
+ */
+.shortcuts__capture {
+  width: 90px;
+  height: var(--control-height-sm);
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+}
+
+.shortcuts__button {
+  height: var(--control-height-sm);
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.shortcuts__button:hover {
+  background: var(--bg-raised-hover);
+  color: var(--text-strong);
+}
+
+/**
+ * The reason a chord was refused.
+ *
+ * It says which command holds the chord, so the user knows what to move
+ * first.
+ */
+.shortcuts__reason {
+  margin: 4px 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--text-strong);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/** The heading of the tools' group. */
+.shortcuts__group {
+  margin: 8px 2px 2px;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/** The note that says what a shortcut is. */
+.shortcuts__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+}

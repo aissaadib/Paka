@@ -1,0 +1,180 @@
+/** References panel: the import button, the list and the selected reference's controls. */
+
+.reference-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.reference-panel__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.reference-panel__import {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reference-panel__import:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.reference-panel__import:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The input is driven by the button; keeping it out of sight but focusable
+   would leave a stray tab stop, so it is display:none and the button is the
+   only control. */
+.reference-panel__input {
+  display: none;
+}
+
+.reference-panel__message {
+  margin: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--danger, #e0567f);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+}
+
+.reference-panel__empty {
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+
+.reference-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reference-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.reference-panel__row:hover {
+  background: var(--bg-inset);
+}
+
+.reference-panel__row.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.reference-panel__visibility,
+.reference-panel__remove {
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reference-panel__visibility[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.reference-panel__remove:hover {
+  color: var(--text-strong);
+}
+
+.reference-panel__pick {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  padding: 3px 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reference-panel__name {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-panel__meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.reference-panel__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.reference-panel__field {
+  display: grid;
+  grid-template-columns: 56px 1fr 36px;
+  align-items: center;
+  gap: 6px;
+}
+
+.reference-panel__field input {
+  width: 100%;
+}
+
+.reference-panel__value {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.reference-panel__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reference-panel__hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.reference-panel__hint kbd {
+  padding: 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+}

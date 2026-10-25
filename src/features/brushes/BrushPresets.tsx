@@ -1,14 +1,17 @@
 /**
- * Named brush presets: apply, save, rename, duplicate and delete.
+ * The brush preset picker: choose a preset, and manage the saved ones.
+ *
+ * The picker is the one control a drawing session reaches for constantly, so
+ * it stays in the options bar as a plain select. Managing presets - naming,
+ * saving, renaming, duplicating and deleting - is a deliberate, occasional
+ * act, so it lives behind the "Manage" popover beside the select. Both halves
+ * share one piece of state, so the name field and the select can never
+ * disagree about which preset is selected.
  *
  * The picker applies the preset it selects to the live brush, so the next
  * stroke is drawn with it. The management actions work on the preset the
  * picker has selected and never apply it first, so renaming, duplicating or
  * deleting one leaves the current brush exactly as it was.
- *
- * The name field is empty until something is typed, and the button that uses
- * it is the one the user presses: "Save" stores the current brush as a new
- * preset under that name, "Rename" gives the selected preset that name.
  *
  * Every action is editor state only: applying a preset goes through the
  * engine's `setBrush`, and none of the preset operations touch history or the
@@ -16,6 +19,7 @@
  */
 
 import { useState } from "react";
+import { Popover } from "../../components/toolbar/Popover";
 import { brushSettingsEqual } from "../../core/brushes/defaults";
 import {
   MAX_PRESET_NAME_LENGTH,
@@ -23,7 +27,7 @@ import {
 } from "../../core/brushes/presets";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 
-export function BrushPresets() {
+export function BrushPresetControls() {
   const { actions } = useEditor();
   const { brush, presets } = useEditorState();
   // `undefined` means "the user has not picked one yet", so the picker shows
@@ -115,62 +119,80 @@ export function BrushPresets() {
           ))}
         </select>
       </label>
-      <input
-        className="text-input brush-presets__name"
-        type="text"
-        aria-label="Preset name"
-        placeholder="Preset name"
-        maxLength={MAX_PRESET_NAME_LENGTH}
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key !== "Enter" || typed === "") {
-            return;
-          }
-          event.preventDefault();
-          if (current) {
-            rename();
-          } else {
-            save();
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={typed === ""}
-        title="Save the current brush as a new preset with this name"
-        onClick={save}
+      <span className="brush-presets__state" aria-hidden={!edited}>
+        {edited ? "edited" : ""}
+      </span>
+      <Popover
+        label="Manage"
+        title="Save the current brush, or rename, duplicate and delete the selected preset"
+        className="brush-preset-editor"
+        ariaLabel="Brush presets"
       >
-        Save
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null || typed === "" || typed === current?.name}
-        title="Rename the selected preset to this name"
-        onClick={rename}
-      >
-        Rename
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null}
-        title="Duplicate the selected preset"
-        onClick={duplicate}
-      >
-        Duplicate
-      </button>
-      <button
-        type="button"
-        className="button brush-presets__action"
-        disabled={current === null}
-        title="Delete the selected preset"
-        onClick={remove}
-      >
-        Delete
-      </button>
+        <label className="brush-preset-editor__field">
+          <span className="brush-preset-editor__label">Preset name</span>
+          <input
+            className="text-input"
+            type="text"
+            aria-label="Preset name"
+            placeholder="Name the brush…"
+            maxLength={MAX_PRESET_NAME_LENGTH}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || typed === "") {
+                return;
+              }
+              event.preventDefault();
+              if (current) {
+                rename();
+              } else {
+                save();
+              }
+            }}
+          />
+        </label>
+        <p className="brush-preset-editor__current">
+          {current ? `Selected: ${current.name}${edited ? " (edited)" : ""}` : "No preset selected"}
+        </p>
+        <div className="brush-preset-editor__actions">
+          <button
+            type="button"
+            className="button"
+            disabled={typed === ""}
+            title="Save the current brush as a new preset with this name"
+            onClick={save}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={current === null || typed === "" || typed === current?.name}
+            title="Rename the selected preset to this name"
+            onClick={rename}
+          >
+            Rename
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={current === null}
+            title="Duplicate the selected preset"
+            onClick={duplicate}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={current === null}
+            title="Delete the selected preset"
+            onClick={remove}
+          >
+            Delete
+          </button>
+        </div>
+      </Popover>
     </div>
   );
 }

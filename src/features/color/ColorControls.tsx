@@ -15,7 +15,8 @@
 
 import { canSwapColors, isDefaultColors } from "../../core/color/colors";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { colorInputValue } from "../../utils/color";
+import { ColorSwatches } from "./ColorSwatches";
+import { toColorInputValue } from "./colorInput";
 
 export function ColorControls() {
   const { actions } = useEditor();
@@ -54,17 +55,8 @@ export function ColorControls() {
         >
           ⇄
         </button>
-        <button
-          type="button"
-          className="color-controls__reset"
-          onClick={() => actions.resetColors()}
-          disabled={isDefault}
-          aria-label="Default colors"
-          title="Put both colors back to their defaults (D)"
-        >
-          Reset
-        </button>
       </div>
+      <ColorSwatches />
     </div>
   );
 }

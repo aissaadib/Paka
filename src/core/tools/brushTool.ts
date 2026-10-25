@@ -13,6 +13,9 @@
 import { isPaintButton, type PointerSample } from "../../types/pointer";
 import type { ToolContext, Tool } from "./types";
 import { BRUSH_TOOL } from "./toolDefinitions";
+// The brush's tip control: the options bar's list of the five tip shapes is
+// registered with the brush tool, so it is registered when the tool is.
+import "../brushes/brushTipOptions";
 
 export class BrushTool implements Tool {
   readonly definition: Tool["definition"];

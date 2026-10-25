@@ -11,7 +11,7 @@ import type { DrawingDocument, LayerId, StrokeRecord, StrokeSource } from "../do
 import type { GridSettings } from "../document/grid";
 import type { SelectionHandles } from "../document/selectionHandles";
 import type { Viewport } from "../../types/viewport";
-import type { Bounds } from "../../types/geometry";
+import type { Bounds, Point } from "../../types/geometry";
 import type { Rgb } from "../../utils/color";
 
 export type RendererKind = "canvas2d" | "webgl" | "webgpu";
@@ -29,6 +29,12 @@ export type RendererKind = "canvas2d" | "webgl" | "webgpu";
 export interface RendererSelection {
   /** Rubber-band rectangle in document space, or `null` when none is dragged. */
   readonly bounds: Bounds | null;
+  /**
+   * The freehand lasso path, in document space, or `null` when the marquee is a
+   * rectangle. It is painted as a closed dashed outline; like the band it is
+   * overlay only and never reaches an export.
+   */
+  readonly path?: readonly Point[] | null;
   /** Strokes to trace as an accent overlay. */
   readonly strokes: readonly StrokeRecord[];
   /**
@@ -40,6 +46,22 @@ export interface RendererSelection {
    * `composeDocumentImage`.
    */
   readonly handles?: SelectionHandles | null;
+  /**
+   * A native shape's outline, traced as an accent overlay.
+   *
+   * Unlike `strokes`, this is the exact primitive outline, not samples: it is
+   * what tells the user the selection is a shape rather than a freehand path.
+   * Overlay only, like everything else here.
+   */
+  readonly outline?: readonly Point[] | null;
+  /**
+   * A native shape's own frame (its rotated box, or a line's bounding box).
+   *
+   * Painted dashed. A rotated shape's frame turns with it, so the handles sit
+   * on the shape rather than on an axis-aligned box that no longer describes
+   * it. Overlay only.
+   */
+  readonly frame?: readonly Point[] | null;
 }
 
 /**
@@ -109,6 +131,17 @@ export interface DrawingRenderer {
    */
   setGrid(grid: GridSettings): void;
   /**
+   * Sets the decoded pictures of the document's references.
+   *
+   * Display only: the references are painted by `render()` around the layers
+   * and never by `composeDocumentImage`, so a PNG export cannot contain one.
+   * The document still says which references exist and where they sit; this
+   * map only supplies the pixels.
+   */
+  setReferenceSources(sources: ReadonlyMap<string, CanvasImageSource>): void;
+  /** Frames a reference on the display canvas, or clears the frame. */
+  setSelectedReference(referenceId: string | null): void;
+  /**
    * Composites paper and visible layers into a **new** canvas at document pixel
    * size (no viewport, no border, no in-progress stroke). Used by PNG export, so
    * it must not disturb the display, the document or the layer surfaces.
@@ -134,6 +167,21 @@ export interface DrawingRenderer {
    * history.
    */
   readCompositeImage(): ImageData | null;
+  /**
+   * Composites a small overview of the document into a **new** canvas, for a
+   * navigator panel.
+   *
+   * The overview is the paper plus every visible layer at its opacity, at the
+   * size asked for. It is display-only: the overview never reaches a layer
+   * surface, the document or `composeDocumentImage`'s output, so it cannot
+   * change what an export contains.
+   *
+   * Optional, because a renderer is free not to be able to make one: the
+   * engine falls back to the document's own composite and scales it down
+   * where it is drawn. A renderer that can make an overview should implement
+   * it, because the composite is expensive to make at document size.
+   */
+  renderOverview?(maxWidth: number, maxHeight: number): HTMLCanvasElement | null;
   render(): void;
   requestRender(): void;
   destroy(): void;
