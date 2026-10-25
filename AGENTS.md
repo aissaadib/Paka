@@ -71,6 +71,8 @@ architecture by browsing.
 `core/brushes/presets.ts` (161: the preset model, its validation and its equality),
 `core/brushes/kritaDefaults.ts` (169: the Krita 4 preset translation, its provenance and its import helper),
 `features/brushes/BrushPresets.tsx` (176),
+`features/brushes/brushIcons.ts` (the six built-in icons: the grid, the palette, the run grouping and the preset lookup),
+`features/brushes/BrushIcon.tsx` (the icon, drawn as one rectangle per run),
 `core/document/blendModes.ts` (125: the closed mode list and the separable formulas),
 `utils/colorPair.ts` (179),
 `features/color/ContrastReadout.tsx` (198),
@@ -267,6 +269,8 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `BrushPrimaryControls`, `BrushAdvancedControls` | `features/brushes/BrushControls.tsx` | grep the symbol |
 | `BrushAdvancedPopover` | `features/brushes/BrushAdvancedPopover.tsx` | grep the symbol |
 | `BrushPresetControls` | `features/brushes/BrushPresets.tsx` | grep the symbol |
+| `BrushIcon`, `BRUSH_ICON_CSS_SIZE` | `features/brushes/BrushIcon.tsx` | grep the symbol |
+| `BRUSH_ICONS`, `BrushIcon`, `BRUSH_ICON_BY_PRESET_ID`, `brushIconForPreset`, `brushIconRuns` | `features/brushes/brushIcons.ts` | grep the symbol |
 | `BrushPropertyTier`, `brushPropertiesInTier`, `primaryBrushProperties`, `advancedBrushProperties` | `core/brushes/brushProperties.ts` | grep the symbol |
 | `PanelDock`, `DockPanel` | `components/panels/PanelDock.tsx` | grep the symbol |
 | `movePanelInPreferences`, `resetPanelPlacement`, `panelSlotOf`, `PanelMove` | `core/shell/panelMovement.ts` | grep the symbol |
@@ -325,6 +329,7 @@ pnpm exec vitest run src/test/drawingEngine.test.ts -t "gradient"   # one block
 | Grid and snapping | `grid.test.ts` (the pure geometry: the nearest line, the lines between two coordinates, the tolerance, the target choice), `gridSnapping.test.ts` (the engine seam, the viewport, the renderer overlay) |
 | Brush settings / capture | `brushSettings.test.ts`, `strokeBuilder.test.ts` |
 | Brush presets | `brushPresets.test.ts` (the name rules, save/apply/rename/duplicate/delete, the settings round trip, the next stroke's brush, and no brush field dropped) |
+| The built-in brushes' icons | `brushIcons.test.ts` (one icon per built-in brush, the grid and its palette, the shared frame, the preset lookup, and the run grouping that the renderer draws), `tests/visual/brush-icons.spec.ts` (each built-in row draws its own picture, and a saved brush keeps its mark) |
 | Krita 4 presets | `kritaPresets.test.ts` (the translated set, its bounds and names, the import helper, and the library-file round trip), `tests/visual/krita-presets.spec.ts` (the one-click import and the second press in a real browser) |
 | Colour model / wheel | `color.test.ts` (conversions, the whole-cube round trip), `colorWheel.test.ts` (disc geometry, what the wheel shows) |
 | Colour contrast and difference | `colorMetrics.test.ts` (WCAG luminance and contrast, sRGB to CIELAB, CIEDE2000 against the published verification table, the nearest swatch, the unknown and translucent states, totality), `colorPair.test.ts` (comparing two colours), `tests/visual/color-compare.spec.ts` (the readout in a real browser) |
