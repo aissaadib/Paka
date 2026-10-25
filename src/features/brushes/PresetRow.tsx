@@ -71,7 +71,11 @@ export function PresetRow({
     .join(" ");
 
   return (
-    <li className={className} data-built-in={bundled ? "true" : undefined}>
+    <li
+      className={className}
+      data-built-in={bundled ? "true" : undefined}
+      data-preset-id={preset.id}
+    >
       <button
         type="button"
         className="brush-tile__pick"
