@@ -1,17 +1,18 @@
 /**
  * Draws a brush icon.
  *
- * The icon is a grid of colours, so the picture is a list of rectangles: one
- * per horizontal run, with the corners of the tile left transparent. The
- * rectangles are axis-aligned and the viewBox is the grid itself, so the art
- * stays sharp at every size instead of being resampled.
+ * The icon is a grid of colours, so the picture is one path per colour: the
+ * grid's horizontal runs are merged into a path, and a tile is at most a
+ * palette's worth of paths. That keeps the drawing sharp - the coordinates
+ * are the grid's own and `crispEdges` keeps the edges hard at every size -
+ * and keeps the library cheap, because every row of it draws a picture.
  *
- * The icon says what *kind* of brush a built-in preset is, so it is
- * decoration beside the preset's name; the row's text is what a screen reader
- * announces.
+ * The icon says what *kind* of brush a preset is, so it is decoration beside
+ * the preset's name; the row's text is what a screen reader announces.
  */
 
-import { BRUSH_ICON_SIZE, brushIconRuns, type BrushIcon as BrushIconData } from "./brushIcons";
+import { useMemo } from "react";
+import { BRUSH_ICON_SIZE, brushIconPaths, type BrushIcon as BrushIconData } from "./brushIcons";
 
 /** The default size: the height a library row can carry. */
 export const BRUSH_ICON_CSS_SIZE = 18;
@@ -24,6 +25,7 @@ export interface BrushIconProps {
 }
 
 export function BrushIcon({ icon, size = BRUSH_ICON_CSS_SIZE }: BrushIconProps) {
+  const paths = useMemo(() => brushIconPaths(icon), [icon]);
   return (
     <svg
       className="brush-icon"
@@ -35,15 +37,8 @@ export function BrushIcon({ icon, size = BRUSH_ICON_CSS_SIZE }: BrushIconProps) 
       aria-hidden="true"
       focusable="false"
     >
-      {brushIconRuns(icon).map((run) => (
-        <rect
-          key={`${run.y}-${run.x}`}
-          x={run.x}
-          y={run.y}
-          width={run.width}
-          height={1}
-          fill={run.color}
-        />
+      {paths.map((path) => (
+        <path key={path.color} d={path.d} fill={path.color} />
       ))}
     </svg>
   );
