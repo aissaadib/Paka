@@ -1,12 +1,10 @@
 /**
  * Action metadata.
  *
- * An action is a user intent with a label, a handler and - usually - one or
- * more keyboard chords. The registry is the single source of truth for the
- * commands the keyboard, the canvas menu and the command palette offer: it
- * maps a chord or a name to an intent and calls the editor's existing
- * explicit methods. It does not wrap document mutations, own history, or
- * provide an extension point.
+ * An action is a user intent with a label, one or more keyboard chords and a
+ * handler. The registry is deliberately narrow: it maps a chord to an intent
+ * and calls the editor's existing explicit methods. It does not wrap document
+ * mutations, own history, or provide an extension point.
  */
 
 import type { DrawingEngine } from "../engine/DrawingEngine";
@@ -20,25 +18,11 @@ export interface FileActionHandlers {
   readonly open?: () => void;
 }
 
-/**
- * Shell commands that belong to the interface rather than to the document.
- *
- * They are separate from the file handlers because they are not about the
- * file: opening the command palette changes what is on screen and nothing
- * else.
- */
-export interface UiActionHandlers {
-  /** Opens the command palette. */
-  readonly openCommandPalette?: () => void;
-}
-
 /** Everything an action may use. The current state is read from the engine. */
 export interface ActionContext {
   readonly engine: DrawingEngine;
   readonly actions: EditorActions;
   readonly file: FileActionHandlers;
-  /** Shell commands, such as opening the command palette. */
-  readonly ui?: UiActionHandlers;
   /** True when the matched chord required Shift (used by the nudge actions). */
   readonly shift: boolean;
 }
@@ -67,19 +51,18 @@ export type ActionId =
   | "open"
   | "duplicateLayer"
   | "duplicateSelection"
+  | "selectAll"
+  | "invertSelection"
+  | "deselect"
   | "flipHorizontal"
   | "flipVertical"
   | "zoomIn"
   | "zoomOut"
   | "zoomActual"
   | "zoomFit"
-  | "viewRotate"
-  | "viewMirror"
-  | "viewReset"
   | "toggleGrid"
   | "toggleGridSnapping"
   | "toggleRulers"
-  | "toggleSymmetry"
   | "nudgeLeft"
   | "nudgeRight"
   | "nudgeUp"
@@ -88,51 +71,26 @@ export type ActionId =
   | "delete"
   | "brushSizeDown"
   | "brushSizeUp"
-  | "selectAll"
-  | "deselect"
-  | "scaleSelection"
-  | "rotateSelectionClockwise"
-  | "rotateSelectionCounterClockwise"
-  | "addLayer"
-  | "commandPalette"
-  | "brushSizeFineDown"
-  | "brushSizeFineUp"
   | `tool:${ToolId}`;
 
 export interface ActionDefinition {
   readonly id: ActionId;
   readonly label: string;
-  /**
-   * The chords that invoke this action.
-   *
-   * Empty for a command-only action: "rotate 15 degrees clockwise" has no
-   * natural key and is reached by name, from the canvas menu or the command
-   * palette.
-   */
   readonly shortcuts: readonly ShortcutSpec[];
-  /**
-   * True when the action is invoked by name only.
-   *
-   * A command-only action claims no key, so it can never shadow another
-   * action's chord.
-   */
-  readonly commandOnly?: boolean;
   /** False when the action cannot run in the current state; it then claims no key. */
   readonly when?: (context: ActionContext) => boolean;
-  /**
-   * Why the action cannot run right now, or `null` when it can.
-   *
-   * The rule decides; the keyboard guard (`when`) is a separate concern. A
-   * menu shows the reason next to the disabled row, so the user is told what
-   * is missing rather than left with a greyed-out command.
-   */
-  readonly available?: (context: ActionContext) => string | null;
-  /**
-   * True when the action is a toggle that is currently on.
-   *
-   * A toggle's label therefore stays neutral ("Grid"), and the menu and the
-   * palette show the state with a tick.
-   */
-  readonly checked?: (context: ActionContext) => boolean;
   readonly run: (context: ActionContext) => void;
 }
+
+/**
+ * The user's own chords, keyed by action id.
+ *
+ * A user chord **replaces** the action's built-in chords: the user asked for
+ * this key, so the command no longer answers to the key Paka shipped with.
+ * An action that is not listed keeps its built-in chords, and an empty map is
+ * the built-in behaviour.
+ *
+ * The chords are a preference, not an edit: changing one adds no history step,
+ * dirties nothing and never reaches a project file.
+ */
+export type ShortcutOverrides = Readonly<Record<string, ShortcutSpec>>;

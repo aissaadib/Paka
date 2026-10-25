@@ -11,21 +11,8 @@
  */
 
 import { stepBrushSize } from "../brushes/defaults";
-import type { DrawingEngine, EditorSnapshot } from "../engine/DrawingEngine";
-import { VIEW_ROTATION_DEGREES } from "../rendering/viewport";
-import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, stepBrushSize } from "../brushes/defaults";
-import { modalIsOpen } from "../input/ownership";
 import { TOOL_DEFINITIONS } from "../tools/toolDefinitions";
-import type { EditorActions } from "../../state/editorStore";
 import type { ToolId } from "../../types/tool";
-import {
-  activeLayerAvailable,
-  deleteAvailable,
-  redoAvailable,
-  selectionAvailable,
-  undoAvailable,
-} from "./availability";
-import { COMMAND_ACTIONS } from "./commands";
 import {
   chordId,
   matchesShortcut,
@@ -37,8 +24,8 @@ import type {
   ActionDefinition,
   ActionId,
   FileActionHandlers,
+  ShortcutOverrides,
   ShortcutSpec,
-  UiActionHandlers,
 } from "./types";
 
 function key(key: string, code: string): ShortcutSpec {
@@ -51,90 +38,21 @@ function mod(keyValue: string, code: string, shift = false): ShortcutSpec {
     : { key: keyValue, code, mod: true };
 }
 
-/**
- * A chord with the platform's primary modifier *and* Alt.
- *
- * Used for the view aids whose letter is already taken by a browser chord:
- * `Ctrl+R` reloads the page, so the rulers take `Ctrl+Alt+R` instead.
- */
-function modAlt(keyValue: string, code: string): ShortcutSpec {
-  return { key: keyValue, code, mod: true, alt: true };
-}
-
 /** Arrow-key nudge distances, in document pixels. */
 const NUDGE_STEP = 1;
 const NUDGE_LARGE_STEP = 10;
-
-/**
- * True when the arrow keys have something to move.
- *
- * Either the stroke selection holds strokes, or the gradient tool has a
- * gradient with a focused handle. Without either, the arrow keys keep their
- * scrolling behaviour.
- */
-function canNudge(engine: DrawingEngine): boolean {
-  const state = engine.getState();
-  if (state.selectedStrokes > 0) {
-    return true;
-  }
-  return hasFocusedGradientHandle(state);
-}
-
-/**
- * True when the gradient tool has a gradient with a focused handle.
- *
- * The handle is the one the user last grabbed, so the arrow keys have
- * something precise to move.
- */
-function hasFocusedGradientHandle(state: EditorSnapshot): boolean {
-  return state.selectedGradient != null && state.selectedGradient.handle != null;
-}
-
-/**
- * Moves whatever the arrow keys own.
- *
- * The gradient handle wins when it is focused: the gradient tool drops the
- * stroke selection, so the two never compete, and a focused handle is the
- * more precise target.
- */
-function nudge(
-  actions: EditorActions,
-  engine: DrawingEngine,
-  dx: number,
-  dy: number,
-): void {
-  if (hasFocusedGradientHandle(engine.getState())) {
-    actions.nudgeGradientHandle(dx, dy);
-    return;
-  }
-  actions.nudgeSelection(dx, dy);
-/** A brush size inside the brush's own range. */
-function clampBrushSize(size: number): number {
-  return Math.min(Math.max(size, MIN_BRUSH_SIZE), MAX_BRUSH_SIZE);
-}
-
-/**
- * True when no modal dialog is open.
- *
- * A dialog owns the window, so the brush size must not change behind it.
- */
-function noModalOpen(): boolean {
-  return !modalIsOpen();
-}
 
 const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
   {
     id: "undo",
     label: "Undo",
     shortcuts: [mod("z", "KeyZ")],
-    available: undoAvailable,
     run: ({ actions }) => actions.undo(),
   },
   {
     id: "redo",
     label: "Redo",
     shortcuts: [mod("z", "KeyZ", true), mod("y", "KeyY"), mod("y", "KeyY", true)],
-    available: redoAvailable,
     run: ({ actions }) => actions.redo(),
   },
   {
@@ -159,7 +77,6 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     id: "duplicateLayer",
     label: "Duplicate Layer",
     shortcuts: [mod("j", "KeyJ")],
-    available: activeLayerAvailable,
     run: ({ actions, engine }) => {
       const activeLayerId = engine.getState().document.activeLayerId;
       if (activeLayerId !== null) {
@@ -168,24 +85,42 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     },
   },
   {
+    id: "selectAll",
+    label: "Select All",
+    shortcuts: [mod("a", "KeyA")],
+    // Selecting is only meaningful on the select tool's canvas; the action
+    // works from any tool and the overlay reports what it selected.
+    run: ({ actions }) => actions.selectAll(),
+  },
+  {
+    id: "invertSelection",
+    label: "Invert Selection",
+    shortcuts: [mod("i", "KeyI", true)],
+    run: ({ actions }) => actions.invertSelection(),
+  },
+  {
+    id: "deselect",
+    label: "Deselect",
+    // Ctrl+D already duplicates the selection, so deselect takes Shift.
+    shortcuts: [mod("d", "KeyD", true)],
+    run: ({ actions }) => actions.clearSelection(),
+  },
+  {
     id: "duplicateSelection",
     label: "Duplicate Selection",
     shortcuts: [mod("d", "KeyD")],
-    available: selectionAvailable,
     run: ({ actions }) => actions.duplicateSelection(),
   },
   {
     id: "flipHorizontal",
     label: "Flip Selection Horizontally",
     shortcuts: [mod("h", "KeyH", true)],
-    available: selectionAvailable,
     run: ({ actions }) => actions.flipSelection("horizontal"),
   },
   {
     id: "flipVertical",
     label: "Flip Selection Vertically",
     shortcuts: [mod("v", "KeyV", true)],
-    available: selectionAvailable,
     run: ({ actions }) => actions.flipSelection("vertical"),
   },
   {
@@ -214,95 +149,63 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     run: ({ actions }) => actions.zoomToFit(),
   },
   {
-    id: "viewRotate",
-    label: "Rotate View 90° Clockwise",
-    // Shift keeps it away from the rectangle tool's own key.
-    shortcuts: [{ key: "r", code: "KeyR", shift: true }],
-    run: ({ actions }) => actions.rotateView(VIEW_ROTATION_DEGREES),
-  },
-  {
-    id: "viewMirror",
-    label: "Mirror View Horizontally",
-    shortcuts: [{ key: "m", code: "KeyM", shift: true }],
-    run: ({ actions }) => actions.toggleViewMirror(),
-  },
-  {
-    id: "viewReset",
-    label: "Reset View",
-    shortcuts: [mod("0", "Digit0", true)],
-    run: ({ actions }) => actions.resetView(),
-  },
-  {
     id: "toggleGrid",
-    label: "Grid",
+    label: "Show Grid",
     shortcuts: [mod("'", "Quote")],
-    checked: ({ engine }) => engine.getState().gridVisible,
     run: ({ actions, engine }) => actions.setGridVisible(!engine.getState().gridVisible),
   },
   {
     id: "toggleGridSnapping",
     label: "Snap to Guides and Grid",
     shortcuts: [mod("'", "Quote", true)],
-    checked: ({ engine }) => engine.getState().gridSnapping,
     run: ({ actions, engine }) => actions.setGridSnapping(!engine.getState().gridSnapping),
   },
   {
     id: "toggleRulers",
     label: "Show Rulers",
-    shortcuts: [modAlt("r", "KeyR")],
+    // Alt is deliberate: Ctrl+R is the webview's reload in a Tauri window.
+    shortcuts: [{ key: "r", code: "KeyR", mod: true, alt: true }],
     run: ({ actions, engine }) => actions.setRulersVisible(!engine.getState().rulersVisible),
-  },
-  {
-    id: "toggleSymmetry",
-    label: "Symmetry",
-    shortcuts: [modAlt("m", "KeyM")],
-    run: ({ actions, engine }) => actions.setSymmetryEnabled(!engine.getState().symmetryEnabled),
   },
   {
     id: "nudgeLeft",
     label: "Nudge Left",
     shortcuts: [key("arrowleft", "ArrowLeft"), { ...key("arrowleft", "ArrowLeft"), shift: true }],
     // Without a selection the arrow keys keep their scrolling behaviour.
-    when: ({ engine }) => canNudge(engine),
-    run: ({ actions, engine, shift }) =>
-      nudge(actions, engine, shift ? -NUDGE_LARGE_STEP : -NUDGE_STEP, 0),
+    when: ({ engine }) => engine.getState().selectedStrokes > 0,
+    run: ({ actions, shift }) => actions.nudgeSelection(shift ? -NUDGE_LARGE_STEP : -NUDGE_STEP, 0),
   },
   {
     id: "nudgeRight",
     label: "Nudge Right",
     shortcuts: [key("arrowright", "ArrowRight"), { ...key("arrowright", "ArrowRight"), shift: true }],
-    when: ({ engine }) => canNudge(engine),
-    run: ({ actions, engine, shift }) =>
-      nudge(actions, engine, shift ? NUDGE_LARGE_STEP : NUDGE_STEP, 0),
+    when: ({ engine }) => engine.getState().selectedStrokes > 0,
+    run: ({ actions, shift }) => actions.nudgeSelection(shift ? NUDGE_LARGE_STEP : NUDGE_STEP, 0),
   },
   {
     id: "nudgeUp",
     label: "Nudge Up",
     shortcuts: [key("arrowup", "ArrowUp"), { ...key("arrowup", "ArrowUp"), shift: true }],
-    when: ({ engine }) => canNudge(engine),
-    run: ({ actions, engine, shift }) =>
-      nudge(actions, engine, 0, shift ? -NUDGE_LARGE_STEP : -NUDGE_STEP),
+    when: ({ engine }) => engine.getState().selectedStrokes > 0,
+    run: ({ actions, shift }) => actions.nudgeSelection(0, shift ? -NUDGE_LARGE_STEP : -NUDGE_STEP),
   },
   {
     id: "nudgeDown",
     label: "Nudge Down",
     shortcuts: [key("arrowdown", "ArrowDown"), { ...key("arrowdown", "ArrowDown"), shift: true }],
-    when: ({ engine }) => canNudge(engine),
-    run: ({ actions, engine, shift }) =>
-      nudge(actions, engine, 0, shift ? NUDGE_LARGE_STEP : NUDGE_STEP),
+    when: ({ engine }) => engine.getState().selectedStrokes > 0,
+    run: ({ actions, shift }) => actions.nudgeSelection(0, shift ? NUDGE_LARGE_STEP : NUDGE_STEP),
   },
   {
     id: "escape",
     label: "Escape",
     shortcuts: [key("escape", "Escape")],
     run: ({ actions, engine }) => {
-      // A symmetry centre being dragged owns the escape key: the drag is
-      // abandoned and the centre goes back where it was.
-      if (engine.getState().symmetryDragging) {
-        engine.cancelSymmetryCenterDrag();
-      // The quick brush-size resize owns Escape while it runs: it cancels the
-      // drag in flight and puts the brush size back.
-      if (engine.cancelBrushSizeGesture()) {
+      // A shape tool's press is only a preview, so Escape discards it instead
+      // of letting the release commit an outline the user abandoned. The call
+      // is false when no shape press is in flight, so Escape keeps its other
+      // meanings below.
+      if (engine.cancelShapeCreation()) {
         return;
       }
       // The guides tool owns Escape while it is active: it cancels the drag in
@@ -311,10 +214,16 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
         actions.cancelGuideGesture();
         return;
       }
-      // The gradient tool owns Escape the same way: it abandons a handle drag
-      // in flight, restoring the gradient exactly, and clears the selection.
-      if (engine.getState().toolId === "gradient") {
-        actions.cancelGradientGesture();
+      // The reference tool owns Escape the same way: a drag in flight is
+      // restored and the reference selection is cleared.
+      if (engine.getState().toolId === "reference") {
+        actions.cancelReferenceGesture();
+        return;
+      }
+      // The shape editor owns Escape too: a drag is restored, then the
+      // selection is cleared.
+      if (engine.getState().toolId === "shapeEdit") {
+        actions.cancelShapeGesture();
         return;
       }
       actions.clearSelection();
@@ -325,14 +234,24 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     label: "Delete Selected",
     // Backspace is also the browser's "go back" gesture; the editor owns it.
     shortcuts: [key("delete", "Delete"), key("backspace", "Backspace")],
-    // The key is always claimed, so the availability rule is what the menus
-    // read: the command is offered only when there is something to delete.
-    available: deleteAvailable,
     run: ({ actions, engine }) => {
       // A selected guide is the guides tool's selection, so Delete removes that
       // first; the stroke selection is untouched by it.
       if (engine.getState().toolId === "guides" && engine.getState().selectedGuideId !== null) {
         actions.deleteSelectedGuide();
+        return;
+      }
+      // Likewise a selected reference belongs to the reference tool.
+      if (
+        engine.getState().toolId === "reference" &&
+        engine.getState().selectedReferenceId !== null
+      ) {
+        actions.deleteSelectedReference();
+        return;
+      }
+      // A selected native shape belongs to the shape editor.
+      if (engine.getState().toolId === "shapeEdit" && engine.getState().selectedShapeId !== null) {
+        actions.deleteSelectedShape();
         return;
       }
       actions.deleteSelection();
@@ -342,7 +261,6 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     id: "brushSizeDown",
     label: "Decrease Brush Size",
     shortcuts: [key("[", "BracketLeft")],
-    when: noModalOpen,
     run: ({ actions, engine }) => {
       actions.setBrush({ size: stepBrushSize(engine.getState().brush.size, -1) });
     },
@@ -351,33 +269,8 @@ const GLOBAL_ACTIONS: readonly ActionDefinition[] = [
     id: "brushSizeUp",
     label: "Increase Brush Size",
     shortcuts: [key("]", "BracketRight")],
-    when: noModalOpen,
     run: ({ actions, engine }) => {
       actions.setBrush({ size: stepBrushSize(engine.getState().brush.size, 1) });
-    },
-  },
-  {
-    id: "brushSizeFineDown",
-    label: "Decrease Brush Size by One Pixel",
-    // Alt is the fine modifier: the plain bracket steps by a tenth of the
-    // brush above 10 px, which is too coarse to trim a large brush.
-    shortcuts: [{ key: "[", code: "BracketLeft", alt: true }],
-    when: noModalOpen,
-    run: ({ actions, engine }) => {
-      actions.setBrush({
-        size: clampBrushSize(engine.getState().brush.size - 1),
-      });
-    },
-  },
-  {
-    id: "brushSizeFineUp",
-    label: "Increase Brush Size by One Pixel",
-    shortcuts: [{ key: "]", code: "BracketRight", alt: true }],
-    when: noModalOpen,
-    run: ({ actions, engine }) => {
-      actions.setBrush({
-        size: clampBrushSize(engine.getState().brush.size + 1),
-      });
     },
   },
 ];
@@ -393,26 +286,37 @@ const TOOL_ACTIONS: readonly ActionDefinition[] = TOOL_DEFINITIONS.map((tool) =>
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   ...GLOBAL_ACTIONS,
   ...TOOL_ACTIONS,
-  ...COMMAND_ACTIONS,
 ];
 
 /**
- * The action with an id, or `undefined` when there is none.
+ * The chords an action claims.
  *
- * The menus address the commands by id, so they never carry a command of
- * their own.
+ * A user chord replaces the action's built-in ones: the user asked for this
+ * key, so the command stops answering to the key Paka shipped with, and that
+ * key is free for another command.
  */
-export function findActionById(id: ActionId): ActionDefinition | undefined {
-  return ACTION_DEFINITIONS.find((action) => action.id === id);
+export function effectiveShortcuts(
+  action: ActionDefinition,
+  overrides?: ShortcutOverrides,
+): readonly ShortcutSpec[] {
+  const override = overrides?.[action.id];
+  return override === undefined ? action.shortcuts : [override];
 }
 
 /**
  * Refuses duplicate action ids and chords.
  *
+ * The chords that are checked are the ones the actions actually claim, so a
+ * user's chord is validated exactly like a built-in one: two commands may not
+ * claim the same chord, on either platform.
+ *
  * Exported for tests: a synthetic registry with a clash must throw rather than
  * let one action shadow another.
  */
-export function validateRegistry(actions: readonly ActionDefinition[]): void {
+export function validateRegistry(
+  actions: readonly ActionDefinition[],
+  overrides?: ShortcutOverrides,
+): void {
   const ids = new Set<string>();
   const chords = new Map<string, string>();
   const platforms: readonly KeyboardPlatform[] = ["mac", "other"];
@@ -422,13 +326,11 @@ export function validateRegistry(actions: readonly ActionDefinition[]): void {
       throw new Error(`Duplicate action id "${action.id}".`);
     }
     ids.add(action.id);
-    // A command-only action is reached by name - from the canvas menu or the
-    // command palette - and claims no key. Every other action must be
-    // reachable from the keyboard.
-    if (action.shortcuts.length === 0 && action.commandOnly !== true) {
+    const shortcuts = effectiveShortcuts(action, overrides);
+    if (shortcuts.length === 0) {
       throw new Error(`Action "${action.id}" has no shortcut.`);
     }
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of shortcuts) {
       for (const platform of platforms) {
         const chord = chordId(shortcut, platform);
         const existing = chords.get(chord);
@@ -454,9 +356,8 @@ function baseContext(
   engine: ActionContext["engine"],
   actions: ActionContext["actions"],
   file: FileActionHandlers,
-  ui?: UiActionHandlers,
 ): ActionContext {
-  return { engine, actions, file, ui, shift: false };
+  return { engine, actions, file, shift: false };
 }
 
 /**
@@ -464,14 +365,18 @@ function baseContext(
  *
  * An action whose `when` guard is false claims nothing, so the key keeps its
  * default behaviour (arrows scroll, for example) instead of being swallowed.
+ *
+ * The user's chords are honoured: an action the user has given a chord of its
+ * own answers to that chord and no longer to the built-in one.
  */
 export function findActionForEvent(
   event: KeyboardEventLike,
   platform: KeyboardPlatform,
   context: ActionContext,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   for (const action of ACTION_DEFINITIONS) {
-    for (const shortcut of action.shortcuts) {
+    for (const shortcut of effectiveShortcuts(action, overrides)) {
       if (!matchesShortcut(event, shortcut, platform)) {
         continue;
       }
@@ -488,8 +393,6 @@ export interface DispatchContext {
   readonly engine: ActionContext["engine"];
   readonly actions: ActionContext["actions"];
   readonly file: FileActionHandlers;
-  /** Shell commands, such as opening the command palette. */
-  readonly ui?: UiActionHandlers;
 }
 
 /**
@@ -503,17 +406,19 @@ export function dispatchKeyboardEvent(
   event: KeyboardEventLike,
   context: DispatchContext,
   platform: KeyboardPlatform,
+  overrides?: ShortcutOverrides,
 ): ActionMatch | null {
   const match = findActionForEvent(
     event,
     platform,
-    baseContext(context.engine, context.actions, context.file, context.ui),
+    baseContext(context.engine, context.actions, context.file),
+    overrides,
   );
   if (!match) {
     return null;
   }
   match.action.run({
-    ...baseContext(context.engine, context.actions, context.file, context.ui),
+    ...baseContext(context.engine, context.actions, context.file),
     shift: match.shortcut.shift === true,
   });
   return match;

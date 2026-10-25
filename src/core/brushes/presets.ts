@@ -9,34 +9,18 @@
  * The name rules live here rather than in the panel so the engine and the
  * settings reader enforce the same ones: trimmed, non-empty, bounded length,
  * and unique among the current presets (a duplicate gets a numeric suffix).
- *
- * Three fields describe how the user treats a preset rather than what it
- * contains, and they are additive: a settings file written before them has
- * none of them, and the reader gives them their defaults.
- *
- *  - `favorite` - the user starred it.
- *  - `builtin` - it ships with Paka, so it is protected from being renamed,
- *    overwritten or deleted.
- *  - `lastUsedAt` - when it was last applied, which is what the "recent"
- *    ordering reads. `null` means it has never been used.
  */
 
 import type { BrushSettings } from "../../types/brush";
 import { createId, reserveId } from "../../utils/id";
 import { asRecord } from "../../utils/record";
-import { BUNDLED_PRESET_IDS, BUNDLED_PRESETS } from "./bundledPresets";
+import { BUNDLED_PRESETS, isBundledPresetId } from "./bundledPresets";
 import { brushSettingsEqual, readBrushSettings } from "./defaults";
 
 export interface BrushPreset {
   readonly id: string;
   readonly name: string;
   readonly brush: BrushSettings;
-  /** Whether the user has starred this preset. */
-  readonly favorite: boolean;
-  /** Whether the preset ships with Paka and is therefore protected. */
-  readonly builtin: boolean;
-  /** When the preset was last applied, or `null` when it never was. */
-  readonly lastUsedAt: number | null;
 }
 
 /** Long enough for a descriptive name, short enough for the brush picker. */
@@ -95,16 +79,6 @@ export function reservePresetId(id: string): void {
   reserveId("preset", id);
 }
 
-/** A timestamp for a preset that has just been used. */
-export function presetUsedAt(now: number = Date.now()): number {
-  return now;
-}
-
-/** True when the preset ships with Paka and cannot be changed or removed. */
-export function isBundledPreset(preset: Pick<BrushPreset, "id" | "builtin">): boolean {
-  return preset.builtin || BUNDLED_PRESET_IDS.has(preset.id);
-}
-
 /**
  * Reads a preset list out of an untrusted value.
  *
@@ -115,10 +89,6 @@ export function isBundledPreset(preset: Pick<BrushPreset, "id" | "builtin">): bo
  * duplicate name gets a numeric suffix, so the picker always has distinct
  * entries. The brush of an entry is read through `readBrushSettings`, so it
  * keeps every field a brush has.
- *
- * `builtin` is not read from the file: it is decided by the id, so a
- * hand-edited file cannot turn one of the user's presets into a protected
- * one, nor make a protected one editable.
  */
 export function normalizeBrushPresets(value: unknown): readonly BrushPreset[] {
   if (!Array.isArray(value)) {
@@ -142,48 +112,18 @@ export function normalizeBrushPresets(value: unknown): readonly BrushPreset[] {
     }
     reservePresetId(id);
     ids.add(id);
-    const lastUsedAt = record.lastUsedAt;
     presets.push({
       id,
       name: uniquePresetName(name, presets),
       brush: readBrushSettings(record.brush),
-      favorite: record.favorite === true,
-      builtin: BUNDLED_PRESET_IDS.has(id),
-      lastUsedAt:
-        typeof lastUsedAt === "number" && Number.isFinite(lastUsedAt) ? lastUsedAt : null,
     });
   }
   return presets;
 }
 
 /**
- * Joins the bundled presets with the ones the settings file holds.
- *
- * The bundled brushes are code, so the file cannot change them: the file's
- * copy of a bundled preset contributes only the user's own state - whether
- * it is a favourite and when it was last used. Everything else in the file is
- * the user's, and is kept as it is.
- */
-export function mergeBundledPresets(entries: readonly BrushPreset[]): readonly BrushPreset[] {
-  const user = entries
-    .filter((entry) => !BUNDLED_PRESET_IDS.has(entry.id))
-    .map((entry) => ({ ...entry, builtin: false }));
-  const bundled = BUNDLED_PRESETS.map((preset) => {
-    const stored = entries.find((entry) => entry.id === preset.id);
-    if (stored === undefined) {
-      return preset;
-    }
-    return { ...preset, favorite: stored.favorite, lastUsedAt: stored.lastUsedAt };
-  });
-  return [...bundled, ...user];
-}
-
-/**
  * A copy of a preset: the same brush under a fresh id and a name that does
  * not clash with the ones already in the list.
- *
- * The copy is a new entry, so it starts out unstarred and unused: the
- * favourite and recent bookkeeping belongs to the entry it was made from.
  */
 export function duplicatePreset(
   preset: BrushPreset,
@@ -193,32 +133,49 @@ export function duplicatePreset(
     id: createPresetId(),
     name: uniquePresetName(preset.name, existing),
     brush: { ...preset.brush },
-    favorite: false,
-    builtin: false,
-    lastUsedAt: null,
   };
 }
 
 /**
- * A copy of a preset for an import: the same brush under a fresh id, a name
- * that does not clash, and the user's own state kept.
+ * True when the preset is one of the brushes that ship with Paka.
  *
- * The favourite flag travels with the brush - it says something about the
- * brush, not about the machine - but the last-used stamp does not, because
- * the copy has not been used here.
+ * The identity is the id and nothing else: a flag in the settings file is not
+ * consulted, so a hand-edited file can neither turn one of the user's presets
+ * into a protected one nor make a shipped brush editable.
  */
-export function importPreset(
-  preset: BrushPreset,
-  existing: readonly BrushPreset[],
-): BrushPreset {
-  return {
-    id: createPresetId(),
-    name: uniquePresetName(preset.name, existing),
-    brush: { ...preset.brush },
-    favorite: preset.favorite,
-    builtin: false,
-    lastUsedAt: null,
-  };
+export function isBundledPreset(preset: Pick<BrushPreset, "id">): boolean {
+  return isBundledPresetId(preset.id);
+}
+
+/**
+ * Joins the bundled presets with the ones the user has saved.
+ *
+ * The bundled brushes are code, so the file cannot change them: the file's
+ * copy of a bundled id contributes only what belongs to the user, and the id,
+ * the name and the brush come from here. Every other entry is the user's, and
+ * is kept as it is.
+ *
+ * A user preset always wins. When the user has saved a preset under the name
+ * of a shipped brush, that name stays theirs and the shipped brush takes the
+ * next free name, so the two entries can be told apart in the picker.
+ *
+ * The result is a pure function of the input: the same entries always give
+ * the same list, in the same order, with the same names.
+ */
+export function mergeBundledPresets(entries: readonly BrushPreset[]): readonly BrushPreset[] {
+  const user = entries.filter((entry) => !isBundledPresetId(entry.id));
+  const userNames = new Set(user.map((entry) => entry.name.toLowerCase()));
+  const bundled = BUNDLED_PRESETS.map((preset) => {
+    const stored = entries.find((entry) => entry.id === preset.id);
+    // The code owns the id, the name and the brush. Anything else the file
+    // stored against that id belongs to the user and rides along.
+    const merged: BrushPreset = stored === undefined ? preset : { ...stored, ...preset };
+    const name = userNames.has(merged.name.toLowerCase())
+      ? uniquePresetName(merged.name, user)
+      : merged.name;
+    return { ...merged, name, brush: { ...merged.brush } };
+  });
+  return [...bundled, ...user];
 }
 
 /** Field-wise comparison, used to skip redundant publishes and writes. */
@@ -238,9 +195,6 @@ export function brushPresetsEqual(
     if (
       left.id !== right.id ||
       left.name !== right.name ||
-      left.favorite !== right.favorite ||
-      left.builtin !== right.builtin ||
-      left.lastUsedAt !== right.lastUsedAt ||
       !brushSettingsEqual(left.brush, right.brush)
     ) {
       return false;

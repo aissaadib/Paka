@@ -7,37 +7,53 @@
  * deleting it would take the feature away rather than the user's data. A user
  * who wants a variation duplicates it, and the copy is theirs.
  *
- * The favourite flag and the last-used stamp of a bundled preset *are* the
- * user's, so they are kept in the settings file while the brush itself stays
- * here. `mergeBundledPresets` is what joins the two.
+ * The list is **data**. It is written out in full, in a fixed order, with no
+ * randomness and nothing read from the environment: the same build always
+ * ships the same brushes, in the same order, with the same values.
+ *
+ * Identity is the **id**, not a flag in the settings file. A bundled id is
+ * stable and readable, because the file refers to it, and a hand-edited file
+ * can neither turn one of the user's presets into a protected one nor make a
+ * shipped brush editable.
  *
  * The values below are deliberately plain: a hard small pen, a soft round, a
  * flat marker, a faint airbrush, a grainy charcoal and a dotted stamp. They
  * exist so the library is useful on a fresh install, not as artwork.
  */
 
+import type { BrushSettings } from "../../types/brush";
 import { DEFAULT_BRUSH } from "./defaults";
 import type { BrushPreset } from "./presets";
 
+/** The prefix every bundled id carries, so a shipped entry is recognisable. */
+export const BUNDLED_PRESET_ID_PREFIX = "builtin-";
+
 /**
- * A bundled preset.
+ * The id of a bundled preset.
  *
  * The id is fixed and readable, because the settings file refers to it: a
  * favourite or a last-used stamp is stored against this id, and a file that
  * claims the id gets the brush from here rather than from the file.
  */
-function bundled(id: string, name: string, brush: Partial<typeof DEFAULT_BRUSH>): BrushPreset {
+export function bundledPresetId(key: string): string {
+  return `${BUNDLED_PRESET_ID_PREFIX}${key}`;
+}
+
+/** One bundled brush: the default brush with a few fields changed. */
+function bundled(key: string, name: string, brush: Partial<BrushSettings>): BrushPreset {
   return {
-    id: `builtin-${id}`,
+    id: bundledPresetId(key),
     name,
     brush: { ...DEFAULT_BRUSH, ...brush },
-    favorite: false,
-    builtin: true,
-    lastUsedAt: null,
   };
 }
 
-/** The built-in brushes, in the order the browser lists them. */
+/**
+ * The built-in brushes, in the order the browser lists them.
+ *
+ * The order is part of the data: it is written out here rather than sorted at
+ * runtime, so the library reads the same way in every build.
+ */
 export const BUNDLED_PRESETS: readonly BrushPreset[] = [
   bundled("pen", "Pen", {
     size: 3,
@@ -92,3 +108,14 @@ export const BUNDLED_PRESETS: readonly BrushPreset[] = [
 export const BUNDLED_PRESET_IDS: ReadonlySet<string> = new Set(
   BUNDLED_PRESETS.map((preset) => preset.id),
 );
+
+/**
+ * True when the id belongs to one of the brushes that ship with Paka.
+ *
+ * This is the one rule that identifies a bundled preset, and it is the id
+ * alone: a flag in a file is not consulted, so the file cannot change what
+ * ships.
+ */
+export function isBundledPresetId(id: string): boolean {
+  return BUNDLED_PRESET_IDS.has(id);
+}

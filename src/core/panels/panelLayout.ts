@@ -13,7 +13,7 @@
  *
  *  - a **missing** field takes its default;
  *  - a **malformed** value takes its default;
- *  - an **id the registry does not know** is dropped, so a panel that a later
+ *  - an **id the catalogue does not know** is dropped, so a panel that a later
  *    build removed cannot break an old file;
  *  - a document from a **newer version** is ignored wholesale, because its
  *    meaning is unknown rather than merely wrong.
@@ -22,7 +22,11 @@
  * which is what makes the layout testable without a browser.
  */
 
-import { sidePanelDefinitions, type PanelDefinition, type PanelId } from "./panelRegistry";
+import {
+  panelDefinitions,
+  type PanelDefinition,
+  type PanelId,
+} from "./panelRegistry";
 
 /** The version of the layout document this build reads and writes. */
 export const PANEL_LAYOUT_VERSION = 1;
@@ -30,8 +34,8 @@ export const PANEL_LAYOUT_VERSION = 1;
 /**
  * The layout of the side panels.
  *
- * Both lists hold registered panel ids only. A panel that is hidden keeps
- * its collapsed state, so hiding a folded panel and showing it again brings
+ * Both lists hold catalogued panel ids only. A panel that is hidden keeps
+ * its folded state, so hiding a folded panel and showing it again brings
  * back the panel the user left it in.
  */
 export interface PanelLayoutState {
@@ -43,12 +47,22 @@ export interface PanelLayoutState {
   readonly collapsed: readonly PanelId[];
 }
 
-/** The layout a fresh installation starts from. */
-export const DEFAULT_PANEL_LAYOUT: PanelLayoutState = {
+/**
+ * The layout a fresh installation starts from.
+ *
+ * The hidden list is derived from the catalogue rather than written by hand:
+ * a panel that is not visible by default starts hidden, and a panel that is
+ * visible by default starts shown.
+ */
+export const DEFAULT_PANEL_LAYOUT: PanelLayoutState = Object.freeze({
   version: PANEL_LAYOUT_VERSION,
-  hidden: [],
-  collapsed: [],
-};
+  hidden: Object.freeze(
+    panelDefinitions()
+      .filter((definition) => !definition.defaultVisible)
+      .map((definition) => definition.id),
+  ),
+  collapsed: Object.freeze([] as PanelId[]),
+});
 
 /** The port a layout owner implements, so the shell can read and drive it. */
 export interface PanelLayoutSource {
@@ -75,7 +89,7 @@ function knownPanelIds(value: unknown): PanelId[] {
     return [];
   }
   const wanted = new Set(value.filter((entry): entry is string => typeof entry === "string"));
-  return sidePanelDefinitions()
+  return panelDefinitions()
     .filter((definition) => wanted.has(definition.id))
     .map((definition) => definition.id);
 }
@@ -152,7 +166,7 @@ export function isPanelCollapsed(state: PanelLayoutState, id: PanelId): boolean 
 
 /** The panels that are shown, in stack order. */
 export function visiblePanelIds(state: PanelLayoutState): PanelId[] {
-  return sidePanelDefinitions()
+  return panelDefinitions()
     .filter((definition) => isPanelVisible(state, definition.id))
     .map((definition) => definition.id);
 }
@@ -213,7 +227,7 @@ export function setPanelCollapsed(
   };
 }
 
-/** Shows every registered panel. The folded ones stay folded. */
+/** Shows every catalogued panel. The folded ones stay folded. */
 export function showAllPanels(state: PanelLayoutState): PanelLayoutState {
   if (state.hidden.length === 0) {
     return state;
@@ -221,9 +235,9 @@ export function showAllPanels(state: PanelLayoutState): PanelLayoutState {
   return { ...state, hidden: [] };
 }
 
-/** Hides every registered panel, so the canvas takes the whole window. */
+/** Hides every catalogued panel, so the canvas takes the whole window. */
 export function hideAllPanels(state: PanelLayoutState): PanelLayoutState {
-  const hidden = sidePanelDefinitions().map((definition) => definition.id);
+  const hidden = panelDefinitions().map((definition) => definition.id);
   if (
     hidden.length === state.hidden.length &&
     hidden.every((entry, index) => entry === state.hidden[index])

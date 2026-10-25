@@ -65,7 +65,7 @@ added without changing the model.
 ```json
 {
   "format": "paka-project",
-  "version": 9,
+  "version": 15,
   "document": {
     "id": "doc-1",
     "name": "Still life",
@@ -81,6 +81,7 @@ added without changing the model.
       "visible": true,
       "opacity": 1,
       "blendMode": "normal",
+      "kind": "layer",
       "elements": [
         {
           "kind": "stroke",
@@ -100,6 +101,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -130,6 +132,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -160,6 +163,7 @@ added without changing the model.
             "stampSpacing": 0.1,
             "stampHardness": 1,
             "stampTexture": 0,
+            "tip": "round",
             "pressureCurve": [
               { "x": 0, "y": 0 },
               { "x": 1, "y": 1 }
@@ -196,6 +200,25 @@ added without changing the model.
           "opacity": 0.5
         }
       ]
+    },
+    {
+      "id": "group-1",
+      "name": "Group 1",
+      "visible": true,
+      "opacity": 1,
+      "blendMode": "normal",
+      "kind": "group",
+      "children": [
+        {
+          "id": "layer-2",
+          "name": "Ink",
+          "visible": true,
+          "opacity": 1,
+          "blendMode": "normal",
+          "kind": "layer",
+          "elements": []
+        }
+      ]
     }
   ]
 }
@@ -208,7 +231,9 @@ tracing them, so the interior is solid rather than empty. The fourth element is 
 bucket fill: it paints its opaque colour through the 4x3 coverage mask at
 `(304, 404)` and is ordered after the strokes, so it covers them. The gradient is
 a half-opacity linear ramp across the document, ordered after everything else, so
-it paints over them on that layer.
+it paints over them on that layer. The second layer entry is a **group**: it
+holds another layer, and paints nothing itself - the layer it holds is
+composited in the group's place.
 
 ### `format`, `version`
 
@@ -225,6 +250,7 @@ version described under [Versioning](#versioning).
 | `background` | string | CSS colour of the paper, drawn below every layer. |
 | `activeLayerId` | string \| null | Layer selected when the file was written. |
 | `guides` | array | The composition guides. **Additive**: a file without the field opens with no guides. |
+| `references` | array | The reference images, with their placement and their encoded picture. **Required from version 14**; a version-13 file has no field and opens with no references. |
 
 #### `guides[]`
 
@@ -249,6 +275,40 @@ unopenable - a decorative overlay must never cost the user their drawing. A
 file with more than 10,000 guides is **refused**, like the sample and
 fill-pixel ceilings.
 
+#### `references[]`
+
+A reference image is a picture the artist placed on the canvas to trace or
+colour-pick from. It is **document metadata**, like a guide, and not artwork: it
+is painted around the layers on the display canvas and never reaches a layer
+surface or a PNG export.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Reference id; must be unique within the file. |
+| `name` | string | The label shown in the panel. A missing or blank name is replaced with `Reference N` and a warning. |
+| `x`, `y` | number | Top-left of the unrotated placement, in document pixels. May be negative: a reference may hang over the edge of the paper. |
+| `width`, `height` | number | The displayed size, in document pixels. Must be positive. |
+| `naturalWidth`, `naturalHeight` | number | The decoded picture's own size, in pixels. Rounded when read. |
+| `rotation` | number | Clockwise rotation about the placement's centre, in degrees; wrapped to `[0, 360)`. |
+| `opacity` | number | `0`-`1`. |
+| `blendMode` | string | One of the closed layer blend-mode set. A reference composites like a layer. |
+| `behind` | boolean | Painted after the paper and before the layers when true, over them when false. |
+| `visible` | boolean | Hidden references stay in the file and are not painted. |
+| `mimeType` | string | Must start with `image/`. |
+| `data` | string | The **original encoded bytes**, base64. This is what makes a project portable: reopening decodes the picture from the project file and never consults the path it was imported from. |
+
+The reader bounds the base64 text *before* decoding it, so an enormous string
+cannot make it allocate the bytes it encodes. One reference is capped at 32 MB
+of encoded bytes and 24 megapixels; a project is capped at 64 megapixels of
+reference pixels in total and 32 references. A file past any of those ceilings is
+refused rather than opened with a missing picture.
+
+A file that claims a version below 14 and carries a **non-empty** `references`
+list is refused: the writer of such a file was not the version it claims, and
+guessing which fields it meant would be worse than refusing. An **empty** list
+under an older version is tolerated, because a newer serializer writes the field
+unconditionally.
+
 ### `layers[]`
 
 Bottom-most layer first, matching both the in-memory document order and the
@@ -256,12 +316,25 @@ compositing order. A file must contain at least one layer.
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `id` | string | Layer id; must be unique within the file. |
+| `id` | string | Layer id; must be unique within the file, groups included. |
 | `name` | string | Shown in the layers panel. |
 | `visible` | boolean | Hidden layers are skipped by the compositor and by PNG export. |
 | `opacity` | number | 0-1, applied to the whole layer. |
 | `blendMode` | string | `"normal"`, `"multiply"`, `"screen"`, `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` or `"exclusion"`; applied to the whole layer against the paper and the layers below it. |
-| `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. |
+| `kind` | string | `"layer"` (a paintable layer) or `"group"` (a container of layers). Required in version 13; absent before it, where every layer is a paintable layer. |
+| `elements` | array | Strokes, fill patches and gradients of this layer, in painting order. Present on a paintable layer, absent on a group. |
+| `children` | array | The layers a group holds, bottom-first. Present on a group, absent on a paintable layer. A group may hold groups, so the list nests. |
+
+The list is a **tree**: a layer entry is either a paintable layer or a group,
+and a group carries the layers it holds in `children`. A group owns no content
+of its own - the layers it holds carry the pixels - so a group has no
+`elements` and a paintable layer has no `children`. A reader refuses a group
+that carries elements, and a paintable layer that carries other layers.
+
+The **compositing order** is the depth-first, bottom-first walk of the tree:
+a group is composited in the place it sits, and the layers it holds are
+composited in their own order, in the group's place. A reader must not
+flatten the tree, drop a group or reorder the layers inside one.
 
 A layer's content is one ordered `elements` list. Each element has a `kind`
 discriminator: `"stroke"`, `"fill"` or `"gradient"`. A reader rejects an unknown
@@ -270,13 +343,14 @@ ordered list under `strokes` with no `kind` (every entry there is a stroke).
 
 An element's layer is implied by the layer that contains it; there is no
 `layerId` field inside an element, which makes it impossible for content to
-disagree with its own layer.
+disagree with its own layer. The same is true of a group: its content belongs
+to the layers it holds, never to the group itself.
 
 ### `elements[]`
 
 The `kind` field decides the element shape. Painting order is array order:
-strokes, fills and gradients interleave exactly as the user made them, and a
-reader must not reorder or drop elements.
+strokes, fills, gradients and native shapes interleave exactly as the user made
+them, and a reader must not reorder or drop elements.
 
 #### Strokes
 
@@ -306,27 +380,30 @@ An eraser stroke's `brush.color` is written but ignored - erasing has no colour.
 Keeping the field means one brush shape describes both tools, and a stroke stays
 re-renderable if the brush model changes.
 
-A shape drawn with the line, rectangle, ellipse, polygon or star tool is an
-**ordinary stroke**:
+A shape committed by a version-1 to -14 build is an **ordinary stroke**:
 its outline is stored in `xs`/`ys` as a short polyline - two points for a line,
 four corners plus the repeated first point for a rectangle, a closed run of
 short segments for an ellipse, and the outline's own vertices for a polygon or
 a star - with `pressures` all `1`, so a shape has the
 brush's constant full width. There is no geometry field, which is why
 adding shape tools needed no new element kind: a reader that already knows
-strokes reproduces shapes, and undo, reopen and export treat them exactly like
-any other stroke.
+strokes reproduces those shapes, and undo, reopen and export treat them exactly
+like any other stroke. Version 15 introduces the native shape element (see
+[Shapes](#shapes)); a file that carries the old baked form still opens as the
+stroke it is and is **never converted** on the way in, because a primitive
+cannot be recovered from samples without guessing.
 
 A rectangle, ellipse, polygon or star committed with the fill setting on adds
 one boolean,
-`fill: true`, to that same stroke: the samples still trace the outline, and a
+`fill: true` to that same stroke: the samples still trace the outline, and a
 reader fills the polygon they bound before tracing it. It is a stroke-level flag
 rather than a document- or layer-level one, so a single layer can mix filled
 shapes, outlines and brush strokes in painting order, and the fill re-rasterizes
 from the file with no extra state. `fill` is why version 3 exists: a version-2
 reader would trace a filled shape's outline and leave the interior empty - a
 visibly different drawing - so it must refuse the file rather than mis-read it
-(see [Versioning](#versioning)).
+(see [Versioning](#versioning)). A native shape carries the same `fill` flag
+with the same meaning.
 
 #### Fills
 
@@ -341,7 +418,9 @@ visibly different drawing - so it must refuse the file rather than mis-read it
 
 Byte `i` of the decoded mask is the coverage of pixel
 `(x + i % width, y + floor(i / width))`. `0` leaves the layer alone and `255`
-paints the colour at full coverage. The mask is cropped to the filled pixels'
+paints the colour at full coverage; the current engine writes only those two
+values (a binary mask), so a region's anti-aliased boundary is either selected
+or not - no invented feathering. The mask is cropped to the filled pixels'
 bounding box, so a small fill on a large canvas stores only its own pixels.
 
 A fill's pixels are the result, not a seed and tolerance. Reopening or redoing
@@ -351,14 +430,10 @@ under it changes later. A fill element is opaque in the file's model (its
 `color` has no alpha field), and its patch is painted in element order like a
 stroke.
 
-The coverage is a byte per pixel, not a bit: the renderer writes it as the
-patch's alpha, so a value between `0` and `255` is a partially covered pixel.
-The engine writes `0` and `255` for a hard edge and a ramp for a **soft edge**
-(the bucket's optional feather), and the ramp is what lets a fill's edge blend
-with the layer underneath instead of stair-stepping along a diagonal. Because
-the mask has always been read as an alpha, a reader that ignores the ramp
-renders the same picture - so **no format version change is needed** for a
-soft-edged fill.
+The parser accepts any byte value in the mask (the renderer uses it as alpha)
+but the engine only creates `0`/`255`. This leaves room for a future
+anti-aliased patch without another format version, while a binary mask remains
+the current guarantee.
 
 #### Gradients
 
@@ -386,6 +461,61 @@ bounding box because the colour function covers the whole surface; an opaque
 gradient therefore covers earlier elements on the same layer. Reopening or redoing
 re-creates it from geometry and stops - there is no pixel snapshot in the file.
 
+Editing a gradient changes its geometry or its stops, and **both are fields this
+file already carries**, so an edited gradient needs no version bump of its own: a
+reader that accepts the file reads the same geometry and the same stops into the
+same record and paints the same pixels. There is no wrong look for an older
+reader to draw, and so nothing for it to refuse. What the editor must guarantee
+is the opposite - that it never writes a ramp the reader would refuse. The
+offsets stay strictly ascending and inside `0..1`, the ramp keeps at least two
+stops and every colour is a hex colour, so `core/gradient/gradientRecord.ts`
+**rejects** a malformed gradient rather than repairing it, and the reader
+**refuses** a file whose gradient is malformed rather than quietly drawing a
+different ramp. A gradient is refused, not repaired, in both places.
+
+#### Shapes
+
+A **native shape** is the primitive and its parameters, not the pixels or
+samples it produced. It keeps its identity across save/reopen, so a rectangle
+reopens as a rectangle that can be resized and rotated again; a legacy baked
+shape (a stroke) cannot, and is never converted.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `kind` | `"shape"` | Element discriminator. Required from version 15. |
+| `id` | string | Shape id. It is stable across edits, undo/redo and a reopen. |
+| `geometry` | object | The primitive and its parameters; see below. |
+| `brush` | object | The complete brush the shape was drawn with, read by the same [`brush`](#brush) rules as a stroke. `stamp` is forced off: a shape is an outline, not a chain of dabs. |
+| `fill` | boolean | `true` fills the outline's interior before tracing it. A line has no interior; the writer always writes `false` for one. |
+
+`geometry` is a discriminated union on its own `shape` field:
+
+| `geometry.shape` | Fields | Meaning |
+| --- | --- | --- |
+| `"line"` | `x1`, `y1`, `x2`, `y2` | The two endpoints in document pixels. Endpoints, not a box, because a line's direction is part of the shape: reversing the drag must not reverse the reopened line. |
+| `"rectangle"`, `"ellipse"`, `"polygon"`, `"star"` | `x`, `y`, `width`, `height` | The normalized drag box: origin, positive size in document pixels. |
+| the four box kinds | `rotation` | Rigid rotation about the box centre, `0 <= rotation < 360`. It turns the placed outline; it never changes the box's side lengths. |
+| `"polygon"`, `"star"` | `sides` | Vertex count, an integer in the shape options' supported range. |
+| `"star"` | `innerRatio` | Valley depth as a fraction of the outer radius, in the shape options' supported range. |
+
+Every box kind carries `rotation`, `sides` and `innerRatio` even when they do
+not affect its outline, so the record has one shape and a kind change (a
+polygon's sides becoming a star's points) needs no migration. A line carries no
+box: it has no interior to fill and no rotation parameter, because its two
+endpoints already describe its orientation.
+
+The outline is reconstructed by the same pure function the shape tool previewed
+and the renderer draws (`shapeGeometryOutline`), and the renderer expands a
+native shape to a stroke of that outline and feeds it through the one stroke
+rasterizer. A shape drawn, committed, undone, reopened and exported therefore
+produces the same points and the same pixels every time; there is no second
+rasterizer for shapes.
+
+An edit replaces the record in place, keeping its `id` and its position in the
+element list, so painting order, selection and a redo after an undo all survive
+the edit. Symmetry copies are ordinary native shapes inserted after the
+original; they carry no link back to it.
+
 ### `brush`
 
 | Field | Range | Meaning |
@@ -400,12 +530,12 @@ re-creates it from geometry and stops - there is no pixel snapshot in the file.
 | `minSizeRatio` | 0.02-1 | Floor for the pressure-narrowed diameter. |
 | `spacing` | 0.02-2 (UI 2-200 %) | Sample spacing as a fraction of the diameter: lower values interpolate fast moves more densely. It changes the captured samples, not the brush width. |
 | `stabilizer` | 0-1 | Pointer smoothing strength applied before samples are captured. Additive within version 6: a missing field reads as `0` (the raw path). |
-| `stabilizerMode` | `off` \| `smooth` \| `pull` | How the pointer path is filtered before the samples are captured: `off` stores the pointer's own path, `smooth` filters it adaptively and `pull` drags the line behind the pointer. It changes the samples captured at draw time and not the rendering of stored samples, so it is additive within version 12: a missing field reads as `smooth`, and a value outside the three is refused. |
 | `texture` | 0-1 | Strength of the deterministic, document-anchored grain applied once to the finished stroke coverage. `0` is the plain coverage. Required in version 7; version-1 to -6 files have no field and read as `0`. |
 | `stamp` | boolean | Whether the stroke is rasterized as a chain of round dabs instead of round-capped segments. `false` is the legacy segment path. Required in version 9; version-1 to -8 files have no field and read as `false`. |
 | `stampSpacing` | 0.02-1 (UI 2-100 %) | Distance between dab centres as a fraction of the brush's nominal size. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampHardness` | 0-1 | Radial falloff of one dab: `1` is a crisp dab edge, lower values widen the falloff towards the dab's centre. Required in version 9; version-1 to -8 files have no field and read as the default. |
 | `stampTexture` | 0-1 | Strength of the **per-dab directional texture**: the bristle lanes that run along the stroke. `0` is the plain round dab, byte for byte. Only a stamped stroke is affected. Required in version 10; version-1 to -9 files have no field and read as `0`. |
+| `tip` | `round`, `felt`, `chisel`, `blot` or `bristle` | The shape a stamped dab is masked with. The tip is a **mask**, not a colour: it multiplies a dab's coverage before the dabs are unioned, so the union stays a maximum and the stroke cannot darken where it crosses itself. `round` is the plain disc, byte for byte. Only a stamped stroke is affected. Required in version 13; version-1 to -12 files have no field and read as `round`, which is the coverage they were written by. |
 
 ## Validation policy
 
@@ -421,18 +551,31 @@ looks like:
 - document dimensions outside 8-8192 per side, more than 16,777,216 pixels in
   total, or non-finite numbers anywhere;
 - a missing/empty layer list, a duplicate layer id, a missing id;
+- a layer entry with no `kind` in a version-13 file, an unknown `kind`, a group
+  or a `children` list in a file that claims a version below 13, a group that
+  carries `elements`, a paintable layer that carries `children`, and a group
+  that lists no layers;
 - `opacity` outside 0-1, non-boolean `visible`, an unknown `blendMode`;
-- a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"` or
-  `"gradient"`, or a gradient in a version-4 file;
+- a version-4+ element whose `kind` is missing or not `"stroke"`, `"fill"`,
+  `"gradient"` or `"shape"`, or a gradient in a version-4 file, or a shape in a
+  file that claims a version below 15;
 - a non-boolean `erase` flag on a stroke;
-- a non-boolean `fill` flag on a stroke;
+- a non-boolean `fill` flag on a stroke or a shape;
 - sample arrays that are not arrays, disagree in length, or contain non-finite
   values;
+- a shape `geometry` that is missing, not an object, or names an unknown
+  primitive; a line endpoint that is not a finite number; a box with a
+  non-finite origin, a negative or non-finite `width`/`height`, a `rotation`
+  outside `0..360`, a `sides` that is not an integer in the supported range, or
+  an `innerRatio` outside the supported range;
 - brush fields outside their ranges, including a version-6 `hardness` that is
   missing or outside `0..1` (older versions have no field and default to `1`),
   a `stabilizer` present but outside `0..1`, a version-7 `texture` that is
   missing or outside `0..1`, and a version-9 `stamp` that is not a boolean or a
   `stampSpacing`/`stampHardness` that is missing or outside its range;
+- a version-13 `tip` that is not one of the five shapes: the tip is a closed
+  set, so a shape this build does not know is refused rather than drawn as the
+  wrong thing;
 - more than `MAX_PROJECT_SAMPLES` (5,000,000) sample points;
 - a fill's `color` that is missing or empty;
 - fill `x`/`y` outside the document, or non-integer/oversized `width`/`height`
@@ -451,13 +594,15 @@ looks like:
 
 - a missing/blank document name → `"Untitled"`;
 - an unusable `background` → white;
-- a missing/blank layer name → `"Layer N"`;
-- an `activeLayerId` that is not in the file → the bottom layer is selected;
+- a missing/blank layer name → `"Layer N"` (a group is renamed `"Group N"`);
+- an `activeLayerId` that is not in the file → the bottom **paintable** layer is
+  selected (a group owns no content, so it cannot be the destination of a
+  drawing);
 - a missing/non-numeric `startTime` → `0`;
 - a missing `erase` flag → the stroke paints (which is what every version-1
   stroke does);
 - a missing `fill` flag → the stroke traces its outline (which is what every
-  version-1 and -2 shape does);
+  version-1 and -2 shape does), and a missing `fill` on a shape → `false`;
 - a missing `stabilizer` → `0`. This is an additive field within version 6: the
   stored samples already describe the smoothed path, so old version-6 files and
   all earlier versions render exactly as they did;
@@ -470,6 +615,8 @@ looks like:
 - a missing `stampTexture` in a version-1 to -9 file → `0`. The per-dab
   texture did not exist before version 10, and the texture off is exactly the
   coverage those files were written by;
+- a missing `tip` → `round`. The tip did not exist before version 13, and the
+  round tip is exactly the coverage those files were written by;
 - a missing `guides` field → no guides. This is an additive field within
   version 9: the guides are display-only, so a file without them opens exactly
   as it always did;
@@ -515,7 +662,10 @@ Two further guarantees:
 | 9 | Requires `stamp`, `stampSpacing` and `stampHardness` on every stroke brush; reads version-1 to -8 files unchanged and defaults their strokes to the segment path (`stamp` off). | - |
 | 10 | Requires `stampTexture` on every stroke brush; reads version-1 to -9 files unchanged and defaults their strokes to the plain dabs (`stampTexture` off). | - |
 | 11 | Allows `blendMode` `"overlay"`, `"soft-light"`, `"hard-light"`, `"color-dodge"`, `"darken"`, `"lighten"`, `"difference"` and `"exclusion"` in addition to the version-8 modes; reads version-1 to -10 files unchanged. | - |
-| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | The current version; what this build always writes. |
+| 12 | Requires `pressureCurve` on every stroke brush; reads version-1 to -11 files unchanged and defaults their strokes to the identity curve (the linear response they were written by). | - |
+| 13 | Adds `kind` to every layer entry and `children` to a group, so `layers[]` is a tree; and requires `tip` on every stroke brush, the shape a stamped dab is masked with. Reads version-1 to -12 files unchanged (they have no `kind` and no `tip`: every one of their layers is a paintable layer and their strokes are plain discs). | - |
+| 14 | Adds `document.references`: the reference images, with their placement and their encoded picture. Reads version-1 to -13 files unchanged (they have no field and open with no references). | Writes the required `references` field. |
+| 15 | Adds `kind: "shape"`: a native primitive with its geometry, parameters and brush, instead of a baked stroke. Reads version-1 to -14 files unchanged; their shapes stay strokes and are never converted. | The current version; what this build always writes. |
 
 - **Additive, ignorable fields may be added within a version** (a reader that
   does not know them ignores them). Extra fields are ignored by design, which is
@@ -529,22 +679,12 @@ Two further guarantees:
   samples at draw time, and those samples are already stored, so a version-6
   reader that skips the field still renders the identical picture. Missing reads
   as `0`; when present it must still be a number in `0..1`.
-- **`stabilizerMode` is additive within version 12, for the same reason.** It
-  chooses *how* the pointer path is filtered before the samples are captured,
-  and the stored samples already describe the picture, so a reader that skips
-  the field draws the identical picture. Missing reads as `smooth`; when
-  present it must be one of `off`, `smooth` or `pull`, and anything else is
-  refused rather than guessed at.
 - **`document.guides` is additive within version 9 and later.** The composition
   guides are display-only: they are painted over the artwork and never reach a
   layer surface or a PNG export. A reader that skips the field draws the
   identical picture, so the field needed no version bump - the same situation as
   `stabilizer` within version 6. A file without the field opens with no guides;
   a file with them round-trips exactly.
-- **The brush cursor and the quick resize are not in the file at all.** The ring
-  is a DOM overlay beside the canvas, and the resize changes the *next* stroke's
-  brush, which that stroke records for itself. Neither is document state, so
-  neither adds a field nor moves the version.
 - **`texture` required version 7.** It changes how stored samples are
   rasterized, so a version-6 reader that ignored it would draw a textured stroke
   plain. That is the same reason `hardness` required version 6; neither field
@@ -565,6 +705,43 @@ Two further guarantees:
   version-11 reader that ignored it would draw the linear profile instead, which
   is a different picture. Version-1 to -11 files read with the identity curve,
   which is exactly the linear response they were written by.
+- **`tip` required version 13.** It changes how a stamped stroke's samples are
+  rasterized - the dabs are masked with the tip's shape instead of being plain
+  discs - so a version-12 reader that ignored it would draw the same stroke as a
+  plain chain of dabs, which is a different picture. Version-1 to -12 files read
+  with the `round` tip, which is exactly the coverage they were written by. The
+  tip is a closed set of five shapes, so a shape a build does not know is
+  refused rather than drawn as something else.
+- **Layer groups are also why version 13 exists.** A layer entry may now be a
+  `group`: a container that holds other layers and paints nothing itself. A
+  version-12 reader knows neither the `kind` field nor the `children` list: it
+  would read a group as a paintable layer with no content, and every layer
+  inside the group would be missing from the picture - a different drawing, not
+  merely an incomplete one. So the version was bumped, and a version-12 reader
+  refuses the file with "created by a newer version of Paka" instead of
+  mis-reading it. Version-1 to -12 files have no `kind` and no `children`, and
+  every one of their layers is a paintable layer, exactly as they were written.
+  A file that claims an older version and carries a group is refused too, for
+  the same reason.
+- **References are why version 14 exists.** A version-13 reader knows no
+  `document.references` field. It would open the file, paint the artwork and
+  silently drop every reference the artist placed - the drawing would survive,
+  but the tracing setup would be gone without a word. The field also carries the
+  encoded bytes of each picture, so it is a required new shape rather than an
+  ignorable extra. Version-13 files have no field and open with no references,
+  exactly as they were written. A file that claims an older version *and*
+  carries a non-empty reference list is refused for the same reason a
+  version-12 file carrying a group is: the claim is inconsistent with its
+  contents.
+- **Native shapes are why version 15 exists.** A version-14 reader rejects an
+  unknown element `kind`, so it would refuse the file rather than mis-read it -
+  but the schema still gained a required new element shape. A native shape
+  cannot be added additively: a reader that skipped it would drop the shape from
+  the picture, and a reader that guessed a primitive from samples would be
+  inventing geometry the artist never committed. Version-1 to -14 files contain
+  no native shape and open unchanged; their baked shapes stay strokes. A file
+  that claims an older version and carries a shape is refused for the same
+  reason a version-12 file carrying a group is.
 - **Anything a reader cannot ignore - a removed field, a changed meaning, a new
   required field - requires a version bump.** A v1 reader then refuses the file
   with "created by a newer version of Paka" instead of mis-reading it.
@@ -658,6 +835,11 @@ the unsaved marker: exporting is not saving.
 Hidden layers and layers at 0 opacity are excluded, matching what is on screen.
 The output has no border, no zoom and no surrounding UI.
 
+Reference images are excluded as well, whatever their `behind` flag says: they
+are tracing aids, not artwork, and a reference that appeared in an export would
+be a bug, not a feature. The export path passes no references to the compositor,
+so the exclusion is structural rather than a filter that could be forgotten.
+
 ## Known gaps
 
 - **No compression.** Text JSON, so files are large for heavy drawings. Fill
@@ -667,11 +849,19 @@ The output has no border, no zoom and no surrounding UI.
   mask pixels per file.
 - **A single file must hold everything.** There are no external links or
   incremental saves; saving rewrites the whole file.
+- **Reference pictures are stored verbatim.** Each reference carries its
+  original encoded bytes, so a 12 MB photograph adds 16 MB of base64 to every
+  save. There is no downscaling and no shared-source deduplication: importing
+  the same file twice stores it twice.
 - **No non-separable blend modes**: the layer menu offers the separable modes
   (`normal`, `multiply`, `screen`, `overlay`, `soft-light`, `hard-light`,
   `color-dodge`, `darken`, `lighten`, `difference`, `exclusion`). Hue,
   saturation, color and luminosity are not exposed, and there are no
   group/clipping contexts or alpha inheritance.
+- **A group carries no compositing of its own yet.** The file can hold a
+  group and the tree round-trips exactly, but a group's opacity, visibility and
+  blend mode are not applied to the layers it holds: the layers are composited
+  as they are.
 - **No autosave and no recovery file.** An unclean exit loses unsaved work; the
   close guard is the only protection.
 - **Metadata is minimal**: no author, no timestamps, no thumbnails, no colour

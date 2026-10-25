@@ -8,6 +8,10 @@
  *
  * The swatch is zoomed so the brush fits it, so it shows the *shape* of the
  * mark rather than its size; the size is read from the number box beside it.
+ *
+ * The React part is a shell: the stroke, the fit and the painting all live in
+ * `core/rendering/brushPreview.ts`, which is where the rules that make the
+ * preview agree with the real rasterizer are tested.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -18,6 +22,7 @@ import {
   renderBrushPreview,
 } from "../../core/rendering/brushPreview";
 import { useEditorState } from "../../hooks/useEditor";
+import "./brushPreview.css";
 
 export function BrushPreview() {
   const { brush, document: drawingDocument } = useEditorState();

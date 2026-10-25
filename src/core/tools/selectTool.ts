@@ -9,9 +9,11 @@
  *    selection (a press that never moved is a zero-size marquee, i.e. a click,
  *    which selects the strokes under the pointer or clears the selection).
  *
- * The handles come first: they sit on the frame's corners, which are inside
- * the frame, so a press on a corner would otherwise start a move. Grabbing a
- * handle is an explicit "transform this", and it wins.
+ * The tool does not decide that: the **model** does. The press says what it
+ * found - a handle, or the inside of the selection - and `selectionModes`
+ * says which mode that is. The tool reads the model and starts the gesture
+ * the mode names, so the rules live in one pure module rather than in the
+ * order of a chain of `if`s here.
  *
  * The tool owns only the gesture bookkeeping (`active`, so a stray move or
  * cancel without a press is ignored). Everything else - what stays selected,
@@ -20,6 +22,7 @@
  */
 
 import type { PointerSample } from "../../types/pointer";
+import { resolveSelectionMode, type SelectionPress } from "../document/selectionModes";
 import type { ToolContext } from "./types";
 import type { ToolDefinition } from "../../types/tool";
 
@@ -40,16 +43,25 @@ export class SelectTool {
       return;
     }
     this.active = true;
-    // The handles win over the move: they are the transform's affordance.
-    const handle = context.findSelectionHandleAt(sample.docX, sample.docY);
-    if (handle !== null) {
-      context.beginSelectionTransform(sample, handle);
-      return;
-    }
-    if (context.isInsideSelection(sample.docX, sample.docY)) {
-      context.beginSelectionMove(sample);
-    } else {
-      context.beginSelection(sample);
+    // The press says what it found; the model says which mode that is.
+    const press: SelectionPress = {
+      handle: context.findSelectionHandleAt(sample.docX, sample.docY),
+      insideSelection: context.isInsideSelection(sample.docX, sample.docY),
+    };
+    const resolved = resolveSelectionMode(press);
+    switch (resolved.mode) {
+      case "scale":
+      case "rotate":
+        // A transform's mode always came from a handle, and the model carries
+        // the handle it was: the corner a scale pulls, the ray a turn follows.
+        context.beginSelectionTransform(sample, resolved.handle);
+        break;
+      case "move":
+        context.beginSelectionMove(sample);
+        break;
+      case "marquee":
+        context.beginSelection(sample);
+        break;
     }
   }
 

@@ -1,122 +1,182 @@
 /**
  * The brush preset browser.
  *
- * A list of the user's brushes and the built-in ones, with a search box, a
- * sort order and a favourites filter, and every operation the library
- * supports: create, rename, overwrite, duplicate, delete, star, import and
- * export.
+ * A list of the user's brushes and the built-in ones, with a search box, an
+ * order and a favourites filter, and the operations the library supports:
+ * create, rename, duplicate, delete, star, import and export.
  *
  * Three rules shape it:
  *
- *  1. **The swatch is the brush.** Each row shows the mark the preset paints,
- *     drawn by the renderer's own code from the preset's own brush settings.
- *     A property that changes a stroke changes the swatch.
- *  2. **A built-in brush is protected.** It is code, so it cannot be renamed,
- *     overwritten or deleted; duplicating it is how the user gets a version
- *     they can change. Its star is the user's, so it can be starred like any
- *     other.
- *  3. **The selection and the live brush are two things.** The selection is
+ *  1. **The built-in list is handed in.** `core/brushes/bundledPresets.ts`
+ *     belongs to another slice, so the built-in brushes arrive as a prop and
+ *     the model never imports them. A built-in brush is protected: it cannot
+ *     be renamed or deleted, because that would take the feature away rather
+ *     than the user's data. Duplicating it is how the user gets a copy they
+ *     can change.
+ *  2. **The selection and the live brush are two things.** The selection is
  *     the row the keyboard is on and the actions act on; the live brush is
- *     what the next stroke is drawn with. Applying a preset copies its values
- *     into the live brush and leaves the stored copy alone, so an edit of the
- *     brush is visibly *not* an edit of the preset until it is written back.
+ *     what the next stroke is drawn with. Applying a preset copies its
+ *     values into the live brush and leaves the stored copy alone, so an
+ *     edit of the brush is visibly *not* an edit of the preset.
+ *  3. **Nothing here is an edit.** Applying a preset goes through the
+ *     engine's `setBrush`, and none of the preset operations touch history
+ *     or the file's dirty flag.
  *
- * Every action is editor state: applying a preset goes through the engine's
- * `setBrush`, and none of the preset operations touch history or the file's
- * dirty flag.
+ * The model behind this panel is `core/brushes/presetBrowser.ts`; this file
+ * only holds the little state the browser owns and calls the editor.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { brushSettingsEqual } from "../../core/brushes/defaults";
 import {
-  DEFAULT_PRESET_FILTER,
+  DEFAULT_PRESET_BROWSER_STATE,
   PRESET_SORT_OPTIONS,
   canModifyPreset,
+  findPreset,
   groupPresets,
+  isBundledPreset,
   nextSelectionId,
-  presetListIntent,
+  presetMatchingBrush,
   runPresetAction,
-  type PresetFilter,
+  type PresetAction,
+  type PresetActionResult,
+  type PresetBrowserState,
+  type PresetLibrary,
   type PresetLibraryPort,
   type PresetSort,
 } from "../../core/brushes/presetBrowser";
+import {
+  PresetLibraryFiles,
+  type PresetLibraryGateway,
+} from "../../core/brushes/presetLibraryFiles";
 import { MAX_PRESET_NAME_LENGTH, type BrushPreset } from "../../core/brushes/presets";
-import { Panel } from "../../components/panels/Panel";
+import {
+  KRITA_DEFAULT_PRESET_ENTRIES,
+  KRITA_DEFAULT_PRESET_SOURCE,
+  missingKritaPresets,
+} from "../../core/brushes/kritaDefaults";
 import { registerPanel } from "../../core/shell/panelRegistry";
+import type { ShellSlotId } from "../../core/shell/slots";
+import { Panel } from "../../components/panels/Panel";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { PresetRow } from "./PresetRow";
 import "./brushPresets.css";
 
-export function BrushPresetPanel() {
-  const { actions, presetLibrary } = useEditor();
-  const { brush, presets, activePresetId, document: drawingDocument } = useEditorState();
+export interface BrushPresetPanelProps {
+  /**
+   * The built-in brushes.
+   *
+   * They arrive as an argument because the module that lists them belongs to
+   * another slice; an empty list is a browser with no built-in brushes in it.
+   */
+  readonly bundled?: readonly BrushPreset[];
+  /**
+   * The file service for the import and export buttons.
+   *
+   * Without it the two buttons are disabled: the file dialogs live outside
+   * the model, behind this port.
+   */
+  readonly gateway?: PresetLibraryGateway | null;
+}
 
-  const [filter, setFilter] = useState<PresetFilter>(DEFAULT_PRESET_FILTER);
+export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPanelProps) {
+  const editor = useEditor();
+  const { actions, engine } = editor;
+  const { brush, presets } = useEditorState();
+
+  const [state, setState] = useState(DEFAULT_PRESET_BROWSER_STATE);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  const groups = useMemo(() => groupPresets(presets, filter), [presets, filter]);
+  const library: PresetLibrary = useMemo(() => ({ presets, bundled }), [presets, bundled]);
+  const groups = useMemo(() => groupPresets(library, state), [library, state]);
   const visible = useMemo(() => [...groups.user, ...groups.builtin], [groups]);
-  // The row the list points at. A selection the search has filtered out is
-  // not in the list, so it cannot be the active descendant: the attribute
-  // would name an element that is not there.
-  const activeOptionId =
-    selectedId !== null && visible.some((preset) => preset.id === selectedId)
-      ? `brush-option-${selectedId}`
-      : undefined;
+  const files = useMemo(() => (gateway ? new PresetLibraryFiles(gateway) : null), [gateway]);
 
-  // The selection follows the live brush when the user picks a preset
-  // somewhere else, and falls back to it when the selected preset is gone.
+  // The selection falls back to nothing when the brush it named is gone.
   useEffect(() => {
     setSelectedId((current) =>
-      current !== null && presets.some((preset) => preset.id === current) ? current : activePresetId,
+      current !== null && findPreset(library, current) === null ? null : current,
     );
-  }, [presets, activePresetId]);
+  }, [library]);
 
-  const selected =
-    selectedId === null ? null : (presets.find((preset) => preset.id === selectedId) ?? null);
-  const current =
-    activePresetId === null ? null : (presets.find((preset) => preset.id === activePresetId) ?? null);
-  // The preset the confirmation is about: the one the user asked to delete,
-  // not the one that happens to be selected now.
-  const confirming =
-    confirmingId === null ? null : (presets.find((preset) => preset.id === confirmingId) ?? null);
+  // The grid is taller than the panel, so the keyboard's tile has to be
+  // brought into view as it moves. Only the list's own scroll is touched: the
+  // panel around it stays where it is.
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null || selectedId === null) {
+      return;
+    }
+    const tile = Array.from(list.querySelectorAll<HTMLElement>("[data-preset-id]")).find(
+      (element) => element.dataset.presetId === selectedId,
+    );
+    if (tile === undefined) {
+      return;
+    }
+    const listRect = list.getBoundingClientRect();
+    const tileRect = tile.getBoundingClientRect();
+    if (tileRect.top < listRect.top) {
+      list.scrollTop -= listRect.top - tileRect.top;
+    } else if (tileRect.bottom > listRect.bottom) {
+      list.scrollTop += tileRect.bottom - listRect.bottom;
+    }
+  }, [selectedId]);
 
+  const selected = findPreset(library, selectedId);
+  const confirming = findPreset(library, confirmingId);
+  const current = presetMatchingBrush(library, brush);
   // The brush has been changed since the preset was applied: the stored copy
   // and the live brush are two things, and the panel says so.
   const edited = current !== null && !brushSettingsEqual(current.brush, brush);
-  const protectedSelected = selected !== null && !canModifyPreset(selected);
+  const protectedSelected = selected !== null && !canModifyPreset(selected, bundled);
 
   const port: PresetLibraryPort = useMemo(
     () => ({
       save: (presetName) => actions.saveBrushPreset(presetName),
       rename: (id, presetName) => actions.renameBrushPreset(id, presetName),
       duplicate: (id) => actions.duplicateBrushPreset(id),
-      update: (id) => actions.updateBrushPreset(id),
       remove: (id) => actions.deleteBrushPreset(id),
-      apply: (id) => actions.applyBrushPreset(id),
-      toggleFavorite: (id) => actions.toggleBrushPresetFavorite(id),
-      import: (entries) => actions.importBrushPresets(entries),
-      resetBrush: () => actions.resetBrush(),
+      apply: (preset) => {
+        if (actions.applyBrushPreset(preset.id)) {
+          return true;
+        }
+        // A built-in brush is not in the user's library, so it is applied by
+        // setting its brush: the same editor-only change, with no history
+        // step and no dirty flag.
+        actions.setBrush(preset.brush);
+        return true;
+      },
+      import: (added) => {
+        // The editor owns the list; the browser only says what should be in
+        // it. The engine's own reader gives every entry a fresh id and a
+        // name that does not clash.
+        engine.setPresets([...presets, ...added]);
+        const ids = new Set(added.map((preset) => preset.id));
+        return engine.getState().presets.filter((preset) => ids.has(preset.id));
+      },
     }),
-    [actions],
+    [actions, engine, presets],
   );
 
   /** Runs an action and reports what it did. */
-  const run = (action: Parameters<typeof runPresetAction>[1]) => {
-    const result = runPresetAction(port, action);
-    if (result.message !== null) {
-      setMessage(result.message);
+  const run = (action: PresetAction): PresetActionResult => {
+    const result = runPresetAction(library, state, port, action);
+    if (result.state !== null) {
+      setState(result.state);
     }
     if (result.selection !== null) {
       setSelectedId(result.selection);
     }
-    // The name has done its work: leaving it in the box would offer the same
-    // name again, and the next Save would store a second copy of it.
+    if (result.message !== null) {
+      setMessage(result.message);
+    }
     if (result.ok && (action.kind === "save" || action.kind === "rename")) {
+      // The name has done its job; the field starts empty for the next one.
       setName("");
     }
     return result;
@@ -124,40 +184,27 @@ export function BrushPresetPanel() {
 
   const apply = (id: string) => {
     setSelectedId(id);
+    setConfirmingId(null);
     run({ kind: "apply", id });
   };
 
-  /**
-   * Asks for a deletion.
-   *
-   * A built-in brush is code, so it is never asked about: the refusal is
-   * reported rather than a confirmation that could not be carried out.
-   */
-  const requestDelete = (id: string) => {
-    const preset = presets.find((candidate) => candidate.id === id) ?? null;
-    if (!canModifyPreset(preset)) {
-      setMessage("A built-in brush cannot be deleted - duplicate it instead.");
-      return;
-    }
-    setConfirmingId(id);
-  };
-
-  const move = (direction: 1 | -1) => {
-    const next = nextSelectionId(visible, selectedId, direction);
+  const move = (step: number) => {
+    const next = nextSelectionId(visible, selectedId, step);
     if (next !== null) {
       setSelectedId(next);
     }
   };
 
   const exportLibrary = async () => {
+    if (files === null) {
+      return;
+    }
     setBusy(true);
     try {
-      const outcome = await presetLibrary.exportLibrary(presets);
+      const outcome = await files.exportLibrary(presets, state.favorites);
       if (outcome.status === "exported") {
         setMessage(
-          outcome.count === 1
-            ? "Exported 1 brush."
-            : `Exported ${outcome.count} brushes.`,
+          outcome.count === 1 ? "Exported 1 brush." : `Exported ${outcome.count} brushes.`,
         );
       } else if (outcome.status === "error") {
         setMessage(outcome.message);
@@ -168,11 +215,14 @@ export function BrushPresetPanel() {
   };
 
   const importLibrary = async () => {
+    if (files === null) {
+      return;
+    }
     setBusy(true);
     try {
-      const outcome = await presetLibrary.importLibrary();
+      const outcome = await files.importLibrary();
       if (outcome.status === "read") {
-        const result = run({ kind: "import", entries: outcome.presets });
+        const result = run({ kind: "import", entries: outcome.entries });
         if (outcome.skipped > 0) {
           setMessage(
             `${result.message ?? "Imported."} ${outcome.skipped} malformed ${
@@ -188,6 +238,22 @@ export function BrushPresetPanel() {
     }
   };
 
+  /**
+   * Adds the translated Krita 4 presets.
+   *
+   * The set is embedded, so this is the same import path as a library file
+   * without a file dialog. It only adds the brushes that are not already
+   * there, so a second click cannot bury the library in "(2)" copies.
+   */
+  const importKritaDefaults = () => {
+    const missing = missingKritaPresets(library.presets.map((preset) => preset.name));
+    if (missing.length === 0) {
+      setMessage(`The ${KRITA_DEFAULT_PRESET_SOURCE} brushes are already in the library.`);
+      return;
+    }
+    run({ kind: "import", entries: missing });
+  };
+
   return (
     <Panel
       title="Brushes"
@@ -196,8 +262,17 @@ export function BrushPresetPanel() {
           <button
             type="button"
             className="brush-browser__header-button"
-            title="Import brushes from a file"
+            title={`Add the ${KRITA_DEFAULT_PRESET_ENTRIES.length} ${KRITA_DEFAULT_PRESET_SOURCE} default brushes`}
             disabled={busy}
+            onClick={importKritaDefaults}
+          >
+            {KRITA_DEFAULT_PRESET_SOURCE}
+          </button>
+          <button
+            type="button"
+            className="brush-browser__header-button"
+            title="Import brushes from a file"
+            disabled={busy || files === null}
             onClick={() => void importLibrary()}
           >
             Import
@@ -206,7 +281,7 @@ export function BrushPresetPanel() {
             type="button"
             className="brush-browser__header-button"
             title="Export the brushes to a file"
-            disabled={busy}
+            disabled={busy || files === null}
             onClick={() => void exportLibrary()}
           >
             Export
@@ -216,7 +291,11 @@ export function BrushPresetPanel() {
       footer={
         <div className="brush-browser__footer">
           {confirming !== null ? (
-            <div className="brush-browser__confirm" role="alertdialog" aria-label="Delete the preset">
+            <div
+              className="brush-browser__confirm"
+              role="alertdialog"
+              aria-label="Delete the brush"
+            >
               <span>Delete “{confirming.name}”?</span>
               <button
                 type="button"
@@ -241,8 +320,8 @@ export function BrushPresetPanel() {
               <input
                 className="text-input brush-browser__name"
                 type="text"
-                aria-label="Preset name"
-                placeholder={selected === null ? "Name this brush" : "Rename to…"}
+                aria-label="Brush name"
+                placeholder="Name this brush"
                 maxLength={MAX_PRESET_NAME_LENGTH}
                 value={name}
                 onChange={(event) => setName(event.target.value)}
@@ -271,24 +350,11 @@ export function BrushPresetPanel() {
                 <button
                   type="button"
                   className="button"
-                  disabled={!canModifyPreset(selected)}
-                  title={
-                    protectedSelected
-                      ? "A built-in brush cannot be overwritten - duplicate it instead"
-                      : "Store the current brush in the selected preset"
-                  }
-                  onClick={() => selected && run({ kind: "update", id: selected.id })}
-                >
-                  Update
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  disabled={selected === null || name.trim() === ""}
+                  disabled={selected === null || name.trim() === "" || protectedSelected}
                   title={
                     protectedSelected
                       ? "A built-in brush cannot be renamed - duplicate it instead"
-                      : "Rename the selected preset"
+                      : "Rename the selected brush"
                   }
                   onClick={() => selected && run({ kind: "rename", id: selected.id, name })}
                 >
@@ -298,7 +364,7 @@ export function BrushPresetPanel() {
                   type="button"
                   className="button"
                   disabled={selected === null}
-                  title="Duplicate the selected preset"
+                  title="Duplicate the selected brush"
                   onClick={() => selected && run({ kind: "duplicate", id: selected.id })}
                 >
                   Duplicate
@@ -306,34 +372,15 @@ export function BrushPresetPanel() {
                 <button
                   type="button"
                   className="button"
-                  disabled={!canModifyPreset(selected)}
+                  disabled={selected === null || protectedSelected}
                   title={
                     protectedSelected
                       ? "A built-in brush cannot be deleted"
-                      : "Delete the selected preset"
+                      : "Delete the selected brush"
                   }
-                  onClick={() => selected && requestDelete(selected.id)}
+                  onClick={() => selected && setConfirmingId(selected.id)}
                 >
                   Delete
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  title={
-                    current === null
-                      ? "Restore Paka's default brush"
-                      : `Restore the brush to the values of "${current.name}"`
-                  }
-                  onClick={() => {
-                    run({ kind: "reset" });
-                    setMessage(
-                      current === null
-                        ? "The brush was restored to Paka's default."
-                        : `The brush was restored to “${current.name}”.`,
-                    );
-                  }}
-                >
-                  Reset
                 </button>
               </div>
             </>
@@ -353,15 +400,15 @@ export function BrushPresetPanel() {
             type="search"
             aria-label="Search brushes"
             placeholder="Search brushes"
-            value={filter.query}
-            onChange={(event) => setFilter({ ...filter, query: event.target.value })}
+            value={state.query}
+            onChange={(event) => setState({ ...state, query: event.target.value })}
           />
           <select
             className="brush-browser__sort"
             aria-label="Order the brushes"
-            value={filter.sort}
+            value={state.sort}
             onChange={(event) =>
-              setFilter({ ...filter, sort: event.target.value as PresetSort })
+              setState({ ...state, sort: event.target.value as PresetSort })
             }
           >
             {PRESET_SORT_OPTIONS.map((option) => (
@@ -373,10 +420,10 @@ export function BrushPresetPanel() {
           <button
             type="button"
             className="brush-browser__favourites"
-            aria-label={filter.favoritesOnly ? "Show every brush" : "Show only the starred brushes"}
-            aria-pressed={filter.favoritesOnly}
+            aria-pressed={state.favoritesOnly}
+            aria-label="Show only the starred brushes"
             title="Show only the starred brushes"
-            onClick={() => setFilter({ ...filter, favoritesOnly: !filter.favoritesOnly })}
+            onClick={() => setState({ ...state, favoritesOnly: !state.favoritesOnly })}
           >
             ★
           </button>
@@ -384,68 +431,78 @@ export function BrushPresetPanel() {
 
         <div
           className="brush-browser__list"
-          role="listbox"
-          aria-label="Brush presets"
-          aria-activedescendant={activeOptionId}
+          ref={listRef}
           tabIndex={0}
+          aria-label="Brush presets"
           onKeyDown={(event) => {
-            const intent = presetListIntent(event.key, selectedId !== null);
-            if (intent === null) {
+            // The library is a grid of thumbnails: the vertical arrows move by
+            // a row, the horizontal ones by a tile.
+            const columns = gridColumnCount(event.currentTarget);
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              move(columns);
               return;
             }
-            // The list owns the key. Delete is a global shortcut in the editor
-            // - it deletes the selected strokes - and Backspace is the
-            // browser's own "go back", so neither may travel past the list
-            // while the brushes are being browsed.
-            event.preventDefault();
-            event.stopPropagation();
-            if (intent.kind === "move") {
-              move(intent.direction);
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              move(-columns);
               return;
             }
-            if (intent.kind === "first") {
+            if (event.key === "ArrowRight") {
+              event.preventDefault();
+              move(1);
+              return;
+            }
+            if (event.key === "ArrowLeft") {
+              event.preventDefault();
+              move(-1);
+              return;
+            }
+            if (event.key === "Home") {
+              event.preventDefault();
               setSelectedId(visible[0]?.id ?? null);
               return;
             }
-            if (intent.kind === "last") {
+            if (event.key === "End") {
+              event.preventDefault();
               setSelectedId(visible[visible.length - 1]?.id ?? null);
               return;
             }
-            if (intent.kind === "apply" && selectedId !== null) {
+            if (event.key === "Enter" && selectedId !== null) {
+              event.preventDefault();
               apply(selectedId);
-              return;
-            }
-            if (intent.kind === "delete" && selectedId !== null) {
-              requestDelete(selectedId);
             }
           }}
         >
-          {groups.user.length === 0 ? (
-            <p className="brush-browser__empty">{emptyText(filter, "user")}</p>
+          {groups.user.length === 0 && groups.builtin.length === 0 ? (
+            <p className="brush-browser__empty">
+              {state.query === ""
+                ? "No brushes yet. Adjust the brush and press Save."
+                : "No brush matches the search."}
+            </p>
           ) : null}
           {groups.user.length > 0 ? (
             <PresetGroup
               label="Your brushes"
               presets={groups.user}
+              bundled={bundled}
+              state={state}
               selectedId={selectedId}
-              currentId={activePresetId}
+              currentId={current?.id ?? null}
               edited={edited}
-              background={drawingDocument.background}
               onSelect={apply}
               onToggleFavorite={(id) => run({ kind: "favorite", id })}
             />
-          ) : null}
-          {groups.builtin.length === 0 ? (
-            <p className="brush-browser__empty">{emptyText(filter, "builtin")}</p>
           ) : null}
           {groups.builtin.length > 0 ? (
             <PresetGroup
               label="Built-in"
               presets={groups.builtin}
+              bundled={bundled}
+              state={state}
               selectedId={selectedId}
-              currentId={activePresetId}
+              currentId={current?.id ?? null}
               edited={edited}
-              background={drawingDocument.background}
               onSelect={apply}
               onToggleFavorite={(id) => run({ kind: "favorite", id })}
             />
@@ -466,81 +523,89 @@ export function BrushPresetPanel() {
   );
 }
 
-registerPanel({
-  id: "brushes",
-  title: "Brushes",
-  slot: "right",
-  order: 5,
-  icon: "brush",
-  // The browser keeps the search text and the selection in React state, so
-  // the panel stays mounted while it is hidden and cannot lose them.
-  mounting: "always",
-  collapsible: true,
-  grow: false,
-  description: "The brush library: search it, apply a brush, and manage the saved ones.",
-  render: () => <BrushPresetPanel />,
-});
+/**
+ * Registers the browser with the shell's panel registry.
+ *
+ * The shell reads a list of panels and renders whatever is in it, so a panel
+ * joins by registering itself. The built-in brushes and the file gateway are
+ * handed in, because the module that lists the built-in brushes belongs to
+ * another slice and the file dialogs live behind a port.
+ */
+export function registerBrushPresetPanel(
+  bundled: readonly BrushPreset[] = [],
+  gateway: PresetLibraryGateway | null = null,
+  slot: ShellSlotId = "right",
+  order = 20,
+): void {
+  registerPanel({
+    id: "brushes",
+    title: "Brushes",
+    slot,
+    order,
+    render: () => <BrushPresetPanel bundled={bundled} gateway={gateway} />,
+  });
+}
+
+/**
+ * How many tiles fit in a row of the library's grid.
+ *
+ * The grid is as wide as the panel and its tiles have a fixed minimum, so the
+ * count is the layout's, not a constant: read the used track list rather than
+ * guessing at the panel's width. A hidden grid has no tracks, and one column
+ * is the only sensible answer then.
+ */
+function gridColumnCount(list: HTMLElement): number {
+  const grid = list.querySelector<HTMLElement>(".brush-browser__tiles");
+  if (grid === null) {
+    return 1;
+  }
+  const tracks = getComputedStyle(grid)
+    .gridTemplateColumns.split(" ")
+    .filter((track) => track !== "");
+  return Math.max(1, tracks.length);
+}
 
 interface PresetGroupProps {
   readonly label: string;
   readonly presets: readonly BrushPreset[];
+  readonly bundled: readonly BrushPreset[];
+  readonly state: PresetBrowserState;
   readonly selectedId: string | null;
   readonly currentId: string | null;
   readonly edited: boolean;
-  readonly background: string;
   readonly onSelect: (id: string) => void;
   readonly onToggleFavorite: (id: string) => void;
-}
-
-/**
- * What an empty list says.
- *
- * The three reasons a list is empty are told apart, because they ask
- * different things of the user: a search that found nothing is fixed by
- * typing something else, an empty favourites filter by starring a brush, and
- * an empty library by saving one.
- */
-function emptyText(filter: PresetFilter, group: "user" | "builtin"): string {
-  if (filter.query !== "") {
-    return group === "user"
-      ? "No saved brush matches the search."
-      : "No built-in brush matches the search.";
-  }
-  if (filter.favoritesOnly) {
-    return group === "user"
-      ? "None of your own brushes is starred."
-      : "No built-in brush is starred.";
-  }
-  return group === "user"
-    ? "No saved brushes yet. Adjust the brush and press Save."
-    : "No built-in brush is available.";
 }
 
 function PresetGroup({
   label,
   presets,
+  bundled,
+  state,
   selectedId,
   currentId,
   edited,
-  background,
   onSelect,
   onToggleFavorite,
 }: PresetGroupProps) {
   return (
     <div className="brush-browser__group">
       <h3 className="brush-browser__group-title">{label}</h3>
-      {presets.map((preset) => (
-        <PresetRow
-          key={preset.id}
-          preset={preset}
-          selected={preset.id === selectedId}
-          current={preset.id === currentId}
-          edited={preset.id === currentId && edited}
-          background={background}
-          onSelect={onSelect}
-          onToggleFavorite={onToggleFavorite}
-        />
-      ))}
+      <ul className="brush-browser__tiles">
+        {presets.map((preset) => (
+          <PresetRow
+            key={preset.id}
+            preset={preset}
+            bundled={isBundledPreset(preset, bundled)}
+            selected={preset.id === selectedId}
+            current={preset.id === currentId}
+            edited={preset.id === currentId && edited}
+            favorite={state.favorites.includes(preset.id)}
+            onSelect={onSelect}
+            onToggleFavorite={onToggleFavorite}
+          />
+        ))}
+      </ul>
     </div>
   );
 }

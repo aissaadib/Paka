@@ -14,30 +14,34 @@ interface FakeState {
   activeLayerId: string | null;
   selectedStrokes: number;
   selectedGuideId: string | null;
+  selectedReferenceId: string | null;
+  selectedShapeId: string | null;
   toolId: ToolId;
   gridVisible: boolean;
   gridSnapping: boolean;
   brushSize: number;
-  /** True while a quick brush-size resize is running. */
-  brushSizeGestureActive: boolean;
 }
 
 let state: FakeState;
 let actions: EditorActions;
 let engine: DrawingEngine;
 let file: FileActionHandlers;
+/** Whether the fake engine reports an unreleased shape press. */
+let shapePressActive: boolean;
 
 beforeEach(() => {
   state = {
     activeLayerId: "layer-1",
     selectedStrokes: 1,
     selectedGuideId: null,
+    selectedReferenceId: null,
+    selectedShapeId: null,
     toolId: "brush",
     gridVisible: false,
     gridSnapping: false,
     brushSize: 6,
-    brushSizeGestureActive: false,
   };
+  shapePressActive = false;
   actions = {
     setTool: vi.fn(),
     setBrush: vi.fn(),
@@ -46,32 +50,28 @@ beforeEach(() => {
     saveBrushPreset: vi.fn(),
     renameBrushPreset: vi.fn(),
     duplicateBrushPreset: vi.fn(),
-    updateBrushPreset: vi.fn(),
     deleteBrushPreset: vi.fn(),
     applyBrushPreset: vi.fn(),
-    toggleBrushPresetFavorite: vi.fn(),
-    importBrushPresets: vi.fn(),
-    setActivePreset: vi.fn(),
-    resetBrush: vi.fn(),
     setShapeFill: vi.fn(),
     setShapeSides: vi.fn(),
     setShapeInnerRatio: vi.fn(),
     setShapeRotation: vi.fn(),
     setFillTolerance: vi.fn(),
-    setFillReference: vi.fn(),
-    setFillReferenceLayer: vi.fn(),
-    setFillExpand: vi.fn(),
-    setFillAntialias: vi.fn(),
-    setFillCloseGaps: vi.fn(),
+    setFillMode: vi.fn(),
+    setFillSampleScale: vi.fn(),
+    setSymmetryMode: vi.fn(),
+    createGroup: vi.fn(() => null),
+    dissolveGroup: vi.fn(),
+    renameGroup: vi.fn(),
+    moveLayerToParent: vi.fn(),
+    setSymmetryAxis: vi.fn(),
     setGradientType: vi.fn(),
     setGradientEndColor: vi.fn(),
     setGradientMidStops: vi.fn(),
-    nudgeGradientHandle: vi.fn(),
-    setGradientHandlePosition: vi.fn(),
-    cancelGradientGesture: vi.fn(),
     setGridVisible: vi.fn(),
     setGridSpacing: vi.fn(),
     setGridSnapping: vi.fn(),
+    setRulersVisible: vi.fn(),
     dismissNotice: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
@@ -79,9 +79,6 @@ beforeEach(() => {
     zoomOut: vi.fn(),
     zoomTo: vi.fn(),
     zoomToFit: vi.fn(),
-    rotateView: vi.fn(),
-    toggleViewMirror: vi.fn(),
-    resetView: vi.fn(),
     newDocument: vi.fn(),
     addLayer: vi.fn(),
     duplicateLayer: vi.fn(),
@@ -94,44 +91,52 @@ beforeEach(() => {
     selectLayer: vi.fn(),
     clearSelection: vi.fn(),
     selectAll: vi.fn(),
+    invertSelection: vi.fn(),
+    setSelectionShape: vi.fn(),
     deleteSelection: vi.fn(),
     deleteSelectedGuide: vi.fn(),
     cancelGuideGesture: vi.fn(),
+    importReference: vi.fn(),
+    selectReference: vi.fn(),
+    removeReference: vi.fn(),
+    deleteSelectedReference: vi.fn(),
+    setReferenceVisible: vi.fn(),
+    setReferenceOpacity: vi.fn(),
+    setReferenceBehind: vi.fn(),
+    setReferenceRotation: vi.fn(),
+    renameReference: vi.fn(),
+    cancelReferenceGesture: vi.fn(),
+    selectShape: vi.fn(),
+    deleteSelectedShape: vi.fn(),
+    cancelShapeGesture: vi.fn(),
+    setSelectedShapeFill: vi.fn(),
+    setSelectedShapeSides: vi.fn(),
+    setSelectedShapeInnerRatio: vi.fn(),
+    setSelectedShapeRotation: vi.fn(),
+    setSelectedShapeSize: vi.fn(),
+    setSelectedShapeWidth: vi.fn(),
+    setSelectedShapeHeight: vi.fn(),
+    setSelectedShapeBrush: vi.fn(),
     nudgeSelection: vi.fn(),
     duplicateSelection: vi.fn(),
     flipSelection: vi.fn(),
     scaleSelection: vi.fn(),
     rotateSelection: vi.fn(),
-    setRulersVisible: vi.fn(),
-    setSymmetryEnabled: vi.fn(),
-    setSymmetryMode: vi.fn(),
-    setSymmetryCount: vi.fn(),
-    setSymmetryCenter: vi.fn(),
-    resetSymmetryCenter: vi.fn(),
-    clearGuides: vi.fn(),
-    centerViewportOn: vi.fn(),
-    centerViewport: vi.fn(),
-    toggleSecondaryView: vi.fn(),
-    closeSecondaryView: vi.fn(),
-    focusView: vi.fn(),
-    fitView: vi.fn(),
-    actualSizeView: vi.fn(),
   };
   engine = {
+    cancelShapeCreation: () => shapePressActive,
     getState: () =>
       ({
         document: { activeLayerId: state.activeLayerId },
         selectedStrokes: state.selectedStrokes,
         selectedGuideId: state.selectedGuideId,
-        selectedGradient: null,
+        selectedReferenceId: state.selectedReferenceId,
+        selectedShapeId: state.selectedShapeId,
         toolId: state.toolId,
         gridVisible: state.gridVisible,
         gridSnapping: state.gridSnapping,
         brush: { size: state.brushSize },
       }) as unknown as EditorSnapshot,
-    // The quick brush-size resize owns Escape while it runs. The stub reports
-    // none in flight unless a test asks for one.
-    cancelBrushSizeGesture: vi.fn(() => state.brushSizeGestureActive),
   } as unknown as DrawingEngine;
   file = { save: vi.fn(), saveAs: vi.fn(), open: vi.fn() } as unknown as FileActionHandlers;
 });
@@ -167,11 +172,7 @@ describe("registry shape", () => {
     const ids = ACTION_DEFINITIONS.map((action) => action.id);
     expect(new Set(ids).size).toBe(ids.length);
     for (const action of ACTION_DEFINITIONS) {
-      // A command-only action is reached by name, from the canvas menu or the
-      // command palette; every other action has a key.
-      if (action.commandOnly !== true) {
-        expect(action.shortcuts.length).toBeGreaterThan(0);
-      }
+      expect(action.shortcuts.length).toBeGreaterThan(0);
       expect(action.label.length).toBeGreaterThan(0);
     }
   });
@@ -249,6 +250,18 @@ describe("document and view commands", () => {
     expect(actions.flipSelection).toHaveBeenCalledWith("vertical");
   });
 
+  it("selects all, inverts and deselects", () => {
+    press("a");
+    expect(actions.selectAll).toHaveBeenCalledOnce();
+    press("i", { shift: true });
+    expect(actions.invertSelection).toHaveBeenCalledOnce();
+    press("d", { shift: true });
+    expect(actions.clearSelection).toHaveBeenCalledOnce();
+    // The unshifted chord still duplicates the selection.
+    press("d");
+    expect(actions.duplicateSelection).toHaveBeenCalledOnce();
+  });
+
   it("zooms", () => {
     press("=");
     press("=", { shift: true });
@@ -275,42 +288,16 @@ describe("document and view commands", () => {
     expect(actions.clearSelection).not.toHaveBeenCalled();
   });
 
-  it("cancels a quick brush-size resize with Escape before anything else", () => {
-    state.brushSizeGestureActive = true;
-    press("escape", { code: "Escape", ctrl: false, meta: false });
-    expect(engine.cancelBrushSizeGesture).toHaveBeenCalledOnce();
-    // The resize owns Escape, so the selection is left alone.
-    expect(actions.clearSelection).not.toHaveBeenCalled();
-    expect(actions.cancelGuideGesture).not.toHaveBeenCalled();
-  });
-
   it("clears the selection otherwise", () => {
     press("escape", { code: "Escape", ctrl: false, meta: false });
     expect(actions.clearSelection).toHaveBeenCalledOnce();
   });
 
-  it("steps the brush size with the brackets", () => {
-    press("[", { code: "BracketLeft", ctrl: false, meta: false });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 5 });
-    press("]", { code: "BracketRight", ctrl: false, meta: false });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 7 });
-  });
-
-  it("changes the brush size by one pixel with Alt and the brackets", () => {
-    state.brushSize = 40;
-    press("[", { code: "BracketLeft", ctrl: false, meta: false, alt: true });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 39 });
-    press("]", { code: "BracketRight", ctrl: false, meta: false, alt: true });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 41 });
-  });
-
-  it("keeps the fine brush size inside the brush's range", () => {
-    state.brushSize = 512;
-    press("]", { code: "BracketRight", ctrl: false, meta: false, alt: true });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 512 });
-    state.brushSize = 1;
-    press("[", { code: "BracketLeft", ctrl: false, meta: false, alt: true });
-    expect(actions.setBrush).toHaveBeenCalledWith({ size: 1 });
+  it("discards an unreleased shape press before clearing the selection", () => {
+    state.toolId = "rectangle";
+    shapePressActive = true;
+    press("escape", { code: "Escape", ctrl: false, meta: false });
+    expect(actions.clearSelection).not.toHaveBeenCalled();
   });
 
   it("deletes a selected guide before touching strokes", () => {

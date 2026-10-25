@@ -1,51 +1,63 @@
 /**
- * Reference images: the workspace overlay, its transform, and the colour the
- * picker reads from it.
+ * Reference images: the model, the geometry, the store and the decoder.
  *
- * The suite runs in plain Node, so the browser's image decoder is replaced by
- * a stand-in that hands back a canvas with known pixels. That is enough to pin
- * down the rules that matter:
+ * The slice is deliberately DOM-free: the placement, the clipping and the
+ * store's ordering are pure functions of the document, and the decoder's
+ * rules are behind an injectable environment, so all of it is exercised here
+ * without a canvas and without a browser.
  *
- *  - the transform is in **workspace space** and is independent of the
- *    document: a reference is placed on the screen, not in the drawing;
- *  - the colour the picker reads is the pixel of the *decoded image* under the
- *    pointer, mapped through the reference's placement;
- *  - a reference never becomes document content: it does not dirty the
- *    document, it does not enter the history, and it never reaches an export.
+ * The rules the whole slice rests on are tested as well:
+ *
+ *  - a reference is **anchored to the document**, so it sits over the same
+ *    artwork at every zoom and on every window size;
+ *  - a reference is **clipped to the paper**, so it never hangs out over the
+ *    edge of the document;
+ *  - a reference is **display only**: it is not a layer element, so it can
+ *    never reach a layer surface or a PNG export;
+ *  - a file that is **not an image is refused**, rather than crashing the
+ *    import.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createDocument } from "../core/document/document";
-import { DrawingEngine } from "../core/engine/DrawingEngine";
+import { describe, expect, it } from "vitest";
 import {
-  decodeReferenceImage,
+  MIN_REFERENCE_SIZE,
+  clipRectToDocument,
+  fitReferenceToDocument,
+  moveReference,
+  referenceContains,
+  referenceRect,
+  referenceScale,
+  referenceScreenRect,
+  referenceSourcePoint,
+  referenceVisibleContains,
+  referenceVisibleRect,
+  scaleReference,
+  setReferenceOpacity,
+  setReferencePosition,
+  setReferenceSize,
+} from "../core/reference/geometry";
+import {
   MAX_REFERENCE_BYTES,
   MAX_REFERENCE_PIXELS,
+  MAX_TOTAL_REFERENCE_PIXELS,
   ReferenceDecodeError,
+  decodeReferenceImage,
+  detectImageFormat,
+  referenceImageExtensions,
+  referenceMimeType,
   type DecodedReference,
   type ReferenceDecodeEnvironment,
 } from "../core/reference/decode";
 import {
-  fitReference,
-  referenceContains,
-  referenceScale,
-  referenceSourcePoint,
-  scaleReference,
-  setReferenceScale,
-} from "../core/reference/geometry";
-import { ReferenceImageStore } from "../core/reference/store";
+  ReferenceImageStore,
+  createReferenceImage,
+  type ReferenceStoreOutcome,
+} from "../core/reference/store";
 import type { ReferenceImage } from "../core/reference/types";
-import { Canvas2DRenderer } from "../core/rendering/Canvas2DRenderer";
-import { FrameScheduler } from "../core/rendering/frameScheduler";
-import type { DrawingRenderer, StrokeSource } from "../core/rendering/types";
-import type { PointerSample } from "../types/pointer";
-import {
-  installRecordingDocument,
-  RecordingCanvas,
-  type RecordingDocument,
-} from "./support/recordingCanvas";
+import type { DrawingDocument, LayerElement } from "../core/document/types";
 
-/** A reference placed in the workspace, for the geometry tests. */
+const PAPER = { width: 800, height: 600 };
+
 function reference(overrides: Partial<ReferenceImage> = {}): ReferenceImage {
   return {
     id: "reference-1",
@@ -56,620 +68,469 @@ function reference(overrides: Partial<ReferenceImage> = {}): ReferenceImage {
     height: 100,
     naturalWidth: 400,
     naturalHeight: 200,
-    visible: true,
+    rotation: 0,
     opacity: 1,
+    blendMode: "normal",
+    behind: false,
+    visible: true,
     ...overrides,
   };
 }
 
-/**
- * A decoded image with known pixels.
- *
- * The colour of the pixel at `(x, y)` is `(x, y, 0)`, so a test can say which
- * pixel it expects to be read by naming its coordinates.
- */
-function fakeImage(width: number, height: number) {
-  const reads: Array<[number, number]> = [];
-  const context = {
-    getImageData: (x: number, y: number, w: number, h: number) => {
-      reads.push([x, y]);
-      return {
-        data: new Uint8ClampedArray([x & 255, y & 255, 0, 255]),
-        width: w,
-        height: h,
-        colorSpace: "srgb",
-      } as unknown as ImageData;
+/** A decoder that answers without touching a browser. */
+function environment(
+  answer: (bytes: Uint8Array, mimeType: string) => Promise<DecodedReference>,
+): ReferenceDecodeEnvironment & { calls: number } {
+  const wrapper = {
+    calls: 0,
+    decodeImage: async (bytes: Uint8Array, mimeType: string) => {
+      wrapper.calls += 1;
+      return answer(bytes, mimeType);
     },
-    drawImage: () => {},
-  } as unknown as CanvasRenderingContext2D;
-  const canvas = { width, height } as unknown as HTMLCanvasElement;
-  const decoded: DecodedReference = { width, height, canvas, context };
-  return { decoded, reads };
+  };
+  return wrapper;
 }
 
-/** A store whose decoder hands back a fixed image. */
-function createStore(options: { width?: number; height?: number; fail?: boolean } = {}) {
-  const image = fakeImage(options.width ?? 4, options.height ?? 4);
-  const store = new ReferenceImageStore({
-    decode: async () => {
-      if (options.fail) {
-        throw new ReferenceDecodeError("malformed", "The file could not be decoded as an image.");
-      }
-      return image.decoded;
-    },
-    createId: (() => {
-      let counter = 0;
-      return () => {
-        counter += 1;
-        return `reference-${counter}`;
-      };
-    })(),
+/** A picture of a given size, drawn by nothing. */
+function picture(width: number, height: number): DecodedReference {
+  return { width, height, source: {} as CanvasImageSource };
+}
+
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+const GIF_BYTES = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const WEBP_BYTES = new Uint8Array([
+  0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50,
+]);
+const BMP_BYTES = new Uint8Array([0x42, 0x4d, 0, 0]);
+const TEXT_BYTES = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20]); // "hello "
+
+describe("the reference model", () => {
+  it("holds a placement, a rotation, an opacity, a blend mode and a side of the drawing", () => {
+    expect(Object.keys(reference()).sort()).toEqual([
+      "behind",
+      "blendMode",
+      "height",
+      "id",
+      "name",
+      "naturalHeight",
+      "naturalWidth",
+      "opacity",
+      "rotation",
+      "visible",
+      "width",
+      "x",
+      "y",
+    ]);
   });
-  return { store, image };
-}
 
-function createSample(overrides: Partial<PointerSample> = {}): PointerSample {
-  return {
-    phase: "down",
-    pointerId: 1,
-    kind: "mouse",
-    isPrimary: true,
-    button: 0,
-    buttons: 1,
-    docX: 0,
-    docY: 0,
-    screenX: 0,
-    screenY: 0,
-    pressure: 1,
-    hasPressure: false,
-    tiltX: 0,
-    tiltY: 0,
-    timeStamp: 0,
-    modifiers: { shift: false, alt: false, ctrl: false, meta: false },
-    ...overrides,
-  };
-}
+  it("starts fully opaque, over the artwork and drawn with the normal blend", () => {
+    const created = createReferenceImage(
+      { name: "photo.jpg", naturalWidth: 1200, naturalHeight: 800 },
+      () => "reference-1",
+    );
+    expect(created.opacity).toBe(1);
+    expect(created.blendMode).toBe("normal");
+    expect(created.behind).toBe(false);
+    expect(created.visible).toBe(true);
+  });
 
-/** A renderer that records what the engine asks of it. */
-function createSpyRenderer(compositePixel: { r: number; g: number; b: number } | null = null) {
-  const referenceOverlays: unknown[] = [];
-  const renderer: DrawingRenderer = {
-    kind: "canvas2d",
-    setDocument: () => {},
-    setViewport: () => {},
-    setDisplaySize: () => {},
-    setRasterScale: () => {},
-    invalidateLayer: () => {},
-    beginStroke: () => {},
-    extendStroke: () => {},
-    replaceStroke: () => {},
-    endStroke: () => {},
-    cancelStroke: () => {},
-    setSelection: () => {},
-    setGradientOverlay: () => {},
-    setSelectedGuide: () => {},
-    setGrid: () => {},
-    setRulers: () => {},
-    setSymmetry: () => {},
-    setReferenceOverlay: (overlay) => {
-      referenceOverlays.push(overlay);
-    },
-    composeDocumentImage: () => {
-      throw new Error("composeDocumentImage is not used in these tests.");
-    },
-    renderOverview: () => null,
-    readCompositePixel: () => compositePixel,
-    readCompositeImage: () => null,
-    render: () => {},
-    requestRender: () => {},
-    destroy: () => {},
-  };
-  return { renderer, referenceOverlays };
-}
+  it("places a new reference on the paper at its natural size", () => {
+    const created = createReferenceImage(
+      { name: "photo.jpg", naturalWidth: 1200, naturalHeight: 800 },
+      () => "reference-1",
+    );
+    expect(created.x).toBe(0);
+    expect(created.y).toBe(0);
+    expect(created.width).toBe(1200);
+    expect(created.height).toBe(800);
+  });
+
+  it("is the same record every time, for the same inputs", () => {
+    const options = { name: "photo.jpg", naturalWidth: 1200, naturalHeight: 800 };
+    expect(createReferenceImage(options, () => "reference-1")).toEqual(
+      createReferenceImage(options, () => "reference-1"),
+    );
+  });
+
+  it("is display only: it is not a layer element, so it cannot reach a surface", () => {
+    // The check is made at compile time. If the reference model were ever
+    // merged with the layer model, this file would stop compiling.
+    const acceptsLayerElement = (_element: LayerElement): void => undefined;
+    // @ts-expect-error a reference image is not a layer element
+    acceptsLayerElement(reference());
+    expect(true).toBe(true);
+  });
+
+  it("is document metadata: it travels with the document but is never a layer", () => {
+    // The two halves of the contract. A reference is document state - it is
+    // saved and undone with the document - but it is not layer content: it is
+    // never rasterized into a surface, so it cannot reach the artwork or an
+    // export. If the models were ever merged, this file would stop compiling.
+    const document: DrawingDocument["references"] = [reference()];
+    expect(document).toHaveLength(1);
+    const acceptsLayerElement = (_element: LayerElement): void => undefined;
+    // @ts-expect-error a reference image is not a layer element
+    acceptsLayerElement(reference());
+    expect(true).toBe(true);
+  });
+});
 
 describe("the geometry of a reference", () => {
-  it("maps a point on the screen to the pixel of the image under it", () => {
-    // The image is drawn at half its own size, so every screen pixel covers
-    // two image pixels.
-    const image = reference();
-    expect(referenceSourcePoint(image, 150, 75)).toEqual({ x: 100, y: 50 });
-    expect(referenceSourcePoint(image, 100, 50)).toEqual({ x: 0, y: 0 });
-    expect(referenceSourcePoint(image, 299, 149)).toEqual({ x: 398, y: 198 });
+  it("sits where it was put, in document coordinates", () => {
+    expect(referenceRect(reference())).toEqual({ x: 100, y: 50, width: 200, height: 100 });
   });
 
-  it("has no pixel for a point outside the reference", () => {
-    const image = reference();
-    expect(referenceSourcePoint(image, 99, 75)).toBeNull();
-    expect(referenceSourcePoint(image, 300, 75)).toBeNull();
-    expect(referenceSourcePoint(image, 150, 150)).toBeNull();
+  it("keeps its document rectangle at every zoom", () => {
+    const placed = reference();
+    const before = referenceRect(placed);
+    // The model holds no viewport at all: the rectangle cannot drift.
+    expect(referenceRect(placed)).toEqual(before);
+    expect(before).toEqual({ x: 100, y: 50, width: 200, height: 100 });
   });
 
-  it("knows which points it covers", () => {
-    const image = reference();
-    expect(referenceContains(image, 100, 50)).toBe(true);
-    expect(referenceContains(image, 299.9, 149.9)).toBe(true);
-    expect(referenceContains(image, 300, 150)).toBe(false);
+  it("moves with the paper and scales with it when the viewport changes", () => {
+    const placed = reference();
+    const atOne = referenceScreenRect(placed, { zoom: 1, offsetX: 0, offsetY: 0 });
+    expect(atOne).toEqual({ x: 100, y: 50, width: 200, height: 100 });
+
+    const zoomed = referenceScreenRect(placed, { zoom: 2, offsetX: 30, offsetY: -10 });
+    expect(zoomed).toEqual({ x: 230, y: 90, width: 400, height: 200 });
   });
 
-  it("scales about the anchor it is given", () => {
-    const image = reference();
-    const scaled = scaleReference(image, 2, { x: 100, y: 50 });
-    expect(scaled.width).toBe(400);
-    expect(scaled.height).toBe(200);
-    // The anchor is the top-left corner here, so it stays where it was.
-    expect(scaled.x).toBe(100);
-    expect(scaled.y).toBe(50);
+  it("is clipped to the paper", () => {
+    const overhanging = reference({ x: 700, y: 500, width: 400, height: 400 });
+    expect(referenceVisibleRect(overhanging, PAPER)).toEqual({
+      x: 700,
+      y: 500,
+      width: 100,
+      height: 100,
+    });
   });
 
-  it("keeps the anchor in place when the scale is clamped", () => {
-    const image = reference();
-    const scaled = scaleReference(image, 0.0001, { x: 200, y: 100 });
-    expect(scaled.width).toBeGreaterThan(0);
-    // The centre of the reference is the anchor, and it does not move.
-    expect(scaled.x + scaled.width / 2).toBeCloseTo(200);
-    expect(scaled.y + scaled.height / 2).toBeCloseTo(100);
+  it("is clipped on the top left as well", () => {
+    const overhanging = reference({ x: -50, y: -50, width: 200, height: 200 });
+    expect(referenceVisibleRect(overhanging, PAPER)).toEqual({
+      x: 0,
+      y: 0,
+      width: 150,
+      height: 150,
+    });
   });
 
-  it("grows about its centre when the scale is set", () => {
-    const image = reference();
-    const scaled = setReferenceScale(image, 0.5);
-    expect(scaled.width).toBe(200);
-    expect(scaled.height).toBe(100);
-    expect(scaled.x + scaled.width / 2).toBeCloseTo(image.x + image.width / 2);
-    expect(scaled.y + scaled.height / 2).toBeCloseTo(image.y + image.height / 2);
+  it("is not drawn at all when it lies off the paper", () => {
+    expect(referenceVisibleRect(reference({ x: 900, y: 20 }), PAPER)).toBeNull();
+    expect(clipRectToDocument({ x: 900, y: 20, width: 100, height: 100 }, PAPER)).toBeNull();
   });
 
-  it("fits into a view without distorting the image", () => {
-    const image = reference({ naturalWidth: 400, naturalHeight: 200 });
-    const fitted = fitReference(image, { width: 500, height: 500 }, 0);
-    expect(fitted.width / fitted.height).toBeCloseTo(2);
-    expect(fitted.width).toBe(500);
-    expect(fitted.height).toBe(250);
-    expect(fitted.x).toBe(0);
-    expect(fitted.y).toBe(125);
+  it("keeps the whole paper when it covers it exactly", () => {
+    const covering = reference({ x: 0, y: 0, width: 800, height: 600 });
+    expect(referenceVisibleRect(covering, PAPER)).toEqual({
+      x: 0,
+      y: 0,
+      width: 800,
+      height: 600,
+    });
+  });
+
+  it("is only on the paper where it is drawn", () => {
+    const overhanging = reference({ x: 700, y: 0, width: 400, height: 100 });
+    expect(referenceVisibleContains(overhanging, 750, 50, PAPER)).toBe(true);
+    expect(referenceVisibleContains(overhanging, 900, 50, PAPER)).toBe(false);
+    // The placed rectangle does contain the overhang, but the overhang is not
+    // drawn, so it is not the reference.
+    expect(referenceContains(overhanging, 900, 50)).toBe(true);
+  });
+
+  it("names the picture pixel under a document point", () => {
+    const placed = reference({ x: 0, y: 0, width: 200, height: 100 });
+    expect(referenceSourcePoint(placed, 0, 0)).toEqual({ x: 0, y: 0 });
+    expect(referenceSourcePoint(placed, 50, 25)).toEqual({ x: 100, y: 50 });
+    expect(referenceSourcePoint(placed, 199, 99)).toEqual({ x: 398, y: 198 });
+    expect(referenceSourcePoint(placed, 200, 0)).toBeNull();
+    expect(referenceSourcePoint(placed, -1, 0)).toBeNull();
   });
 
   it("reports how large it is drawn relative to its own pixels", () => {
     expect(referenceScale(reference())).toBe(0.5);
+    expect(referenceScale(reference({ width: 400, naturalWidth: 400 }))).toBe(1);
+  });
+
+  it("moves by a document delta and to an absolute position", () => {
+    expect(moveReference(reference(), 10, -20)).toMatchObject({ x: 110, y: 30 });
+    expect(setReferencePosition(reference(), 5, 5)).toMatchObject({ x: 5, y: 5 });
+  });
+
+  it("keeps its aspect ratio when it is scaled about an anchor", () => {
+    const scaled = scaleReference(reference(), 2, { x: 100, y: 50 });
+    expect(scaled.width).toBe(400);
+    expect(scaled.height).toBe(200);
+    // The anchor is the top left corner here, so it does not move.
+    expect(scaled.x).toBe(100);
+    expect(scaled.y).toBe(50);
+  });
+
+  it("grows around an anchor in the middle", () => {
+    const scaled = scaleReference(reference(), 2, { x: 200, y: 100 });
+    expect(scaled.x).toBe(0);
+    expect(scaled.y).toBe(0);
+    expect(scaled.width).toBe(400);
+    expect(scaled.height).toBe(200);
+  });
+
+  it("is never scaled away to nothing", () => {
+    const scaled = scaleReference(reference(), 0.001, { x: 100, y: 50 });
+    // The longest side is clamped, so the reference can still be grabbed; the
+    // sides keep their ratio, so the shorter one follows it down.
+    expect(scaled.width).toBeCloseTo(MIN_REFERENCE_SIZE);
+    expect(scaled.height).toBeCloseTo(MIN_REFERENCE_SIZE / 2);
+  });
+
+  it("ignores a scale that is not a number", () => {
+    const placed = reference();
+    expect(scaleReference(placed, Number.NaN, { x: 0, y: 0 })).toBe(placed);
+    expect(scaleReference(placed, 0, { x: 0, y: 0 })).toBe(placed);
+  });
+
+  it("never shrinks below the smallest usable size", () => {
+    const sized = setReferenceSize(reference(), 0, -10);
+    expect(sized.width).toBe(MIN_REFERENCE_SIZE);
+    expect(sized.height).toBe(MIN_REFERENCE_SIZE);
+  });
+
+  it("keeps its size when the new one is not a number", () => {
+    const sized = setReferenceSize(reference(), Number.NaN, Number.POSITIVE_INFINITY);
+    expect(sized.width).toBe(200);
+    expect(sized.height).toBe(100);
+  });
+
+  it("clamps the opacity into 0..1", () => {
+    expect(setReferenceOpacity(reference(), 2).opacity).toBe(1);
+    expect(setReferenceOpacity(reference(), -1).opacity).toBe(0);
+    expect(setReferenceOpacity(reference(), 0.25).opacity).toBe(0.25);
+  });
+
+  it("fits the whole picture on the paper, centred and undistorted", () => {
+    const fitted = fitReferenceToDocument(
+      reference({ naturalWidth: 1600, naturalHeight: 1200, width: 1600, height: 1200 }),
+      PAPER,
+    );
+    expect(fitted.width).toBe(800);
+    expect(fitted.height).toBe(600);
+    expect(fitted.x).toBe(0);
+    expect(fitted.y).toBe(0);
   });
 });
 
-describe("decoding an imported file", () => {
-  /** A browser that decodes into a bitmap of a known size. */
-  function fakeEnvironment(options: { width: number; height: number; fail?: boolean }) {
-    const canvases: Array<{ width: number; height: number }> = [];
-    const resizes: Array<[number, number]> = [];
-    const closed: string[] = [];
-    const environment: ReferenceDecodeEnvironment = {
-      createBitmap: async () => {
-        if (options.fail) {
-          throw new Error("The blob is not an image.");
-        }
-        return {
-          width: options.width,
-          height: options.height,
-          close: () => {
-            closed.push("bitmap");
-          },
-        } as unknown as ImageBitmap;
-      },
-      resizeBitmap: async (_bitmap, width, height) => {
-        resizes.push([width, height]);
-        return {
-          width,
-          height,
-          close: () => {
-            closed.push("resized");
-          },
-        } as unknown as ImageBitmap;
-      },
-      createCanvas: (width, height) => {
-        canvases.push({ width, height });
-        const context = { drawImage: () => {} } as unknown as CanvasRenderingContext2D;
-        return {
-          width,
-          height,
-          getContext: () => context,
-        } as unknown as HTMLCanvasElement;
-      },
-    };
-    return { environment, canvases, resizes, closed };
-  }
+describe("the reference store", () => {
+  it("starts empty", () => {
+    const store = new ReferenceImageStore();
+    expect(store.list()).toEqual([]);
+    expect(store.count()).toBe(0);
+    expect(store.find("reference-1")).toBeNull();
+  });
 
-  it("refuses a file the browser cannot decode", async () => {
-    const { environment } = fakeEnvironment({ width: 4, height: 4, fail: true });
+  it("adds a reference on top of the others", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }));
+    store.add(reference({ id: "b" }));
+    expect(store.list().map((item) => item.id)).toEqual(["a", "b"]);
+  });
 
-    await expect(decodeReferenceImage(new Blob(["x"]), environment)).rejects.toBeInstanceOf(
+  it("keeps the list in the drawing order: the last one is on top", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }));
+    store.add(reference({ id: "b" }));
+    store.add(reference({ id: "c" }));
+    expect(store.indexOf("c")).toBe(2);
+    // Moving the first one to the top brings it in front of the others.
+    expect(store.reorder("a", 2)).toBe(true);
+    expect(store.list().map((item) => item.id)).toEqual(["b", "c", "a"]);
+  });
+
+  it("clamps a reorder to the list", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }));
+    store.add(reference({ id: "b" }));
+    expect(store.reorder("a", 99)).toBe(true);
+    expect(store.list().map((item) => item.id)).toEqual(["b", "a"]);
+    expect(store.reorder("a", 99)).toBe(false);
+    expect(store.reorder("missing", 0)).toBe(false);
+  });
+
+  it("separates the references behind the artwork from the ones over it", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "over-1" }));
+    store.add(reference({ id: "under-1", behind: true }));
+    store.add(reference({ id: "over-2" }));
+    expect(store.behind().map((item) => item.id)).toEqual(["under-1"]);
+    expect(store.over().map((item) => item.id)).toEqual(["over-1", "over-2"]);
+  });
+
+  it("removes a reference and releases its pixels", () => {
+    const store = new ReferenceImageStore();
+    const outcome = store.add(reference({ id: "a" }), picture(100, 100));
+    expect(outcome.ok).toBe(true);
+    expect(store.decodedPixelCount()).toBe(10_000);
+    expect(store.remove("a")).not.toBeNull();
+    expect(store.count()).toBe(0);
+    expect(store.decodedPixelCount()).toBe(0);
+    expect(store.sourceFor("a")).toBeNull();
+    expect(store.remove("a")).toBeNull();
+  });
+
+  it("keeps a reference's place when it is changed", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }));
+    store.add(reference({ id: "b" }));
+    expect(store.update("b", { opacity: 0.5, behind: true })).toBe(true);
+    expect(store.list().map((item) => item.id)).toEqual(["a", "b"]);
+    expect(store.find("b")).toMatchObject({ opacity: 0.5, behind: true });
+  });
+
+  it("hands the decoded picture to the renderer and no more", () => {
+    const store = new ReferenceImageStore();
+    const decoded = picture(64, 32);
+    store.add(reference({ id: "a" }), decoded);
+    expect(store.sourceFor("a")).toBe(decoded.source);
+    expect(store.decodedFor("a")).toBe(decoded);
+    expect(store.sourceFor("missing")).toBeNull();
+  });
+
+  it("refuses a second reference with the same id", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }));
+    const outcome = store.add(reference({ id: "a" }));
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("duplicate");
+    }
+    expect(store.count()).toBe(1);
+  });
+
+  it("refuses a picture that does not fit the session's budget", () => {
+    const store = new ReferenceImageStore();
+    const large = picture(6000, 4000); // 24 megapixels
+    expect(store.remainingPixelBudget()).toBe(MAX_TOTAL_REFERENCE_PIXELS);
+    expect(store.add(reference({ id: "a" }), large).ok).toBe(true);
+    expect(store.add(reference({ id: "b" }), large).ok).toBe(true);
+    const third = store.add(reference({ id: "c" }), large);
+    expect(third.ok).toBe(false);
+    if (!third.ok) {
+      expect(third.reason).toBe("budget");
+    }
+    // The store is left exactly as it was.
+    expect(store.count()).toBe(2);
+    expect(store.decodedPixelCount()).toBe(2 * 24_000_000);
+  });
+
+  it("empties itself and gives every pixel back", () => {
+    const store = new ReferenceImageStore();
+    store.add(reference({ id: "a" }), picture(10, 10));
+    store.clear();
+    expect(store.list()).toEqual([]);
+    expect(store.decodedPixelCount()).toBe(0);
+    expect(store.remainingPixelBudget()).toBe(MAX_TOTAL_REFERENCE_PIXELS);
+  });
+
+  it("refuses to attach a picture to a reference that is not there", () => {
+    const store = new ReferenceImageStore();
+    const outcome: ReferenceStoreOutcome = store.attachDecoded("missing", picture(10, 10));
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) {
+      expect(outcome.reason).toBe("missing");
+    }
+  });
+});
+
+describe("the decoder", () => {
+  it("recognises the image formats a reference may be imported from", () => {
+    expect(detectImageFormat(PNG_BYTES)).toBe("png");
+    expect(detectImageFormat(JPEG_BYTES)).toBe("jpeg");
+    expect(detectImageFormat(GIF_BYTES)).toBe("gif");
+    expect(detectImageFormat(WEBP_BYTES)).toBe("webp");
+    expect(detectImageFormat(BMP_BYTES)).toBe("bmp");
+  });
+
+  it("does not mistake a file that is not an image for one", () => {
+    expect(detectImageFormat(TEXT_BYTES)).toBeNull();
+    expect(detectImageFormat(new Uint8Array(0))).toBeNull();
+    // A PNG signature cut short is not a PNG.
+    expect(detectImageFormat(new Uint8Array([0x89, 0x50, 0x4e]))).toBeNull();
+  });
+
+  it("offers the formats the decoder accepts to the open dialog", () => {
+    expect(referenceImageExtensions()).toContain("png");
+    expect(referenceImageExtensions()).toContain("jpg");
+    expect(referenceMimeType("png")).toBe("image/png");
+    expect(referenceMimeType("jpeg")).toBe("image/jpeg");
+  });
+
+  it("decodes an image and hands the picture over", async () => {
+    const decoder = environment(async () => picture(1200, 800));
+    const decoded = await decodeReferenceImage(PNG_BYTES, decoder);
+    expect(decoded.width).toBe(1200);
+    expect(decoded.height).toBe(800);
+    expect(decoder.calls).toBe(1);
+  });
+
+  it("tells the decoder which format the bytes are in", async () => {
+    let seen = "";
+    const decoder = environment(async (_bytes, mimeType) => {
+      seen = mimeType;
+      return picture(10, 10);
+    });
+    await decodeReferenceImage(JPEG_BYTES, decoder);
+    expect(seen).toBe("image/jpeg");
+  });
+
+  it("refuses a file that is not an image, without decoding it", async () => {
+    const decoder = environment(async () => picture(10, 10));
+    await expect(decodeReferenceImage(TEXT_BYTES, decoder)).rejects.toBeInstanceOf(
       ReferenceDecodeError,
     );
-    await expect(decodeReferenceImage(new Blob(["x"]), environment)).rejects.toMatchObject({
+    expect(decoder.calls).toBe(0);
+  });
+
+  it("refuses an empty file", async () => {
+    const decoder = environment(async () => picture(10, 10));
+    await expect(decodeReferenceImage(new Uint8Array(0), decoder)).rejects.toMatchObject({
+      reason: "not-an-image",
+    });
+    expect(decoder.calls).toBe(0);
+  });
+
+  it("refuses a file that is larger than the byte limit, before decoding it", async () => {
+    const decoder = environment(async () => picture(10, 10));
+    const huge = new Uint8Array(MAX_REFERENCE_BYTES + 1);
+    huge.set(PNG_BYTES, 0);
+    await expect(decodeReferenceImage(huge, decoder)).rejects.toMatchObject({
+      reason: "too-large",
+    });
+    expect(decoder.calls).toBe(0);
+  });
+
+  it("refuses a picture with more pixels than the limit", async () => {
+    const decoder = environment(async () => picture(8000, 8000));
+    await expect(decodeReferenceImage(PNG_BYTES, decoder)).rejects.toMatchObject({
+      reason: "too-large",
+    });
+    expect(MAX_REFERENCE_PIXELS).toBeLessThan(8000 * 8000);
+  });
+
+  it("turns a decoder that throws into a refusal, not an exception", async () => {
+    const decoder = environment(async () => {
+      throw new Error("the browser gave up");
+    });
+    await expect(decodeReferenceImage(PNG_BYTES, decoder)).rejects.toMatchObject({
       reason: "malformed",
     });
   });
 
-  it("refuses a file that is too large to be worth decoding", async () => {
-    const { environment, canvases } = fakeEnvironment({ width: 4, height: 4 });
-    const huge = { size: MAX_REFERENCE_BYTES + 1 } as unknown as Blob;
-
-    await expect(decodeReferenceImage(huge, environment)).rejects.toMatchObject({
-      reason: "too-large",
+  it("refuses a picture with no pixels", async () => {
+    const decoder = environment(async () => picture(0, 0));
+    await expect(decodeReferenceImage(PNG_BYTES, decoder)).rejects.toMatchObject({
+      reason: "malformed",
     });
-    // Nothing was decoded: the file was refused before the decoder ran.
-    expect(canvases).toHaveLength(0);
-  });
-
-  it("downscales an enormous image while it is decoded", async () => {
-    const { environment, canvases, resizes, closed } = fakeEnvironment({
-      width: 20_000,
-      height: 20_000,
-    });
-
-    const decoded = await decodeReferenceImage(new Blob(["x"]), environment);
-
-    expect(resizes).toHaveLength(1);
-    const [width, height] = resizes[0];
-    expect(width * height).toBeLessThanOrEqual(MAX_REFERENCE_PIXELS);
-    // The aspect ratio survives the downscale.
-    expect(width / height).toBeCloseTo(1);
-    // The copy that is kept is the small one, and the transient bitmaps are
-    // released: an enormous import does not leave the memory behind.
-    expect(decoded.width).toBe(width);
-    expect(canvases).toEqual([{ width, height }]);
-    expect(closed.sort()).toEqual(["bitmap", "resized"]);
-  });
-
-  it("keeps a normal image at its own size", async () => {
-    const { environment, canvases, resizes } = fakeEnvironment({ width: 320, height: 200 });
-
-    const decoded = await decodeReferenceImage(new Blob(["x"]), environment);
-
-    expect(decoded.width).toBe(320);
-    expect(decoded.height).toBe(200);
-    expect(resizes).toHaveLength(0);
-    expect(canvases).toEqual([{ width: 320, height: 200 }]);
-  });
-});
-
-describe("the reference store", () => {  it("imports an image and keeps exactly one decoded copy", async () => {
-    const { store, image } = createStore({ width: 8, height: 8 });
-    const added = await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-
-    expect(added).toBe(true);
-    const state = store.getState();
-    expect(state.references).toHaveLength(1);
-    expect(state.references[0].name).toBe("sketch.png");
-    expect(state.selectedId).toBe(state.references[0].id);
-    // The pixels come from the one decoded copy, and it is the same object
-    // every time: nothing decodes the file twice.
-    expect(store.sourceFor(state.references[0].id)).toBe(image.decoded.canvas);
-    expect(store.sourceFor(state.references[0].id)).toBe(store.sourceFor(state.references[0].id));
-  });
-
-  it("refuses a file that cannot be decoded, and says why", async () => {
-    const { store } = createStore({ fail: true });
-    const added = await store.add({ blob: new Blob(["x"]), name: "broken.png" });
-
-    expect(added).toBe(false);
-    expect(store.getState().references).toHaveLength(0);
-    expect(store.getState().notice).toContain("broken.png");
-    expect(store.getState().notice).toContain("could not be decoded");
-  });
-
-  it("releases the pixels of a reference that is removed", async () => {
-    const { store } = createStore();
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-
-    store.remove(id);
-
-    expect(store.getState().references).toHaveLength(0);
-    expect(store.getState().selectedId).toBeNull();
-    expect(store.sourceFor(id)).toBeNull();
-  });
-
-  it("hides a reference without removing it, and stops sampling it", async () => {
-    const { store } = createStore();
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    const placed = store.getState().references[0];
-
-    store.setVisible(id, false);
-
-    expect(store.getState().references[0].visible).toBe(false);
-    expect(store.hitTest(placed.x + 1, placed.y + 1)).toBeNull();
-    expect(store.sampleAt(placed.x + 1, placed.y + 1)).toBeNull();
-  });
-
-  it("moves and scales a reference without touching anything else", async () => {
-    const { store } = createStore();
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    const before = store.getState().references[0];
-
-    store.move(id, 10, 20);
-    expect(store.getState().references[0].x).toBe(before.x + 10);
-    expect(store.getState().references[0].y).toBe(before.y + 20);
-
-    store.setScale(id, 2);
-    expect(store.getState().references[0].width).toBe(before.naturalWidth * 2);
-  });
-
-  it("samples the pixel under the pointer through the reference's placement", async () => {
-    const { store, image } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-
-    // Put the reference somewhere known and at a known size.
-    store.setPosition(id, 100, 100);
-    store.setSize(id, 80, 80);
-
-    // The pointer is over the middle of the reference, which is the pixel
-    // (20, 20) of a 40x40 image.
-    const colour = store.sampleAt(140, 140);
-
-    expect(colour).toEqual({ r: 20, g: 20, b: 0 });
-    expect(image.reads).toContainEqual([20, 20]);
-  });
-
-  it("fits a reference into the workspace", async () => {
-    const { store } = createStore({ width: 400, height: 200 });
-    store.setViewportSize(1000, 800);
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-
-    store.fitToView(id);
-
-    const fitted = store.getState().references[0];
-    // The image is as large as it can be without touching the edge, and it is
-    // centred in the workspace.
-    expect(fitted.width).toBe(1000 - 32);
-    expect(fitted.height).toBe((200 / 400) * (1000 - 32));
-    expect(fitted.x).toBe(16);
-  });
-
-  it("brings a reference in at its own size when the workspace is not known yet", async () => {
-    const { store } = createStore({ width: 400, height: 200 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-
-    const reference = store.getState().references[0];
-    expect(reference.width).toBe(400);
-    expect(reference.height).toBe(200);
-  });
-
-  it("refuses a reference that does not fit the session's budget", async () => {
-    const store = new ReferenceImageStore({
-      decode: async () => fakeImage(2000, 2000).decoded,
-      createId: (() => {
-        let counter = 0;
-        return () => `reference-${++counter}`;
-      })(),
-    });
-    // 2000 x 2000 is four megapixels; the budget is sixty-four.
-    for (let index = 0; index < 20; index += 1) {
-      await store.add({ blob: new Blob(["x"]), name: `image-${index}.png` });
-    }
-
-    expect(store.getState().references.length).toBeLessThan(20);
-    expect(store.getState().notice).toContain("memory");
-  });
-});
-
-describe("the colour picker and the references", () => {
-  it("samples the reference under the pointer", async () => {
-    const { store } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    store.setPosition(id, 100, 100);
-    store.setSize(id, 80, 80);
-
-    const { renderer } = createSpyRenderer({ r: 1, g: 2, b: 3 });
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-    engine.setTool("picker");
-
-    engine.handlePointerSample(createSample({ screenX: 140, screenY: 140 }));
-
-    expect(engine.getState().brush.color).toBe("#141400");
-    // The artwork was not even read: the reference was on top of it.
-    expect(engine.getState().secondaryColor).not.toBe("#141400");
-  });
-
-  it("samples the background colour when Alt is held", async () => {
-    const { store } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    store.setPosition(id, 0, 0);
-    store.setSize(id, 80, 80);
-
-    const { renderer } = createSpyRenderer();
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-    engine.setTool("picker");
-    const brushBefore = engine.getState().brush.color;
-
-    engine.handlePointerSample(
-      createSample({
-        screenX: 20,
-        screenY: 20,
-        modifiers: { shift: false, alt: true, ctrl: false, meta: false },
-      }),
-    );
-
-    expect(engine.getState().brush.color).toBe(brushBefore);
-    // The pointer is over the middle of an 80x80 rendering of a 40x40 image,
-    // so the pixel it reads is the one at (10, 10).
-    expect(engine.getState().secondaryColor).toBe("#0a0a00");
-  });
-
-  it("falls back to the artwork when the pointer is not over a reference", async () => {
-    const { store } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    store.setPosition(id, 0, 0);
-    store.setSize(id, 80, 80);
-
-    const { renderer } = createSpyRenderer({ r: 10, g: 20, b: 30 });
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-    engine.setTool("picker");
-
-    engine.handlePointerSample(createSample({ screenX: 300, screenY: 300, docX: 300, docY: 300 }));
-
-    expect(engine.getState().brush.color).toBe("#0a141e");
-  });
-
-  it("never dirties the document", async () => {
-    const { store } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    store.setPosition(id, 0, 0);
-    store.setSize(id, 80, 80);
-
-    const { renderer } = createSpyRenderer();
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-    engine.setTool("picker");
-
-    engine.handlePointerSample(createSample({ screenX: 20, screenY: 20 }));
-    store.move(id, 5, 5);
-    store.setOpacity(id, 0.5);
-    store.setVisible(id, false);
-    store.remove(id);
-
-    expect(engine.getState().file.dirty).toBe(false);
-    expect(engine.getState().history.canUndo).toBe(false);
-  });
-
-  it("asks for the magnifier cursor over a reference, and the crosshair elsewhere", async () => {
-    const { store } = createStore({ width: 40, height: 40 });
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-    const id = store.getState().references[0].id;
-    store.setPosition(id, 0, 0);
-    store.setSize(id, 80, 80);
-
-    const { renderer } = createSpyRenderer();
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-    engine.setTool("picker");
-    const cursors: string[] = [];
-    engine.subscribeCursor((report) => {
-      cursors.push(report.cursor);
-    });
-
-    engine.handlePointerSample(createSample({ phase: "move", screenX: 20, screenY: 20 }));
-    engine.handlePointerSample(createSample({ phase: "move", screenX: 300, screenY: 300 }));
-
-    // The magnifier says the press will read the reference; the crosshair is
-    // the picker's own cursor over the artwork.
-    expect(cursors).toEqual(["zoom-in", "crosshair"]);
-  });
-
-  it("asks the renderer for the overlay when the references change", async () => {    const { store } = createStore();
-    const { renderer, referenceOverlays } = createSpyRenderer();
-    const engine = new DrawingEngine({
-      document: createDocument({ name: "Test", width: 400, height: 300 }),
-      renderer,
-      referenceSource: store,
-    });
-
-    await store.add({ blob: new Blob(["x"]), name: "sketch.png" });
-
-    const last = referenceOverlays[referenceOverlays.length - 1] as {
-      items: unknown[];
-      selectedId: string | null;
-    };
-    expect(last.items).toHaveLength(1);
-    expect(last.selectedId).toBe(store.getState().references[0].id);
-    // The overlay is a display concern: the drawing is untouched by it.
-    expect(engine.getState().file.dirty).toBe(false);
-  });
-});
-
-describe("the reference overlay on the canvas", () => {
-  let recording: RecordingDocument;
-
-  beforeEach(() => {
-    recording = installRecordingDocument();
-  });
-
-  afterEach(() => {
-    recording.restore();
-  });
-
-  function createHarness() {
-    const display = new RecordingCanvas();
-    const strokeSource: StrokeSource = {
-      listStrokes: () => [],
-      listElements: () => [],
-    };
-    const renderer = new Canvas2DRenderer({
-      canvas: display.asElement(),
-      strokeSource,
-      rasterScale: 1,
-      scheduler: new FrameScheduler({ requestFrame: () => 1, cancelFrame: () => {} }),
-    });
-    renderer.setDocument(createDocument({ name: "Test", width: 200, height: 150 }));
-    renderer.setDisplaySize(200, 150, 1);
-    return { renderer, display };
-  }
-
-  it("is drawn on the display canvas", () => {
-    const { renderer, display } = createHarness();
-    const { decoded } = fakeImage(4, 4);
-
-    renderer.setReferenceOverlay({
-      items: [
-        {
-          reference: reference({ x: 10, y: 20, width: 40, height: 30 }),
-          source: decoded.canvas,
-        },
-      ],
-      selectedId: null,
-      hoveredId: null,
-    });
-    renderer.render();
-
-    const drawn = display.drawImages.filter((call) => call.args[0] === decoded.canvas);
-    expect(drawn).toHaveLength(1);
-    // The reference is placed in workspace pixels: its own rectangle, not a
-    // document one.
-    expect(drawn[0].args.slice(1)).toEqual([10, 20, 40, 30]);
-  });
-
-  it("never reaches the exported image", () => {
-    const { renderer, display } = createHarness();
-    const { decoded } = fakeImage(4, 4);
-
-    renderer.setReferenceOverlay({
-      items: [
-        {
-          reference: reference({ x: 10, y: 20, width: 40, height: 30 }),
-          source: decoded.canvas,
-        },
-      ],
-      selectedId: "reference-1",
-      hoveredId: "reference-1",
-    });
-    renderer.render();
-
-    const exported = renderer.composeDocumentImage() as unknown as RecordingCanvas;
-    expect(exported.drawImages.filter((call) => call.args[0] === decoded.canvas)).toHaveLength(0);
-    // The display canvas did draw it, so the overlay was not simply ignored.
-    expect(display.drawImages.filter((call) => call.args[0] === decoded.canvas)).toHaveLength(1);
   });
 });

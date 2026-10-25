@@ -1,47 +1,16 @@
 /**
- * Declarative tool options.
+ * The built-in tool options.
  *
- * One typed schema describes every control the options bar can show, and one
- * table says which groups each tool shows. An option says where its value is
- * read from - the editor snapshot - and where it is written - an
- * `EditorActions` method - so the bar itself holds no per-tool logic and no
- * second copy of a brush value.
+ * The contract lives in `core/shell/toolOptions.ts`: the kinds of control, the
+ * per-tool registry and the visibility rules. This module is the *content* -
+ * the options the editor ships with - and it registers them into that
+ * registry when it is evaluated.
  *
- * The options are grouped. A group is a set of controls that belong together:
- * the brush, the shape, the selection, the fill, the gradient. A control is
- * only in a group when the tool really uses it. The gradient has no brush
- * size, and a shape has no stabilizer and no dab spacing, so those controls
- * are absent rather than present and inert: a slider the user can move but
- * that changes nothing is worse than no slider at all.
- *
- * Every option here is *editor state*: it describes the next gesture, and the
- * committed record keeps the value it was drawn with. Changing one is not an
- * edit, so none of these writes touches history or the file's dirty flag.
+ * Keeping the two apart is what lets a feature add an option to a tool it
+ * does not own: it registers its own option in its own module, and the
+ * options bar shows it without either file knowing about the other.
  */
 
-import {
-  MAX_BRUSH_SIZE,
-  MAX_SPACING,
-  MAX_STAMP_SPACING,
-  MIN_BRUSH_SIZE,
-  MIN_SPACING,
-  MIN_STAMP_SPACING,
-} from "../../core/brushes/defaults";
-import { brushSizeStep, type StepMode } from "../../core/brushes/numericInput";
-import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
-import type { BrushSettings, StabilizerMode } from "../../types/brush";
-import {
-  MAX_SYMMETRY_COUNT,
-  MIN_SYMMETRY_COUNT,
-  type SymmetryMode,
-} from "../../core/document/symmetry";
-import {
-  MAX_FILL_ANTIALIAS,
-  MAX_FILL_CLOSE_GAPS,
-  MAX_FILL_EXPAND,
-  MIN_FILL_EXPAND,
-  type FillReferenceMode,
-} from "../../core/fill/fillOptions";
 import {
   MAX_SHAPE_INNER_RATIO,
   MAX_SHAPE_SIDES,
@@ -49,418 +18,56 @@ import {
   MIN_SHAPE_SIDES,
   SHAPE_INNER_RATIO_STEP,
 } from "../../core/tools/shapeGeometry";
-import { getToolDefinition } from "../../core/tools/toolDefinitions";
-import type { EditorActions } from "../../state/editorStore";
+import {
+  DEFAULT_BRUSH,
+  MAX_BRUSH_SIZE,
+  MIN_BRUSH_SIZE,
+} from "../../core/brushes/defaults";
+import { MIN_SHAPE_SIZE } from "../../core/document/shapeRecord";
+import type { BoxShapeGeometry } from "../../core/document/types";
+import type { EditorSnapshot } from "../../core/engine/DrawingEngine";
+import {
+  FILL_MODES,
+  FILL_SAMPLE_SCALES,
+} from "../../core/fill/fillOptions";
+import { MAX_DOCUMENT_SIZE } from "../../core/document/document";
+import { SELECTION_SHAPES } from "../../core/document/selectionModes";
+import {
+  registerToolOptions,
+  type ColorToolOption,
+  type NumberToolOption,
+  type SelectToolOption,
+  type SliderToolOption,
+  type ToggleToolOption,
+  type ToolOption,
+} from "../../core/shell/toolOptions";
 import type { ToolId } from "../../types/tool";
 
-/** A label, or a function of the snapshot when the label follows the tool. */
-export type ToolOptionLabel = string | ((snapshot: EditorSnapshot) => string);
-
-/**
- * Where a control sits.
- *
- * `inline` controls are in the strip itself. `popover` controls live in the
- * group's popover, behind a compact trigger: the strip stays one row tall, and
- * the brush alone has a dozen settings.
- */
-export type ToolOptionPlacement = "inline" | "popover";
-
-/**
- * The brush field a control writes.
- *
- * It is what lets one brush control serve several tools: the brush and the
- * eraser use every field, a shape uses four of them, and a gradient uses one.
- */
-export type BrushOptionField =
-  | "size"
-  | "opacity"
-  | "hardness"
-  | "sampling"
-  | "stabilizer"
-  | "stabilizerMode"
-  | "texture"
-  | "stamp"
-  | "stampSpacing"
-  | "stampHardness"
-  | "stampTexture"
-  | "pressureSize"
-  | "pressureOpacity";
-
-interface ToolOptionBase {
-  /** Stable id, unique within one group's field list. */
-  readonly id: string;
-  readonly label: ToolOptionLabel;
-  readonly title?: string;
-  /** Extra visibility rule on top of the group's tool association. */
-  readonly visible?: (snapshot: EditorSnapshot) => boolean;
-  /** True when the control exists but cannot act right now. */
-  readonly disabled?: (snapshot: EditorSnapshot) => boolean;
-  /** Where the control sits. Defaults to `inline`. */
-  readonly placement?: ToolOptionPlacement;
-  /** Set on the brush group's controls: the brush field the control writes. */
-  readonly brushField?: BrushOptionField;
-}
-
-export interface SliderToolOption extends ToolOptionBase {
-  readonly kind: "slider";
-  readonly min: number;
-  readonly max: number;
-  readonly step: number;
-  readonly scale?: "linear" | "log";
-  readonly format?: (value: number) => string;
-  /**
-   * The step a key press moves the value by.
-   *
-   * The default moves the value by the control's own step. A control whose
-   * step should depend on the value - the brush size, which moves by a pixel
-   * when it is small and by a tenth of itself when it is large - supplies its
-   * own, so the arrow keys stay useful at both ends.
-   */
-  readonly keyboardStep?: (
-    current: number,
-    direction: 1 | -1,
-    mode: StepMode,
-  ) => number;
-  readonly read: (snapshot: EditorSnapshot) => number;
-  readonly write: (actions: EditorActions, value: number) => void;
-}
-
-export interface ToggleToolOption extends ToolOptionBase {
-  readonly kind: "toggle";
-  readonly read: (snapshot: EditorSnapshot) => boolean;
-  readonly write: (actions: EditorActions, value: boolean) => void;
-}
-
-export interface ColorToolOption extends ToolOptionBase {
-  readonly kind: "color";
-  readonly read: (snapshot: EditorSnapshot) => string;
-  readonly write: (actions: EditorActions, value: string) => void;
-}
-
-/**
- * One choice out of a closed list.
- *
- * Used where a value is a *kind* rather than a number: the symmetry's mode is
- * one of three, and a slider for it would be nonsense.
- */
-/** One entry of a drop-down. */
-export interface SelectToolOptionEntry {
-  readonly value: string;
-  readonly label: string;
-}
-
-/**
- * A drop-down control.
- *
- * The entries are resolved from the snapshot rather than fixed, because the
- * bucket's layer picker lists the layers the document has right now.
- */
-export interface SelectToolOption extends ToolOptionBase {
-  readonly kind: "select";
-  readonly entries: (snapshot: EditorSnapshot) => readonly SelectToolOptionEntry[];
-  readonly read: (snapshot: EditorSnapshot) => string;
-  readonly write: (actions: EditorActions, value: string) => void;
-}
-
-export interface ActionToolOption extends ToolOptionBase {
-  readonly kind: "action";
-  /** The keyboard shortcut the same action has, shown in the tooltip. */
-  readonly shortcut?: string;
-  readonly run: (actions: EditorActions) => void;
-}
-
-export type ToolOption =
-  | SliderToolOption
-  | ToggleToolOption
-  | ColorToolOption
-  | SelectToolOption
-  | ActionToolOption;
-
-/** The groups the options bar knows. */
-export type ToolOptionGroupId =
-  | "brush"
-  | "shape"
-  | "selection"
-  | "fill"
-  | "gradient"
-  | "guides"
-  | "symmetry";
-
-export interface ToolOptionGroup {
-  readonly id: ToolOptionGroupId;
-  /** The group's name, used for the region's accessible label. */
-  readonly label: string;
-  readonly title?: string;
-  /** The group's controls, already filtered for the active tool. */
-  readonly fields: readonly ToolOption[];
-}
-
-/** Resolves a label against the current snapshot. */
-export function toolOptionLabel(option: ToolOption, snapshot: EditorSnapshot): string {
-  return typeof option.label === "function" ? option.label(snapshot) : option.label;
-}
-
-/** True when the control exists but cannot act right now. */
-export function isToolOptionDisabled(
-  option: ToolOption,
-  snapshot: EditorSnapshot,
-): boolean {
-  return option.disabled?.(snapshot) ?? false;
-}
-
-/* ---------------------------------------------------------------- the brush */
-
-/** Pressure strength the on/off toggles switch to. */
-const PRESSURE_STRENGTH = 0.6;
-
-const brushSizeOption: SliderToolOption = {
-  id: "brushSize",
-  kind: "slider",
-  label: "Size",
-  title: "Diameter of the stroke in document pixels",
-  min: MIN_BRUSH_SIZE,
-  max: MAX_BRUSH_SIZE,
-  step: 1,
-  scale: "log",
-  format: (value) => `${Math.round(value)} px`,
-  read: (snapshot) => snapshot.brush.size,
-  write: (actions, size) => actions.setBrush({ size }),
-  // The size moves by a pixel when it is small and by a tenth of itself when
-  // it is large, so the arrow keys stay useful at both ends.
-  keyboardStep: (current, direction, mode) => brushSizeStep(current, direction, mode),
-  brushField: "size",
-};
-
-/**
- * The brush fields that are stored as a fraction and shown as a percentage.
- */
-type PercentBrushField =
-  | "opacity"
-  | "hardness"
-  | "stabilizer"
-  | "texture"
-  | "stampHardness"
-  | "stampTexture";
-
-/**
- * A brush property that is stored as a fraction and shown as a percentage.
- *
- * The number box and the readout have to speak the same unit: a box that asks
- * for `0.5` beside a readout that says `50%` is a box the user has to guess
- * at, and typing `50` into it would be clamped away. The stored value stays
- * the fraction - the engine's contract does not change - only the control's
- * unit does.
- */
-function percentBrushOption(options: {
-  readonly id: string;
-  readonly label: string;
-  readonly title: string;
-  readonly field: PercentBrushField;
-  readonly brushField: BrushOptionField;
-  readonly placement?: ToolOptionPlacement;
-  readonly visible?: (snapshot: EditorSnapshot) => boolean;
-}): SliderToolOption {
-  return {
-    id: options.id,
-    kind: "slider",
-    label: options.label,
-    title: options.title,
-    min: 0,
-    max: 100,
-    step: 1,
-    format: (value) => `${Math.round(value)}%`,
-    read: (snapshot) => snapshot.brush[options.field] * 100,
-    write: (actions, value) =>
-      actions.setBrush({ [options.field]: value / 100 } as Partial<BrushSettings>),
-    placement: options.placement,
-    visible: options.visible,
-    brushField: options.brushField,
-  };
-}
-
-const brushOpacityOption: SliderToolOption = percentBrushOption({
-  id: "brushOpacity",
-  label: "Opacity",
-  title: "Opacity of the whole stroke",
-  field: "opacity",
-  brushField: "opacity",
-});
-
-const brushHardnessOption: SliderToolOption = percentBrushOption({
-  id: "brushHardness",
-  label: "Hardness",
-  title: "Edge falloff: 100% is a crisp edge, lower values soften it",
-  field: "hardness",
-  brushField: "hardness",
-  placement: "popover",
-});
-
-const brushSamplingOption: SliderToolOption = {
-  id: "brushSampling",
-  kind: "slider",
-  label: "Sampling",
-  title:
-    "Gap between interpolated samples as a percentage of brush size; lower values smooth fast strokes at a memory cost. This is the sample density, not the dab spacing of the stamp",
-  min: MIN_SPACING * 100,
-  max: MAX_SPACING * 100,
-  step: 1,
-  format: (value) => `${Math.round(value)}%`,
-  read: (snapshot) => snapshot.brush.spacing * 100,
-  write: (actions, spacing) => actions.setBrush({ spacing: spacing / 100 }),
-  placement: "popover",
-  brushField: "sampling",
-};
-
-/**
- * How the pointer path is filtered before the samples are captured.
- *
- * The three modes are the three things a stabilizer can be, and they are
- * offered in the order of how much they change the stroke: `off` stores the
- * pointer's own path, `smooth` filters it adaptively and `pull` drags the
- * line behind the pointer.
- */
-const brushStabilizerModeOption: SelectToolOption = {
-  id: "brushStabilizerMode",
-  kind: "select",
-  label: "Stabilizer",
-  title:
-    "How the pointer path is filtered: off stores the pointer's own path, smooth filters it (quietly while the pointer is slow, hardly at all while it is fast) and pull drags the line behind the pointer",
-  entries: () => [
-    { value: "off", label: "Off" },
-    { value: "smooth", label: "Smooth" },
-    { value: "pull", label: "Pull" },
-  ],
-  read: (snapshot) => snapshot.brush.stabilizerMode,
-  write: (actions, value) => actions.setBrush({ stabilizerMode: value as StabilizerMode }),
-  placement: "popover",
-  brushField: "stabilizerMode",
-};
-
-const brushStabilizerOption: SliderToolOption = percentBrushOption({
-  id: "brushStabilizer",
-  label: "Smoothing",
-  title:
-    "How strongly the path is filtered; 0% follows the pointer exactly and 100% smooths the most, at the cost of a line that trails the pointer",
-  field: "stabilizer",
-  brushField: "stabilizer",
-  placement: "popover",
-  // The strength means nothing while the stabilizer is off, so the control is
-  // not shown: a slider that cannot change anything is worse than no slider.
-  visible: (snapshot) => snapshot.brush.stabilizerMode !== "off",
-});
-
-const brushTextureOption: SliderToolOption = percentBrushOption({
-  id: "brushTexture",
-  label: "Texture",
-  title: "Document-anchored grain over the finished stroke; 0% is the plain edge",
-  field: "texture",
-  brushField: "texture",
-  placement: "popover",
-});
-
-const brushStampOption: ToggleToolOption = {
-  id: "brushStamp",
-  kind: "toggle",
-  label: "Stamp",
-  title: "Draw the stroke as a chain of round dabs instead of continuous segments",
-  read: (snapshot) => snapshot.brush.stamp,
-  write: (actions, stamp) => actions.setBrush({ stamp }),
-  placement: "popover",
-  brushField: "stamp",
-};
-
-const brushStampSpacingOption: SliderToolOption = {
-  id: "brushStampSpacing",
-  kind: "slider",
-  label: "Stamp spacing",
-  title: "Distance between dabs as a percentage of the brush size; this is not the sample density above",
-  min: MIN_STAMP_SPACING * 100,
-  max: MAX_STAMP_SPACING * 100,
-  step: 1,
-  format: (value) => `${Math.round(value)}%`,
-  read: (snapshot) => snapshot.brush.stampSpacing * 100,
-  write: (actions, stampSpacing) => actions.setBrush({ stampSpacing: stampSpacing / 100 }),
-  // Only meaningful while the stamp is on.
-  visible: (snapshot) => snapshot.brush.stamp,
-  placement: "popover",
-  brushField: "stampSpacing",
-};
-
-const brushStampHardnessOption: SliderToolOption = percentBrushOption({
-  id: "brushStampHardness",
-  label: "Stamp hardness",
-  title: "Falloff of a single dab; 100% is a crisp dab edge, lower values soften it towards the centre",
-  field: "stampHardness",
-  brushField: "stampHardness",
-  placement: "popover",
-  visible: (snapshot) => snapshot.brush.stamp,
-});
-
-const brushStampTextureOption: SliderToolOption = percentBrushOption({
-  id: "brushStampTexture",
-  label: "Stamp texture",
-  title: "Bristle lanes along the stroke; 0% is the plain round dab and 100% is the full effect",
-  field: "stampTexture",
-  brushField: "stampTexture",
-  placement: "popover",
-  visible: (snapshot) => snapshot.brush.stamp,
-});
-
-const brushPressureSizeOption: ToggleToolOption = {
-  id: "brushPressureSize",
-  kind: "toggle",
-  label: "Pressure size",
-  title: "Pen pressure controls stroke width (ignored by mouse input)",
-  read: (snapshot) => snapshot.brush.pressureSize > 0,
-  write: (actions, on) => actions.setBrush({ pressureSize: on ? PRESSURE_STRENGTH : 0 }),
-  placement: "popover",
-  brushField: "pressureSize",
-};
-
-const brushPressureOpacityOption: ToggleToolOption = {
-  id: "brushPressureOpacity",
-  kind: "toggle",
-  label: "Pressure opacity",
-  title: "Pen pressure controls stroke opacity",
-  read: (snapshot) => snapshot.brush.pressureOpacity > 0,
-  write: (actions, on) => actions.setBrush({ pressureOpacity: on ? PRESSURE_STRENGTH : 0 }),
-  placement: "popover",
-  brushField: "pressureOpacity",
-};
-
-/**
- * Every brush control, in the order the brush group shows them.
- *
- * The order is the order of use: the two controls that change with every
- * stroke are inline, and the rest live in the popover.
- */
-const BRUSH_OPTIONS: readonly ToolOption[] = [
-  brushSizeOption,
-  brushOpacityOption,
-  brushHardnessOption,
-  brushSamplingOption,
-  brushStabilizerModeOption,
-  brushStabilizerOption,
-  brushTextureOption,
-  brushStampOption,
-  brushStampSpacingOption,
-  brushStampHardnessOption,
-  brushStampTextureOption,
-  brushPressureSizeOption,
-  brushPressureOpacityOption,
-];
-
-/* ---------------------------------------------------------------- the shape */
+export {
+  findToolOption,
+  toolOptionLabel,
+  toolOptionsFor,
+  toolShowsBrushControls,
+  visibleToolOptions,
+} from "../../core/shell/toolOptions";
+export type {
+  ColorToolOption,
+  GroupToolOption,
+  NumberToolOption,
+  SelectToolOption,
+  SliderToolOption,
+  ToggleToolOption,
+  ToolOption,
+  ToolOptionLabel,
+} from "../../core/shell/toolOptions";
 
 const shapeFillOption: ToggleToolOption = {
   id: "shapeFill",
   kind: "toggle",
   label: "Fill shape",
   title: "Fill the shape's interior instead of tracing just its outline",
-  // Only the shapes that enclose an area can be filled.
-  visible: (snapshot) => getToolDefinition(snapshot.toolId).fillable === true,
   read: (snapshot) => snapshot.shapeFill,
-  write: (actions, filled) => actions.setShapeFill(filled),
+  write: (actions, value) => actions.setShapeFill(value),
 };
 
 const shapeSidesOption: SliderToolOption = {
@@ -473,26 +80,8 @@ const shapeSidesOption: SliderToolOption = {
   min: MIN_SHAPE_SIDES,
   max: MAX_SHAPE_SIDES,
   step: 1,
-  visible: (snapshot) => snapshot.toolId === "polygon" || snapshot.toolId === "star",
   read: (snapshot) => snapshot.shapeSides,
-  write: (actions, sides) => actions.setShapeSides(sides),
-};
-
-const shapeInnerRatioOption: SliderToolOption = {
-  id: "shapeInnerRatio",
-  kind: "slider",
-  label: "Inner radius",
-  title: "How deep the star's valleys reach, as a fraction of its outer radius",
-  min: MIN_SHAPE_INNER_RATIO,
-  max: MAX_SHAPE_INNER_RATIO,
-  step: SHAPE_INNER_RATIO_STEP,
-  format: (value) => `${Math.round(value * 100)}%`,
-  visible: (snapshot) => snapshot.toolId === "star",
-  read: (snapshot) => snapshot.shapeInnerRatio,
-  // Snapped to the step, so the number box and the slider's thumb can never
-  // show two different ratios.
-  write: (actions, ratio) =>
-    actions.setShapeInnerRatio(Math.round(ratio / SHAPE_INNER_RATIO_STEP) * SHAPE_INNER_RATIO_STEP),
+  write: (actions, value) => actions.setShapeSides(value),
 };
 
 const shapeRotationOption: SliderToolOption = {
@@ -504,109 +93,26 @@ const shapeRotationOption: SliderToolOption = {
   max: 360,
   step: 1,
   format: (value) => `${Math.round(value)}°`,
-  visible: (snapshot) => snapshot.toolId === "polygon" || snapshot.toolId === "star",
   read: (snapshot) => snapshot.shapeRotation,
-  write: (actions, degrees) => actions.setShapeRotation(degrees),
+  write: (actions, value) => actions.setShapeRotation(value),
 };
 
-/* ------------------------------------------------------------- the selection */
-
-const selectionDuplicateOption: ActionToolOption = {
-  id: "selectionDuplicate",
-  kind: "action",
-  label: "Duplicate",
-  title: "Copy the selected strokes above the originals",
-  shortcut: "Ctrl+D",
-  disabled: (snapshot) => snapshot.selectedStrokes === 0,
-  run: (actions) => actions.duplicateSelection(),
-};
-
-const selectionFlipHorizontalOption: ActionToolOption = {
-  id: "selectionFlipHorizontal",
-  kind: "action",
-  label: "Flip H",
-  title: "Reflect the selected strokes about their own vertical centre line",
-  shortcut: "Ctrl+Shift+H",
-  disabled: (snapshot) => snapshot.selectedStrokes === 0,
-  run: (actions) => actions.flipSelection("horizontal"),
-};
-
-const selectionFlipVerticalOption: ActionToolOption = {
-  id: "selectionFlipVertical",
-  kind: "action",
-  label: "Flip V",
-  title: "Reflect the selected strokes about their own horizontal centre line",
-  shortcut: "Ctrl+Shift+V",
-  disabled: (snapshot) => snapshot.selectedStrokes === 0,
-  run: (actions) => actions.flipSelection("vertical"),
-};
-
-const selectionDeleteOption: ActionToolOption = {
-  id: "selectionDelete",
-  kind: "action",
-  label: "Delete",
-  title: "Remove the selected strokes from the layer",
-  shortcut: "Delete",
-  disabled: (snapshot) => snapshot.selectedStrokes === 0,
-  run: (actions) => actions.deleteSelection(),
-};
-
-const selectionDeselectOption: ActionToolOption = {
-  id: "selectionDeselect",
-  kind: "action",
-  label: "Deselect",
-  title: "Drop the selection and its overlay",
-  shortcut: "Esc",
-  disabled: (snapshot) => snapshot.selectedStrokes === 0,
-  run: (actions) => actions.clearSelection(),
-};
-
-/* ------------------------------------------------------------------ the fill */
-
-/**
- * What the bucket measures its region against.
- *
- * The three choices are the three things the scanner can read: the merged
- * visible composite, the active layer alone, or one chosen layer. A control
- * the algorithm cannot honour is worse than no control at all, so there is no
- * entry for anything the scanner does not do.
- */
-const fillReferenceOption: SelectToolOption = {
-  id: "fillReference",
-  kind: "select",
-  label: "Sample",
-  title: "What the bucket measures the filled region against",
-  entries: () => [
-    { value: "merged", label: "Merged" },
-    { value: "active", label: "Active layer" },
-    { value: "layer", label: "One layer" },
-  ],
-  read: (snapshot) => snapshot.fillReference,
-  write: (actions, value) => actions.setFillReference(value as FillReferenceMode),
-};
-
-/**
- * The layer the bucket samples, in the `layer` reference mode.
- *
- * The list is the document's own layers; a hidden one is marked, because the
- * bucket refuses to sample a layer the user cannot see.
- */
-const fillReferenceLayerOption: SelectToolOption = {
-  id: "fillReferenceLayer",
-  kind: "select",
-  label: "Layer",
-  title: "The layer the bucket measures the filled region against",
-  visible: (snapshot) => snapshot.fillReference === "layer",
-  entries: (snapshot) =>
-    snapshot.document.layers.map((layer) => ({
-      value: layer.id,
-      label: layer.visible ? layer.name : `${layer.name} (hidden)`,
-    })),
-  // With nothing chosen the bucket samples the active layer, so the picker
-  // shows the layer that would actually be read.
-  read: (snapshot) =>
-    snapshot.fillReferenceLayerId ?? snapshot.document.activeLayerId ?? "",
-  write: (actions, value) => actions.setFillReferenceLayer(value === "" ? null : value),
+const shapeInnerRatioOption: SliderToolOption = {
+  id: "shapeInnerRatio",
+  kind: "slider",
+  label: "Inner radius",
+  title: "How deep the star's valleys reach, as a fraction of its outer radius",
+  min: MIN_SHAPE_INNER_RATIO,
+  max: MAX_SHAPE_INNER_RATIO,
+  step: SHAPE_INNER_RATIO_STEP,
+  format: (value) => `${Math.round(value * 100)}%`,
+  read: (snapshot) => snapshot.shapeInnerRatio,
+  // Snapped to the step, so the number box and the slider's thumb can never
+  // show two different ratios.
+  write: (actions, value) =>
+    actions.setShapeInnerRatio(
+      Math.round(value / SHAPE_INNER_RATIO_STEP) * SHAPE_INNER_RATIO_STEP,
+    ),
 };
 
 const fillToleranceOption: SliderToolOption = {
@@ -619,309 +125,317 @@ const fillToleranceOption: SliderToolOption = {
   step: 1,
   format: (value) => `${Math.round(value)}`,
   read: (snapshot) => snapshot.fillTolerance,
-  write: (actions, tolerance) => actions.setFillTolerance(tolerance),
+  write: (actions, value) => actions.setFillTolerance(value),
 };
 
-const fillExpandOption: SliderToolOption = {
-  id: "fillExpand",
-  kind: "slider",
-  label: "Grow / shrink",
-  title: "Grow or shrink the filled region, in document pixels",
-  min: MIN_FILL_EXPAND,
-  max: MAX_FILL_EXPAND,
-  step: 1,
-  format: (value) => (value > 0 ? `+${Math.round(value)}` : `${Math.round(value)}`),
-  read: (snapshot) => snapshot.fillExpand,
-  write: (actions, expand) => actions.setFillExpand(expand),
-};
-
-const fillAntialiasOption: SliderToolOption = {
-  id: "fillAntialias",
-  kind: "slider",
-  label: "Soft edge",
-  title: "Soften the edge of the filled region, in document pixels",
-  min: 0,
-  max: MAX_FILL_ANTIALIAS,
-  step: 1,
-  format: (value) => `${Math.round(value)} px`,
-  read: (snapshot) => snapshot.fillAntialias,
-  write: (actions, antialias) => actions.setFillAntialias(antialias),
-};
-
-const fillCloseGapsOption: SliderToolOption = {
-  id: "fillCloseGaps",
-  kind: "slider",
-  label: "Close gaps",
+const fillModeOption: SelectToolOption = {
+  id: "fillMode",
+  kind: "select",
+  label: "Mode",
   title:
-    "Seal a passage this wide so the fill cannot leak through a break in the line art",
-  min: 0,
-  max: MAX_FILL_CLOSE_GAPS,
-  step: 1,
-  format: (value) => `${Math.round(value)} px`,
-  read: (snapshot) => snapshot.fillCloseGaps,
-  write: (actions, closeGaps) => actions.setFillCloseGaps(closeGaps),
+    "Contiguous fills the region reachable from the click; Global fills every matching pixel in the visible artwork",
+  choices: FILL_MODES.map((mode) => ({
+    value: mode,
+    label: mode === "global" ? "Global" : "Contiguous",
+  })),
+  read: (snapshot) => snapshot.fillMode,
+  write: (actions, value) => {
+    if (value === "contiguous" || value === "global") {
+      actions.setFillMode(value);
+    }
+  },
 };
 
-/* -------------------------------------------------------------- the gradient */
-
-const gradientRadialOption: ToggleToolOption = {
-  id: "gradientRadial",
-  kind: "toggle",
-  label: "Radial",
-  title: "Draw a radial gradient from the start point instead of a linear one",
-  read: (snapshot) => snapshot.gradientType === "radial",
-  write: (actions, radial) => actions.setGradientType(radial ? "radial" : "linear"),
-};
-
-const gradientEndColorOption: ColorToolOption = {
-  id: "gradientEndColor",
-  kind: "color",
-  label: "To",
-  title: "Colour the next gradient fades to; its start colour is the current brush colour",
-  read: (snapshot) => snapshot.gradientEndColor,
-  write: (actions, color) => actions.setGradientEndColor(color),
-};
-
-/* -------------------------------------------------------------- the guides */
-
-const guidesClearOption: ActionToolOption = {
-  id: "guidesClear",
-  kind: "action",
-  label: "Clear guides",
-  title: "Remove every composition guide, as one undoable step",
-  disabled: (snapshot) => snapshot.document.guides.length === 0,
-  run: (actions) => actions.clearGuides(),
-};
-
-/* -------------------------------------------------------------- the symmetry */
-
-const symmetryEnabledOption: ToggleToolOption = {
-  id: "symmetryEnabled",
-  kind: "toggle",
-  label: "Symmetry",
+const fillSampleScaleOption: SelectToolOption = {
+  id: "fillSampleScale",
+  kind: "select",
+  label: "Sample",
   title:
-    "Repeat the next stroke around the symmetry centre. The copies are ordinary strokes, so they can be edited like any other",
-  read: (snapshot) => snapshot.symmetryEnabled,
-  write: (actions, enabled) => actions.setSymmetryEnabled(enabled),
+    "How finely the fill reads the composite: 1x is exact, coarser scales scan large regions faster",
+  choices: FILL_SAMPLE_SCALES.map((scale) => ({
+    value: String(scale),
+    label: `${scale}x`,
+  })),
+  read: (snapshot) => String(snapshot.fillSampleScale),
+  write: (actions, value) => actions.setFillSampleScale(Number(value)),
 };
 
 const symmetryModeOption: SelectToolOption = {
   id: "symmetryMode",
   kind: "select",
-  label: "Mode",
-  title: "Mirror the stroke across an axis, or repeat it around the centre",
-  entries: () => [
-    { value: "vertical", label: "Mirror V" },
-    { value: "horizontal", label: "Mirror H" },
-    { value: "radial", label: "Radial" },
+  label: "Symmetry",
+  group: "Symmetry",
+  title:
+    "Mirror the next stroke across a vertical axis, a horizontal axis or both (four-way)",
+  choices: [
+    { value: "off", label: "Off" },
+    { value: "vertical", label: "Vertical" },
+    { value: "horizontal", label: "Horizontal" },
+    { value: "both", label: "Both" },
   ],
-  read: (snapshot) => snapshot.symmetryMode,
-  write: (actions, mode) => actions.setSymmetryMode(mode as SymmetryMode),
-  // Only meaningful while the symmetry is on.
-  visible: (snapshot) => snapshot.symmetryEnabled,
+  read: (snapshot) => (snapshot.symmetryEnabled ? snapshot.symmetryMode : "off"),
+  write: (actions, value) => {
+    if (value === "off" || value === "vertical" || value === "horizontal" || value === "both") {
+      actions.setSymmetryMode(value);
+    }
+  },
 };
 
-const symmetryCountOption: SliderToolOption = {
-  id: "symmetryCount",
-  kind: "slider",
-  label: "Copies",
-  title: "How many times the radial symmetry repeats the stroke",
-  min: MIN_SYMMETRY_COUNT,
-  max: MAX_SYMMETRY_COUNT,
+const symmetryVerticalAxisOption: NumberToolOption = {
+  id: "symmetryVerticalAxis",
+  kind: "number",
+  label: "Axis X",
+  group: "Symmetry",
+  title: "Where the vertical mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
   step: 1,
-  format: (value) => `${Math.round(value)}`,
-  // Only the radial mode draws more than one copy.
-  visible: (snapshot) => snapshot.symmetryEnabled && snapshot.symmetryMode === "radial",
-  read: (snapshot) => snapshot.symmetryCount,
-  write: (actions, count) => actions.setSymmetryCount(count),
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "vertical" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryVerticalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("vertical", value),
 };
 
-const symmetryCentreOption: ActionToolOption = {
-  id: "symmetryCentre",
-  kind: "action",
-  label: "Centre",
-  title: "Put the symmetry centre back in the middle of the paper",
-  visible: (snapshot) => snapshot.symmetryEnabled,
-  run: (actions) => actions.resetSymmetryCenter(),
+const symmetryHorizontalAxisOption: NumberToolOption = {
+  id: "symmetryHorizontalAxis",
+  kind: "number",
+  label: "Axis Y",
+  group: "Symmetry",
+  title: "Where the horizontal mirror line stands, in document pixels",
+  min: 0,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  integer: true,
+  visible: (snapshot) =>
+    snapshot.symmetryEnabled &&
+    (snapshot.symmetryMode === "horizontal" || snapshot.symmetryMode === "both"),
+  read: (snapshot) => snapshot.symmetryHorizontalAxis,
+  write: (actions, value) => actions.setSymmetryAxis("horizontal", value),
 };
 
-/* ---------------------------------------------------------------- the groups */
-
-/** The controls of each group, before the tool filter is applied. */
-const GROUP_FIELDS: Record<ToolOptionGroupId, readonly ToolOption[]> = {
-  brush: BRUSH_OPTIONS,
-  shape: [shapeSidesOption, shapeInnerRatioOption, shapeRotationOption, shapeFillOption],
-  selection: [
-    selectionDuplicateOption,
-    selectionFlipHorizontalOption,
-    selectionFlipVerticalOption,
-    selectionDeleteOption,
-    selectionDeselectOption,
-  ],
-  fill: [
-    fillReferenceOption,
-    fillReferenceLayerOption,
-    fillToleranceOption,
-    fillExpandOption,
-    fillAntialiasOption,
-    fillCloseGapsOption,
-  ],
-  gradient: [gradientRadialOption, gradientEndColorOption],
-  guides: [guidesClearOption],
-  symmetry: [
-    symmetryEnabledOption,
-    symmetryModeOption,
-    symmetryCountOption,
-    symmetryCentreOption,
-  ],
-};
-
-/** The group's name, used for the region's accessible label. */
-const GROUP_LABELS: Record<ToolOptionGroupId, string> = {
-  brush: "Brush",
-  shape: "Shape",
-  selection: "Selection",
-  fill: "Fill",
-  gradient: "Gradient",
-  guides: "Guides",
-  symmetry: "Symmetry",
-};
-
-/**
- * The brush fields each tool consumes.
- *
- * A shape traces an outline: it has a width, an opacity, a soft edge and a
- * grain, but no sample density, no stabilizer, no dabs and no pressure - the
- * geometry comes from the drag, not from a sampled path. A gradient captures
- * the brush's colour and opacity and nothing else, so it has no size.
- */
-const FULL_BRUSH_FIELDS: readonly BrushOptionField[] = [
-  "size",
-  "opacity",
-  "hardness",
-  "sampling",
-  "stabilizer",
-  "stabilizerMode",
-  "texture",
-  "stamp",
-  "stampSpacing",
-  "stampHardness",
-  "stampTexture",
-  "pressureSize",
-  "pressureOpacity",
+const symmetryOptions: readonly ToolOption[] = [
+  symmetryModeOption,
+  symmetryVerticalAxisOption,
+  symmetryHorizontalAxisOption,
 ];
 
-const SHAPE_BRUSH_FIELDS: readonly BrushOptionField[] = [
-  "size",
-  "opacity",
-  "hardness",
-  "texture",
-];
-
-const GRADIENT_BRUSH_FIELDS: readonly BrushOptionField[] = ["opacity"];
-
-const BRUSH_FIELDS_BY_TOOL: Partial<Record<ToolId, readonly BrushOptionField[]>> = {
-  brush: FULL_BRUSH_FIELDS,
-  eraser: FULL_BRUSH_FIELDS,
-  line: SHAPE_BRUSH_FIELDS,
-  rectangle: SHAPE_BRUSH_FIELDS,
-  ellipse: SHAPE_BRUSH_FIELDS,
-  polygon: SHAPE_BRUSH_FIELDS,
-  star: SHAPE_BRUSH_FIELDS,
-  gradient: GRADIENT_BRUSH_FIELDS,
-};
-
-/**
- * The groups each tool shows, in order.
- *
- * A tool with no entry has no options of its own: the picker, the guides and
- * pan have none, and the strip says what the tool does instead of showing a
- * row of dead controls.
- */
-export const TOOL_OPTION_GROUP_IDS: Partial<Record<ToolId, readonly ToolOptionGroupId[]>> = {
-  brush: ["brush", "symmetry"],
-  eraser: ["brush"],
-  line: ["brush", "symmetry"],
-  rectangle: ["brush", "shape", "symmetry"],
-  ellipse: ["brush", "shape", "symmetry"],
-  polygon: ["brush", "shape", "symmetry"],
-  star: ["brush", "shape", "symmetry"],
-  select: ["selection"],
-  bucket: ["fill"],
-  gradient: ["brush", "gradient"],
-  picker: [],
-  guides: ["guides"],
-  pan: [],
-};
-
-/**
- * The controls a group shows for the active tool.
- *
- * A group's fields are filtered twice: the brush group keeps only the fields
- * the tool consumes, and every group keeps only the fields whose own
- * visibility rule holds for the current snapshot.
- */
-export function toolOptionFields(
-  groupId: ToolOptionGroupId,
-  toolId: ToolId,
-  snapshot: EditorSnapshot,
-): readonly ToolOption[] {
-  const fields = GROUP_FIELDS[groupId];
-  const brushFields =
-    groupId === "brush" ? (BRUSH_FIELDS_BY_TOOL[toolId] ?? []) : null;
-  return fields.filter((option) => {
-    if (brushFields !== null && option.brushField !== undefined) {
-      if (!brushFields.includes(option.brushField)) {
-        return false;
-      }
+const selectionShapeOption: SelectToolOption = {
+  id: "selectionShape",
+  kind: "select",
+  label: "Shape",
+  title:
+    "Rectangle selects the box you drag; Lasso selects the freehand region you trace",
+  choices: SELECTION_SHAPES.map((shape) => ({
+    value: shape,
+    label: shape === "lasso" ? "Lasso" : "Rectangle",
+  })),
+  read: (snapshot) => snapshot.selectionShape,
+  write: (actions, value) => {
+    if (value === "rect" || value === "lasso") {
+      actions.setSelectionShape(value);
     }
-    return option.visible?.(snapshot) ?? true;
-  });
+  },
+};
+
+/**
+ * The selected shape's box, or `null` when nothing is selected or the
+ * selection is a line.
+ *
+ * A line has endpoints rather than a box, so the box-only controls - rotation,
+ * width, height - must not appear for it: they would edit nothing.
+ */
+function selectedBox(snapshot: EditorSnapshot): BoxShapeGeometry | null {
+  const shape = snapshot.selectedShape;
+  return shape && shape.geometry.shape !== "line" ? shape.geometry : null;
+}
+
+/** Whether the selected shape is one of `kinds`. */
+function selectedShapeIs(snapshot: EditorSnapshot, ...kinds: readonly string[]): boolean {
+  const kind = snapshot.selectedShape?.geometry.shape;
+  return kind !== undefined && kinds.includes(kind);
 }
 
 /**
- * The groups the options bar shows for the active tool.
+ * The compact editor for a committed shape.
  *
- * A group with no visible control is dropped: the strip shows what the tool
- * can do, not a group heading over nothing.
+ * These controls are registered on the shape-editor tool, not on the shape
+ * tools: they edit the **selected** shape rather than the settings for the
+ * next one. Every field is hidden until a shape is selected, and each is
+ * hidden again for the kinds it cannot change - a line has no fill, rotation
+ * or box, and only a polygon has sides and only a star has an inner radius.
  */
-export function toolOptionGroups(
-  toolId: ToolId,
-  snapshot: EditorSnapshot,
-): readonly ToolOptionGroup[] {
-  const ids = TOOL_OPTION_GROUP_IDS[toolId] ?? [];
-  const groups: ToolOptionGroup[] = [];
-  for (const id of ids) {
-    const fields = toolOptionFields(id, toolId, snapshot);
-    if (fields.length === 0) {
-      continue;
-    }
-    groups.push({ id, label: GROUP_LABELS[id], fields });
+const shapeEditFillOption: ToggleToolOption = {
+  id: "shapeEditFill",
+  kind: "toggle",
+  label: "Fill",
+  group: "Shape",
+  title: "Fill the selected shape's interior instead of tracing just its outline",
+  visible: (snapshot) =>
+    selectedShapeIs(snapshot, "rectangle", "ellipse", "polygon", "star"),
+  read: (snapshot) => snapshot.selectedShape?.fill ?? false,
+  write: (actions, value) => actions.setSelectedShapeFill(value),
+};
+
+const shapeEditSidesOption: SliderToolOption = {
+  id: "shapeEditSides",
+  kind: "slider",
+  label: (snapshot) =>
+    snapshot.selectedShape?.geometry.shape === "star" ? "Points" : "Sides",
+  group: "Shape",
+  title: "How many sides the selected polygon has, or how many points the selected star has",
+  min: MIN_SHAPE_SIDES,
+  max: MAX_SHAPE_SIDES,
+  step: 1,
+  visible: (snapshot) => selectedShapeIs(snapshot, "polygon", "star"),
+  read: (snapshot) => selectedBox(snapshot)?.sides ?? MIN_SHAPE_SIDES,
+  write: (actions, value) => actions.setSelectedShapeSides(value),
+};
+
+const shapeEditInnerRatioOption: SliderToolOption = {
+  id: "shapeEditInnerRatio",
+  kind: "slider",
+  label: "Inner radius",
+  group: "Shape",
+  title: "How deep the selected star's valleys reach, as a fraction of its outer radius",
+  min: MIN_SHAPE_INNER_RATIO,
+  max: MAX_SHAPE_INNER_RATIO,
+  step: SHAPE_INNER_RATIO_STEP,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => selectedShapeIs(snapshot, "star"),
+  read: (snapshot) => selectedBox(snapshot)?.innerRatio ?? MIN_SHAPE_INNER_RATIO,
+  write: (actions, value) =>
+    actions.setSelectedShapeInnerRatio(
+      Math.round(value / SHAPE_INNER_RATIO_STEP) * SHAPE_INNER_RATIO_STEP,
+    ),
+};
+
+const shapeEditRotationOption: SliderToolOption = {
+  id: "shapeEditRotation",
+  kind: "slider",
+  label: "Rotation",
+  group: "Shape",
+  title: "Turn the selected shape about the centre of its box",
+  min: 0,
+  max: 360,
+  step: 1,
+  format: (value) => `${Math.round(value)}°`,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.rotation ?? 0,
+  write: (actions, value) => actions.setSelectedShapeRotation(value),
+};
+
+const shapeEditWidthOption: NumberToolOption = {
+  id: "shapeEditWidth",
+  kind: "number",
+  label: "Width",
+  group: "Shape",
+  title: "Width of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.width ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeWidth(value),
+};
+
+const shapeEditHeightOption: NumberToolOption = {
+  id: "shapeEditHeight",
+  kind: "number",
+  label: "Height",
+  group: "Shape",
+  title: "Height of the selected shape's box, in document pixels",
+  min: MIN_SHAPE_SIZE,
+  max: MAX_DOCUMENT_SIZE,
+  step: 1,
+  visible: (snapshot) => selectedBox(snapshot) !== null,
+  read: (snapshot) => selectedBox(snapshot)?.height ?? MIN_SHAPE_SIZE,
+  write: (actions, value) => actions.setSelectedShapeHeight(value),
+};
+
+const shapeEditColorOption: ColorToolOption = {
+  id: "shapeEditColor",
+  kind: "color",
+  label: "Color",
+  group: "Appearance",
+  title: "Color of the selected shape's outline",
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.color ?? DEFAULT_BRUSH.color,
+  write: (actions, value) => actions.setSelectedShapeBrush({ color: value }),
+};
+
+const shapeEditStrokeOption: SliderToolOption = {
+  id: "shapeEditStroke",
+  kind: "slider",
+  label: "Stroke",
+  group: "Appearance",
+  title: "Width of the selected shape's outline",
+  min: MIN_BRUSH_SIZE,
+  max: MAX_BRUSH_SIZE,
+  step: 1,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.size ?? MIN_BRUSH_SIZE,
+  write: (actions, value) => actions.setSelectedShapeBrush({ size: value }),
+};
+
+const shapeEditOpacityOption: SliderToolOption = {
+  id: "shapeEditOpacity",
+  kind: "slider",
+  label: "Opacity",
+  group: "Appearance",
+  title: "Opacity of the selected shape",
+  min: 0,
+  max: 1,
+  step: 0.01,
+  format: (value) => `${Math.round(value * 100)}%`,
+  visible: (snapshot) => snapshot.selectedShape !== null,
+  read: (snapshot) => snapshot.selectedShape?.brush.opacity ?? 1,
+  write: (actions, value) => actions.setSelectedShapeBrush({ opacity: value }),
+};
+
+const shapeEditOptions: readonly ToolOption[] = [
+  shapeEditFillOption,
+  shapeEditSidesOption,
+  shapeEditInnerRatioOption,
+  shapeEditRotationOption,
+  shapeEditWidthOption,
+  shapeEditHeightOption,
+  shapeEditColorOption,
+  shapeEditStrokeOption,
+  shapeEditOpacityOption,
+];
+
+/**
+ * The option fields for each tool, in toolbar order.
+ *
+ * Tools without an entry have no options of their own: their controls are the
+ * brush group, the colour panel or nothing at all.
+ */
+export const TOOL_OPTION_FIELDS: Partial<Record<ToolId, readonly ToolOption[]>> = {
+  select: [selectionShapeOption],
+  shapeEdit: [...shapeEditOptions],
+  brush: [...symmetryOptions],
+  eraser: [...symmetryOptions],
+  line: [...symmetryOptions],
+  rectangle: [shapeFillOption, ...symmetryOptions],
+  ellipse: [shapeFillOption, ...symmetryOptions],
+  polygon: [shapeSidesOption, shapeRotationOption, shapeFillOption, ...symmetryOptions],
+  star: [
+    shapeSidesOption,
+    shapeInnerRatioOption,
+    shapeRotationOption,
+    shapeFillOption,
+    ...symmetryOptions,
+  ],
+  bucket: [fillToleranceOption, fillModeOption, fillSampleScaleOption],
+};
+
+/** Registers the built-in options into the shared per-tool registry. */
+export function registerBuiltInToolOptions(): void {
+  for (const [toolId, options] of Object.entries(TOOL_OPTION_FIELDS)) {
+    registerToolOptions(toolId as ToolId, options ?? []);
   }
-  return groups;
 }
 
-/**
- * True when the tool's drawing reads the brush group.
- *
- * The colour always stays available through the colour panel, so the brush
- * group is hidden for the tools that do not paint with a brush: the selection
- * marquee, the picker, the composition guides and pan. The bucket keeps its
- * own tolerance option, and the gradient keeps the brush opacity its record
- * captures.
- */
-export function toolShowsBrushControls(toolId: ToolId): boolean {
-  return (BRUSH_FIELDS_BY_TOOL[toolId] ?? []).length > 0;
-}
-
-/**
- * True when the tool uses every brush field.
- *
- * The brush and the eraser do: a stroke samples the pointer path, so the
- * sampling, the stabilizer, the dabs and the pressure all apply. A shape or a
- * gradient uses only part of the brush, so the preset picker - which replaces
- * the whole brush - is not offered for them.
- */
-export function toolUsesWholeBrush(toolId: ToolId): boolean {
-  return BRUSH_FIELDS_BY_TOOL[toolId] === FULL_BRUSH_FIELDS;
-}
+registerBuiltInToolOptions();

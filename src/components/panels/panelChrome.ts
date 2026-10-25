@@ -11,7 +11,7 @@
  * makes the chrome degrade gracefully: such a panel has no fold button and
  * is never hidden.
  */
-import { createContext } from "react";
+import { createContext, useContext } from "react";
 
 export interface PanelChromeState {
   /** The panel is hidden: it keeps its place in the stack but takes no space. */
@@ -27,3 +27,8 @@ export interface PanelChromeState {
 }
 
 export const PanelChromeContext = createContext<PanelChromeState | null>(null);
+
+/** The chrome the shell is applying to this panel, or `null` outside a stack. */
+export function usePanelChrome(): PanelChromeState | null {
+  return useContext(PanelChromeContext);
+}

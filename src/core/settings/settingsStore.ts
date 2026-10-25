@@ -17,9 +17,10 @@
  *     neither is raised as an error in the UI.
  *
  * A **section** is the fourth thing the store carries: state that belongs in
- * the file but not in the engine, such as the panel layout. The store owns
- * the file, so a section's owner hands its state to the store rather than
- * writing the file itself, and the store writes it back whenever it changes.
+ * the file but not in the engine, such as the panel layout or the shell's
+ * preferences. The store owns the file, so a section's owner hands its state
+ * to the store rather than writing the file itself, and the store writes it
+ * back whenever it changes.
  *
  * The store is framework-free, so the whole "read, apply, change, persist"
  * cycle can be exercised in Node.
@@ -29,7 +30,8 @@ import type { DrawingEngine } from "../engine/DrawingEngine";
 import {
   DEFAULT_APP_SETTINGS,
   SETTINGS_VERSION,
-  parseAppSettings,
+  isFutureSettingsDocument,
+  normalizeAppSettings,
   parseSettingsDocument,
   serializeSettingsDocument,
   settingsDocument,
@@ -37,7 +39,7 @@ import {
   type AppSettings,
 } from "./appSettings";
 import type { SettingsGateway } from "./settingsGateway";
-import type { SettingsSection } from "./settingsSection";
+import type { SettingsDocument, SettingsSection } from "./settingsSection";
 
 /**
  * How long a change waits before the file is written.
@@ -74,8 +76,38 @@ function describe(error: unknown): string {
   return typeof error === "string" ? error : String(error);
 }
 
+/**
+ * Whether two plain values say the same thing.
+ *
+ * The comparison ignores the order of an object's keys: the document that was
+ * found on disk and the document that would be written now say the same thing
+ * when they hold the same values, whatever order the keys are in.
+ */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((entry, index) => jsonEqual(entry, b[index]));
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (!jsonEqual(left[key], right[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Writes the preferences into the editor. Editor state only: no history, no dirty. */
-export function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
+function applyToEngine(engine: DrawingEngine, settings: AppSettings): void {
   engine.setBrush(settings.brush);
   engine.setPresets(settings.presets);
   engine.setTool(settings.toolId);
@@ -84,23 +116,15 @@ export function applyToEngine(engine: DrawingEngine, settings: AppSettings): voi
   engine.setShapeInnerRatio(settings.shapeInnerRatio);
   engine.setShapeRotation(settings.shapeRotation);
   engine.setFillTolerance(settings.fillTolerance);
-  engine.setFillReference(settings.fillReference);
-  engine.setFillExpand(settings.fillExpand);
-  engine.setFillAntialias(settings.fillAntialias);
-  engine.setFillCloseGaps(settings.fillCloseGaps);
   engine.setGradientType(settings.gradientType);
   engine.setGradientEndColor(settings.gradientEndColor);
   engine.setGridVisible(settings.gridVisible);
   engine.setGridSpacing(settings.gridSpacing);
   engine.setGridSnapping(settings.gridSnapping);
-  engine.setRulersVisible(settings.rulersVisible);
-  engine.setSymmetryEnabled(settings.symmetryEnabled);
-  engine.setSymmetryMode(settings.symmetryMode);
-  engine.setSymmetryCount(settings.symmetryCount);
 }
 
 /** Reads the preferences the editor currently holds. */
-export function readFromEngine(engine: DrawingEngine): AppSettings {
+function readFromEngine(engine: DrawingEngine): AppSettings {
   const snapshot = engine.getState();
   return {
     version: SETTINGS_VERSION,
@@ -112,32 +136,13 @@ export function readFromEngine(engine: DrawingEngine): AppSettings {
     shapeInnerRatio: snapshot.shapeInnerRatio,
     shapeRotation: snapshot.shapeRotation,
     fillTolerance: snapshot.fillTolerance,
-    fillReference: snapshot.fillReference,
-    fillExpand: snapshot.fillExpand,
-    fillAntialias: snapshot.fillAntialias,
-    fillCloseGaps: snapshot.fillCloseGaps,
     gradientType: snapshot.gradientType,
     gradientEndColor: snapshot.gradientEndColor,
     gridVisible: snapshot.gridVisible,
     gridSpacing: snapshot.gridSpacing,
     gridSnapping: snapshot.gridSnapping,
-    rulersVisible: snapshot.rulersVisible,
-    symmetryEnabled: snapshot.symmetryEnabled,
-    symmetryMode: snapshot.symmetryMode,
-    symmetryCount: snapshot.symmetryCount,
   };
 }
-
-/**
- * The preferences, written into an editor surface.
- *
- * Exported under a name that says what it is for, because the document
- * session registry needs the same two operations: the preferences belong to
- * the application, not to a document, so they are mirrored between the
- * application-level copy and the active document's engine. Both sides use
- * these functions, so the two can never disagree about what a preference is.
- */
-export { applyToEngine as applyPreferencesToEngine, readFromEngine as readPreferencesFromEngine };
 
 export class SettingsStore {
   private readonly engine: DrawingEngine;
@@ -148,6 +153,18 @@ export class SettingsStore {
   private readonly cancel: (handle: unknown) => void;
 
   private settings: AppSettings = DEFAULT_APP_SETTINGS;
+  /**
+   * The document as the store last knew it.
+   *
+   * The store owns the file, so it has to be able to write back the keys it
+   * does not understand: a section another builder owns is not this build's
+   * to drop. A file from a newer version is the exception - it is ignored
+   * wholesale, so nothing of it is written back.
+   *
+   * The document is also what the file is compared against, so a change that
+   * says nothing new is not written again.
+   */
+  private document: SettingsDocument = {};
   private loaded = false;
   private applying = false;
   private destroyed = false;
@@ -185,6 +202,7 @@ export class SettingsStore {
    *
    * A file that is missing, malformed or from a newer version yields the
    * defaults; none of them is an error, and none of them stops the editor.
+   * The sections of the file are handed to their owners the same way.
    */
   async load(): Promise<AppSettings> {
     let text: string | null = null;
@@ -201,11 +219,16 @@ export class SettingsStore {
       return this.settings;
     }
 
-    const settings = parseAppSettings(text);
+    const document = parseSettingsDocument(text);
+    const settings = normalizeAppSettings(document);
+    // A file from a newer version is ignored wholesale, so none of it - not
+    // even the keys this build does not know - is written back.
+    this.document = isFutureSettingsDocument(document) ? {} : document;
+
     this.applying = true;
     try {
       applyToEngine(this.engine, settings);
-      this.applySections(parseSettingsDocument(text));
+      this.applySections(this.document);
     } finally {
       this.applying = false;
     }
@@ -248,14 +271,15 @@ export class SettingsStore {
     try {
       do {
         this.queued = false;
-        const document = settingsDocument(this.settings);
-        for (const section of this.sections) {
-          section.write(document, section.current());
+        const document = this.buildDocument();
+        if (jsonEqual(document, this.document)) {
+          // The file already holds this state, so there is nothing to write.
+          continue;
         }
-        const contents = serializeSettingsDocument(document);
         try {
-          await this.gateway.write(contents);
+          await this.gateway.write(serializeSettingsDocument(document));
           this.writeError = null;
+          this.document = document;
         } catch (error) {
           this.writeError = describe(error);
           // A settings file that cannot be written is a minor inconvenience,
@@ -268,10 +292,35 @@ export class SettingsStore {
     }
   }
 
-  /** Hands the document's sections to their owners. */
-  private applySections(document: Record<string, unknown>): void {
+  /**
+   * The file as it would be written now.
+   *
+   * The engine's own fields are written over the document that was found on
+   * disk, and every section writes its owner's state into it. The keys
+   * nobody claims are left exactly as they were found.
+   *
+   * The engine's fields are written last: they are the file's core, and a
+   * section that claimed one of their keys does not take it over.
+   */
+  private buildDocument(): SettingsDocument {
+    const engine = settingsDocument(this.settings);
+    const document: SettingsDocument = { ...this.document, ...engine };
     for (const section of this.sections) {
-      section.apply(section.read(document));
+      section.write(document, section.current());
+    }
+    return { ...document, ...engine };
+  }
+
+  /** Hands the document's sections to their owners. */
+  private applySections(document: SettingsDocument): void {
+    for (const section of this.sections) {
+      try {
+        section.apply(section.read(document));
+      } catch (error) {
+        // A section that cannot make sense of its value is its own problem:
+        // the rest of the file still loads, and the editor still starts.
+        this.readError = describe(error);
+      }
     }
   }
 

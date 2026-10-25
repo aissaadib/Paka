@@ -1,0 +1,31 @@
+{
+  "tabs": [
+    "Color",
+    "Brushes",
+    "References",
+    "Navigator",
+    "Shortcuts"
+  ],
+  "rowCount": 1,
+  "name": "reference-fixture.png",
+  "meta": "over artwork · 0°",
+  "importMessage": 0,
+  "dirty": true,
+  "undoEnabledAfterImport": true,
+  "activeTool": "Reference",
+  "moveChangedPixels": true,
+  "undoRestoredPixels": true,
+  "undoEnabledAfterUndo": true,
+  "redoRestoredPixels": true,
+  "hideChangedPixels": true,
+  "hideMatchesEmptyArtwork": true,
+  "showRestoredPixels": true,
+  "rotationReadout": "30°",
+  "rotationChangedPixels": true,
+  "rowsAfterRemove": 0,
+  "rowsAfterUndoRemove": 1,
+  "removeUndoRestoredPixels": true,
+  "dirtyAtEnd": true,
+  "zoom": "zoom 49%",
+  "errors": []
+}

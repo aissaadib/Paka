@@ -1,59 +1,63 @@
-/**
- * The reference images panel.
- *
- * The list reads like the layers list: a thumbnail, a name, and the two
- * buttons that act on the row. The placement controls of the selected
- * reference sit below the list, because they only mean something for one
- * reference at a time.
- */
+/** References panel: the import button, the list and the selected reference's controls. */
 
-.reference__file {
-  display: none;
-}
-
-.reference__empty {
-  margin: 4px 2px;
-  color: var(--text-dim);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
-.reference__notice {
+.reference-panel {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin: 4px 2px;
-  padding: 4px 6px;
-  border: 1px solid var(--danger);
-  border-radius: var(--radius);
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
   color: var(--text);
-  font-size: 11px;
-  line-height: 1.4;
 }
 
-.reference__notice-text {
-  flex: 1 1 auto;
+.reference-panel__actions {
+  display: flex;
+  gap: 6px;
 }
 
-.reference__notice-dismiss {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 10px;
-  text-decoration: underline;
+.reference-panel__import {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
 }
 
-.reference__notice-dismiss:hover {
+.reference-panel__import:hover:not(:disabled) {
+  border-color: var(--accent);
   color: var(--text-strong);
 }
 
-.reference__hint {
+.reference-panel__import:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* The input is driven by the button; keeping it out of sight but focusable
+   would leave a stray tab stop, so it is display:none and the button is the
+   only control. */
+.reference-panel__input {
+  display: none;
+}
+
+.reference-panel__message {
+  margin: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--danger, #e0567f);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+}
+
+.reference-panel__empty {
   margin: 0;
   color: var(--text-dim);
-  font-size: 10px;
   line-height: 1.45;
 }
 
-.reference-list {
+.reference-panel__list {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -62,94 +66,115 @@
   list-style: none;
 }
 
-.reference-row {
+.reference-panel__row {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
   border: 1px solid transparent;
   border-radius: var(--radius);
 }
 
-.reference-row.is-selected {
+.reference-panel__row:hover {
+  background: var(--bg-inset);
+}
+
+.reference-panel__row.is-selected {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
 
-.reference-row__select {
+.reference-panel__visibility,
+.reference-panel__remove {
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reference-panel__visibility[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.reference-panel__remove:hover {
+  color: var(--text-strong);
+}
+
+.reference-panel__pick {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  flex: 1 1 auto;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
   min-width: 0;
-  height: var(--control-height);
-  padding: 0 2px;
+  padding: 3px 4px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
   text-align: left;
+  cursor: pointer;
 }
 
-.reference-row__thumb {
-  flex: 0 0 auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  background: var(--bg-inset);
-  object-fit: contain;
-}
-
-.reference-row__name {
-  flex: 1 1 auto;
-  min-width: 0;
+.reference-panel__name {
   overflow: hidden;
-  color: var(--text);
-  font-size: 11px;
+  max-width: 100%;
+  color: var(--text-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.reference-controls {
+.reference-panel__meta {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.reference-panel__controls {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 6px;
+  gap: 6px;
   padding-top: 6px;
   border-top: 1px solid var(--border);
 }
 
-.reference-controls__position {
-  display: flex;
-  gap: 8px;
-}
-
-.reference-controls__field {
-  display: inline-flex;
+.reference-panel__field {
+  display: grid;
+  grid-template-columns: 56px 1fr 36px;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.reference-panel__field input {
+  width: 100%;
+}
+
+.reference-panel__value {
   color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
-.reference-controls__field-label {
-  font-size: 11px;
-}
-
-.reference-controls__field .text-input {
-  width: 52px;
-}
-
-.reference-controls__actions {
+.reference-panel__check {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
 }
 
-.reference-controls__button {
-  height: var(--control-height-sm);
-  padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-  color: var(--text-strong);
+.reference-panel__hint {
+  margin: 0;
+  color: var(--text-dim);
   font-size: 11px;
+  line-height: 1.45;
 }
 
-.reference-controls__button:hover {
-  background: var(--bg-raised-hover);
-  border-color: var(--accent);
+.reference-panel__hint kbd {
+  padding: 0 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
 }

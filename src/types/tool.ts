@@ -4,6 +4,7 @@ export type ToolId =
   | "brush"
   | "eraser"
   | "select"
+  | "shapeEdit"
   | "line"
   | "rectangle"
   | "ellipse"
@@ -13,6 +14,7 @@ export type ToolId =
   | "gradient"
   | "picker"
   | "guides"
+  | "reference"
   | "pan";
 
 export interface ToolDefinition {

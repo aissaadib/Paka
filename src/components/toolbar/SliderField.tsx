@@ -16,6 +16,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import {
   clampNumber,
+  numericDraft,
   parseNumericInput,
   stepSize,
   stepValue,
@@ -110,13 +111,7 @@ export function SliderField({
   // shows the value the editor actually holds. A value that is still the one
   // that was typed is left alone, so the caret does not jump while typing.
   useEffect(() => {
-    setDraft((current) => {
-      if (current === null) {
-        return null;
-      }
-      const parsed = parseNumericInput(current);
-      return parsed !== null && parsed !== value ? null : current;
-    });
+    setDraft((current) => numericDraft(current, value));
   }, [value]);
 
   const handleSlider = (raw: number) => {
@@ -133,9 +128,6 @@ export function SliderField({
       return;
     }
     event.preventDefault();
-    // The box shows the value again: whatever was typed into it is not a
-    // number the field can move from.
-    setDraft(null);
     const mode = keyMode(event.key, event.shiftKey);
     const next = keyboardStep
       ? keyboardStep(value, direction, mode)

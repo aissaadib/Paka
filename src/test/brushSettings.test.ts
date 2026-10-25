@@ -52,12 +52,12 @@ describe("brush configuration", () => {
       minSizeRatio: 0,
       spacing: 100,
       stabilizer: -4,
-      stabilizerMode: "pull",
       texture: 9,
       stamp: true,
       stampSpacing: 9,
       stampHardness: -2,
       stampTexture: 4,
+      tip: "nib" as never,
     });
     expect(normalized.size).toBe(MAX_BRUSH_SIZE);
     expect(normalized.opacity).toBe(1);
@@ -72,6 +72,19 @@ describe("brush configuration", () => {
     expect(normalized.stampSpacing).toBe(MAX_STAMP_SPACING);
     expect(normalized.stampHardness).toBe(0);
     expect(normalized.stampTexture).toBe(1);
+    // The tip is a closed set of shapes, so an unknown one is repaired to the
+    // round tip rather than kept.
+    expect(normalized.tip).toBe("round");
+  });
+
+  it("keeps a known tip and treats it as part of the brush identity", () => {
+    expect(DEFAULT_BRUSH.tip).toBe("round");
+    expect(normalizeBrush({ ...DEFAULT_BRUSH, tip: "chisel" }).tip).toBe("chisel");
+
+    const chisel = updateBrushSettings(DEFAULT_BRUSH, { tip: "chisel" });
+    expect(chisel.tip).toBe("chisel");
+    expect(brushSettingsEqual(DEFAULT_BRUSH, chisel)).toBe(false);
+    expect(brushSettingsEqual(chisel, { ...chisel })).toBe(true);
   });
 
   it("applies a patch without mutating the current settings", () => {
@@ -125,6 +138,7 @@ describe("tool definitions", () => {
       "brush",
       "eraser",
       "select",
+      "shapeEdit",
       "line",
       "rectangle",
       "ellipse",
@@ -135,10 +149,12 @@ describe("tool definitions", () => {
       "picker",
       "guides",
       "pan",
+      "reference",
     ]);
     expect(getToolDefinition("brush").shortcut).toBe("B");
     expect(getToolDefinition("eraser").shortcut).toBe("E");
     expect(getToolDefinition("select").shortcut).toBe("M");
+    expect(getToolDefinition("shapeEdit").shortcut).toBe("V");
     expect(getToolDefinition("line").shortcut).toBe("L");
     expect(getToolDefinition("rectangle").shortcut).toBe("R");
     expect(getToolDefinition("ellipse").shortcut).toBe("O");
@@ -149,6 +165,7 @@ describe("tool definitions", () => {
     expect(getToolDefinition("picker").shortcut).toBe("I");
     expect(getToolDefinition("guides").shortcut).toBe("U");
     expect(getToolDefinition("pan").shortcut).toBe("H");
+    expect(getToolDefinition("reference").shortcut).toBe("Y");
   });
 
   it("resolves shortcuts case-insensitively and ignores unknown keys", () => {

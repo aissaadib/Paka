@@ -12,6 +12,10 @@
  * all three are in the engine's snapshot. The panel never writes a viewport
  * in response to a snapshot change, so there is no feedback loop between the
  * two: only a pointer or a key moves the view.
+ *
+ * The panel registers itself with the shell's panel registry, so the shell
+ * mounts it where the user put it without this file knowing anything about
+ * the layout.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,7 +23,6 @@ import type { PointerEvent as ReactPointerEvent, KeyboardEvent as ReactKeyboardE
 import { Panel } from "../../components/panels/Panel";
 import { registerPanel } from "../../core/shell/panelRegistry";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { formatZoomPercent } from "../view/viewNavigation";
 import type { Point, Size } from "../../types/geometry";
 import {
   navigatorCorners,
@@ -30,6 +33,7 @@ import {
   viewportCenter,
   type NavigatorGrab,
 } from "./navigatorGeometry";
+import { zoomToActualSize } from "../view/viewNavigation";
 import "./navigator.css";
 
 /** The canvas behind the overview: the workspace's own inset colour. */
@@ -42,10 +46,23 @@ const NAVIGATOR_VIEWPORT_EDGE = "#4c8ef7";
 const NAVIGATOR_VIEWPORT_FILL = "rgba(76, 142, 247, 0.16)";
 
 export function NavigatorPanel() {
-  const { engine, actions } = useEditor();
+  const { engine } = useEditor();
   const { document: drawingDocument, viewport, viewportSize } = useEditorState();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const grabRef = useRef<NavigatorGrab | null>(null);
+  /**
+   * The overview, scaled down once.
+   *
+   * The composite the renderer hands over can be document-sized, and scaling
+   * it on every redraw would cost more than the panel is worth - a pan
+   * redraws it for every pointer move. The scratch canvas holds the scaled
+   * picture, and it is only redrawn when the overview itself changes.
+   */
+  const scratchRef = useRef<{
+    canvas: HTMLCanvasElement;
+    overview: HTMLCanvasElement | null;
+    key: string;
+  } | null>(null);
   const [panelSize, setPanelSize] = useState<Size>({ width: 0, height: 0 });
   const [hasOverview, setHasOverview] = useState(false);
   const [dpr, setDpr] = useState(() =>
@@ -139,9 +156,37 @@ export function NavigatorPanel() {
     setHasOverview(overview !== null);
 
     if (overview) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(overview, layout.offsetX, layout.offsetY, layout.width, layout.height);
+      // The overview is scaled down once, into the scratch canvas, and the
+      // scratch is what every redraw blits. A pan redraws the panel for
+      // every pointer move, and rescaling a document-sized composite that
+      // often would cost more than the panel is worth.
+      const cached = scratchRef.current;
+      const scratch = cached?.canvas ?? document.createElement("canvas");
+      if (scratch.width !== pixelWidth) {
+        scratch.width = pixelWidth;
+      }
+      if (scratch.height !== pixelHeight) {
+        scratch.height = pixelHeight;
+      }
+      const key = `${pixelWidth}x${pixelHeight}:${layout.offsetX},${layout.offsetY},${layout.width},${layout.height}`;
+      if (cached?.overview !== overview || cached?.key !== key) {
+        const scratchContext = scratch.getContext("2d");
+        if (scratchContext) {
+          scratchContext.setTransform(dpr, 0, 0, dpr, 0, 0);
+          scratchContext.clearRect(0, 0, panelSize.width, panelSize.height);
+          scratchContext.imageSmoothingEnabled = true;
+          scratchContext.imageSmoothingQuality = "high";
+          scratchContext.drawImage(
+            overview,
+            layout.offsetX,
+            layout.offsetY,
+            layout.width,
+            layout.height,
+          );
+          scratchRef.current = { canvas: scratch, overview, key };
+        }
+      }
+      ctx.drawImage(scratch, 0, 0, panelSize.width, panelSize.height);
     } else {
       // No composite yet (the renderer is not attached): the paper's colour
       // is the honest picture of an empty document.
@@ -222,7 +267,7 @@ export function NavigatorPanel() {
       // A pointer outside the visible area jumps the view onto it; a pointer
       // inside it grabs the view where it is.
       const target = navigatorTargetCenter(grab, layout, point.x, point.y);
-      actions.centerViewportOn(target.x, target.y);
+      engine.centerViewportOn(target.x, target.y);
       // Capturing the pointer keeps the drag going when the pointer leaves
       // the panel. It is a courtesy, not a requirement: a pointer that is
       // already gone cannot be captured, and the view has moved either way.
@@ -232,7 +277,7 @@ export function NavigatorPanel() {
         // No active pointer with that id: nothing to capture.
       }
     },
-    [actions, layout, pointerPosition, viewport, viewportSize],
+    [engine, layout, pointerPosition, viewport, viewportSize],
   );
 
   const handlePointerMove = useCallback(
@@ -244,9 +289,9 @@ export function NavigatorPanel() {
       event.preventDefault();
       const point = pointerPosition(event);
       const target = navigatorTargetCenter(grab, layout, point.x, point.y);
-      actions.centerViewportOn(target.x, target.y);
+      engine.centerViewportOn(target.x, target.y);
     },
-    [actions, layout, pointerPosition],
+    [engine, layout, pointerPosition],
   );
 
   const endDrag = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -283,13 +328,12 @@ export function NavigatorPanel() {
       // shortcut table binds them to nudge the selection.
       event.preventDefault();
       event.stopPropagation();
-      actions.centerViewportOn(center.x + dx, center.y + dy);
+      engine.centerViewportOn(center.x + dx, center.y + dy);
     },
-    [actions, viewport, viewportSize],
+    [engine, viewport, viewportSize],
   );
 
-  // The zoom is written the way the rest of the app writes it.
-  const zoomPercent = formatZoomPercent(viewport.zoom);
+  const zoomPercent = `${Math.round(viewport.zoom * 100)}%`;
 
   return (
     <Panel
@@ -301,7 +345,7 @@ export function NavigatorPanel() {
             <button
               type="button"
               className="navigator__button"
-              onClick={actions.zoomToFit}
+              onClick={() => engine.zoomToFit()}
               title="Fit the document in the canvas"
             >
               Fit
@@ -309,7 +353,20 @@ export function NavigatorPanel() {
             <button
               type="button"
               className="navigator__button"
-              onClick={actions.centerViewport}
+              onClick={() => {
+                // Actual size, about the point the canvas is showing: the
+                // view's centre, so the picture does not jump sideways.
+                const center = viewportCenter(viewport, viewportSize);
+                engine.setViewport(zoomToActualSize(viewportSize, center.x, center.y));
+              }}
+              title="Show the canvas at actual size"
+            >
+              1:1
+            </button>
+            <button
+              type="button"
+              className="navigator__button"
+              onClick={() => engine.centerViewport()}
               title="Centre the document in the canvas"
             >
               Centre

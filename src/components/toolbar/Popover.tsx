@@ -1,66 +1,200 @@
 /**
- * A compact popover: a trigger in the strip and a panel of controls below it.
+ * A floating panel: the popover the tool rail's flyout and its tooltip share.
  *
- * The panel is positioned `fixed`, so the strip's own horizontal scroll cannot
- * clip it, and it is placed from the trigger's rectangle so it stays under its
- * button when the window is resized or the strip is scrolled.
+ * The panel is portalled to the body and positioned `fixed`, so the rail's own
+ * scrolling never clips it and the strip's overflow never hides it. It is
+ * placed from the anchor's rectangle, so it stays beside the button it belongs
+ * to when the window is resized or the rail is scrolled.
  *
- * Keyboard: the panel takes the focus when it opens, so the first `Tab`
- * reaches its first control; `Escape` closes it and puts the focus back on the
- * trigger.
+ * Two shapes of the same primitive:
+ *
+ * - **anchored** (the rail's flyout and tooltip): the caller owns the open
+ *   state and hands over the rectangle the panel belongs to;
+ * - **triggered** (a control that opens its own panel): the panel opens under
+ *   a trigger button the primitive owns.
+ *
+ * Keyboard: `Escape` closes the panel and gives the focus back to the
+ * trigger; a pointer press outside the panel closes it as well.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  placePopover,
+  type PopoverPlacement,
+  type PopoverSide,
+  type ToolRailRect,
+} from "../../core/tools/toolRail";
 
 export interface PopoverProps {
-  /** The trigger's text. */
-  readonly label: string;
-  /** The tooltip on the trigger. */
-  readonly title?: string;
+  /** The panel's content. */
   readonly children: ReactNode;
+  /** The trigger's text, in the triggered shape. */
+  readonly label?: string;
+  /** The trigger's own tooltip, in the triggered shape. */
+  readonly title?: string;
+  /**
+   * Whether the panel is open.
+   *
+   * Given, the popover is anchored: the caller owns the state and hands over
+   * the rectangle. Left out, the popover is triggered and owns its own state.
+   */
+  readonly open?: boolean;
+  /** The rectangle the panel is anchored to, in viewport coordinates. */
+  readonly anchor?: ToolRailRect;
+  /**
+   * The element the panel is anchored to.
+   *
+   * When it is given, the panel re-measures it every time it is placed, so it
+   * follows its button when the window is resized or the rail is scrolled.
+   */
+  readonly anchorElement?: HTMLElement | null;
+  /** Which side of the anchor the panel opens on. */
+  readonly side?: PopoverSide;
+  /** The gap between the anchor and the panel. */
+  readonly gap?: number;
+  /** Called when the panel asks to be closed. */
+  readonly onClose?: () => void;
+  /**
+   * Called once the panel has been placed and is visible.
+   *
+   * A panel that takes the focus cannot do it before it is placed: a panel
+   * that is still hidden cannot be focused, so the focus would be dropped.
+   */
+  readonly onPlaced?: () => void;
+  /** The panel's role. */
+  readonly role?: string;
+  /** The panel's accessible name. */
+  readonly ariaLabel?: string;
+  /** The panel's class name, on top of `popover__panel`. */
+  readonly className?: string;
+  /** True when the panel takes the focus as it opens. */
+  readonly autoFocus?: boolean;
+  /** True when a pointer press outside the panel closes it. */
+  readonly closeOnOutsideClick?: boolean;
 }
 
-interface Placement {
-  readonly top: number;
-  readonly left: number;
-}
+export function Popover({
+  children,
+  label,
+  title,
+  open,
+  anchor,
+  anchorElement,
+  side = "below",
+  gap,
+  onClose,
+  onPlaced,
+  role = "dialog",
+  ariaLabel,
+  className,
+  autoFocus = false,
+  closeOnOutsideClick = true,
+}: PopoverProps) {
+  const isAnchored = open !== undefined;
+  const [triggeredOpen, setTriggeredOpen] = useState(false);
+  const isOpen = isAnchored ? open === true : triggeredOpen;
 
-/** The gap between the trigger and the panel. */
-const PANEL_GAP = 4;
-/** The smallest gap the panel keeps from the window's edge. */
-const EDGE_GAP = 8;
-
-export function Popover({ label, title, children }: PopoverProps) {
-  const [open, setOpen] = useState(false);
-  const [placement, setPlacement] = useState<Placement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [triggerRect, setTriggerRect] = useState<ToolRailRect | null>(null);
+  const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
 
-  /** Puts the panel under the trigger, inside the window. */
-  const place = () => {
-    const trigger = triggerRef.current;
-    if (!trigger) {
+  /** Closes the panel, whichever shape it is in. */
+  const close = useCallback(() => {
+    if (!isAnchored) {
+      setTriggeredOpen(false);
+    }
+    onClose?.();
+  }, [isAnchored, onClose]);
+
+  /** Puts the panel beside its anchor, inside the window. */
+  const place = useCallback(() => {
+    const panel = panelRef.current;
+    if (!panel) {
       return;
     }
-    const rect = trigger.getBoundingClientRect();
-    const panel = panelRef.current;
-    const panelWidth = panel?.getBoundingClientRect().width ?? 0;
-    const panelHeight = panel?.getBoundingClientRect().height ?? 0;
+    const rect =
+      anchorElement !== undefined && anchorElement !== null
+        ? anchorElement.getBoundingClientRect()
+        : isAnchored
+          ? (anchor ?? null)
+          : triggerRect;
+    if (!rect) {
+      return;
+    }
+    const box = panel.getBoundingClientRect();
+    setPlacement(
+      placePopover(
+        rect,
+        { width: box.width, height: box.height },
+        { width: window.innerWidth, height: window.innerHeight },
+        { side, gap },
+      ),
+    );
+  }, [anchor, anchorElement, isAnchored, side, gap, triggerRect]);
 
-    const maxTop = window.innerHeight - panelHeight - EDGE_GAP;
-    const top = Math.max(EDGE_GAP, Math.min(rect.bottom + PANEL_GAP, maxTop));
-    const maxLeft = window.innerWidth - panelWidth - EDGE_GAP;
-    const left = Math.max(EDGE_GAP, Math.min(rect.left, maxLeft));
+  // The panel is measured after it is in the document, so it can be kept
+  // inside the window instead of hanging off the edge.
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    place();
+    const handle = () => place();
+    window.addEventListener("resize", handle);
+    window.addEventListener("scroll", handle, true);
+    return () => {
+      window.removeEventListener("resize", handle);
+      window.removeEventListener("scroll", handle, true);
+    };
+  }, [isOpen, place]);
 
-    setPlacement({ top, left });
-  };
+  // The panel takes the focus when it opens, so the first `Tab` reaches its
+  // first control.
+  useLayoutEffect(() => {
+    if (isOpen && autoFocus) {
+      panelRef.current?.focus();
+    }
+  }, [isOpen, autoFocus]);
+
+  // The panel is announced as placed once it is visible and in position. A
+  // panel that is still hidden cannot take the focus, so this is the moment a
+  // caller may move the focus into it.
+  const placedRef = useRef(false);
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      placedRef.current = false;
+      return;
+    }
+    if (placement !== null && !placedRef.current) {
+      placedRef.current = true;
+      onPlaced?.();
+    }
+  }, [isOpen, placement, onPlaced]);
 
   useEffect(() => {
-    if (!open) {
+    if (!isOpen) {
+      return;
+    }
+    // A panel nobody can dismiss must not swallow the editor's own keys: the
+    // tooltip is dismissed by the pointer leaving its button, not by Escape.
+    const dismissible = !isAnchored || onClose !== undefined;
+    if (!dismissible) {
       return;
     }
 
     const onPointerDown = (event: PointerEvent) => {
+      if (!closeOnOutsideClick) {
+        return;
+      }
       const target = event.target as Node | null;
       if (!target) {
         return;
@@ -68,53 +202,49 @@ export function Popover({ label, title, children }: PopoverProps) {
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) {
         return;
       }
-      setOpen(false);
+      close();
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") {
         return;
       }
-      // The editor's own Escape handling clears the selection; the popover
-      // owns the key while it is open.
+      // The panel owns Escape while it is open: the editor's own Escape
+      // (clearing the selection) must not fire behind it.
       event.stopPropagation();
       event.preventDefault();
-      setOpen(false);
+      close();
       triggerRef.current?.focus();
     };
 
-    place();
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown);
-    panelRef.current?.focus();
-
     return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown);
     };
-    // `place` is rebuilt on every render, but the effect only cares about the
-    // panel being open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [isOpen, close, closeOnOutsideClick]);
 
-  const toggle = () => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    // The trigger's rectangle is known now, so the panel opens in the right
-    // place instead of jumping into it on the next frame.
-    const trigger = triggerRef.current;
-    if (trigger) {
-      const rect = trigger.getBoundingClientRect();
-      setPlacement({ top: rect.bottom + PANEL_GAP, left: rect.left });
-    }
-    setOpen(true);
-  };
+  const panel = isOpen ? (
+    <div
+      ref={panelRef}
+      className={["popover__panel", className].filter(Boolean).join(" ")}
+      role={role}
+      aria-label={ariaLabel}
+      tabIndex={autoFocus ? -1 : undefined}
+      style={{
+        top: placement?.top ?? 0,
+        left: placement?.left ?? 0,
+        visibility: placement === null ? "hidden" : "visible",
+      }}
+    >
+      {children}
+    </div>
+  ) : null;
+
+  if (isAnchored) {
+    return panel === null ? null : createPortal(panel, document.body);
+  }
 
   return (
     <div className="popover">
@@ -124,27 +254,20 @@ export function Popover({ label, title, children }: PopoverProps) {
         className="popover__trigger"
         title={title ?? label}
         aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={toggle}
+        aria-expanded={isOpen}
+        onClick={() => {
+          // The trigger's rectangle is known now, so the panel opens in the
+          // right place instead of jumping into it on the next frame.
+          const trigger = triggerRef.current;
+          if (trigger) {
+            setTriggerRect(trigger.getBoundingClientRect());
+          }
+          setTriggeredOpen((value) => !value);
+        }}
       >
         {label}
       </button>
-      {open ? (
-        <div
-          ref={panelRef}
-          className="popover__panel"
-          role="dialog"
-          aria-label={label}
-          tabIndex={-1}
-          style={{
-            top: placement?.top ?? 0,
-            left: placement?.left ?? 0,
-            visibility: placement === null ? "hidden" : "visible",
-          }}
-        >
-          {children}
-        </div>
-      ) : null}
+      {panel === null ? null : createPortal(panel, document.body)}
     </div>
   );
 }

@@ -2,81 +2,58 @@
 
 .app-shell {
   display: grid;
-  /* The menu bar, the contextual tool-options strip, the document toolbar, the
-     workspace and the status bar. The options strip has a fixed height, so
-     switching tools never moves the canvas. */
-  grid-template-rows:
-    calc(30px * var(--ui-scale))
-    calc(32px * var(--ui-scale))
-    auto
-    1fr
-    var(--status-bar-height);
-  /* The rows the workspace preference can hide. A hidden row takes no space:
-     the canvas gets the pixels back without the user resizing the window. */
-  --tool-rail-width: calc(40px * var(--ui-scale));
-  --status-bar-height: calc(22px * var(--ui-scale));
-  grid-template-rows: 30px 32px auto 1fr 22px;
+  grid-template-rows: 30px auto 1fr 22px;
   height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-app);
-}
-
-/* A shell row the user has turned off collapses to nothing. */
-.app-shell[data-tool-rail="hidden"] {
-  --tool-rail-width: 0px;
 }
 
 .workspace-body {
   display: grid;
-  /* The third column follows its content, so hiding every panel gives the
-     space straight back to the canvas instead of leaving an empty strip. */
-  grid-template-columns: var(--tool-rail-width) minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) 216px;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* The columns keep their tracks even when a column's content is not rendered.
-   The tool rail is a workspace preference, and a rail that is not drawn must
-   not slide the canvas into its column: without this the canvas would take
-   the rail's zero-width column and the panels would take the canvas'. */
-.workspace-body > .tool-rail {
-  grid-column: 1;
-  grid-row: 1;
+/* The two top rows: the contextual options bar and the document bar. They are
+   separate rows so the document controls never move when the tool changes. */
+.top-bars {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.workspace-body > .canvas-views {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.workspace-body > .side-panels {
-  grid-column: 3;
-  grid-row: 1;
-}
-
-/* The right-hand column: the panel stack. The panels are the ones the panel
-   manager knows about, in registry order; the one that grows takes the rest
-   of the column, and the column itself scrolls when they do not fit. */
+/* The right-hand column: a tabbed dock over the layers list. The dock takes a
+   little over half the height and the layers list the rest, both with a
+   minimum: at a short window the column scrolls rather than squeezing the
+   layers list to a header. */
 .side-panels {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-x: hidden;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
-.side-panels > .panel {
-  flex: 0 0 auto;
+.side-panels__layers {
+  display: flex;
+  flex: 1 1 45%;
+  min-height: 150px;
+  min-width: 0;
+  border-top: 1px solid var(--border);
+}
+
+.side-panels__layers > .panel {
+  flex: 1 1 auto;
   /* `min-width: 0` is load-bearing: the flex base size of the panel is its
      max-content width (the layer rows), and the automatic minimum size would
-     keep it from shrinking, so the panel grew past the column and the stack
-     clipped its header buttons off the window. */
+     keep it from shrinking, so the panel grew past the fixed 216 px grid
+     column and the side panels clipped its header buttons off the window. */
   min-width: 0;
   min-height: 0;
-}
-
-/* The panel that takes the leftover height of the column. */
-.side-panels > .panel--grow {
-  flex: 1 1 auto;
-  min-height: 96px;
 }
 
 /* ---------------------------------------------------------------- menu bar */
@@ -131,8 +108,8 @@
 .menu__item {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 16px;
   width: 100%;
   height: var(--control-height-sm);
   padding: 0 8px;
@@ -144,28 +121,7 @@
   background: var(--accent-soft);
 }
 
-/* The state column of a menu that shows a state: a tick or nothing, so the
-   labels of the items line up. */
-.menu__check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  color: var(--accent);
-}
-
-.menu__icon {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-dim);
-}
-
-.menu__label {
-  flex: 1 1 auto;
-}
-
 .menu__shortcut {
-  margin-left: auto;
   color: var(--text-dim);
   font-size: 11px;
 }
@@ -180,13 +136,17 @@
 
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 4px 8px;
-  padding: 4px 8px;
+  height: 34px;
+  padding: 0 8px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 .toolbar__group {
@@ -197,13 +157,14 @@
 }
 
 .toolbar__divider {
+  flex: 0 0 auto;
   width: 1px;
   height: 18px;
   background: var(--border);
 }
 
 .toolbar__spacer {
-  flex: 1;
+  flex: 1 0 8px;
 }
 
 .toolbar__hint {
@@ -213,14 +174,160 @@
   white-space: nowrap;
 }
 
-.brush-presets {
+/* The hint is guidance, not a control: at a narrow window it is the first
+   thing to go, so the controls that matter keep their room. */
+@media (max-width: 1180px) {
+  .toolbar__hint {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------ brush controls */
+
+/* The primary stroke controls, in the options bar: preview, preset, and the
+   three sliders a stroke is actually adjusted with. */
+.brush-primary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.brush-primary .slider-field {
+  gap: 5px;
+}
+
+.tool-options-bar .brush-primary .slider-field__range {
+  width: 60px;
+}
+
+.tool-options-bar .brush-primary .slider-field__value {
+  width: 42px;
+}
+
+.tool-options-bar .brush-primary .slider-field__display {
+  display: none;
+}
+
+/* The advanced settings panel: a column of labelled rows, wide enough for the
+   labels and the pressure curve. */
+.brush-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 320px;
+  padding: 10px;
+}
+
+.brush-advanced__hint {
+  margin: 0 0 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.brush-advanced .slider-field {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) 48px;
+  gap: 6px;
+}
+
+.brush-advanced .slider-field__range {
+  width: 100%;
+}
+
+.brush-advanced .slider-field__display {
+  display: none;
+}
+
+.brush-advanced__curve-toggle {
+  align-self: flex-start;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-strong);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.brush-advanced__curve-toggle:hover,
+.brush-advanced__curve-toggle[aria-expanded="true"] {
+  background: var(--bg-raised-hover);
+  border-color: var(--accent);
+}
+
+.brush-advanced .pressure-curve {
+  width: 100%;
+  border-top: 1px solid var(--border);
+}
+
+.brush-advanced .pressure-curve__plot {
+  width: 100%;
+  height: 130px;
+}
+
+/* The preset manager: a small form under its trigger. */
+.brush-preset-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 300px;
+  padding: 10px;
+}
+
+.brush-preset-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+.brush-preset-editor__field .text-input {
+  width: 100%;
+}
+
+.brush-preset-editor__current {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brush-preset-editor__actions {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gradient-stops-panel {
+  width: 300px;
+  padding: 10px;
+}
+
+@media (max-width: 1100px) {
+  /* The swatch shows a shape, not a value: at a narrow window the sliders and
+     the preset select are worth more than the picture. */
+  .brush-primary .brush-preview,
+  .brush-presets__label {
+    display: none;
+  }
+}
+
+.brush-presets {
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 4px 6px;
-  width: 100%;
-  padding-bottom: 2px;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+}
+
+.brush-presets__state {
+  min-width: 0;
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.02em;
 }
 
 /* ------------------------------------------------------- pressure curve */
@@ -371,14 +478,6 @@
   outline: none;
 }
 
-.brush-presets__name {
-  width: 150px;
-}
-
-.brush-presets__action {
-  padding: 0 8px;
-}
-
 .color-controls {
   flex-wrap: wrap;
   gap: 8px;
@@ -418,6 +517,16 @@
   cursor: default;
 }
 
+.color-controls__picker {
+  width: 28px;
+  height: var(--control-height);
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
 .color-controls__palette {
   display: grid;
   grid-template-columns: repeat(4, 14px);
@@ -435,6 +544,24 @@
 .color-controls__swatch.is-active {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.gradient-controls {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.gradient-controls__color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--control-height);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.gradient-controls__color:hover {
+  color: var(--text);
 }
 
 .gradient-stops {
@@ -576,12 +703,6 @@
   gap: 3px;
 }
 
-/* The shell can hide the rail (a workspace preference). Its column collapses
-   to nothing then, so the rail's own buttons go with it. */
-.app-shell[data-tool-rail="hidden"] .tool-rail {
-  display: none;
-}
-
 .tool-rail__divider {
   width: 18px;
   height: 1px;
@@ -590,8 +711,7 @@
 }
 
 /* The buttons keep their size when the rail scrolls; a squashed target is
-   worse than a scrolled one. The position is load-bearing: the flyout caret
-   is pinned to the button's own corner. */
+   worse than a scrolled one. */
 .tool-rail .icon-button {
   position: relative;
   flex: 0 0 auto;
@@ -626,7 +746,6 @@
   bottom: 1px;
   display: inline-flex;
   color: var(--text-dim);
-  pointer-events: none;
 }
 
 .tool-rail .icon-button.is-active .tool-rail__slot-caret {
@@ -646,59 +765,10 @@
   border: 0;
 }
 
-/* The rail's own tooltip. It is anchored to its button, so it never follows
-   the pointer and never sits under the cursor. */
-.tool-rail__tooltip {
-  position: fixed;
-  z-index: 40;
-  width: max-content;
-  max-width: 244px;
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
-  transform: translateY(-50%);
-  pointer-events: none;
-}
-
-.tool-rail__tooltip-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0;
-}
-
-.tool-rail__tooltip-title {
-  color: var(--text-strong);
-  font-weight: 600;
-}
-
-.tool-rail__tooltip-shortcut {
-  color: var(--text-dim);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.tool-rail__tooltip-text {
-  margin: 2px 0 0;
-  color: var(--text-dim);
-}
-
-.tool-rail__tooltip-hint {
-  margin: 3px 0 0;
-  color: var(--accent);
-}
-
 /* The flyout of a collapsed group. */
 .tool-rail__menu {
-  position: fixed;
-  z-index: 40;
   min-width: 156px;
   padding: 3px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--bg-raised);
 }
 
 .tool-rail__menu-item {
@@ -742,6 +812,44 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The rail's own tooltip. It is anchored to its button, so it never follows
+   the pointer and never sits under the cursor. */
+.tool-rail__tooltip {
+  width: max-content;
+  max-width: 244px;
+  padding: 5px 8px;
+  pointer-events: none;
+}
+
+.tool-rail__tooltip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.tool-rail__tooltip-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.tool-rail__tooltip-shortcut {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-rail__tooltip-text {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+}
+
+.tool-rail__tooltip-hint {
+  margin: 3px 0 0;
+  color: var(--accent);
+}
+
 /* A short window tightens the rail rather than clipping it: the gaps and
    the group separators shrink, the targets keep their size. */
 @media (max-height: 520px) {
@@ -759,20 +867,41 @@
   }
 }
 
-/* ------------------------------------------------------------ canvas stage */
+/* ----------------------------------------------------------------- popover */
 
-/* The row the views live in. One canvas is the normal case; a second view of
-   the same document sits next to it and shares the row. */
-.canvas-views {
-  display: flex;
-  align-items: stretch;
-  min-width: 0;
-  min-height: 0;
+/* The floating panel the rail's flyout and its tooltip share. It is fixed,
+   so the rail's own scrolling never clips it. */
+.popover__panel {
+  position: fixed;
+  z-index: 40;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--text);
 }
+
+.popover {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.popover__trigger {
+  height: var(--control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.popover__trigger:hover {
+  background: var(--bg-raised-hover);
+}
+
+/* ------------------------------------------------------------ canvas stage */
 
 .canvas-stage {
   position: relative;
-  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   background: var(--bg-workspace);
@@ -788,83 +917,16 @@
   cursor: crosshair;
 }
 
-/*
- * The brush cursor overlay.
- *
- * A view, never content: it is a sibling of the canvas, so it cannot reach a
- * layer surface, an export or the project file. The root is placed at the
- * pointer; the ring is centred on it and the readout sits beside it.
- */
 .brush-cursor {
   position: absolute;
   top: 0;
   left: 0;
   display: none;
-  visibility: hidden;
-  pointer-events: none;
-  will-change: transform;
-  z-index: 2;
-}
-
-.brush-cursor__ring {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform: translate(-50%, -50%);
   border: 1px solid rgba(255, 255, 255, 0.75);
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
-  transition: opacity 120ms ease-out;
-}
-
-/* While a stroke is in flight the ring steps back, so the artwork under the
-   pointer stays readable. It is a separate compositing layer, so it cannot
-   flicker with the canvas underneath it. */
-.brush-cursor__ring.is-drawing {
-  opacity: 0.35;
-}
-
-/* While the quick resize runs, the ring is the control being dragged, so it
-   is drawn in the accent colour. */
-.brush-cursor__ring.is-resizing {
-  border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.55),
-    0 0 0 2px rgba(0, 0, 0, 0.35);
-}
-
-.brush-cursor__readout {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform: translate(14px, 10px);
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(18, 20, 24, 0.88);
-  color: var(--text-strong);
-  font-size: 10px;
-  line-height: 14px;
-  white-space: nowrap;
-  opacity: 0;
-  transition: opacity 120ms ease-out;
-}
-
-.brush-cursor__readout.is-visible {
-  opacity: 1;
-}
-
-/* Present for screen readers only. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
+  pointer-events: none;
+  will-change: transform;
 }
 
 /* -------------------------------------------------------------- status bar */
@@ -877,26 +939,9 @@
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: calc(11px * var(--ui-scale));
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
-}
-
-/* The two halves of the bar. The left one holds the document's facts and is
-   allowed to shrink and clip, so the right one - the cursor readout and the
-   environment - keeps its place in a narrow window. */
-.status-bar__group {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.status-bar__group--end {
-  flex: 0 0 auto;
-  gap: 12px;
-  overflow: visible;
 }
 
 .status-bar__item {
@@ -978,6 +1023,62 @@
 .dialog__row {
   display: flex;
   gap: 10px;
+}
+
+/* The one-click canvas sizes. They are a grid rather than a row so the
+   longest label (A4 300 dpi) still fits in the 320 px dialog at a narrow
+   window, and the selected preset is visible without reading the inputs. */
+.dialog__presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.dialog__preset {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dialog__preset:hover {
+  background: var(--bg-raised-hover);
+}
+
+.dialog__preset.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.dialog__preset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dialog__preset-label {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog__preset-size {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog__field {

@@ -3,43 +3,33 @@
  *
  * Three ways out, because discarding a drawing is destructive: cancel, save
  * first, or discard. The caller owns what happens on confirm, so the same
- * dialog covers a tab that is being closed and the window that is being
- * closed.
- *
- * With several documents open, the question is asked about the *document*,
- * not about "the current drawing": the dialog names the tab it is about, so
- * the user can tell which one is at stake.
+ * dialog covers new, open and window close.
  */
 
 import { useEffect } from "react";
 
-export type UnsavedAction = "new" | "open" | "close" | "closeTab";
+export type UnsavedAction = "new" | "open" | "close";
 
 const TITLES: Record<UnsavedAction, string> = {
   new: "Start a new document?",
   open: "Open another project?",
   close: "Close Paka?",
-  closeTab: "Close this document?",
 };
 
 const BODIES: Record<UnsavedAction, string> = {
   new: "The current drawing has unsaved changes. Creating a new document discards them.",
   open: "The current drawing has unsaved changes. Opening another project discards them.",
-  close: "An open drawing has unsaved changes. Closing Paka discards them.",
-  closeTab: "This drawing has unsaved changes. Closing it discards them.",
+  close: "The current drawing has unsaved changes. Closing Paka discards them.",
 };
 
 const CONFIRM_LABELS: Record<UnsavedAction, string> = {
   new: "Discard and create",
   open: "Discard and open",
   close: "Discard and close",
-  closeTab: "Discard and close",
 };
 
 export interface UnsavedChangesDialogProps {
   readonly action: UnsavedAction;
-  /** The document the question is about, when there is a single one. */
-  readonly documentName?: string | null;
   readonly onCancel: () => void;
   readonly onSaveFirst: () => void;
   readonly onDiscard: () => void;
@@ -47,7 +37,6 @@ export interface UnsavedChangesDialogProps {
 
 export function UnsavedChangesDialog({
   action,
-  documentName,
   onCancel,
   onSaveFirst,
   onDiscard,
@@ -62,8 +51,6 @@ export function UnsavedChangesDialog({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onCancel]);
 
-  const name = documentName ?? null;
-
   return (
     <div
       className="dialog-backdrop"
@@ -77,15 +64,7 @@ export function UnsavedChangesDialog({
         <h2 className="dialog__title" id="unsaved-title">
           {TITLES[action]}
         </h2>
-        <p className="dialog__note">
-          {BODIES[action]}
-          {name === null ? null : (
-            <>
-              {" "}
-              <strong className="dialog__document">{name}</strong>
-            </>
-          )}
-        </p>
+        <p className="dialog__note">{BODIES[action]}</p>
         <div className="dialog__actions">
           <button type="button" className="button" onClick={onCancel}>
             Cancel

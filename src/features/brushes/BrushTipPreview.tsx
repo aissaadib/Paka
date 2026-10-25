@@ -1,52 +1,53 @@
 /**
- * A preset's tip, drawn by the engine's own renderer.
+ * The preview of a brush tip.
  *
- * The swatch is not a picture of a brush: it is the *same* picture the live
- * preview draws, rendered by the same code, from the preset's own brush
- * settings. A property that changes a stroke changes the swatch.
+ * The swatch is the engine's own picture of the tip: the mask the stamp
+ * engine multiplies into a dab's coverage, sampled by the very function the
+ * renderer rasterizes with. It is not a drawing of a brush - it is what the
+ * brush stamps.
  *
- * The live preview draws at a fixed size, so the swatch renders into a canvas
- * of that size and scales it down. The brush is therefore shown the way it
- * would look, not the way it would measure - with one exception: the swatch
- * draws the mark **at the size it deserves**, so a hairline pen reads as a
- * hairline and a broad airbrush fills the box. A list of brushes that all
- * look the same size is not a list you can choose from.
+ * The mask is the only thing a tip is, so the swatch shows the mask: a disc
+ * for the round tip, a soft pad for the felt one, a diagonal nib for the
+ * chisel, a ragged edge for the blot and a set of lanes for the bristles.
  */
 
 import { useEffect, useRef } from "react";
-import {
-  PREVIEW_CSS_HEIGHT,
-  PREVIEW_CSS_WIDTH,
-  buildPreviewStroke,
-  previewFit,
-  renderBrushPreview,
-} from "../../core/rendering/brushPreview";
-import type { BrushSettings } from "../../types/brush";
+import { brushTipSilhouette } from "../../core/rendering/brushTip";
+import { hexToRgb } from "../../utils/color";
+import type { BrushTipShape } from "../../types/brush";
+import "./brushTip.css";
 
 /** The swatch's width, in CSS pixels. */
-export const TIP_CSS_WIDTH = 44;
-
-/** The swatch's height, in CSS pixels. */
-export const TIP_CSS_HEIGHT = 18;
-
-/**
- * The brush that fills the swatch.
- *
- * It is the reference the list is read against: a brush this wide fills the
- * box, a wider one is drawn as wide as the box allows, and a narrower one is
- * drawn narrower.
- */
-const REFERENCE_SIZE = 24;
+export const TIP_CSS_SIZE = 48;
 
 export interface BrushTipPreviewProps {
-  readonly brush: BrushSettings;
-  /** The colour painted behind the stroke: the document's paper. */
-  readonly background: string;
+  /** The tip the swatch shows. */
+  readonly tip: BrushTipShape;
+  /** The colour the tip is painted in. */
+  readonly color?: string;
   /** What the swatch shows, for a screen reader. */
   readonly label: string;
+  /**
+   * The swatch's width, in CSS pixels.
+   *
+   * The default is the full-size swatch; a control that draws the swatch
+   * beside itself passes the size its own row can carry.
+   */
+  readonly size?: number;
 }
 
-export function BrushTipPreview({ brush, background, label }: BrushTipPreviewProps) {
+/**
+ * Draws the tip's mask.
+ *
+ * The canvas is sized in device pixels, so the swatch is the same picture on
+ * every screen: the mask is sampled on the same grid the renderer works on.
+ */
+export function BrushTipPreview({
+  tip,
+  color = "#16181c",
+  label,
+  size = TIP_CSS_SIZE,
+}: BrushTipPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -55,54 +56,36 @@ export function BrushTipPreview({ brush, background, label }: BrushTipPreviewPro
       return;
     }
     const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const width = Math.round(TIP_CSS_WIDTH * ratio);
-    const height = Math.round(TIP_CSS_HEIGHT * ratio);
-    if (canvas.width !== width) {
-      canvas.width = width;
+    const pixels = Math.max(1, Math.round(size * ratio));
+    if (canvas.width !== pixels) {
+      canvas.width = pixels;
     }
-    if (canvas.height !== height) {
-      canvas.height = height;
+    if (canvas.height !== pixels) {
+      canvas.height = pixels;
     }
-
-    // The live preview's own size, drawn off screen and scaled into the
-    // swatch: the swatch is the live preview, smaller.
-    const source = document.createElement("canvas");
-    source.width = Math.round(PREVIEW_CSS_WIDTH * ratio);
-    source.height = Math.round(PREVIEW_CSS_HEIGHT * ratio);
-    const sourceCtx = source.getContext("2d");
     const ctx = canvas.getContext("2d");
-    if (!sourceCtx || !ctx) {
+    if (!ctx) {
       return;
     }
-    renderBrushPreview(sourceCtx, buildPreviewStroke(brush), { pixelRatio: ratio, background });
 
-    // How tall the mark is in the source, in CSS pixels, and how tall it
-    // should be in the swatch: the brush's own width against the reference.
-    const markHeight = Math.max(0.5, brush.size * previewFit(brush));
-    const wanted = TIP_CSS_HEIGHT * Math.min(1, brush.size / REFERENCE_SIZE);
-    const scale = wanted / markHeight;
-
-    ctx.clearRect(0, 0, width, height);
-    const drawnWidth = source.width * scale;
-    const drawnHeight = source.height * scale;
-    ctx.drawImage(
-      source,
-      0,
-      0,
-      source.width,
-      source.height,
-      (width - drawnWidth) / 2,
-      (height - drawnHeight) / 2,
-      drawnWidth,
-      drawnHeight,
-    );
-  }, [brush, background]);
+    // The mask, in the coverage the engine would stamp with.
+    const coverage = brushTipSilhouette(tip, pixels);
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+    const image = ctx.createImageData(pixels, pixels);
+    for (let index = 0; index < pixels * pixels; index += 1) {
+      image.data[index * 4] = rgb.r;
+      image.data[index * 4 + 1] = rgb.g;
+      image.data[index * 4 + 2] = rgb.b;
+      image.data[index * 4 + 3] = coverage[index];
+    }
+    ctx.putImageData(image, 0, 0);
+  }, [tip, color, size]);
 
   return (
     <canvas
       className="brush-tip"
       ref={canvasRef}
-      style={{ width: `${TIP_CSS_WIDTH}px`, height: `${TIP_CSS_HEIGHT}px` }}
+      style={{ width: `${size}px`, height: `${size}px` }}
       role="img"
       aria-label={label}
     />

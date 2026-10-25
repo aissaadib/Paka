@@ -14,22 +14,12 @@
  * preferences are applied a moment later. That is deliberate - gating the
  * editor on the read would delay the first paint and would have to survive
  * StrictMode's double mount.
- *
- * The panel layout is a section of the same settings file. The settings
- * store owns the file, so the layout is handed to it as a section rather
- * than written by the panel store itself: one file, one writer. The workspace
- * - the profile, the colour scheme, the interface scale and the brush panel's
- * density - is a second section of the same file, for the same reason.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { createPanelLayoutSection } from "../core/panels/panelLayoutSection";
-import { createRecentFilesSection } from "../core/documents/recentFiles";
 import { SettingsStore } from "../core/settings/settingsStore";
+import type { SettingsSection } from "../core/settings/settingsSection";
 import { createTauriSettingsGateway } from "../core/settings/tauriSettingsGateway";
-import { createWorkspaceSettingsSection } from "../core/workspace/workspaceSettingsSection";
-import { usePanelStore } from "../hooks/usePanels";
-import { useWorkspaceStore } from "../hooks/useWorkspace";
 import { EditorContext } from "../state/editorContext";
 import { createEditor, type Editor } from "../state/editorStore";
 
@@ -37,48 +27,34 @@ export interface EditorProviderProps {
   readonly children: ReactNode;
   /** Optional injected editor, used by tests. */
   readonly editor?: Editor;
+  /**
+   * The settings sections that belong to the shell rather than the engine.
+   *
+   * The provider still owns the file; it only hands each section its part of
+   * the document. That keeps one writer for the settings file while letting
+   * the panel layout and the workspace persist their own state.
+   */
+  readonly sections?: readonly SettingsSection<unknown>[];
 }
 
-export function EditorProvider({ children, editor }: EditorProviderProps) {
+export function EditorProvider({ children, editor, sections }: EditorProviderProps) {
   const [value] = useState(() => editor ?? createEditor());
-  const panels = usePanelStore();
-  const workspace = useWorkspaceStore();
 
   useEffect(() => {
     const store = new SettingsStore({
-      // The preferences live in an engine of their own, so they have one
-      // stable home while the active document changes underneath them. The
-      // session registry mirrors them into the document that is on screen.
-      engine: value.sessions.preferences,
+      engine: value.engine,
       gateway: createTauriSettingsGateway(),
-      // The panels come first: the workspace reads the layout it is applied
-      // against, so it has to be in place before the workspace is read.
-      sections: [
-        createPanelLayoutSection(panels),
-        createWorkspaceSettingsSection(workspace),
-        createRecentFilesSection(value.recentFiles),
-      ],
+      sections,
     });
     void store.load();
     return () => {
       store.destroy();
     };
-  }, [panels, value, workspace]);
+  }, [value, sections]);
 
   useEffect(() => {
     return () => {
-      // React StrictMode mounts the provider twice in development, and the
-      // editor lives in state, so the remount reuses the very same editor.
-      // Releasing its documents here would leave the second mount with no
-      // document to show - the registry would have no active session and the
-      // canvas would never paint.
-      //
-      // What a canvas that goes away needs is for its engines to let go of
-      // their renderer and their input, and that is what detaching does; the
-      // documents themselves stay open, as they were before the remount.
-      for (const session of value.sessions.list) {
-        session.engine.detach();
-      }
+      value.engine.destroy();
     };
   }, [value]);
 

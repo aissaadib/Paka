@@ -58,6 +58,12 @@ function createHost() {
         elements.splice(index, 1);
       }
     },
+    replace(element) {
+      const index = elements.findIndex((entry) => entry.id === element.id);
+      if (index !== -1) {
+        elements[index] = element;
+      }
+    },
     refresh(layerId) {
       refreshed.push(layerId);
     },

@@ -22,34 +22,20 @@ import type {
   LayerBlendMode,
   StrokeRecord,
 } from "../document/types";
-import { isFillPatch, isGradient } from "../document/types";
+import { isFillPatch, isGradient, isShape } from "../document/types";
+import { strokeFromShape } from "../document/shapeRecord";
 import type { SelectionHandles } from "../document/selectionHandles";
+import { referenceHandles } from "../reference/geometry";
 import type { GridSettings } from "../document/grid";
 import { DEFAULT_GRID_SETTINGS, gridLinesBetween } from "../document/grid";
-import type { SymmetrySettings } from "../document/symmetry";
-import type { ReferenceOverlay } from "../reference/types";
-import {
-  DEFAULT_SYMMETRY_SETTINGS,
-  symmetryAxes,
-  symmetryTransforms,
-} from "../document/symmetry";
-import type { RulerSettings } from "./rulers";
-import {
-  DEFAULT_RULER_SETTINGS,
-  RULER_LEFT_SIZE_PX,
-  RULER_SIZE_PX,
-  formatRulerLabel,
-  rulerMinorStep,
-  rulerStep,
-  rulerTicks,
-} from "./rulers";
+import { overlaysForLayer, type OverlayPaintContext } from "../shell/overlayRegistry";
+import { flattenLayers } from "../document/layerGroups";
 import type { Bounds } from "../../types/geometry";
+import type { BrushTipShape } from "../../types/brush";
 import type { Viewport } from "../../types/viewport";
-import { PRIMARY_VIEW_ID } from "../../types/viewport";
 import { hexToRgb } from "../../utils/color";
 import { FrameScheduler } from "./frameScheduler";
 import { LayerSurfaceStore, type LayerSurface } from "./layerSurfaceStore";
-import { viewMatrix, visibleDocumentRect } from "./viewport";
 import {
   rasterizeStroke,
   strokeDiameter,
@@ -67,11 +53,9 @@ import {
   unionStampRect,
   type StampRect,
 } from "./stampCoverage";
+import { normalizeBrushTip, type BrushTipFrame } from "./brushTip";
 import type {
-  CompositeReadOptions,
   DrawingRenderer,
-  DisplayTargetOptions,
-  RendererGradientOverlay,
   RendererKind,
   RendererSelection,
   Rgb,
@@ -85,17 +69,6 @@ export interface Canvas2DRendererOptions {
   readonly rasterScale?: number;
   readonly scheduler?: FrameScheduler;
 }
-
-/**
- * The id of the display target the engine's own canvas is registered under.
- *
- * The renderer always has one target - the main canvas - and may have more:
- * a second view of the same document is a second target, not a second
- * renderer, so both views share the rasterized layer surfaces.
- *
- * It is the engine's primary *view* id, so the two cannot drift apart.
- */
-export const PRIMARY_DISPLAY_TARGET = PRIMARY_VIEW_ID;
 
 const DOCUMENT_BORDER_COLOR = "rgba(0, 0, 0, 0.35)";
 /** Accent used for the selection marquee and the traced selected strokes. */
@@ -118,13 +91,6 @@ const HANDLE_FILL_COLOR = "#ffffff";
  */
 const GUIDE_COLOR = "#e0567f";
 /**
- * Accent used for the gradient overlay.
- *
- * A third hue, so the gradient handles cannot be mistaken for the selection's
- * transform handles or for a composition guide.
- */
-const GRADIENT_COLOR = "#8a6bff";
-/**
  * The grid, deliberately fainter than the guides.
  *
  * A grid is a background reference: it has to be readable without competing
@@ -132,15 +98,6 @@ const GRADIENT_COLOR = "#8a6bff";
  * the guides' accent hue.
  */
 const GRID_COLOR = "rgba(70, 84, 104, 0.22)";
-/**
- * Accent used for the reference images.
- *
- * A fourth hue, so a reference frame cannot be mistaken for the selection's
- * transform handles, for a composition guide or for the gradient handles.
- */
-const REFERENCE_COLOR = "#2fb8a0";
-/** The outline of the reference under the pointer, when it is not selected. */
-const REFERENCE_HOVER_COLOR = "rgba(47, 184, 160, 0.6)";
 /**
  * The closest two grid lines may be on screen before the grid is hidden, in
  * device pixels.
@@ -150,46 +107,6 @@ const REFERENCE_HOVER_COLOR = "rgba(47, 184, 160, 0.6)";
  * when zoomed in and quiet when zoomed out.
  */
 const MIN_GRID_GAP_PX = 3;
-
-/**
- * The ruler strips.
- *
- * The strips are part of the workspace chrome, so they use the app's own
- * surface colours rather than an accent: a ruler is furniture, not an
- * annotation. The background is opaque enough to read a label on, and the
- * ticks are fainter than the labels.
- */
-const RULER_BACKGROUND_COLOR = "#1c1f23";
-const RULER_BORDER_COLOR = "#2a2e34";
-const RULER_TICK_COLOR = "#5b636d";
-const RULER_LABEL_COLOR = "#8a919b";
-/** The label font, in CSS pixels. */
-const RULER_FONT = "10px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-
-/**
- * The symmetry overlay: the axes the copies are mirrored or turned about, and
- * the marker at the centre.
- *
- * A fourth accent, so the symmetry can be told from the selection, the guides
- * and the gradient at a glance. The centre marker is drawn in the selection
- * accent because it is the one handle the user grabs.
- */
-const SYMMETRY_COLOR = "#3fb9a8";
-const SYMMETRY_CENTER_COLOR = "#2f7bff";
-/** The symmetry centre marker's radius, in CSS pixels. */
-const SYMMETRY_CENTER_RADIUS_PX = 5;
-
-/**
- * The guide's position label.
- *
- * A guide is a registration mark, and a registration mark is only useful if
- * the user can read where it sits: the label shows the guide's coordinate in
- * document pixels, next to the edge it is anchored to.
- */
-const GUIDE_LABEL_COLOR = "#e0567f";
-const GUIDE_LABEL_FONT = "10px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-/** The label's chip, so it reads over dark ink as well. */
-const GUIDE_LABEL_BACKGROUND = "rgba(14, 16, 19, 0.78)";
 
 /** Maps a layer blend mode to a Canvas 2D composite operation. */
 function compositeOperationFor(mode: LayerBlendMode): GlobalCompositeOperation {
@@ -254,46 +171,35 @@ function resizeCanvas(canvas: HTMLCanvasElement, width: number, height: number):
 }
 
 /**
- * `-0` is a different number to `0` even though they compare equal.
+ * The frame a dab is masked with, or `null` for the plain round dab.
  *
- * A matrix term that is a negative zero is a surprise in a recorded call - it
- * prints as `-0` and it is not the number the caller wrote - so the sign of a
- * zero is normalised away.
+ * The tip belongs to the stroke's own brush, so the mask is the same in live
+ * drawing, in a layer rebuild, after undo/redo, in a reopened project and in
+ * a PNG export: the tip is read from the stroke, never from editor state.
+ * The round tip - and a brush written before tips existed - leave the dab
+ * exactly as it was, byte for byte.
  */
-function withoutNegativeZero(value: number): number {
-  return value === 0 ? 0 : value;
-}
-
-/**
- * One canvas the document is painted into, with its own view transform.
- *
- * A target holds no document state: the document, the layer surfaces and the
- * stroke buffer belong to the renderer, so two targets always show the same
- * artwork and differ only in where it is put on the screen.
- */
-interface DisplayTarget {
-  readonly id: string;
-  readonly canvas: HTMLCanvasElement;
-  readonly ctx: CanvasRenderingContext2D;
-  /** The transform from document space to this target's screen space. */
-  viewport: Viewport;
-  /** The device pixel ratio of this target's backing store. */
-  devicePixelRatio: number;
+function tipFrame(
+  tip: BrushTipShape,
+  angle: number,
+  radius: number,
+): BrushTipFrame | null {
+  if (tip === "round") {
+    return null;
+  }
+  return {
+    shape: tip,
+    directionX: Math.cos(angle),
+    directionY: Math.sin(angle),
+    radius,
+  };
 }
 
 export class Canvas2DRenderer implements DrawingRenderer {
   readonly kind: RendererKind = "canvas2d";
 
-  /**
-   * The display targets: one canvas per view over the same document.
-   *
-   * Everything that belongs to the *document* - the layer surfaces, the stroke
-   * buffer, the in-progress stroke - lives on the renderer and is shared by
-   * every target. What a target owns is its canvas, its view transform and its
-   * device pixel ratio: the three things that make one window a different
-   * window.
-   */
-  private readonly targets = new Map<string, DisplayTarget>();
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
   private readonly strokeSource: StrokeSource;
   private readonly scheduler: FrameScheduler;
   private readonly surfaces: LayerSurfaceStore;
@@ -304,6 +210,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
   private readonly textureTiles = new Map<number, HTMLCanvasElement>();
 
   private doc: DrawingDocument | null = null;
+  /**
+   * The decoded picture of each reference, keyed by reference id.
+   *
+   * The document says which references exist and where they sit; this map
+   * says which of them have pixels to draw. A reference without an entry (its
+   * picture has not decoded yet) is simply not painted.
+   */
+  private referenceSources: ReadonlyMap<string, CanvasImageSource> = new Map();
+  /** The reference the reference tool has framed, if any. */
+  private selectedReferenceId: string | null = null;
+  private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
+  private devicePixelRatio = 1;
   private activeStroke: StrokeRecord | null = null;
   /**
    * Pixels of the active layer as they were when an erasing stroke started.
@@ -349,6 +267,16 @@ export class Canvas2DRenderer implements DrawingRenderer {
    */
   private previewSurface: HTMLCanvasElement | null = null;
   /**
+   * Isolated scratch surfaces for groups with a non-default opacity or blend
+   * mode, one per nesting depth.
+   *
+   * A normal, fully opaque group is flattened into its parent, which is byte-
+   * identical and costs no canvas. Isolation is only needed when the group
+   * itself has to be composited as one unit, and the scratch is reused across
+   * frames. Default groups (the common case) never allocate one.
+   */
+  private readonly groupSurfaces: HTMLCanvasElement[] = [];
+  /**
    * Coverage of the in-flight stamped stroke, in device pixels.
    *
    * The stamp engine unions its dabs with a maximum, and Canvas 2D cannot
@@ -368,13 +296,6 @@ export class Canvas2DRenderer implements DrawingRenderer {
   /** Selection overlay: UI chrome, never composited into a surface or an export. */
   private selection: RendererSelection | null = null;
   /**
-   * Gradient overlay: the handles and the line of the selected gradient.
-   *
-   * Overlay only, like the selection: painted on the display canvas above the
-   * layers and never part of a layer surface, the document or an export.
-   */
-  private gradientOverlay: RendererGradientOverlay | null = null;
-  /**
    * The guide the user has selected, or `null`.
    *
    * The guide *positions* are document state and arrive with the document; only
@@ -388,34 +309,17 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * grid is painted, not whether the user wants it. Off by default.
    */
   private grid: GridSettings = DEFAULT_GRID_SETTINGS;
-  /**
-   * Ruler display settings.
-   *
-   * Editor state, like the grid: the renderer owns only how the strips are
-   * painted, not whether the user wants them. Off by default.
-   */
-  private rulers: RulerSettings = DEFAULT_RULER_SETTINGS;
-  /**
-   * The symmetry the in-progress stroke is repeated around.
-   *
-   * Editor state, like the grid: it describes the next stroke, and the copies
-   * it produces are ordinary strokes in the document. Off by default.
-   */
-  private symmetry: SymmetrySettings = DEFAULT_SYMMETRY_SETTINGS;
-  /**
-   * The reference images painted over the workspace.
-   *
-   * Overlay only, like the selection and the grid: the references are drawn on
-   * the display canvas in workspace space and never reach a layer surface, the
-   * document or an export. The renderer holds the *placement* and the pixels;
-   * which reference is selected and which one is under the pointer are handed
-   * over with the overlay.
-   */
-  private referenceOverlay: ReferenceOverlay | null = null;
   private rasterScale: number;
   private destroyed = false;
 
   constructor(options: Canvas2DRendererOptions) {
+    const ctx = options.canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas 2D rendering is not available in this environment.");
+    }
+
+    this.canvas = options.canvas;
+    this.ctx = ctx;
     this.strokeSource = options.strokeSource;
     this.scheduler = options.scheduler ?? new FrameScheduler();
     this.rasterScale = options.rasterScale !== undefined && options.rasterScale > 0 ? options.rasterScale : 1;
@@ -428,22 +332,11 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
     this.strokeCtx = strokeCtx;
 
-    // The frame scheduler is wired before anything can ask for a frame: adding
-    // a display target requests one.
     this.requestFrame = () => {
       this.scheduler.schedule(() => {
         this.render();
       });
     };
-
-    // The main canvas is the primary target. It is registered here rather than
-    // added later, so the renderer is never in a state where it has a
-    // document but nothing to show it on.
-    this.addDisplayTarget({
-      id: PRIMARY_DISPLAY_TARGET,
-      canvas: options.canvas,
-      viewport: { zoom: 1, offsetX: 0, offsetY: 0 },
-    });
   }
 
   get rasterScaleValue(): number {
@@ -486,89 +379,21 @@ export class Canvas2DRenderer implements DrawingRenderer {
     }
 
     // Surfaces for removed layers are dropped; new layers get a dirty surface
-    // the first time they are composited.
-    this.surfaces.retain(doc.layers.map((layer) => layer.id));
+    // the first time they are composited. Child layers of a group are layers
+    // too: the whole tree is retained, not just the root list.
+    this.surfaces.retain(flattenLayers(doc.layers).map((layer) => layer.id));
   }
 
   setViewport(viewport: Viewport): void {
-    this.setDisplayTargetViewport(PRIMARY_DISPLAY_TARGET, viewport);
+    this.viewport = viewport;
   }
 
   setDisplaySize(cssWidth: number, cssHeight: number, devicePixelRatio: number): void {
-    this.setDisplayTargetSize(PRIMARY_DISPLAY_TARGET, cssWidth, cssHeight, devicePixelRatio);
-  }
-
-  /**
-   * Adds a display target: a second canvas showing the same document.
-   *
-   * The target shares the renderer's document, layer surfaces and stroke
-   * buffer, so a second view of the canvas costs a projection of the pixels
-   * that are already rasterized rather than a second copy of them.
-   */
-  addDisplayTarget(options: DisplayTargetOptions): void {
     if (this.destroyed) {
       return;
     }
-    const ctx = options.canvas.getContext("2d");
-    if (!ctx) {
-      throw new Error("Canvas 2D rendering is not available in this environment.");
-    }
-    const existing = this.targets.get(options.id);
-    const target: DisplayTarget = {
-      id: options.id,
-      canvas: options.canvas,
-      ctx,
-      viewport: options.viewport,
-      devicePixelRatio: existing?.devicePixelRatio ?? 1,
-    };
-    this.targets.set(options.id, target);
-    this.requestFrame();
-  }
-
-  /**
-   * Removes a display target.
-   *
-   * The document, the layer surfaces and the history are untouched: a closed
-   * view takes nothing away from the document it was showing, and the other
-   * views keep working.
-   */
-  removeDisplayTarget(id: string): void {
-    if (!this.targets.delete(id)) {
-      return;
-    }
-    this.requestFrame();
-  }
-
-  /** Sets the view transform of one display target. */
-  setDisplayTargetViewport(id: string, viewport: Viewport): void {
-    const target = this.targets.get(id);
-    if (!target) {
-      return;
-    }
-    target.viewport = viewport;
-    this.requestFrame();
-  }
-
-  /** Sets the CSS size and device pixel ratio of one display target. */
-  setDisplayTargetSize(
-    id: string,
-    cssWidth: number,
-    cssHeight: number,
-    devicePixelRatio: number,
-  ): void {
-    if (this.destroyed) {
-      return;
-    }
-    const target = this.targets.get(id);
-    if (!target) {
-      return;
-    }
-    target.devicePixelRatio = devicePixelRatio > 0 ? devicePixelRatio : 1;
-    resizeCanvas(
-      target.canvas,
-      cssWidth * target.devicePixelRatio,
-      cssHeight * target.devicePixelRatio,
-    );
+    this.devicePixelRatio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+    resizeCanvas(this.canvas, cssWidth * this.devicePixelRatio, cssHeight * this.devicePixelRatio);
     this.requestFrame();
   }
 
@@ -584,6 +409,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
       this.abandonStroke();
     }
     this.dropPreviewSurface();
+    this.groupSurfaces.length = 0;
     this.requestFrame();
   }
 
@@ -744,21 +570,6 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
-   * Sets the gradient overlay - the handles and the line of the selected
-   * gradient - or clears it with `null`.
-   *
-   * Overlay only: it is drawn on the display canvas above the layers and never
-   * reaches a layer surface, the document or `composeDocumentImage`.
-   */
-  setGradientOverlay(overlay: RendererGradientOverlay | null): void {
-    if (this.destroyed) {
-      return;
-    }
-    this.gradientOverlay = overlay;
-    this.requestFrame();
-  }
-
-  /**
    * Marks a guide as the selected one, or clears the selection.
    *
    * Overlay only: the selected guide is drawn in the selection accent on the
@@ -773,34 +584,27 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
-   * Sets the ruler display settings.
+   * Sets the decoded pictures of the document's references.
    *
-   * Display only, like the grid: the strips are painted on the display canvas
-   * and never reach a layer surface or `composeDocumentImage`, so an export is
-   * identical whether the rulers were shown or not.
+   * Display only, like the guides: the pictures are drawn on the display
+   * canvas, never into a layer surface, and `composeDocumentImage` never asks
+   * for them. The map is replaced rather than mutated, so a stale entry cannot
+   * outlive the reference it belonged to.
    */
-  setRulers(rulers: RulerSettings): void {
-    if (this.destroyed || rulers.visible === this.rulers.visible) {
-      return;
-    }
-    this.rulers = rulers;
-    this.requestFrame();
-  }
-
-  /**
-   * Sets the symmetry the in-progress stroke is repeated around.
-   *
-   * The symmetry has two jobs here, and both are display-only: the overlay
-   * shows the axes and the centre marker, and the in-progress stroke is
-   * painted once per copy so the user sees the symmetric result *while* they
-   * draw. The copies themselves are ordinary strokes the engine commits to the
-   * layer, so nothing here reaches a layer surface or an export.
-   */
-  setSymmetry(symmetry: SymmetrySettings): void {
+  setReferenceSources(sources: ReadonlyMap<string, CanvasImageSource>): void {
     if (this.destroyed) {
       return;
     }
-    this.symmetry = symmetry;
+    this.referenceSources = sources;
+    this.requestFrame();
+  }
+
+  /** Frames a reference on the canvas, or clears the frame with `null`. */
+  setSelectedReference(referenceId: string | null): void {
+    if (this.destroyed || referenceId === this.selectedReferenceId) {
+      return;
+    }
+    this.selectedReferenceId = referenceId;
     this.requestFrame();
   }
 
@@ -822,45 +626,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
-  /**
-   * Sets the reference overlay - the images the artist keeps beside the
-   * canvas - or clears it with `null`.
-   *
-   * Overlay only, like the selection: the references are painted on the
-   * display canvas and never reach a layer surface, the document or
-   * `composeDocumentImage`, so an export is identical whether a reference was
-   * shown or not.
-   */
-  setReferenceOverlay(overlay: ReferenceOverlay | null): void {
-    if (this.destroyed) {
-      return;
-    }
-    this.referenceOverlay = overlay;
-    this.requestFrame();
-  }
-
-  /**
-   * Paints every display target.
-   *
-   * One document, several windows: each target is painted from the same
-   * surfaces and the same in-progress stroke, through its own view transform.
-   * A target that is not attached (a closed view) is simply not in the map,
-   * so there is nothing to clean up beyond dropping the target itself.
-   */
   render(): void {
     if (this.destroyed) {
       return;
     }
-    for (const target of this.targets.values()) {
-      this.renderTarget(target);
-    }
-  }
 
-  /** Paints one display target. */
-  private renderTarget(target: DisplayTarget): void {
-    const { ctx, canvas } = target;
-    const pixelWidth = canvas.width;
-    const pixelHeight = canvas.height;
+    const ctx = this.ctx;
+    const pixelWidth = this.canvas.width;
+    const pixelHeight = this.canvas.height;
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
@@ -872,55 +645,76 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
 
-    const { viewport, devicePixelRatio } = target;
+    const { viewport, devicePixelRatio } = this;
     const scale = devicePixelRatio * viewport.zoom;
-    // The whole view is one affine: zoom, rotation and the mirror. The
-    // transform maps document coordinates to device pixels, so the device pixel
-    // ratio multiplies every term. Its scale stays uniform, which is why the
-    // hairline widths below (`1 / scale`) are still one device pixel.
-    const matrix = viewMatrix(viewport);
     ctx.setTransform(
-      withoutNegativeZero(matrix.a * devicePixelRatio),
-      withoutNegativeZero(matrix.b * devicePixelRatio),
-      withoutNegativeZero(matrix.c * devicePixelRatio),
-      withoutNegativeZero(matrix.d * devicePixelRatio),
-      withoutNegativeZero(viewport.offsetX * devicePixelRatio),
-      withoutNegativeZero(viewport.offsetY * devicePixelRatio),
+      scale,
+      0,
+      0,
+      scale,
+      viewport.offsetX * devicePixelRatio,
+      viewport.offsetY * devicePixelRatio,
     );
 
-    this.paintDocument(ctx, this.activeStroke?.erase === true ? null : this.activeStroke);
+    this.paintOverlays(ctx, "under", scale);
 
-    this.paintGrid(ctx, scale, target);
+    this.paintDocument(
+      ctx,
+      this.activeStroke?.erase === true ? null : this.activeStroke,
+      true,
+    );
 
-    this.paintGuides(ctx, scale, target);
+    this.paintGrid(ctx, scale);
 
-    // The guide's own label, in screen space so it keeps its size at any
-    // zoom. It is painted with the guides it belongs to.
-    this.paintGuideLabels(ctx, target);
-
-    this.paintSymmetry(ctx, scale, target);
-
-    // The references belong to the workspace the artist works in, which is the
-    // primary target; a second view of the document is another window onto the
-    // artwork, not another place to keep a reference.
-    if (target.id === PRIMARY_DISPLAY_TARGET) {
-      this.paintReferences(ctx, target);
-    }
+    this.paintGuides(ctx, scale);
 
     this.paintSelection(ctx, scale);
 
-    this.paintGradientOverlay(ctx, scale);
+    this.paintReferenceSelection(ctx, scale);
 
     // Hairline document boundary: exactly one device pixel at any zoom.
     ctx.lineWidth = 1 / scale;
     ctx.strokeStyle = DOCUMENT_BORDER_COLOR;
     ctx.strokeRect(0, 0, doc.width, doc.height);
 
-    // The symmetry centre and the ruler strips are the outermost chrome: they
-    // belong to the workspace rather than to the view of the paper.
-    this.paintSymmetryCenter(ctx, target);
+    this.paintOverlays(ctx, "over", scale);
+  }
 
-    this.paintRulers(ctx, target);
+  /**
+   * Paints the registered overlays for one layer.
+   *
+   * The registry is the list of chrome that is not the document: a module
+   * registers an overlay and the renderer paints it here, so a new overlay
+   * needs no new line in this paint sequence. The overlays are display only by
+   * construction - they are handed the display context and nothing else, so
+   * they cannot reach a layer surface or `composeDocumentImage`, and an export
+   * is identical whether they are on or off.
+   */
+  private paintOverlays(
+    ctx: CanvasRenderingContext2D,
+    layer: "under" | "over",
+    scale: number,
+  ): void {
+    const doc = this.doc;
+    if (!doc) {
+      return;
+    }
+    const overlays = overlaysForLayer(layer);
+    if (overlays.length === 0) {
+      return;
+    }
+    const context: OverlayPaintContext = {
+      ctx,
+      viewport: this.viewport,
+      documentWidth: doc.width,
+      documentHeight: doc.height,
+      scale,
+      selectionBounds: this.selection?.bounds ?? null,
+      devicePixelRatio: this.devicePixelRatio,
+    };
+    for (const overlay of overlays) {
+      overlay.paint?.(context);
+    }
   }
 
   /**
@@ -935,7 +729,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * Nothing here reaches a layer surface or `composeDocumentImage`, so a PNG
    * export is byte-identical whether the grid was shown or not.
    */
-  private paintGrid(ctx: CanvasRenderingContext2D, scale: number, target: DisplayTarget): void {
+  private paintGrid(ctx: CanvasRenderingContext2D, scale: number): void {
     const doc = this.doc;
     if (!doc || !this.grid.visible) {
       return;
@@ -948,13 +742,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
       return;
     }
 
-    const viewWidth = target.canvas.width / target.devicePixelRatio;
-    const viewHeight = target.canvas.height / target.devicePixelRatio;
-    const visible = visibleDocumentRect(target.viewport, viewWidth, viewHeight);
-    const left = visible.left;
-    const top = visible.top;
-    const right = visible.right;
-    const bottom = visible.bottom;
+    const { zoom, offsetX, offsetY } = this.viewport;
+    const viewWidth = this.canvas.width / this.devicePixelRatio;
+    const viewHeight = this.canvas.height / this.devicePixelRatio;
+    const left = 0 - offsetX / zoom;
+    const top = 0 - offsetY / zoom;
+    const right = left + viewWidth / zoom;
+    const bottom = top + viewHeight / zoom;
 
     // The visible part of the paper, which is all the grid covers.
     const startX = Math.max(0, left);
@@ -1002,22 +796,22 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * byte-identical to one without. The selected guide is drawn in the
    * selection accent, so it is told apart from the others at a glance.
    */
-  private paintGuides(ctx: CanvasRenderingContext2D, scale: number, target: DisplayTarget): void {
+  private paintGuides(ctx: CanvasRenderingContext2D, scale: number): void {
     const doc = this.doc;
     if (!doc || doc.guides.length === 0) {
       return;
     }
 
-    const viewWidth = target.canvas.width / target.devicePixelRatio;
-    const viewHeight = target.canvas.height / target.devicePixelRatio;
-    // The viewport in document space: what the user can see right now. A
-    // rotated or mirrored view shows a rectangle that is not a rectangle in
-    // document space, so this is the bounding box of the visible area.
-    const visible = visibleDocumentRect(target.viewport, viewWidth, viewHeight);
-    const left = visible.left;
-    const top = visible.top;
-    const right = visible.right;
-    const bottom = visible.bottom;
+    const { zoom, offsetX, offsetY } = this.viewport;
+    const viewWidth = this.canvas.width / this.devicePixelRatio;
+    const viewHeight = this.canvas.height / this.devicePixelRatio;
+    // The viewport in document space: what the user can see right now. The
+    // subtraction is written as `0 - x` so an edge at the origin is `+0`
+    // rather than the `-0` a plain negation would produce.
+    const left = 0 - offsetX / zoom;
+    const top = 0 - offsetY / zoom;
+    const right = left + viewWidth / zoom;
+    const bottom = top + viewHeight / zoom;
 
     ctx.globalAlpha = 1;
     ctx.lineWidth = 1 / scale;
@@ -1037,322 +831,6 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
-   * Draws the reference images over the workspace.
-   *
-   * A reference lives in **workspace space**: its rectangle is in the canvas'
-   * own CSS pixels, not in document pixels, so it stays where the artist put
-   * it while the artwork is zoomed and panned underneath. The canvas transform
-   * at this point maps *document* space to device pixels, so the reference is
-   * drawn with the transform replaced by the device pixel ratio alone - the
-   * one affine that maps CSS pixels to device pixels.
-   *
-   * The images are drawn over the artwork, because the paper is opaque: a
-   * reference *under* the paper would never be seen. The selection overlay is
-   * painted after this, so the handles of a selected stroke stay readable over
-   * a reference.
-   *
-   * Nothing here reaches a layer surface or `composeDocumentImage`, so a PNG
-   * export is byte-identical whether a reference was shown or not.
-   */
-  private paintReferences(ctx: CanvasRenderingContext2D, target: DisplayTarget): void {
-    const overlay = this.referenceOverlay;
-    if (!overlay || overlay.items.length === 0) {
-      return;
-    }
-
-    const dpr = target.devicePixelRatio;
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-
-    for (const item of overlay.items) {
-      const reference = item.reference;
-      if (!reference.visible || reference.opacity <= 0) {
-        continue;
-      }
-      ctx.globalAlpha = reference.opacity;
-      ctx.drawImage(
-        item.source,
-        reference.x,
-        reference.y,
-        reference.width,
-        reference.height,
-      );
-    }
-
-    ctx.globalAlpha = 1;
-
-    // The frame of the selected reference, and the outline of the one under the
-    // pointer. They are the feedback that tells the artist which image a press
-    // would sample.
-    for (const item of overlay.items) {
-      const reference = item.reference;
-      if (!reference.visible) {
-        continue;
-      }
-      const selected = reference.id === overlay.selectedId;
-      const hovered = reference.id === overlay.hoveredId;
-      if (!selected && !hovered) {
-        continue;
-      }
-      ctx.strokeStyle = selected ? REFERENCE_COLOR : REFERENCE_HOVER_COLOR;
-      ctx.lineWidth = 1 / dpr;
-      ctx.setLineDash(selected ? [4 / dpr, 3 / dpr] : []);
-      ctx.strokeRect(reference.x, reference.y, reference.width, reference.height);
-      ctx.setLineDash([]);
-    }
-
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
-
-  /**
-   * Draws each guide's coordinate next to the edge it is anchored to.
-   *
-   * A guide is a registration mark, and a registration mark is only useful if
-   * the user can read where it sits: the label shows the guide's position in
-   * document pixels, so the same guide is read the same way at every zoom.
-   *
-   * The labels are **screen space**: they keep their size whatever the zoom,
-   * and they sit just inside the canvas edge, clear of the ruler strips when
-   * those are shown.
-   */
-  private paintGuideLabels(ctx: CanvasRenderingContext2D, target: DisplayTarget): void {
-    const doc = this.doc;
-    if (!doc || doc.guides.length === 0) {
-      return;
-    }
-    const dpr = target.devicePixelRatio;
-    const width = target.canvas.width / dpr;
-    const height = target.canvas.height / dpr;
-    const { zoom, offsetX, offsetY } = target.viewport;
-    const top = this.rulers.visible ? RULER_SIZE_PX : 0;
-    const left = this.rulers.visible ? RULER_LEFT_SIZE_PX : 0;
-
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.font = GUIDE_LABEL_FONT;
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-
-    for (const guide of doc.guides) {
-      const text = String(guide.position);
-      if (guide.axis === "vertical") {
-        const x = guide.position * zoom + offsetX;
-        if (x < 0 || x > width) {
-          continue;
-        }
-        ctx.textAlign = "center";
-        this.drawLabelChip(ctx, x, top + 3, text, guide.id === this.selectedGuideId ? SELECTION_COLOR : GUIDE_LABEL_COLOR);
-      } else {
-        const y = guide.position * zoom + offsetY;
-        if (y < 0 || y > height) {
-          continue;
-        }
-        ctx.textAlign = "left";
-        this.drawLabelChip(ctx, left + 3, y + 3, text, guide.id === this.selectedGuideId ? SELECTION_COLOR : GUIDE_LABEL_COLOR);
-      }
-    }
-    ctx.restore();
-  }
-
-  /**
-   * Draws a small chip of text with a background behind it.
-   *
-   * The background is what makes a label readable over dark ink as well as
-   * over paper, and it is drawn in the current transform - screen space for
-   * the guide and symmetry labels.
-   */
-  private drawLabelChip(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    text: string,
-    color: string,
-  ): void {
-    const metrics = ctx.measureText(text);
-    const width = Math.max(1, metrics.width);
-    ctx.fillStyle = GUIDE_LABEL_BACKGROUND;
-    ctx.fillRect(x - width / 2 - 2, y - 1, width + 4, 12);
-    ctx.fillStyle = color;
-    ctx.fillText(text, x, y);
-  }
-
-  /**
-   * Draws the symmetry axes over the artwork.
-   *
-   * The axes are the lines the copies are mirrored or turned about, drawn
-   * across the whole viewport like a guide: they are a registration aid, not
-   * a mark on the paper, so they stay visible while the paper is panned away.
-   *
-   * They are overlay only: the display canvas only, never a layer surface and
-   * never an export.
-   */
-  private paintSymmetry(ctx: CanvasRenderingContext2D, scale: number, target: DisplayTarget): void {
-    const axes = symmetryAxes(this.symmetry);
-    if (axes.length === 0) {
-      return;
-    }
-    const viewWidth = target.canvas.width / target.devicePixelRatio;
-    const viewHeight = target.canvas.height / target.devicePixelRatio;
-    const visible = visibleDocumentRect(target.viewport, viewWidth, viewHeight);
-    const { x: cx, y: cy } = this.symmetry.center;
-
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = SYMMETRY_COLOR;
-    ctx.lineWidth = 1 / scale;
-    ctx.beginPath();
-    for (const angle of axes) {
-      const dx = Math.cos(angle);
-      const dy = Math.sin(angle);
-      let reach = Number.POSITIVE_INFINITY;
-      if (dx > 0) {
-        reach = Math.min(reach, (visible.right - cx) / dx);
-      } else if (dx < 0) {
-        reach = Math.min(reach, (visible.left - cx) / dx);
-      }
-      if (dy > 0) {
-        reach = Math.min(reach, (visible.bottom - cy) / dy);
-      } else if (dy < 0) {
-        reach = Math.min(reach, (visible.top - cy) / dy);
-      }
-      if (!Number.isFinite(reach)) {
-        reach = 0;
-      }
-      ctx.moveTo(cx - dx * reach, cy - dy * reach);
-      ctx.lineTo(cx + dx * reach, cy + dy * reach);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  /**
-   * Draws the symmetry centre marker.
-   *
-   * The marker is the one handle the symmetry has: the user grabs it to move
-   * the centre, so it is drawn in the selection accent and in **screen
-   * space**, which keeps it the same size at every zoom.
-   */
-  private paintSymmetryCenter(ctx: CanvasRenderingContext2D, target: DisplayTarget): void {
-    if (!this.symmetry.enabled) {
-      return;
-    }
-    const dpr = target.devicePixelRatio;
-    const { zoom, offsetX, offsetY } = target.viewport;
-    const x = this.symmetry.center.x * zoom + offsetX;
-    const y = this.symmetry.center.y * zoom + offsetY;
-
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.strokeStyle = SYMMETRY_CENTER_COLOR;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(x, y, SYMMETRY_CENTER_RADIUS_PX, 0, Math.PI * 2);
-    ctx.moveTo(x - SYMMETRY_CENTER_RADIUS_PX - 3, y);
-    ctx.lineTo(x + SYMMETRY_CENTER_RADIUS_PX + 3, y);
-    ctx.moveTo(x, y - SYMMETRY_CENTER_RADIUS_PX - 3);
-    ctx.lineTo(x, y + SYMMETRY_CENTER_RADIUS_PX + 3);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  /**
-   * Draws the ruler strips along the top and the left of the canvas.
-   *
-   * The strips are the workspace's own furniture: they are drawn in **screen
-   * space**, on top of everything else, because they measure the view rather
-   * than the paper. Their ticks are document coordinates, so they pan and zoom
-   * with the paper, and the step between two labelled ticks is chosen from the
-   * live zoom so the numbers stay readable.
-   *
-   * The rulers are overlay only: they never reach a layer surface, the
-   * document or a PNG export.
-   */
-  private paintRulers(ctx: CanvasRenderingContext2D, target: DisplayTarget): void {
-    if (!this.rulers.visible) {
-      return;
-    }
-    const dpr = target.devicePixelRatio;
-    const width = target.canvas.width / dpr;
-    const height = target.canvas.height / dpr;
-    if (width <= 0 || height <= 0) {
-      return;
-    }
-    const { zoom, offsetX, offsetY } = target.viewport;
-    const step = rulerStep(zoom);
-    const minor = rulerMinorStep(step);
-
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.font = RULER_FONT;
-    ctx.textBaseline = "middle";
-
-    // The strips themselves.
-    ctx.fillStyle = RULER_BACKGROUND_COLOR;
-    ctx.fillRect(0, 0, width, RULER_SIZE_PX);
-    ctx.fillRect(0, 0, RULER_LEFT_SIZE_PX, height);
-    ctx.strokeStyle = RULER_BORDER_COLOR;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, RULER_SIZE_PX + 0.5);
-    ctx.lineTo(width, RULER_SIZE_PX + 0.5);
-    ctx.moveTo(RULER_LEFT_SIZE_PX + 0.5, 0);
-    ctx.lineTo(RULER_LEFT_SIZE_PX + 0.5, height);
-    ctx.stroke();
-
-    // The document range the strips cover.
-    const fromX = (0 - offsetX) / zoom;
-    const toX = (width - offsetX) / zoom;
-    const fromY = (0 - offsetY) / zoom;
-    const toY = (height - offsetY) / zoom;
-
-    ctx.strokeStyle = RULER_TICK_COLOR;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    if (minor > 0) {
-      for (const tick of rulerTicks(fromX, toX, minor)) {
-        const x = Math.round(tick * zoom + offsetX) + 0.5;
-        ctx.moveTo(x, RULER_SIZE_PX - 4);
-        ctx.lineTo(x, RULER_SIZE_PX);
-      }
-      for (const tick of rulerTicks(fromY, toY, minor)) {
-        const y = Math.round(tick * zoom + offsetY) + 0.5;
-        ctx.moveTo(RULER_LEFT_SIZE_PX - 4, y);
-        ctx.lineTo(RULER_LEFT_SIZE_PX, y);
-      }
-    }
-    ctx.stroke();
-
-    // The labelled ticks: a longer mark and the coordinate.
-    ctx.strokeStyle = RULER_LABEL_COLOR;
-    ctx.beginPath();
-    ctx.fillStyle = RULER_LABEL_COLOR;
-    for (const tick of rulerTicks(fromX, toX, step)) {
-      const x = Math.round(tick * zoom + offsetX) + 0.5;
-      ctx.moveTo(x, RULER_SIZE_PX - 8);
-      ctx.lineTo(x, RULER_SIZE_PX);
-      ctx.textAlign = "center";
-      ctx.fillText(formatRulerLabel(tick), x, RULER_SIZE_PX / 2 - 2);
-    }
-    for (const tick of rulerTicks(fromY, toY, step)) {
-      const y = Math.round(tick * zoom + offsetY) + 0.5;
-      ctx.moveTo(RULER_LEFT_SIZE_PX - 8, y);
-      ctx.lineTo(RULER_LEFT_SIZE_PX, y);
-      ctx.textAlign = "right";
-      ctx.fillText(formatRulerLabel(tick), RULER_LEFT_SIZE_PX - 3, y);
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-   /**
    * Draws the selection overlay: the selected strokes traced in the accent
    * colour, then the rubber-band rectangle and the transform handles.
    *
@@ -1393,6 +871,54 @@ export class Canvas2DRenderer implements DrawingRenderer {
         }
         ctx.stroke();
       }
+    }
+
+    const path = selection.path;
+    if (path && path.length >= 2) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
+      ctx.beginPath();
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let index = 1; index < path.length; index += 1) {
+        ctx.lineTo(path[index].x, path[index].y);
+      }
+      // The lasso closes implicitly: the region it selects is the closed path.
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const frame = selection.frame;
+    if (frame && frame.length >= 2) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1 / scale;
+      ctx.setLineDash([SELECTION_MARQUEE_DASH[0] / scale, SELECTION_MARQUEE_DASH[1] / scale]);
+      ctx.beginPath();
+      ctx.moveTo(frame[0].x, frame[0].y);
+      for (let index = 1; index < frame.length; index += 1) {
+        ctx.lineTo(frame[index].x, frame[index].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const outline = selection.outline;
+    if (outline && outline.length >= 2) {
+      ctx.globalAlpha = SELECTION_TRACE_ALPHA;
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = SELECTION_TRACE_WIDTH / scale;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(outline[0].x, outline[0].y);
+      for (let index = 1; index < outline.length; index += 1) {
+        ctx.lineTo(outline[index].x, outline[index].y);
+      }
+      ctx.stroke();
     }
 
     const bounds = selection.bounds;
@@ -1457,66 +983,6 @@ export class Canvas2DRenderer implements DrawingRenderer {
   }
 
   /**
-   * Draws the gradient overlay: the line of the gradient's geometry and the
-   * two handles that move it.
-   *
-   * A linear gradient draws its axis, from the start handle to the end
-   * handle. A radial one draws the **circle** its radius makes, plus the
-   * radius line from the centre to the radius handle, so the two handles read
-   * as "the centre" and "the edge".
-   *
-   * Overlay only, like the selection handles: the positions are in document
-   * space, so the handles sit on the gradient's own points, and the sizes are
-   * in screen pixels, so they stay the same size at any zoom. Nothing here
-   * reaches a layer surface or `composeDocumentImage`, so an export of a
-   * document with a gradient selected is byte-identical to one without.
-   */
-  private paintGradientOverlay(ctx: CanvasRenderingContext2D, scale: number): void {
-    const overlay = this.gradientOverlay;
-    if (!overlay) {
-      return;
-    }
-
-    const size = HANDLE_SIZE_PX / scale;
-    const half = size / 2;
-
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = GRADIENT_COLOR;
-    ctx.fillStyle = HANDLE_FILL_COLOR;
-    ctx.lineWidth = 1 / scale;
-    ctx.setLineDash([]);
-
-    // The geometry itself: the axis of a linear gradient, the radius line and
-    // the circle of a radial one.
-    ctx.beginPath();
-    ctx.moveTo(overlay.start.x, overlay.start.y);
-    ctx.lineTo(overlay.end.x, overlay.end.y);
-    ctx.stroke();
-
-    if (overlay.type === "radial") {
-      const radius = Math.hypot(
-        overlay.end.x - overlay.start.x,
-        overlay.end.y - overlay.start.y,
-      );
-      ctx.beginPath();
-      ctx.arc(overlay.start.x, overlay.start.y, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // The handles. The one being dragged is filled with the accent, so the
-    // user can see which end of the geometry they are holding.
-    for (const [index, point] of [overlay.start, overlay.end].entries()) {
-      const active = overlay.activeHandle === (index === 0 ? "start" : "end");
-      ctx.fillStyle = active ? GRADIENT_COLOR : HANDLE_FILL_COLOR;
-      ctx.fillRect(point.x - half, point.y - half, size, size);
-      ctx.strokeRect(point.x - half, point.y - half, size, size);
-    }
-
-    ctx.fillStyle = HANDLE_FILL_COLOR;
-    ctx.globalAlpha = 1;
-  }
-
-  /**
    * Composites the document - paper plus every visible layer - into a fresh
    * canvas at document pixel size.
    *
@@ -1525,11 +991,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * is exactly the document size regardless of `rasterScale`. The display
    * canvas and the document itself are untouched, which is what lets a PNG be
    * exported mid-session without altering what is being edited.
-   *
-   * `layerIds` narrows the composite to a set of layers, for the bucket's
-   * reference modes. `null` keeps every visible layer.
    */
-  composeDocumentImage(layerIds: readonly LayerId[] | null = null): HTMLCanvasElement {
+  composeDocumentImage(): HTMLCanvasElement {
     const canvas = document.createElement("canvas");
     const doc = this.doc;
 
@@ -1550,67 +1013,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
-    this.paintDocument(ctx, null, layerIds);
+    this.paintDocument(ctx);
 
-    return canvas;
-  }
-
-  /**
-   * Composites a small overview of the document.
-   *
-   * The overview is drawn from the *cached* layer surfaces, so it is a
-   * downscale of what is already on screen rather than a second rendering of
-   * the document. A layer whose pixels are stale is re-rasterized first, which
-   * is the same work the display would do anyway.
-   *
-   * The caller chooses the size, and is expected to pick one that matches the
-   * document's aspect ratio: the whole document is scaled into the canvas, so
-   * a mismatched size would stretch the picture.
-   */
-  renderOverview(maxWidth: number, maxHeight: number): HTMLCanvasElement | null {
-    const doc = this.doc;
-    if (this.destroyed || !doc) {
-      return null;
-    }
-
-    const width = Math.max(1, Math.round(maxWidth));
-    const height = Math.max(1, Math.round(maxHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return null;
-    }
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillStyle = doc.background;
-    ctx.fillRect(0, 0, width, height);
-
-    for (const layer of doc.layers) {
-      if (!isComposited(layer)) {
-        continue;
-      }
-      const surface = this.ensureRasterized(layer.id);
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
-      ctx.drawImage(
-        surface.canvas,
-        0,
-        0,
-        surface.canvas.width,
-        surface.canvas.height,
-        0,
-        0,
-        width,
-        height,
-      );
-    }
-
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
     return canvas;
   }
 
@@ -1643,17 +1047,14 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = doc.background;
     ctx.fillRect(0, 0, 1, 1);
 
-    const offsetX = -Math.floor(docX * this.rasterScale);
-    const offsetY = -Math.floor(docY * this.rasterScale);
-    for (const layer of doc.layers) {
-      if (!isComposited(layer)) {
-        continue;
-      }
-      const surface = this.ensureRasterized(layer.id);
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
-      ctx.drawImage(surface.canvas, offsetX, offsetY);
-    }
+    this.paintLayerNodes(ctx, doc.layers, {
+      preview: null,
+      depth: 0,
+      probeOffset: {
+        x: -Math.floor(docX * this.rasterScale),
+        y: -Math.floor(docY * this.rasterScale),
+      },
+    });
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
@@ -1666,19 +1067,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.requestFrame();
   }
 
-  /**
-   * Reads the whole composite at document resolution for the bucket fill.
-   *
-   * `options.layerIds` narrows the read to a set of layers, so the bucket can
-   * sample one layer instead of the merged picture. Hidden layers never
-   * contribute, whatever the list says.
-   */
-  readCompositeImage(options?: CompositeReadOptions): ImageData | null {
+  /** Reads the whole composite at document resolution for the bucket fill. */
+  readCompositeImage(): ImageData | null {
     const doc = this.doc;
     if (this.destroyed || !doc) {
       return null;
     }
-    const canvas = this.composeDocumentImage(options?.layerIds ?? null);
+    const canvas = this.composeDocumentImage();
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       return null;
@@ -1693,15 +1088,13 @@ export class Canvas2DRenderer implements DrawingRenderer {
     this.destroyed = true;
     this.scheduler.cancel();
     this.surfaces.dispose();
-    // Every canvas the renderer painted into is released with it: a closed
-    // view must not leave a target behind that would be painted again.
-    this.targets.clear();
     this.activeStroke = null;
     this.dropEraseBase();
     this.dropStampCoverage();
     this.probeCanvas = null;
     this.featherBuffer = null;
     this.previewSurface = null;
+    this.groupSurfaces.length = 0;
     this.stampUpload = null;
   }
 
@@ -1715,15 +1108,18 @@ export class Canvas2DRenderer implements DrawingRenderer {
    * strokes are not passed here: they are already subtracted from the layer
    * surface, which is what this loop composites. Export passes no preview, so
    * an in-flight stroke never leaks into a PNG.
-   *
-   * `layerIds` narrows the composite to a set of layers, which is how the
-   * bucket samples the active layer or one chosen layer instead of the merged
-   * picture. A hidden layer is skipped either way.
    */
   private paintDocument(
     ctx: CanvasRenderingContext2D,
     preview: StrokeRecord | null = null,
-    layerIds: readonly LayerId[] | null = null,
+    /**
+     * Whether the reference images are painted around the layers.
+     *
+     * Only `render()` passes `true`. The export path (`composeDocumentImage`)
+     * leaves it off, so a reference is excluded from a PNG **by construction**
+     * rather than by a flag someone has to remember to clear.
+     */
+    includeReferences = false,
   ): void {
     const doc = this.doc;
     if (!doc) {
@@ -1733,31 +1129,233 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.fillStyle = doc.background;
     ctx.fillRect(0, 0, doc.width, doc.height);
 
-    for (const layer of doc.layers) {
-      if (!isComposited(layer)) {
-        continue;
-      }
-      if (layerIds !== null && !layerIds.includes(layer.id)) {
-        continue;
-      }
-      const surface = this.ensureRasterized(layer.id);
-      const previewHere = preview !== null && preview.layerId === layer.id;
+    if (includeReferences) {
+      this.paintReferences(ctx, doc, true);
+    }
 
-      if (previewHere && (layer.opacity < 1 || layer.blendMode !== "normal")) {
+    this.paintLayerNodes(ctx, doc.layers, {
+      preview,
+      depth: 0,
+      probeOffset: null,
+    });
+
+    if (includeReferences) {
+      this.paintReferences(ctx, doc, false);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Paints the references on one side of the artwork.
+   *
+   * The paper clip is applied once for the whole pass: a reference may hang
+   * over the edge, but only the part on the paper is drawn. The placement is
+   * the model's rectangle, turned about its centre; the decoded picture is
+   * stretched into that rectangle exactly as it is on screen, so the reference
+   * sits over the same artwork at every zoom.
+   *
+   * This method is only reachable from `render()` (through the
+   * `includeReferences` flag), so it can never write into a layer surface or
+   * into the export composite.
+   */
+  private paintReferences(
+    ctx: CanvasRenderingContext2D,
+    doc: DrawingDocument,
+    behind: boolean,
+  ): void {
+    const items = doc.references.filter(
+      (reference) => reference.behind === behind && reference.visible,
+    );
+    if (items.length === 0) {
+      return;
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, doc.width, doc.height);
+    ctx.clip();
+    for (const reference of items) {
+      const source = this.referenceSources.get(reference.id);
+      if (!source) {
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = reference.opacity;
+      ctx.globalCompositeOperation = compositeOperationFor(reference.blendMode);
+      ctx.translate(reference.x + reference.width / 2, reference.y + reference.height / 2);
+      if (reference.rotation !== 0) {
+        ctx.rotate((reference.rotation * Math.PI) / 180);
+      }
+      ctx.drawImage(
+        source,
+        -reference.width / 2,
+        -reference.height / 2,
+        reference.width,
+        reference.height,
+      );
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /**
+   * Frames the selected reference: its rotated outline, a square on each
+   * corner and the rotation handle beyond the top edge.
+   *
+   * Overlay only, like the stroke selection: it is painted on the display
+   * canvas and never reaches a layer surface or an export.
+   */
+  private paintReferenceSelection(ctx: CanvasRenderingContext2D, scale: number): void {
+    const doc = this.doc;
+    const id = this.selectedReferenceId;
+    if (!doc || id === null) {
+      return;
+    }
+    const reference = doc.references.find((item) => item.id === id);
+    if (!reference) {
+      return;
+    }
+    // A hidden reference is not on the canvas, so it must not leave a frame
+    // and handles floating over the artwork either: the chrome follows the
+    // picture it belongs to.
+    if (!reference.visible) {
+      return;
+    }
+    const handles = referenceHandles(reference, this.viewport);
+    const size = HANDLE_SIZE_PX / scale;
+    const radius = ROTATION_HANDLE_RADIUS_PX / scale;
+    const corners = handles.corners;
+
+    ctx.save();
+    ctx.strokeStyle = SELECTION_COLOR;
+    ctx.fillStyle = HANDLE_FILL_COLOR;
+    ctx.lineWidth = 1 / scale;
+    ctx.setLineDash([]);
+
+    ctx.beginPath();
+    ctx.moveTo(corners[0].x, corners[0].y);
+    for (let index = 1; index < corners.length; index += 1) {
+      ctx.lineTo(corners[index].x, corners[index].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    const topMid = {
+      x: (corners[0].x + corners[1].x) / 2,
+      y: (corners[0].y + corners[1].y) / 2,
+    };
+    ctx.beginPath();
+    ctx.moveTo(topMid.x, topMid.y);
+    ctx.lineTo(handles.rotation.x, handles.rotation.y);
+    ctx.stroke();
+
+    for (const corner of corners) {
+      ctx.beginPath();
+      ctx.rect(corner.x - size / 2, corner.y - size / 2, size, size);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.arc(handles.rotation.x, handles.rotation.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * Paints a list of layer-tree nodes, depth-first and bottom-first.
+   *
+   * This is the one painter the display, the export, the colour probe and the
+   * bucket-fill composite read all use, so they cannot disagree about what a
+   * group means:
+   *
+   *  - a hidden node takes its whole subtree with it;
+   *  - a normal, fully opaque group is flattened into its parent (the common
+   *    case, and byte-identical to painting its children directly);
+   *  - a group with opacity < 1 or a non-normal blend is composited through
+   *    an isolated scratch surface, so its children blend with each other
+   *    before the group blends with the backdrop;
+   *  - a paintable layer draws its surface, and the in-flight preview in its
+   *    own slot when `preview` names it.
+   *
+   * `probeOffset` switches to the 1x1 colour-probe space: layer surfaces are
+   * drawn at that pixel offset and group scratches are 1x1 as well, so a
+   * sample reads exactly the pixel the composite would show.
+   */
+  private paintLayerNodes(
+    ctx: CanvasRenderingContext2D,
+    nodes: readonly Layer[],
+    options: {
+      readonly preview: StrokeRecord | null;
+      readonly depth: number;
+      readonly probeOffset: { readonly x: number; readonly y: number } | null;
+    },
+  ): void {
+    const doc = this.doc;
+    if (!doc) {
+      return;
+    }
+
+    for (const node of nodes) {
+      if (!isComposited(node)) {
+        continue;
+      }
+
+      if (node.kind === "group") {
+        const isolated = node.opacity < 1 || node.blendMode !== "normal";
+        if (!isolated) {
+          this.paintLayerNodes(ctx, node.children, options);
+          continue;
+        }
+        const scratch = this.beginGroupSurface(options.depth, options.probeOffset !== null);
+        if (!scratch) {
+          continue;
+        }
+        this.paintLayerNodes(scratch.ctx, node.children, {
+          ...options,
+          depth: options.depth + 1,
+        });
+        ctx.save();
+        ctx.globalAlpha = node.opacity;
+        ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
+        if (options.probeOffset) {
+          ctx.drawImage(scratch.canvas, 0, 0);
+        } else {
+          ctx.drawImage(scratch.canvas, 0, 0, doc.width, doc.height);
+        }
+        ctx.restore();
+        continue;
+      }
+
+      const surface = this.ensureRasterized(node.id);
+
+      if (options.probeOffset) {
+        ctx.globalAlpha = node.opacity;
+        ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
+        ctx.drawImage(surface.canvas, options.probeOffset.x, options.probeOffset.y);
+        continue;
+      }
+
+      const previewHere = options.preview !== null && options.preview.layerId === node.id;
+      if (previewHere && (node.opacity < 1 || node.blendMode !== "normal")) {
         // Group first, then apply the layer's opacity and blend once: the same
         // order a commit takes. A hidden or zero-opacity layer was skipped
         // above, so its preview is hidden with it.
-        const group = this.buildPreviewGroup(surface, preview);
+        const group = this.buildPreviewGroup(surface, options.preview as StrokeRecord);
         if (group) {
-          ctx.globalAlpha = layer.opacity;
-          ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+          ctx.globalAlpha = node.opacity;
+          ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
           ctx.drawImage(group, 0, 0, doc.width, doc.height);
           continue;
         }
       }
 
-      ctx.globalAlpha = layer.opacity;
-      ctx.globalCompositeOperation = compositeOperationFor(layer.blendMode);
+      ctx.globalAlpha = node.opacity;
+      ctx.globalCompositeOperation = compositeOperationFor(node.blendMode);
       ctx.drawImage(surface.canvas, 0, 0, doc.width, doc.height);
 
       if (previewHere) {
@@ -1767,14 +1365,53 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The buffer holds full coverage; the stroke's alpha is applied here,
         // once (and, for a soft brush, its edge is feathered once - never per
         // segment).
+        const preview = options.preview as StrokeRecord;
         ctx.globalAlpha = strokeOpacity(preview.brush, preview.pressures);
         ctx.globalCompositeOperation = "source-over";
-        this.paintSymmetricCoverage(ctx, preview);
+        this.paintStrokeCoverage(ctx, preview);
       }
     }
+  }
 
+  /**
+   * Clears and prepares the isolated scratch for a group at `depth`.
+   *
+   * One surface per nesting depth is enough: a group's children are painted
+   * before its surface is composited into the parent, so siblings reuse it.
+   * The probe uses a 1x1 surface and no transform; display and export use the
+   * same raster resolution as a layer surface.
+   */
+  private beginGroupSurface(
+    depth: number,
+    probe: boolean,
+  ): { readonly canvas: HTMLCanvasElement; readonly ctx: CanvasRenderingContext2D } | null {
+    const doc = this.doc;
+    if (!doc) {
+      return null;
+    }
+    let canvas = this.groupSurfaces[depth];
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      this.groupSurfaces[depth] = canvas;
+    }
+    resizeCanvas(
+      canvas,
+      probe ? 1 : doc.width * this.rasterScale,
+      probe ? 1 : doc.height * this.rasterScale,
+    );
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return null;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!probe) {
+      ctx.setTransform(this.rasterScale, 0, 0, this.rasterScale, 0, 0);
+    }
+    return { canvas, ctx };
   }
 
   /**
@@ -1809,37 +1446,10 @@ export class Canvas2DRenderer implements DrawingRenderer {
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.drawImage(surface.canvas, 0, 0, doc.width, doc.height);
     ctx.globalAlpha = strokeOpacity(stroke.brush, stroke.pressures);
-    this.paintSymmetricCoverage(ctx, stroke);
+    this.paintStrokeCoverage(ctx, stroke);
     ctx.globalAlpha = 1;
     ctx.filter = "none";
     return canvas;
-  }
-
-  /**
-   * Paints the in-progress stroke once per symmetry copy.
-   *
-   * The stroke the user is drawing is one of the copies, so it is painted
-   * first and unchanged; every other copy is the *same* coverage mapped
-   * through the symmetry's transform. Mapping the finished coverage rather
-   * than the samples is what keeps the preview honest: the mirror of a stroke
-   * is the mirror of its pixels, whether the brush is hard, soft or a chain of
-   * dabs.
-   *
-   * Each copy is painted with its own alpha, in the order the copies will be
-   * committed in, so the preview is the picture the release produces.
-   */
-  private paintSymmetricCoverage(ctx: CanvasRenderingContext2D, stroke: StrokeRecord): void {
-    this.paintStrokeCoverage(ctx, stroke);
-    const transforms = symmetryTransforms(this.symmetry);
-    for (let index = 1; index < transforms.length; index += 1) {
-      const transform = transforms[index];
-      ctx.save();
-      // The canvas transform is the document-to-device map, so multiplying the
-      // symmetry's matrix into it maps the copy in document space.
-      ctx.transform(transform.a, transform.b, transform.c, transform.d, transform.e, transform.f);
-      this.paintStrokeCoverage(ctx, stroke);
-      ctx.restore();
-    }
   }
 
   /** The group scratch, sized like a layer surface; allocated on first use. */
@@ -1903,11 +1513,15 @@ export class Canvas2DRenderer implements DrawingRenderer {
         this.rasterizeGradient(surface, element);
         continue;
       }
-      this.rasterizeStrokeToBuffer(element);
+      // A native shape is drawn by expanding it to the very outline the shape
+      // tool previewed and feeding that through the stroke rasterizer. There is
+      // one rasterizer, so a shape and a legacy baked shape cannot diverge.
+      const stroke = isShape(element) ? strokeFromShape(element) : element;
+      this.rasterizeStrokeToBuffer(stroke);
       this.compositeStrokeBuffer(
         surface,
-        element,
-        element.erase === true ? "destination-out" : "source-over",
+        stroke,
+        stroke.erase === true ? "destination-out" : "source-over",
       );
     }
     surface.dirty = false;
@@ -2050,6 +1664,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const scale = this.rasterScale;
     const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
     const strength = stroke.brush.stampTexture;
+    const tip = normalizeBrushTip(stroke.brush.tip);
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -2060,6 +1675,8 @@ export class Canvas2DRenderer implements DrawingRenderer {
         // The texture rides on the dab's own direction, so the live path and
         // the rebuild path lay the same lanes out over the same pixels.
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        // The tip rides on the same frame, for the same reason.
+        tipFrame(tip, dab.angle, dab.radius * scale),
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);
@@ -2085,6 +1702,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
     const scale = this.rasterScale;
     const laneWidth = stampTextureLaneWidth(stroke.brush, scale);
     const strength = stroke.brush.stampTexture;
+    const tip = normalizeBrushTip(stroke.brush.tip);
     let dirty: StampRect | null = null;
     for (const dab of dabs) {
       const rect = coverage.paintDab(
@@ -2093,6 +1711,7 @@ export class Canvas2DRenderer implements DrawingRenderer {
         dab.radius * scale,
         stroke.brush.stampHardness,
         strength > 0 ? { angle: dab.angle, laneWidth, strength } : null,
+        tipFrame(tip, dab.angle, dab.radius * scale),
       );
       if (rect) {
         dirty = unionStampRect(dirty, rect);

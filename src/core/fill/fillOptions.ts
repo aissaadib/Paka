@@ -1,146 +1,172 @@
 /**
- * Bucket-fill options.
+ * Bucket-fill options: the settings that describe the *next* fill.
  *
- * These are **editor state**: they describe the *next* fill, not the fills
- * that were committed. A committed fill stores its own pixels, so changing an
- * option never rewrites one, never adds a history step and never makes the
- * document dirty.
+ * These are **editor state**, not a drawing. A committed fill stores the
+ * pixels it painted (`FillPatchRecord`), so changing an option never rewrites
+ * one, never adds a history step and never makes the document dirty - the
+ * same contract the brush and the shape options follow. The options are read
+ * at press time, so a committed fill keeps the setting it was drawn with.
  *
- * Every option here is one the scanner actually implements - the options strip
- * must not offer a control the algorithm cannot honour.
+ * Every option here is one the scanner actually implements
+ * (`core/fill/fillScan.ts`). The options strip must never offer a control the
+ * algorithm cannot honour.
  *
  *  - `tolerance` - how far a pixel's colour may sit from the seed's and still
- *    count as "the same region", in 8-bit channel units.
- *  - `reference` - **what the region is measured against**: the merged visible
- *    composite, the active layer alone, or one chosen layer.
- *  - `expand` - grow (positive) or shrink (negative) the region, in document
- *    pixels.
- *  - `antialias` - soften the region's edge over N pixels, so a fill does not
- *    stair-step along a diagonal.
- *  - `closeGaps` - seal passages narrower than N pixels, so the fill cannot
- *    leak through a break in the line art.
+ *    count as "the same region", in 8-bit sRGB channel units (0-255). This is
+ *    the meaning the tolerance has always had and it is kept exactly.
+ *  - `mode` - **whether the region is contiguous**: the pixels reachable from
+ *    the seed without crossing a boundary, or every pixel in the image whose
+ *    colour matches the seed's.
+ *  - `sampleScale` - how finely the composite is sampled before the scan: one
+ *    in `sampleScale` document pixels is examined. `1` is the full resolution
+ *    and is the default, so the default fill is the fill the bucket has always
+ *    made.
+ *
+ * The values are validated the way every other untrusted value in the project
+ * is validated: a missing field takes its default, an out-of-range value is
+ * clamped into the supported range, and a malformed value takes its default.
  */
 
-import type { LayerId } from "../document/types";
 import { clamp } from "../../utils/math";
 
 /**
- * What the bucket measures its region against.
+ * Whether the region is the contiguous one around the seed or every match.
  *
- *  - `merged` - the paper plus **every visible layer**, at its opacity and
- *    blend mode. The default: the boundary is the one the user sees.
- *  - `active` - the paper plus the **active layer** alone. Line art on another
- *    layer no longer bounds the fill.
- *  - `layer` - the paper plus **one chosen layer**. The layer id is editor
- *    state and is never serialized: a layer belongs to a document, and the
- *    option has to survive a restart.
+ *  - `contiguous` - the pixels reachable from the seed without crossing a
+ *    colour boundary. This is what a bucket has always done.
+ *  - `global` - every pixel in the image whose colour matches the seed's,
+ *    wherever it is. Two shapes of the same flat colour are filled together.
  */
-export type FillReferenceMode = "merged" | "active" | "layer";
+export type FillMode = "contiguous" | "global";
 
-/** The reference modes, in the order the picker lists them. */
-export const FILL_REFERENCE_MODES: readonly FillReferenceMode[] = ["merged", "active", "layer"];
+/** The modes, in the order the picker lists them. */
+export const FILL_MODES: readonly FillMode[] = ["contiguous", "global"];
 
-/** Most the region may grow, in document pixels. */
-export const MAX_FILL_EXPAND = 32;
-/** Most the region may shrink, in document pixels (a negative `expand`). */
-export const MIN_FILL_EXPAND = -32;
-/** Widest soft edge the fill may draw, in document pixels. */
-export const MAX_FILL_ANTIALIAS = 8;
-/** Widest passage the gap closing may seal, in document pixels. */
-export const MAX_FILL_CLOSE_GAPS = 16;
+/** The default mode: the contiguous region around the seed. */
+export const DEFAULT_FILL_MODE: FillMode = "contiguous";
 
-/** The default reference: the merged visible composite. */
-export const DEFAULT_FILL_REFERENCE: FillReferenceMode = "merged";
-/** The default growth: none. */
-export const DEFAULT_FILL_EXPAND = 0;
-/** The default edge: hard. */
-export const DEFAULT_FILL_ANTIALIAS = 0;
-/** The default gap closing: off. */
-export const DEFAULT_FILL_CLOSE_GAPS = 0;
+/** The smallest tolerance: only an exactly equal colour matches. */
+export const MIN_FILL_TOLERANCE = 0;
+/** The largest tolerance: every 8-bit value matches every other one. */
+export const MAX_FILL_TOLERANCE = 255;
+/** The default tolerance, in 8-bit sRGB channel units. */
+export const DEFAULT_FILL_TOLERANCE = 24;
+
+/** The finest sampling: every document pixel is examined. */
+export const MIN_FILL_SAMPLE_SCALE = 1;
+/** The coarsest sampling: one document pixel in eight is examined. */
+export const MAX_FILL_SAMPLE_SCALE = 8;
+/**
+ * The sampling scales the scanner supports, finest first.
+ *
+ * Only powers of two: a halved scale is exactly a quarter of the pixels, so
+ * the cost of a scan falls in known steps and the sampled grid stays aligned
+ * with the document's own pixel grid.
+ */
+export const FILL_SAMPLE_SCALES: readonly number[] = [1, 2, 4, 8];
+/** The default sampling: the full resolution. */
+export const DEFAULT_FILL_SAMPLE_SCALE = 1;
 
 /**
  * The bucket's options for the next fill.
  *
- * `referenceLayerId` is only read in the `layer` mode; `null` there means the
- * active layer is sampled instead, so a restored preference never points at a
- * layer that does not exist.
+ * Every field is a plain value: the options travel through the engine's
+ * snapshot, the settings file and the options bar without any of them
+ * knowing about the others.
  */
 export interface FillOptions {
+  /** The colour distance, in 8-bit sRGB channel units (0-255). */
   readonly tolerance: number;
-  readonly reference: FillReferenceMode;
-  readonly referenceLayerId: LayerId | null;
-  readonly expand: number;
-  readonly antialias: number;
-  readonly closeGaps: number;
+  /** Whether the region is the contiguous one or every match. */
+  readonly mode: FillMode;
+  /** One in `sampleScale` document pixels is examined by the scan. */
+  readonly sampleScale: number;
 }
 
 /** The options a fresh editor starts with. */
-export const DEFAULT_FILL_OPTIONS: FillOptions = {
-  tolerance: 24,
-  reference: DEFAULT_FILL_REFERENCE,
-  referenceLayerId: null,
-  expand: DEFAULT_FILL_EXPAND,
-  antialias: DEFAULT_FILL_ANTIALIAS,
-  closeGaps: DEFAULT_FILL_CLOSE_GAPS,
-};
+export const DEFAULT_FILL_OPTIONS: FillOptions = Object.freeze({
+  tolerance: DEFAULT_FILL_TOLERANCE,
+  mode: DEFAULT_FILL_MODE,
+  sampleScale: DEFAULT_FILL_SAMPLE_SCALE,
+});
 
-/** The reference mode, or the default when the value is not one. */
-export function normalizeFillReference(value: unknown): FillReferenceMode {
-  return FILL_REFERENCE_MODES.includes(value as FillReferenceMode)
-    ? (value as FillReferenceMode)
-    : DEFAULT_FILL_REFERENCE;
-}
-
-/** The growth, clamped to the supported range and rounded to whole pixels. */
-export function normalizeFillExpand(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_FILL_EXPAND;
-  }
-  return Math.round(clamp(value, MIN_FILL_EXPAND, MAX_FILL_EXPAND));
-}
-
-/** The soft edge width, clamped to the supported range. */
-export function normalizeFillAntialias(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_FILL_ANTIALIAS;
-  }
-  return Math.round(clamp(value, 0, MAX_FILL_ANTIALIAS));
-}
-
-/** The gap-closing width, clamped to the supported range. */
-export function normalizeFillCloseGaps(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_FILL_CLOSE_GAPS;
-  }
-  return Math.round(clamp(value, 0, MAX_FILL_CLOSE_GAPS));
-}
-
-/** The tolerance, clamped to the 8-bit channel range. */
-export function normalizeFillTolerance(value: unknown): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_FILL_OPTIONS.tolerance;
-  }
-  return Math.round(clamp(value, 0, 255));
+/**
+ * The mode, or the default when the value is not one.
+ *
+ * A mode is a name, not a number: an unknown name is malformed input, so it
+ * falls back to the default rather than being clamped towards it.
+ */
+export function normalizeFillMode(value: unknown): FillMode {
+  return FILL_MODES.includes(value as FillMode)
+    ? (value as FillMode)
+    : DEFAULT_FILL_MODE;
 }
 
 /**
- * The layer a reference mode samples.
+ * The tolerance, in 8-bit sRGB channel units.
  *
- * `merged` samples every visible layer, so it has no single layer; `active`
- * samples the active layer; `layer` samples the chosen one and falls back to
- * the active layer when nothing is chosen yet.
+ * A malformed value takes the default. A value outside the channel range is
+ * clamped into it: the engine's own setter has always clamped, and a
+ * tolerance of 999 means "as loose as the format allows", not "the default".
  */
-export function fillReferenceLayers(
-  mode: FillReferenceMode,
-  activeLayerId: LayerId | null,
-  chosenLayerId: LayerId | null,
-): readonly LayerId[] | null {
-  if (mode === "merged") {
-    return null;
+export function normalizeFillTolerance(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_FILL_TOLERANCE;
   }
-  if (mode === "active") {
-    return activeLayerId ? [activeLayerId] : [];
+  return Math.round(clamp(value, MIN_FILL_TOLERANCE, MAX_FILL_TOLERANCE));
+}
+
+/**
+ * The sampling scale, snapped to a supported one.
+ *
+ * A malformed value takes the default. A number outside the supported range
+ * is clamped into it, and a number that is not a supported scale is rounded
+ * **down** to the next one that is - so the scan is never coarser than the
+ * request, only ever finer.
+ */
+export function normalizeFillSampleScale(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_FILL_SAMPLE_SCALE;
   }
-  const chosen = chosenLayerId ?? activeLayerId;
-  return chosen ? [chosen] : [];
+  const wanted = Math.floor(
+    clamp(value, MIN_FILL_SAMPLE_SCALE, MAX_FILL_SAMPLE_SCALE),
+  );
+  let scale = MIN_FILL_SAMPLE_SCALE;
+  for (const candidate of FILL_SAMPLE_SCALES) {
+    if (candidate <= wanted) {
+      scale = candidate;
+    }
+  }
+  return scale;
+}
+
+/**
+ * Reads the whole option set out of an untrusted value.
+ *
+ * A value that is not an object at all takes every default; an object with
+ * missing or malformed fields takes the default for those fields only.
+ */
+export function normalizeFillOptions(value: unknown): FillOptions {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return DEFAULT_FILL_OPTIONS;
+  }
+  const record = value as {
+    tolerance?: unknown;
+    mode?: unknown;
+    sampleScale?: unknown;
+  };
+  return {
+    tolerance: normalizeFillTolerance(record.tolerance),
+    mode: normalizeFillMode(record.mode),
+    sampleScale: normalizeFillSampleScale(record.sampleScale),
+  };
+}
+
+/** Whether two option sets say the same thing. */
+export function fillOptionsEqual(a: FillOptions, b: FillOptions): boolean {
+  return (
+    a.tolerance === b.tolerance &&
+    a.mode === b.mode &&
+    a.sampleScale === b.sampleScale
+  );
 }

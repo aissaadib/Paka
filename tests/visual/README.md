@@ -86,6 +86,9 @@ source alpha and a transparent source.
 | `fill-patch` | a bucket-fill patch, with a stroke over it |
 | `gradient` | a linear gradient, with a stroke over it |
 | `multi-layer` | a three-layer stack, one of them hidden |
+| `group-opacity` | a **group at 50 % opacity** with two overlapping children: the fade is the group's, not each child's |
+| `group-hidden` | a **hidden group**: its whole subtree is absent from the export |
+| `group-blend` | a **group with `multiply` and 50 % opacity** over a yellow layer |
 | `soft-erase-rim` | a painted stroke with a **soft eraser** across it |
 | `polygon` | a **filled** five-sided polygon, inscribed in the dragged box's ellipse |
 | `star` | a **filled** five-point star, with the inner radius at 50 % |
@@ -102,6 +105,15 @@ scene stroke is the same flag the shape tools write: the closed outline is
 filled with the brush colour before the outline is traced on top. The star
 scene is the one that matters: the rasterizer fills with the **non-zero** rule,
 so it fills the star only because the outline is a simple loop.
+
+`group-opacity`, `group-hidden` and `group-blend` are the **layer groups**. A
+scene layer may be a `group` with `children`, and the harness builds the
+document's real tree rather than flattening it. The goldens pin the group's
+picture; `layer-groups-render.spec.ts` additionally samples the exported pixels
+so the two behaviours a group must have are checked arithmetically, not only by
+a regression image: a 50 % group fades its **composite** (the upper child does
+not show the lower one through it), and a group's blend mode applies to that
+composite rather than to each child.
 
 `soft-erase-rim` is the scene that catches the audited **region-rounding**
 defect: the composited region floored instead of ceiled clips the erase's
@@ -154,6 +166,8 @@ a React component and is verified by hand in the running app.
   window, its HiDPI behaviour and the native save/reopen path are separate
   items, and they are still unverified.
 - **Real pen hardware.** All input here is synthetic.
-- **The React layer.** The harness drives the renderer, not the UI, so a
-  control's behaviour is still verified by hand in the running app.
+- **The React layer.** The harness drives the renderer, not the UI. A panel
+  gets browser coverage only where a dedicated spec drives it:
+  `layer-groups.spec.ts` does that for the Layers panel's group workflow. Other
+  controls are still verified by hand in the running app.
 - **Text.** Deliberately, until the font policy is settled.

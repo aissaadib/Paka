@@ -20,9 +20,6 @@ export class MemoryProjectGateway implements ProjectFileGateway {
   openPath: string | null = null;
   savePath: string | null = null;
   pngPath: string | null = null;
-  /** Path the brush library dialogs return; `null` means the user cancelled. */
-  presetLibraryOpenPath: string | null = null;
-  presetLibrarySavePath: string | null = null;
 
   /** When set, the corresponding operation fails with this message. */
   readFailure: string | null = null;
@@ -31,7 +28,6 @@ export class MemoryProjectGateway implements ProjectFileGateway {
   /** Suggested file names the save dialogs were called with, in order. */
   readonly saveSuggestions: string[] = [];
   readonly pngSuggestions: string[] = [];
-  readonly presetLibrarySuggestions: string[] = [];
 
   async pickProjectToOpen(): Promise<string | null> {
     return this.openPath;
@@ -45,15 +41,6 @@ export class MemoryProjectGateway implements ProjectFileGateway {
   async pickPngToSave(suggestedName: string): Promise<string | null> {
     this.pngSuggestions.push(suggestedName);
     return this.pngPath;
-  }
-
-  async pickPresetLibraryToOpen(): Promise<string | null> {
-    return this.presetLibraryOpenPath;
-  }
-
-  async pickPresetLibraryToSave(suggestedName: string): Promise<string | null> {
-    this.presetLibrarySuggestions.push(suggestedName);
-    return this.presetLibrarySavePath;
   }
 
   async readTextFile(path: string): Promise<string> {

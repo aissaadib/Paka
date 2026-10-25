@@ -6,8 +6,6 @@
  * the stroke pipeline never touch the DOM event directly.
  */
 
-import type { ViewId } from "./viewport";
-
 export type PointerPhase = "down" | "move" | "up" | "cancel";
 
 export type PointerKind = "mouse" | "pen" | "touch" | "unknown";
@@ -63,15 +61,6 @@ export interface StrokeSample {
 
 /** Lightweight cursor report used by overlays; never stored in React state. */
 export interface CursorReport {
-  /**
-   * The view the report belongs to.
-   *
-   * A cursor is a property of a *window*: the pointer is over one canvas at a
-   * time, and every view's overlay has to know whether the pointer is over
-   * it. The id is what lets the overlays ignore the reports of the other
-   * views.
-   */
-  readonly viewId: ViewId;
   /** False when the pointer left the drawing surface. */
   readonly inside: boolean;
   readonly docX: number;

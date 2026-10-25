@@ -1,0 +1,27 @@
+{
+  "id": "group-hidden",
+  "width": 120,
+  "height": 80,
+  "background": "#ffffff",
+  "layers": [
+    {
+      "id": "Shading",
+      "kind": "group",
+      "visible": false,
+      "children": [
+        {
+          "id": "Red",
+          "elements": [
+            { "kind": "fill", "color": "#ff0000", "x": 10, "y": 10, "width": 40, "height": 40 }
+          ]
+        },
+        {
+          "id": "Blue",
+          "elements": [
+            { "kind": "fill", "color": "#0000ff", "x": 30, "y": 10, "width": 40, "height": 40 }
+          ]
+        }
+      ]
+    }
+  ]
+}

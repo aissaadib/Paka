@@ -99,23 +99,13 @@ Four distinct spaces exist, and every conversion happens in a named function.
 | --- | --- | --- | --- |
 | Document | logical px | `screenToDoc` | Stroke data and brush size live here. Independent of zoom and DPR. |
 | Screen | canvas-local CSS px | `PointerEvent.clientX - canvasRect.left` | Relative to the canvas element, never the window. |
-| Workspace | canvas-local CSS px | the same as screen, unrounded | Where the reference images live: they do not move when the view moves. |
 | Device | backing-store px | `css * devicePixelRatio` | Only the display canvas uses this. |
 | Surface | raster px | `doc * rasterScale` | Only per-layer surfaces use this. |
 
-The viewport is a plain value, `{ zoom, offsetX, offsetY }` plus an optional
-**view transform** (a rotation and a mirror), and all of its math is in
+The viewport is a plain value, `{ zoom, offsetX, offsetY }`, with
+`screen = doc * zoom + offset`. All of its math is in
 `core/rendering/viewport.ts`, free of DOM and renderer state, so it can be unit
-tested directly. The mapping is one affine:
-
-```
-screen = R(rotation) · F(mirrored) · (zoom · doc) + offset
-```
-
-With no rotation and no mirror that is the familiar `screen = doc * zoom +
-offset`; the rotation is clockwise (the screen's y axis points down) and the
-mirror flips the x axis. The scale stays uniform under both, so a turned view
-keeps the document's proportions and its strokes' widths.
+tested directly.
 
 `rasterScale` is a *supersampling* factor for layer surfaces (`clamp(dpr, 1, 2)`
 in the app). Raising it makes strokes crisper on HiDPI displays at the cost of
@@ -128,16 +118,14 @@ memory; it never changes document size or stroke coordinates.
 | `src/app` | Entry point, provider wiring, global styles | features, components, state |
 | `src/components` | Presentational shell: menu bar, toolbars, panels, icons | types only |
 | `src/features` | Feature UI: canvas stage, brush/colour/layer/history/document controls | hooks, core types |
-| `src/hooks` | React bindings: `useEditor`, `useEditorState`, `usePanels`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
-| `src/state` | The editor store + React context that holds the single engine instance, and the panel store that holds the panel layout | core/engine, core/panels |
+| `src/hooks` | React bindings: `useEditor`, `useEditorState`, `useKeyboardShortcuts`, `useNativeEnvironment` | state, core types |
+| `src/state` | The editor store + React context that holds the single engine instance | core/engine |
 | `src/core/document` | Document and layer metadata, ordered element store, the selection hit-test, the transform geometry and the transform handles | types, utils |
 | `src/core/brushes` | Brush defaults, stroke sample processing (`StrokeBuilder`) | core/document types |
-| `src/core/panels` | The panel manager's adapter over the shell's panel registry, the layout rules and the layout's settings section | core/shell, core/settings (types), utils |
 | `src/core/fill` | Pure flood-fill scan and fill-patch creation/cloning | core/document types |
 | `src/core/gradient` | Gradient records, endpoint movement and cloning | core/document types |
 | `src/core/tools` | Tool registry and per-tool behaviour (brush, eraser, shapes, bucket, gradient, picker, guides, pan) | core/document, types |
 | `src/core/commands` | Command stack, stroke/fill/gradient commands, document (layer) command | core/document |
-| `src/core/actions` | The one table of editor intents (the registry), the commands without a chord, the availability rules, the canvas menu's rows and the palette's search | core/engine (types), state (types) |
 | `src/core/input` | Pointer normalization and DOM binding | core/rendering (viewport math only) |
 | `src/core/rendering` | Viewport math, frame scheduler, Canvas 2D renderer, stroke rasterizer, layer surfaces | core/document types |
 | `src/core/engine` | Integration: stroke lifecycle, history, layers, viewport, cursor stream | all of `core` |
@@ -607,59 +595,6 @@ The tool itself (`PickerTool`) is stateless - a pick is complete on pointer-down
 and there is nothing to finish or cancel - and it stays selected afterwards,
 consistent with the eraser. `B` returns to the brush.
 
-### Reference images
-
-A **reference image** is a picture the artist keeps beside the canvas: a
-photograph to trace from, a colour chart to pick from, a sketch to check a
-drawing against. It is deliberately *not* document content.
-
-The rules that make it a reference rather than an import:
-
-- **It never becomes pixels.** A reference is painted on the display canvas
-  only. It is not a layer element, it is not in the project file, and it never
-  reaches `composeDocumentImage`, so a PNG export of the same drawing is
-  identical with and without a reference.
-- **It never dirties the document.** Importing, moving, scaling, hiding or
-  removing a reference changes no stroke, adds no history entry and bumps no
-  revision. The references are **session state**: they live in their own store
-  (`core/reference/store.ts`), outside the editor's snapshot, and they are
-  gone when the app closes.
-- **It lives in workspace space.** A reference's rectangle is in the canvas'
-  own CSS pixels, not in document pixels, so it stays where the artist put it
-  while the artwork is zoomed and panned underneath it. Moving or scaling a
-  reference therefore cannot disturb the drawing, and the transform does not
-  depend on the document at all.
-
-The placement is a rectangle in workspace space plus the natural size of the
-decoded image. The one piece of arithmetic worth reading is the inverse of
-that placement, in `core/reference/geometry.ts`:
-
-```
-u = (x - reference.x) / reference.width  * reference.naturalWidth
-```
-
-`u` is the pixel of the *decoded image* under the pointer, and it is what the
-colour picker reads. A reference drawn at half its own size is therefore
-sampled at the pixel the artist is really pointing at, not at the pixel that
-happens to share the coordinates in the original file.
-
-**Sampling a reference.** A reference is drawn *over* the artwork, so a
-reference under the pointer is what the artist is pointing at. The picker
-therefore samples the reference first and the document composite only when
-the pointer is not over one. `Alt` puts the sampled colour into the secondary
-colour instead of the brush colour, the convention every art application
-uses. The pointer asks for the magnifier cursor over a reference, and the
-reference under the pointer is outlined, so the artist can see what a press
-will read.
-
-**Memory.** The store keeps exactly **one decoded copy** per reference: the
-file is decoded once into a canvas, and that canvas is both what the renderer
-draws and what the picker samples. Scaling a reference decodes nothing again
-- the canvas is simply drawn at another size. A file that cannot be decoded is
-refused with a message; a file that is enormous is downscaled *during* the
-decode, and the session shares one pixel budget so it cannot fill the memory
-with a dozen huge images.
-
 ### The colour wheel
 
 The **Colour** panel holds an HSV wheel: a disc where the angle of the pointer
@@ -742,197 +677,18 @@ debounced, so a brush-slider drag is one write rather than sixty. A file that
 cannot be read or written is recorded and forgotten - it is a minor
 inconvenience, not something the user has to act on.
 
-### The brush library
-
-A **brush preset** is an id, a name and a snapshot of the brush settings
-(`core/brushes/presets.ts`). It is editor preference, not document state:
-applying one goes through `setBrush`, and saving, renaming or deleting one
-never adds a history entry, bumps the revision or dirties the drawing. The
-same contract the brush itself has always had.
-
-**The built-in brushes are code.** `core/brushes/bundledPresets.ts` holds
-them, so a new build can improve one and every install gets the same brush.
-They are therefore *protected*: they cannot be renamed, overwritten or
-deleted, because deleting one would take the feature away rather than the
-user's data. Duplicating one is how the user gets a version they own. What
-the settings file may hold about a built-in brush is the user's own state -
-whether it is starred and when it was last used - and
-`mergeBundledPresets` joins the two: the brush comes from the code, the
-favourite and the timestamp come from the file. A hand-edited file therefore
-cannot make a user's brush protected, nor make a protected one editable.
-
-The **browser** (`features/brushes/BrushPresetPanel.tsx`) is the panel that
-lists them: a search, an order, a favourites filter, and the operations -
-create, rename, overwrite, duplicate, delete, star, import, export. Its rules
-are plain functions over plain data (`core/brushes/presetBrowser.ts`), so
-the whole of it - what the search finds, how the order reads, which key does
-what, what each button asks the editor for - is exercised in Node without a
-DOM, a canvas or React. The component holds the little state the browser
-owns and calls the editor for everything else.
-
-**The swatch is the brush.** A row's tip is drawn by the renderer's own
-primitives (`core/rendering/brushPreview.ts`), from the preset's own brush
-settings, so a property that changes a stroke changes the swatch with it.
-
-**The selection and the live brush are two things.** The engine remembers
-which preset the brush came from (`activePresetId`), so the panel, the
-toolbar picker and the reset button cannot disagree about which brush is in
-effect. Editing a brush field changes the brush and leaves the preset alone:
-the panel says the brush has changed since the preset was applied, and the
-stored copy is only changed when it is written back.
-
-The list **owns the keyboard**: the arrows, Home, End, Enter and Delete act
-on the selection. Delete is among them because the editor has a global
-Delete shortcut - it deletes the selected strokes - so the list has to claim
-it before the drawing sees it.
-
-**The library file** (`core/brushes/presetTransfer.ts`) is Paka's own small
-JSON document: the user's brushes, so they can be shared or backed up. It is
-validated on the way in, because it comes from outside: a file that is not
-JSON, or not a library, or that was written by a newer version, is refused
-with a message the user can act on rather than read as an empty library. A
-file that is too large, or that holds more brushes than the browser takes, is
-refused before anything is read into memory. A malformed *entry* is skipped
-and the rest of the file is still imported, and the number skipped is
-reported. The ids and the last-used stamps of the source machine do not
-travel: an imported brush is a new entry here, with a fresh id and a name
-that does not clash with the ones already in the library.
-
-### The panel manager
-
-The side panels - the brush library, the colour wheel, the layers, the
-navigator - are **shell state**, not document state. Which of them are on
-screen says what the window looks like; it never says what the drawing
-contains. So the panel layout follows the same contract every other
-preference follows: showing or hiding a panel pushes no history entry, bumps
-no revision and never makes a document dirty.
-
-Three pieces, and the split between them is the point:
-
-- **the registry** is the wave's shared contract
-  (`core/shell/panelRegistry.ts`): a panel **registers itself** and the shell
-  renders whatever the registry says. A panel's own module calls
-  `registerPanel` with its id, its title, the slot it docks in, its order and
-  its body, so **adding a panel to the shell means editing the panel's own
-  module and nothing else** - the shell's composition is never edited to
-  accommodate a new panel. The registry is plain data plus a render callback,
-  so it can be inspected and asserted on without a browser, which is what the
-  project's own rule about the React layer requires. Only panels that exist
-  are registered: an entry for a panel that has not been built would be a
-  menu item that opens nothing. The ids are stable, because they are written
-  to disk; a renamed panel keeps its id and a removed panel leaves its id
-  behind in old settings files, where the reader drops it.
-- **the layout** (`core/panels/panelLayout.ts`) is the pure state: which panels
-  are hidden and which are folded. Every operation is a function from one
-  layout to the next, so "hide", "show", "fold", "reset" and "read the file"
-  are all testable without a browser.
-- **the store** (`state/panelStore.ts`) holds the live layout for React and is
-  the only writer of it. It is framework-free, like the editor store, and it
-  notifies its listeners only when the layout really changed.
-
-**Hiding a panel reclaims the space at once.** The workspace's grid gives the
-panel column an `auto` width, and a hidden panel is `display: none`, so the
-column shrinks to the width of the panels that are still visible - and to
-nothing at all when every panel is hidden. The canvas gets the pixels back
-without the user resizing anything, and the canvas' own resize observer keeps
-the pointer mapping correct.
-
-**Hiding a panel does not lose its state.** A panel that keeps React state of
-its own - the colour wheel holds the hue and saturation the user asked for,
-the brush browser holds its search text - stays **mounted** while it is
-hidden, so it cannot lose that state. A panel that is derived from the
-document - the layers, the navigator - is **unmounted** when it is hidden,
-because it has nothing to lose and no reason to keep rendering out of sight.
-The registry says which is which, per panel.
-
-**Folding** a panel keeps it mounted and hides its body, so unfolding it
-brings back exactly what was there.
-
-**The layout is persisted in the settings file, as a section.** The settings
-store owns the file, so the panel store does not write one of its own: the
-layout is handed to the store as a `SettingsSection` (`core/settings/
-settingsSection.ts`), which the store reads at startup, hands to the panel
-store, and writes back under the `panels` key whenever the layout changes.
-One file, one writer, and the layout rides along with the other preferences.
-A settings file written before the panel manager existed has no `panels` key
-and the layout starts from its defaults.
-
-**The menu is part of the contract.** The **Panels** menu lists the
-registered panels as checkboxes, plus *Show All Panels*, *Hide All Panels* and
-*Reset Layout*; the two that would change nothing are disabled. Only panels
-the registry knows are offered, so the menu can never show a panel that does
-not exist. The menu bar is keyboard driven: the arrow keys open a menu and
-walk its items, the disabled items are skipped, Home and End jump to the ends
-and Escape closes the menu and puts the focus back where it came from.
-
-### The workspace layout
-
-The **workspace** is the window's own arrangement: which panels are up, how
-big the interface is, which colour scheme it wears and how dense the brush
-panel is. It is shell state, so it follows the same contract every other
-preference follows - rearranging the window is not an edit, so it pushes no
-history entry, bumps no revision and never makes a document dirty.
-
-It is a **second section of the settings file** (`core/workspace/
-workspaceSettingsSection.ts`), under the `workspace` key, for the same reason
-the panel layout is: the settings store owns the file, so the workspace hands
-its state over rather than writing a second file of its own. One file, one
-writer.
-
-**The schema is tolerant in the same way the rest of the file is**
-(`core/workspace/workspaceSettings.ts`): a missing field takes its default, an
-out-of-range interface scale is clamped rather than rejected, a malformed
-value takes its default, and a document from a newer version is ignored
-wholesale. A corrupt workspace therefore cannot stop the editor from starting,
-and a half-written file costs the user their arrangement, not their session.
-
-**A profile is an arrangement, not a label.** `core/workspace/workspaceProfiles.ts`
-holds the presets - *Painting* and *Compact Canvas* - and each one is a
-complete answer to "what does the window look like": the side panels, the
-shell's own rows, the interface scale and the brush panel's density. Applying
-one puts the shell into that arrangement and the settings file keeps it, so the
-window comes back the way the user left it.
-
-Two rules keep a profile honest:
-
-- **A profile touches the whole shell, including the panels.** The panel
-  layout belongs to the panel manager, so the profile *computes* the layout it
-  wants and hands it over; it never keeps a second copy of it. That is why
-  *Compact Canvas* really does give the canvas the space the panels were
-  taking.
-- **A profile never touches the colour scheme.** The scheme is a preference
-  the user chose on purpose, so applying a profile leaves it alone.
-  *Restore Workspace Defaults* is the one action that does change it, because
-  the user asked for "as if nothing had been changed".
-
-**The profile on offer is computed, never trusted.** The store compares the
-live workspace and the live panel layout against every profile and names the
-one that matches; a workspace the user has arranged by hand matches none of
-them and is honestly called *Custom*. The menu can therefore never claim a
-preset that does not match what is on screen.
-
-**The interface scale and the colour scheme are the stylesheet's business.**
-The scale is a `--ui-scale` custom property on the root element and every
-metric follows from it - the control heights, the type size, the shell's rows
-and columns - so the whole interface grows and shrinks together instead of one
-control at a time. The scheme is a `data-theme` attribute and a second set of
-tokens; the light scheme keeps the same token names, so no component knows
-which scheme is on. The area around the paper stays a shade darker than the
-panels in the light scheme: the paper is white, and a white sheet on a white
-workspace would have no edge to read.
-
-**The status bar is not hideable.** It carries the outcome of the last file
-operation - a save that failed is reported nowhere else - so a preference that
-could swallow an error is not a preference, it is a lost message. The tool
-rail is hideable, and every tool has a keyboard shortcut, so the rail is a
-convenience rather than the only way through.
-
-**Reference images are not part of the workspace.** A reference image is
-session state by design: its placement is in workspace pixels, its pixels
-belong to the store, and the file it came from is deliberately not kept. There
-is nothing meaningful to persist without the pixels - restoring the placement
-alone would put empty rectangles on the canvas - so the references are left
-alone and the workspace persists the window, not the window's contents.
+**The file is a document of sections.** The engine's own fields sit at the
+top level, exactly as they always did, and a **section** - a named, versioned
+group of fields that belongs in the file but not in the engine, such as the
+panel layout or the shell's preferences - sits beside them under its own key.
+A section is read field by field, with the same tolerance as the rest of the
+file: a missing or malformed field takes its default, and a section written by
+a newer version of itself is ignored, because its meaning is unknown rather
+than wrong. The store owns the file, so it reads each section out, hands it to
+its owner, and writes the owner's state back whenever it changes; a key that
+no section claims is written back untouched, so a build that does not know a
+section cannot destroy it. A section changes no pixels: it adds no history
+step, dirties nothing and never reaches a project file.
 
 ### The autosave seam (not enabled)
 
@@ -1099,6 +855,22 @@ gesture starts**, so a shape keeps the values that were active when the user
 pressed. One number serves both tools, so the toolbar's slider is labelled
 **Sides** for the polygon and **Points** for the star.
 
+The options are written down **once**, in `core/tools/shapeOptions.ts`: the
+values, their ranges, their defaults, their labels, and the table of which
+shape kind has which option. The geometry, the engine and the options bar's
+controls all read that model, so a slider's range *is* the range the geometry
+clamps to and the **Sides**/**Points** label is not written twice. The
+controls themselves are descriptions built from the model and registered in the
+shared per-tool registry (`core/shell/toolOptions.ts`), which is how a tool
+adds an option to a tool it does not own.
+
+The **rotation** belongs to every shape that has a box, so the rectangle and
+the ellipse turn as well: their corners and their samples are placed first and
+then turned about the centre of the dragged box, rigidly, exactly like the
+polygon's vertices are. A whole turn is the identity, and the identity returns
+the very same points, so the default rectangle and the default ellipse are
+unchanged.
+
 Because the outline is **replaced** rather than appended, the renderer contract
 gains `replaceStroke(stroke)`: it clears the stroke buffer and re-rasterizes from
 index 0. The preview therefore lives in the same buffer as a live brush stroke,
@@ -1132,74 +904,30 @@ The gesture is a press, not a drag:
 
 1. On pointer-down the engine rejects a point outside the paper, a document
    larger than `MAX_FILL_SCAN_PIXELS` (16,777,216 pixels) and a missing
-   renderer. It then asks the renderer for the **reference** the options name
-   and runs `core/fill/fillScan` from the floored document point.
+   renderer. It then asks the renderer for the **merged visible composite** -
+   paper plus every visible layer at its opacity - at document resolution and
+   runs `core/fill/floodFill` from the floored document point.
 2. The scan is **4-connected** and compares each pixel to the seed with the
    largest absolute difference across `R`, `G`, `B` and `A`, in 8-bit units,
    against the toolbar's tolerance (`0`-`255`; default `24`). Raising it admits
    anti-aliased boundary pixels; it never interpolates a colour. Two fully
    transparent pixels always match each other regardless of their hidden RGB
    bytes, because those bytes have no visible meaning.
-3. The selected pixels are cropped to their bounding box and stored as a
-   coverage mask (`0` outside, `255` inside, and a ramp between the two on a
-   feathered edge). The renderer writes the coverage as the patch's alpha, so
-   a soft edge blends with the layer underneath - and a hard edge is still a
-   step, which is what lets a save/reopen and an undo/redo reproduce the same
-   bytes.
+3. The selected pixels are cropped to their bounding box and stored as a binary
+   mask (`0` or `255`). A pixel either matches the tolerance and is filled or it
+   does not - there is no feathered edge invented at commit time. That is what
+   lets a save/reopen and an undo/redo reproduce the same bytes.
 4. The patch is inserted on the **active layer** at the end of its element list,
    immediately, so the preview is the real result. Nothing has entered history
    and the revision has not moved yet.
-
-#### What the region is measured against
-
-The **reference mode** decides which layers the region is measured against, and
-the renderer reads exactly those layers - no more:
-
-| Mode | The sample is |
-| --- | --- |
-| `merged` | the paper plus **every visible layer**, at its opacity and blend mode |
-| `active` | the paper plus the **active layer** alone |
-| `layer` | the paper plus **one chosen layer** |
-
-A hidden layer never contributes, whatever the mode says: the user cannot see
-it, so it cannot bound a region either. The `layer` mode therefore refuses the
-press with a status-bar notice when the chosen layer is hidden or gone, rather
-than silently sampling the paper alone and filling the whole canvas.
-
-#### Growing, shrinking and softening the region
-
-The region the scan returns is a set of pixels, and the options reshape it
-before it is committed:
-
-- **Grow / shrink** (`-32` to `+32` document pixels) measures the distance from
-  the region's **boundary** and takes in or drops every pixel within that
-  distance. The distance is an exact Euclidean distance transform
-  (Felzenszwalb and Huttenlocher), so the growth is round rather than square
-  and the numbers mean the same thing at every zoom. The transform runs over
-  the region's own bounding box, never over the whole document.
-- **Soft edge** (`0`-`8` document pixels) turns the boundary into a ramp: a
-  pixel just inside keeps most of its coverage, a pixel just outside keeps a
-  little, and the ramp reaches zero `antialias` pixels out. The coverage byte
-  is what the renderer writes as the patch's alpha, so the edge blends with
-  whatever is underneath it.
-- **Close gaps** (`0`-`16` document pixels) seals a passage too narrow for the
-  fill to pass through. A matching pixel is sealed when the scan line through
-  it has a barrier within `radius` steps on **both** sides and the passage
-  between the two barriers is no wider than `radius` steps: that is the shape
-  of a break in a wall. The rule is deliberately simple, and it has one
-  visible consequence - a region narrower than `radius` is itself a passage,
-  so it is sealed too. The control therefore measures *how narrow a passage
-  has to be before it stops letting the fill through*, and a one-pixel break
-  in a line of line art is sealed at `1`. Only the rows and the columns are
-  scanned: two walls meeting at a corner look like a one-pixel diagonal
-  passage, and sealing that would cut the corners off every boxy shape.
 
 On pointer-up `finishFill` bumps the revision and pushes one `FillCommand`
 carrying the patch and its index. On `pointercancel`, lost pointer capture, a
 tool switch or an abort, `cancelFill` removes the same patch and invalidates
 the layer; no history entry or revision change is left behind. A click that
-would change nothing - a fill whose region already carries the brush colour -
-is dropped rather than recorded as an invisible undo step.
+would change nothing - a tolerance-0 fill whose seed already has the brush
+colour at full alpha - is dropped rather than recorded as an invisible undo
+step.
 
 Redo and reopen replay the **stored mask**; neither re-runs flood fill against a
 composite that may have changed since. That is the reason the patch is the
@@ -1217,19 +945,13 @@ one function, so they cannot disagree.
 Memory stays proportional to the job: a small fill stores only its own
 bounding-box mask, never a full-canvas copy. The scan itself is bounded by the
 document-pixel ceiling because it needs the RGBA composite, an `ImageData` copy,
-a visited bitmap, the coverage mask, the map the gap closing seals its
-passages in and the distance field the growth and the soft edge are measured
-from; at the ceiling that is roughly 240 MB transiently. A larger document is
-still editable - only a bucket press is refused, with a status-bar notice
-rather than a freeze.
+a visited bitmap and the coverage mask; at the ceiling that is roughly 170 MB
+transiently. A larger document is still editable - only a bucket press is
+refused, with a status-bar notice rather than a freeze.
 
-The tolerance, the reference mode, the growth, the soft edge and the gap
-closing live in the editor snapshot (`setFillTolerance`, `setFillReference`,
-`setFillExpand`, `setFillAntialias`, `setFillCloseGaps`) and describe the next
-fill, like `shapeFill`; they are not serialized into a project. A committed
-patch carries its own pixels, so changing a slider never rewrites one. The
-preferences survive a restart through the per-user settings file; the layer the
-`layer` mode names does not, because a layer belongs to a document.
+Tolerance lives in the editor snapshot (`setFillTolerance`) and describes the
+next fill, like `shapeFill`; it is not serialized. A committed patch carries its
+own pixels, so changing the slider never rewrites one.
 
 ### Gradients
 
@@ -1274,65 +996,32 @@ gradient covers earlier elements on its layer, which is why painting one on its
 own layer is the normal workflow. The editor options (`setGradientType`,
 `setGradientEndColor`) describe the next drag only and are not serialized.
 
-#### Editing a gradient on the canvas
+A gradient is edited by moving points, and that geometry is **pure and DOM-free**
+(`core/gradient/gradientHandles.ts`): the two end points of the axis (the start
+and the end of a linear ramp, the centre and the radius handle of a radial one),
+the position of every middle stop along the axis, the grab radius in screen
+pixels and the hit test against the axis or the circle. The handle **positions**
+are in document space and the grab radius is in screen pixels, exactly as the
+selection's transform handles are.
 
-A committed gradient is editable, because a gradient *is* geometry: the record
-already stores the two points the renderer draws from, so moving them is a
-matter of replacing the record - no new element kind, no new file field, no
-format version.
+`moveGradientHandle` is the one place that decides what a drag means. It moves
+the geometry, and it slides a stop along the axis - the pointer's place on the
+axis decides the stop's new offset - while holding that stop **between its
+neighbours**. The ramp's offsets have to stay strictly ascending, because that is
+what the file format requires: a ramp that was not ascending would be a file the
+reader refuses, so the drawing would stop being saveable. A move with no valid
+answer (a stop with no room between its neighbours, a handle on a degenerate
+axis) is **refused** rather than repaired, and a record the file could not read
+is rejected by `gradientRecordProblem` rather than quietly fixed.
 
-**The selection.** The gradient tool owns a selection of its own, like the
-select tool owns the stroke selection and the guides tool owns the guide
-selection. It is **editor state**: the gradient is document content and travels
-with the document, but *which* gradient is selected belongs to the tool, so it
-is dropped when the tool is left, when the active layer changes and when the
-gradient itself is removed by an undo.
-
-The hit test is against the gradient's **geometry**, not against its pixels: a
-gradient paints its whole layer, so every point of the paper belongs to it and
-only the axis (linear) or the circle (radial) can say which one the user meant.
-The topmost gradient on the active layer wins, because the topmost one is the
-one the user sees. `core/gradient/gradientHandles.ts` holds that rule, and the
-two handle positions, as pure functions.
-
-**The handles.** A selected gradient shows two handles: the ends of its axis
-for a linear gradient, its centre and its radius handle for a radial one. Their
-*positions* are in document space, so they sit on the gradient's own points at
-any zoom; the *grab radius* is in screen pixels, so a handle is equally easy to
-grab at 2 % and at 6400 %. The handles and the line between them are a
-**display overlay**: the renderer paints them on the display canvas, exactly
-like the selection's transform handles, and they never reach a layer surface,
-the document, a PNG export or the project file.
-
-**The gesture.** A press is resolved in this order: on a handle of the selected
-gradient (drag it), on the geometry of a gradient on the active layer (select
-it), anywhere else (draw a new gradient). A handle drag is a **preview**: the
-record is replaced in place - same id, same place in the painting order - and
-the layer is invalidated, so the renderer rebuilds the gradient from the
-document and the user watches the real thing. Nothing enters history while the
-drag runs.
-
-The release records **one** command, `GradientEditCommand`, which carries both
-records: the committed one and the one that replaced it. Undo puts the original
-back, redo puts the edited one back. A drag that ended where it started records
-nothing, so history never holds a step that appears to do nothing, and a drag
-that collapsed the gradient restores the committed one rather than recording an
-invisible step. A cancel - `pointercancel`, a lost capture, a tool switch or
-`Esc` - puts the committed record back **exactly**: the same object, with its
-stops and its opacity, and no history entry and no revision change.
-
-**The keyboard.** The handle the user last grabbed is the focused one, and the
-arrow keys move it by one document pixel (`Shift`: ten). Repeated nudges
-coalesce in the command stack, so a held arrow key is one undo step, exactly
-like the stroke selection's nudge. The status bar reads the selected gradient's
-geometry.
-
-**What is not here.** The stops of a *committed* gradient are not editable yet:
-the middle-stop editor describes the **next** drag, so its data is editor state
-rather than document content, and an on-canvas stop marker would have to be
-wired to the committed record instead - a different data path, and one that
-would duplicate the stop list. The geometry edit deliberately leaves the stops
-alone, so the two never fight over the same data.
+The edit itself is **one history step**:
+`core/commands/gradientEditCommand.ts` carries the committed record and the
+record that replaced it, so undo puts the very same record back and redo applies
+the very same one. A run of edits that share a merge key collapses into one
+entry, which is what keeps a held arrow key to a single undo step. The handle
+geometry and the command are the model; the on-canvas gesture that drives them
+(selecting a gradient, dragging a handle, the overlay that shows them) is the
+engine's and the renderer's work.
 
 ### Selection and transform
 
@@ -1693,220 +1382,60 @@ byte-identical to one with it off.
 survive a restart. Changing one is not an edit: no history step, no revision
 bump, no dirty flag.
 
-### Rulers and symmetry
+### Reference images
 
-The **rulers** and the **symmetry** are the two drawing aids that are neither
-document content nor the grid's kind of overlay, and they solve different
-problems.
+A reference image is a picture the artist places on the canvas to trace over or
+to pick colours from. Unlike a guide or the grid it has **pixels**, and unlike a
+layer it is **not artwork**: it is never composited into an export.
 
-**The rulers measure the view.** The strips along the top and the left edge of
-the canvas carry ticks at **document coordinates**, so they pan and zoom with
-the paper: a tick at 400 means the same thing at 25 % and at 6400 %. What is
-*screen* space is the distance between two labelled ticks: the step is the
-smallest round number (1, 2 or 5 times a power of ten) that keeps the labels
-at least 60 CSS pixels apart, so the ruler stays readable at every zoom
-instead of turning into a solid line of digits.
+**Document metadata, not editor state.** The placements live in
+`DrawingDocument.references`, next to the guides, because they are part of the
+drawing the user saves. The *decoded* pictures do not: they live in a session
+store (`core/reference/store.ts`) keyed by reference id, because a decoded
+`ImageBitmap` is not serializable and must be rebuilt from the encoded bytes
+after a reopen. The document is the authority for which references exist; the
+store keeps one decoded surface per id and reconciles on every document change
+(`sync`), so undo, redo and a reopen all converge on the same picture set.
 
-`core/rendering/rulers.ts` holds the geometry and is unit tested without a
-canvas: `rulerStep(zoom)`, `rulerMinorStep(step)`, `rulerTicks(from, to, step)`,
-`rulerAxisAt(screenX, screenY)` and `formatRulerLabel(value)`.
+**The encoded bytes travel with the file.** A reference stores its original
+encoded bytes (`source: { mimeType, base64 }`) in the project, so a project
+reopened on another machine draws the same references without the original file
+being present. This is why references forced format version 14: a version-13
+reader would silently drop them, and a tracing setup that disappears without a
+word is worse than a refused file. The decoded size is stored too
+(`naturalWidth`/`naturalHeight`), so the placement maps back to image pixels
+without re-measuring the picture.
 
-The rulers are painted in **screen space** on the display canvas - they are the
-workspace's own furniture, not a mark on the paper - while their ticks are
-placed with the viewport transform, so they follow the paper. They are view
-state: no pixels, no history, no dirty flag, no export, and the switch is
-remembered in the per-user settings file.
+**Geometry is pure and rotation-aware.** `core/reference/geometry.ts` holds the
+rectangle, the centre, the corners, the hit-test, the source-pixel mapping, the
+resize-from-corner and the patch/clamp rules. Rotation is about the placement's
+centre, so a hit-test rotates the point *back* by `-rotation` before comparing -
+a rotated reference is grabbable where it is drawn, not where its bounding box
+is. Handles are screen-space (8 CSS px grab radius, a rotation handle 26 CSS px
+above the top edge), like the guides', so they are equally easy to grab at every
+zoom.
 
-**A guide can be pulled out of a ruler.** With the rulers on, a press in the
-top strip makes a **vertical** guide (the top ruler measures x) and a press in
-the left strip makes a **horizontal** one; the drag then carries the guide
-along that axis. The axis is therefore *given* rather than decided by the
-drag, which is why the guide gesture carries an optional axis
-(`beginGuideCreate(sample, axis)`).
+**One tool, three gestures.** The dedicated **Reference** tool (`Y`) owns pointer
+ownership: a press on a handle resizes or rotates, a press on a visible reference
+selects and moves it, and a press anywhere else clears the selection. A dedicated
+tool is what keeps the brush from guessing whether a press is paint or a grab.
+The engine owns the preview and the history: a gesture mutates the document
+directly (that is how the renderer shows it), the release commits **one**
+document command, and `Esc` restores the document exactly and records nothing.
+Sliders coalesce into one step per run, the same rule as the layer opacity.
 
-**The symmetry repeats a stroke.** The symmetry is editor state - it describes
-the *next* stroke - and the copies it produces are **ordinary strokes**: the
-same brush, the same pressure and timing, and the same samples mapped through
-the symmetry's transform. That is what keeps the artwork self-describing: a
-reopened project, an undo and a PNG export reproduce the copies without
-knowing that a symmetry was ever on, and the project format does not change.
+**Painting order and export isolation.** `paintDocument` takes an
+`includeReferences` flag: `behind` references are painted after the paper fill and
+before the layers, the rest after the layers, and only `render()` passes `true`.
+`composeDocumentImage` never does, so a reference can never reach a PNG export -
+the exclusion is structural, not a filter that could be forgotten. References
+are clipped to the paper (like a layer), and their selection frame and handles
+are painted in the overlay pass, so they never enter a layer surface either.
 
-`core/document/symmetry.ts` is the pure module:
-
-- `symmetryTransforms(settings)` - the transforms the symmetry produces, the
-  original first. Each is a 2x3 affine matrix in the **canvas 2D convention**,
-  so the renderer can hand one straight to `setTransform` and the engine can
-  map a sample with two multiplications. One description, two uses: the
-  preview and the committed copy cannot disagree about where a point lands.
-- `createSymmetryCopies(stroke, settings)` - the copies, as ordinary strokes.
-- `symmetryAxes(settings)` - the lines the overlay draws.
-
-The three modes are a **mirror across a vertical axis**, a **mirror across a
-horizontal axis** and a **radial** repeat of 2 to 12 copies.
-
-**The preview shows the copies while the user draws.** The renderer paints the
-in-progress stroke once per copy: the stroke as it was drawn, and then the
-*same coverage* mapped through each transform. Mapping the finished coverage
-rather than the samples is what keeps the preview honest - the mirror of a
-stroke is the mirror of its pixels, whether the brush is hard, soft or a chain
-of dabs - and each copy is painted with its own alpha, in the order the copies
-will be committed in, so the preview is the picture the release produces.
-
-**One gesture, one undo step.** The copies are committed with the stroke, and
-the whole set is a single history entry (`createGroupCommand`): the user drew
-one thing, not six. The copies are rasterized into the layer the way the
-stroke itself was, so the committed pixels are the copies' own rather than a
-re-rasterization of the whole layer.
-
-The symmetry applies to the tools that **paint** - the brush and the shape
-tools. The eraser is left alone (an erasing stroke subtracts coverage from
-the layer and its copies would need their own snapshot), and the bucket and
-the gradient are not strokes at all.
-
-**The centre is a handle.** The symmetry centre is a marker on the canvas, and
-a press on it moves the centre instead of drawing - the engine's single
-pointer entry point takes the press before the tool sees it. The select tool
-keeps its own handles, because its marquee is how the user picks strokes. The
-centre is editor state: dragging it is not an edit, `Esc` abandons the drag
-and puts it back, and the **Centre** button returns it to the middle of the
-paper. It belongs to the paper it is used on, so a new document starts with a
-new centre.
-
-### Navigator
-
-The **navigator** is a small panel that shows the whole document and marks the
-part of it the canvas is showing. It is a *view* of the document, never a
-second source of truth: it reads the composite the renderer already has and it
-writes nothing but the viewport.
-
-**Three coordinate spaces.** The document has its own pixels; the canvas has
-CSS pixels and a view transform (scale, rotation, mirror); the navigator has
-its own CSS pixels. The conversion between them is a pure module
-(`features/navigator/navigatorGeometry.ts`), so it can be unit tested without a
-DOM, a canvas or an engine - the same reason `core/rendering/viewport.ts`
-exists for the main canvas. The navigator shows the document **upright**: a
-rotation is a property of the window, not of the artwork, so the overview is
-always the artwork as it is and the visible area is drawn as the (possibly
-tilted) quadrilateral the canvas really shows.
-
-**The overview is cached.** `DrawingRenderer.renderOverview` composites the
-paper and the visible layers into a small canvas, drawing from the **cached**
-layer surfaces - it is a downscale of what is on screen, not a second rendering
-of the document. The engine keeps that canvas and rebuilds it only when the
-document changed (its identity or its revision) or when a different size was
-asked for, so a pan, a zoom, a resize of the panel or a redraw of the
-rectangle costs nothing. While a gesture is in flight the cached overview is
-returned unchanged: a stroke in flight owns content that is not in the document
-yet, and re-rasterizing a layer mid-gesture is work the display would do
-anyway.
-
-**The rectangle follows the view.** The visible area is the four corners of the
-canvas viewport mapped back into the document and then into the navigator. The
-engine publishes the canvas' CSS size next to the viewport
-(`EditorSnapshot.viewportSize`), because the transform alone does not say what
-is on screen: the visible document area also depends on how big the surface is.
-A zoom, a pan, a rotation, a mirror and a resize all move the rectangle, and
-none of them is an edit - no history step, no revision bump, no dirty flag.
-
-**Pointing at the navigator.** A pointer *inside* the visible area grabs it:
-the view keeps the offset it was grabbed with, so the artwork stays under the
-pointer. A pointer *outside* it jumps: the view centres on the point. The
-engine's `centerViewportOn` does the move, deriving the new offset from the
-view transform the viewport already has, so the point lands in the middle of
-the canvas whether the view is upright, turned or mirrored.
-
-**No feedback loop.** The panel writes a viewport only in response to a
-pointer or a key. It never writes one in response to a snapshot change, so the
-two cannot chase each other: the rectangle is drawn *from* the view, never
-*pushed* into it.
-
-### View navigation and the status bar
-
-The **status bar** is the app's readout of what the engine actually holds. Every
-field is read from the engine's snapshot: the file name and its unsaved marker,
-the document's size, the active tool, the active layer, the zoom, the history
-depth, the selection's size, the guides, the grid and the live cursor position.
-Nothing in it is a constant that could drift away from the canvas, and a field
-that is not true is not shown at all (the guides, the grid and the view's
-orientation only appear when they apply).
-
-**The zoom field is editable.** It shows the zoom the canvas really has, and it
-takes a typed one: `150`, `150%` or `1.5x`. The parse lives in
-`features/view/viewNavigation.ts` and clamps to the range the viewport
-supports, so the field can never ask for a zoom the canvas cannot show. While
-the field has the focus it shows what the user is typing; `Enter` commits and
-releases the focus, `Escape` throws the typing away, and losing the focus
-returns the field to the canvas' own zoom.
-
-**A zoom keeps the point under the pointer.** `zoomIn`, `zoomOut` and `zoomTo`
-anchor on the pointer's last position while it is over the canvas, and on the
-middle of the window otherwise. The anchor is a *document* point, so it holds
-under a rotation and a mirror as well.
-
-**The view's orientation is view state.** A rotation (`Shift+R`) and a mirror
-(`Shift+M`) live in the viewport, not in the document: they move the canvas and
-nothing else, so they add no history step, bump no revision and never mark the
-file unsaved. `Reset View` (`Ctrl+Shift+0`) puts the view back the way it was
-found - the whole document, upright and unmirrored. The renderer applies the
-whole view as one affine, so the paper, the grid, the guides and the selection
-overlay all turn with it, and the overlays that clip themselves to the paper
-clip against the *visible* document rectangle rather than against a rectangle
-assumed to be axis-aligned.
-
-**Panning has three answers.** The `Pan` tool, a middle-button drag (which
-pans whatever the active tool is) and the **space bar**: while it is held, a
-drag moves the view instead of drawing. The modifier decides what a *new* press
-does - a stroke that is already in flight keeps drawing - so a stray key press
-can never lose artwork. The modifier lives in the engine
-(`setPanModifier`), and the keyboard layer only reports the key.
-
-### The second view of the canvas
-
-A **view** is a window on the document, not a copy of it. `View → New View of
-Canvas` opens a second one: a canvas beside the main one that shows the same
-artwork through a transform of its own.
-
-**One document, many windows.** The document, its history, its dirty flag and
-its rasterized pixels belong to the engine. A view owns exactly three things:
-its canvas, its transform (zoom, pan, rotation, mirror) and its size. So:
-
-- a stroke drawn in either view is **one** stroke in **one** document, and it
-  shows up in both views at once;
-- undo from either view undoes the same single step;
-- opening or closing a view is **not an edit**: it adds no history step, bumps
-  no revision and never marks the file unsaved;
-- a PNG export is the document, not a view: the transform is display only.
-
-**The two views are two display targets of one renderer.** The renderer owns
-the layer surfaces, the stroke buffer and the in-progress stroke; a display
-target owns a canvas and a view transform. Rendering paints every target from
-the same surfaces, so the second view costs a projection of pixels that are
-already rasterized rather than a second copy of the artwork. The layer
-surfaces are therefore allocated once, and a stroke in flight is previewed in
-both windows.
-
-**A view owns its own input.** Each view has its own input binder, because a
-pointer position only means something relative to the canvas it happened in:
-the binder asks the engine for *its* view's viewport on every event, and the
-engine maps the sample through that view's transform. A wheel over the second
-view moves the second view; a press in a view makes it the **active** view.
-
-**The active view is the one the commands act on.** `zoomIn`, `zoomToFit`,
-`rotateView` and the rest turn the view the user is working in, and the
-toolbar shows which one that is. A press focuses its own view, so the user
-never has to say which window they meant.
-
-**The overlay is drawn in every view.** The selection, the guide selection and
-the gradient handles are *one* thing: the engine owns a single selection and
-projects it into each view. There is no second selection to fall out of step
-with the first. (The transform *handles* are the one exception to "each view
-draws what it sees": their positions are computed once, with the active view's
-zoom, so the rotation handle's stem is the same length above the frame in both
-windows.)
-
-The view registry itself lives in `core/engine/canvasViews.ts`; the panel that
-draws the second canvas is `features/view/SecondaryViewPanel.tsx`, and the
-tests are in `src/test/secondaryView.test.ts`.
+**Limits.** One reference is capped at 32 MB of encoded bytes and 24 megapixels;
+a project at 64 megapixels of reference pixels and 32 references. The reader
+bounds the base64 text before decoding it, so a hostile file cannot make the
+reader allocate the bytes it claims.
 
 ### Dirty surfaces
 
@@ -2126,135 +1655,29 @@ existing work, and neither creates a history entry or dirties the document.
   for jumps beyond `MAX_INTERPOLATION_DISTANCE`. It therefore controls sample
   density and pressure-ramp smoothness, not brush width; the renderer still
   draws segments between samples.
-- **The stabilizer** filters the *path*, and only the path. It lives in
-  `core/brushes/stabilizer.ts` and is a capture-time filter: what it produces
-  is what the stroke stores, so live drawing, undo/redo, a reopened file and a
-  PNG export all replay exactly what was shown. The brush and the eraser use
-  it; the shape tools do not, because their geometry comes from the drag and
-  not from a sampled path.
+- **Stabilizer** (`0..1`, default `0`, shown as 0-100 %) applies an exponential
+  follow to incoming x, y and pressure: `follow = 1 - 0.75 * strength`. The
+  first sample is exact; each later captured point moves that fraction of the
+  way from the previous captured point to the raw pointer. At `0` the follow
+  factor is exactly `1`, preserving the raw path byte for byte.
+- **The release point is part of the path.** Smoothing lags the pointer while it
+  moves, so `finish()` appends the last raw point when it differs from the
+  captured tail. The engine feeds that final point to the renderer before
+  `endStroke`, which means the settled segment is previewed, committed and later
+  replayed like any other sample. There is no hidden post-process and no lost
+  start or end.
+- **Brush and eraser only.** Shapes derive their geometry from the drag corners,
+  not the freehand path, so the stabilizer is deliberately not applied to them.
+- **Additive in the file.** Stabilizer changes only the samples captured at draw
+  time; a reader that ignores the field still replays those samples and produces
+  the same picture. It was therefore added within format version 6, and a
+  missing field reads as `0` (see
+  [PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
 
-**Three modes, one strength.** The mode says *what* the filter does and the
-strength says *how much*:
-
-| Mode | What it does |
-| --- | --- |
-| `off` | The pointer's own path, sample for sample. |
-| `smooth` | An adaptive first-order lag: heavily smoothed while the pointer is slow, almost transparent while it is fast. |
-| `pull` | A rubber band: the captured point trails the pointer by a fixed *time*, so the distance it trails grows with the pointer's speed. |
-
-The strength is `0..1` and is a **time constant**, not a share of the
-distance: at `0` the filter is transparent, and at `1` the captured point
-takes 133 ms (`smooth`) or 50 ms (`pull`) to close most of the gap to the
-pointer. A time constant is a duration, so the same gesture is filtered the
-same way at 60 Hz and at 240 Hz - measured at 100 px/s, the captured path
-trails the pointer by 4.43 px at 60, 120 and 240 Hz alike.
-
-**The speed term is what keeps the corners.** The `smooth` mode shortens its
-time constant as the pointer speeds up (`tau / (1 + 0.02 * speed)`), so a slow
-gesture is smoothed hard and a fast one is followed closely. The speed is the
-**median of the recent steps** over a bounded window of six raw samples, not
-their average: a hand that trembles while it draws makes long and short steps
-in turn, and the median is the one of them that does not move. A single step
-that is much larger than the recent travel is a movement of its own - a flick -
-and the filter opens for it at once, so the first flick of a stroke is not
-rounded into a swoop.
-
-**What it does not touch.** The pressure and the timestamp of a sample are the
-device's own: the stored pressure is what the device measured, and the
-brush's pressure curve is applied later, when the stroke is rasterized. The
-filter moves the point, not the pressure, so a pressure ramp stays a pressure
-ramp and the curve is never applied twice.
-
-**The release point is part of the path.** A causal filter lags, so the last
-captured point is behind the pointer. The release runs a short **catch-up**:
-a curve of at most four points from the captured point to the release point,
-whose last point is the release point **exactly**. The curve leaves the stroke
-along the direction the pointer was travelling, so the tail continues the line
-instead of cutting across it, and the engine feeds the tail to the renderer
-before `endStroke`, which means it is previewed, committed and later replayed
-like any other sample. There is no hidden post-process and no lost start or
-end.
-
-**What it costs.** The trade-off is measured, not asserted. With the
-`smooth` mode at full strength, a straight drag trails the pointer by 1.9 px
-at 20 px/s, 4.4 px at 100 px/s and 6.3 px at 1000 px/s - the trail grows
-with the speed and then saturates, so it never runs away. A 1 px tremor at
-10 Hz on a 50 px/s line keeps 37 % of its amplitude (the `pull` mode keeps
-more, at the cost of a trail that grows with the speed without a bound). The
-`off` mode is the raw path, byte for byte.
-
-**Additive in the file.** The stabilizer and its mode change only the samples
-captured at draw time; a reader that ignores the fields still replays those
-samples and produces the same picture. They were therefore added additively -
-`stabilizer` within format version 6 and `stabilizerMode` within version 12 -
-and a missing field reads as `0` and `smooth` (see
-[PROJECT_FORMAT.md](PROJECT_FORMAT.md#versioning)).
-
-### The brush cursor and the quick resize
-
-The brush's size is visible on the canvas as a **ring**, and it can be changed
-without leaving the canvas. Both are *views*, never content.
-
-**The ring.** `features/canvas/BrushCursor.tsx` is a DOM overlay: a sibling of
-the canvas element, not a layer of it. It therefore cannot reach a layer
-surface, a PNG export, the document history or the project file, and because it
-is a separate compositing layer it cannot flicker with the artwork underneath
-it. The ring's diameter is the brush's diameter in **document** pixels mapped
-through the viewport zoom, so it is the brush's real footprint rather than a
-decoration:
-
-```
-cssDiameter = max(4, brush.size * zoom)
-```
-
-The four CSS pixels are the floor: a 1 px brush at 10 % zoom is a tenth of a
-pixel, and a ring that thin is invisible rather than honest. The device pixel
-ratio enters through the outline's width - one *device* pixel is `1 / dpr` CSS
-pixels, with a half-pixel floor - so the ring stays a hairline on a
-high-density display instead of thickening with the zoom.
-
-The engine owns the answer. `engine.subscribeBrushCursor` reports the size, the
-zoom and two states (a resize in flight, a stroke in flight); the overlay
-writes them straight to the DOM, like the cursor position, so pointer movement
-never re-renders React. The ring fades while a stroke is in flight so it does
-not sit on top of the artwork being drawn.
-
-**The quick resize.** `Ctrl`+`Alt` and drag on the canvas changes the brush
-size: up grows it, down shrinks it. The gesture is owned by the engine and
-runs *before* any tool sees the press, so a resize can never leave a stroke
-behind.
-
-- The drag is **relative**: `size = start * e^(-dy / 100)`, so the ring does
-  not jump when the drag begins and the gesture feels the same at every zoom.
-  One e-fold of travel (100 screen pixels) multiplies the size by `e`; the
-  result is clamped to the brush's own `1..512` range.
-- A travel of three pixels or less is a **click**, not a resize, and leaves
-  the size alone.
-- The size is written through the ordinary `setBrush`, so the ring, the
-  readout, the toolbar's slider and the next stroke all agree. It is editor
-  state: no command is pushed, the revision does not move and the file stays
-  clean.
-- **Escape cancels** the resize and puts the size back. It has to work while
-  `Ctrl`+`Alt` is still held, because the gesture only ends when the pointer
-  is released - so the cancel is handled in `useKeyboardShortcuts` before the
-  chord table, which claims an exact set of modifiers and would otherwise
-  ignore the key.
-- A **lost pointer capture** cancels the resize the same way. If the capture
-  could not be taken at all, the release never arrives, and the next press is
-  the only sign that the gesture was over: the orphaned gesture is put back
-  the way it was, so the size is never left half-changed.
-- The gesture is **not taken away from a surface that owns the interaction**:
-  a field the user is typing in keeps the keyboard, and a press there reaches
-  the tool as usual. A modal dialog covers the canvas, so the canvas never
-  receives the press at all, and the brush-size shortcuts stand down while a
-  dialog is open.
-
-The gesture is a shortcut, not the only way in: `[` and `]` step the size,
-`Alt`+`[` and `Alt`+`]` change it by exactly one pixel, and the toolbar's
-**Size** slider is a labelled range input that a keyboard or a screen reader
-can drive. The ring's readout is a visual duplicate of what that slider
-already exposes, so it stays out of the accessibility tree; the final size is
-announced once, when the gesture ends.
+The trade-off is honest: at high strength the line visibly trails the pointer
+and closes with one settle segment on release. There is no look-ahead, rope
+physics or time-based catch-up, and the stored smoothed samples mean undo,
+reopen and export replay exactly the previewed path.
 
 ## React integration
 
@@ -2278,121 +1701,46 @@ keep it from churning. Two things deliberately bypass React:
 Keyboard shortcuts live in `useKeyboardShortcuts`; they call the same actions
 the menus and buttons do.
 
-### The brush controls and the live preview
+## The panel manager
 
-The brush's properties are described **once**, in the options schema
-(`features/options/toolOptionSchema.ts`), and the brush group renders that
-schema. The schema says which field a control reads and writes, and the
-options bar filters the group by the fields the *active tool* consumes: a
-shape traces an outline, so it has no sample density, no stabilizer and no
-dabs, and a control that changes nothing is worse than no control at all.
+The shell's side column is rendered from a list, not hard-wired. Two lists
+answer two different questions, and they are joined by the panel id:
 
-Two rules make the controls safe to type into:
+- `src/core/shell/panelRegistry.ts` is the **mount registry**: the shared
+  contract by which a panel says "mount me, here, in this order", with a
+  render callback. It answers *where a panel goes* and *what it draws*.
+- `src/core/panels/panelRegistry.ts` is the **catalogue**: the closed, typed
+  list of the panels that exist, with the label, the icon, the stack order,
+  the default visibility, the fold and grow flags, the mount policy and a
+  one-line description. It answers *what a panel is*. `toShellPanelDefinition`
+  and `registerCataloguePanel` map a catalogue entry onto the mount
+  registry's contract, carrying the catalogue's slot and order across, so the
+  two lists cannot drift apart.
 
-- **A number box is a text field first.** `core/brushes/numericInput.ts` holds
-  the rules: an empty or half-typed value is *not* a value, so it never
-  reaches the editor, and a value outside the range is clamped and corrected in
-  place. Clearing the box to type a new number no longer snaps the brush to
-  its minimum.
-- **The keyboard moves in three steps.** An arrow key moves by the field's own
-  step, `Shift`+arrow by a tenth of it, `Page Up`/`Page Down` by ten times it.
-  The brush size supplies its own step, because a pixel is the right step at
-  6 px and a tenth of the size is the right step at 100 px.
+The shell reads the **mount registry** to lay out its frame; the panel
+manager reads the **catalogue** to know which panels exist and how they
+behave. `PanelStack` renders the registry's entries for the side slot, so a
+panel that registers itself is mounted without the stack naming it.
 
-The **live preview** (`core/rendering/brushPreview.ts`) draws one synthetic
-stroke with the engine's own primitives - the segment rasterizer, the stamp
-engine's dab plan, the hardness feather and the grain - so a property that
-changes a stroke changes the swatch the same way. It is drawn into a canvas of
-its own when the brush changes and at no other time: it never touches the
-document, and no pointer sample reaches it. The swatch is zoomed so the brush
-fits it, so it shows the *shape* of the mark rather than its size.
+The layout - which panels are shown and which are folded - is
+`src/core/panels/panelLayout.ts`: pure functions over a small versioned
+document. It is **shell state, not document state**: showing or hiding a
+panel pushes no history entry, bumps no revision and never makes a document
+dirty. The rules are:
 
-The **brush's origin** is the preset the brush was applied from. It is engine
-state (`activePresetId`), kept apart from the brush's edited values, so the
-picker, the preview and the reset button cannot disagree about which preset is
-in effect, and the reset can restore a preset's defaults after the brush has
-been changed.
+- a **missing** or **malformed** field takes its default;
+- an **id the catalogue does not know** is dropped, so a panel a later build
+  removed cannot break an old file;
+- a document from a **newer version** is ignored wholesale, because its
+  meaning is unknown rather than merely wrong.
 
-### The canvas menu and the command palette
-
-There is **one** table of editor intents: the action registry
-(`core/actions/registry.ts`). The keyboard, the canvas menu and the command
-palette all read it, so a command's name, its chord and the state it may run
-in exist once.
-
-A command may have **no chord** - "rotate 15 degrees clockwise" has no
-natural key - and is then reached by name (`commandOnly`). Such a command claims
-no key, so it can never shadow another command's chord, and the registry's
-duplicate-chord check still holds.
-
-Three rules keep the surfaces honest:
-
-- **Availability is one answer.** `core/actions/availability.ts` says why a
-  command cannot run right now (`Nothing is selected.`, `There is nothing to
-  undo.`). A menu shows that reason next to the disabled row and the palette
-  shows it too, so a greyed-out command explains itself instead of being a
-  mystery.
-- **The menu owns no commands.** `core/actions/canvasMenu.ts` is a list of
-  registry ids; the rows are resolved against the editor's state. A row that
-  is not in the registry is dropped rather than shown dead.
-- **The palette filters, it does not list.** `core/actions/commandSearch.ts`
-  matches the registry's own labels and chords, so a command added to the
-  keyboard table is in the palette too, with its shortcut, and there is no
-  second list to keep in step.
-
-The canvas menu is opened by the platform's **context-menu request**, which
-the canvas already keeps away from the operating system's own menu. A
-right-button *click* must not paint, so the engine **defers the right-button
-gesture** until the pointer moves: a click opens the menu on an untouched
-canvas, and a right-drag still paints with the secondary colour from the
-position the button went down. The distance that tells the two apart is four
-**CSS pixels** (`core/input/clickGesture.ts`), so it means the same thing at
-every zoom and on every display.
-### The tool-options strip
-
-The strip under the menu bar shows the **active tool's** options, and nothing
-else. Its shape is fixed - one row, 32 px, always - so switching tools never
-moves the canvas; only the controls inside it change. The document toolbar
-below it holds the controls that belong to the *document* rather than to the
-tool: the history, the zoom, the grid and the colour.
-
-Everything on the strip is described by one declarative schema,
-`src/features/options/toolOptionSchema.ts`. An option says where its value is
-read from (the editor snapshot) and where it is written (an `EditorActions`
-method), so the strip holds no per-tool logic and no second copy of a brush
-value:
-
-| Kind | Reads | Writes |
-| --- | --- | --- |
-| `slider` | a number | a number, through the option's own setter |
-| `toggle` | a flag | a flag |
-| `color` | a hex string | a hex string |
-| `action` | - | runs an editor action |
-
-The options are grouped: the **brush**, the **shape**, the **selection**, the
-**fill** and the **gradient**. A tool names the groups it shows
-(`TOOL_OPTION_GROUP_IDS`), and a control is only in a group when the tool
-really uses it. A gradient has no brush size, and a shape has no stabilizer and
-no dab spacing, so those controls are absent rather than present and inert: a
-slider the user can move but that changes nothing is worse than no slider.
-
-Every option is editor state: it describes the *next* gesture, and the
-committed record keeps the value it was drawn with. Changing one is not an
-edit, so no option writes history or the file's dirty flag, and the values
-survive a tool change - the options are the engine's, not the strip's.
-
-The brush group is split in two: the size and the opacity stay in the strip,
-because they change with every stroke, and the rest - the edge, the sampling,
-the stabilizer, the grain, the dab engine and the pressure response - lives in
-a popover. The popover's panel is `position: fixed`, so the strip's own
-horizontal scroll cannot clip it, and it is placed from the trigger's
-rectangle. `Escape` closes it and puts the focus back on the trigger.
-
-The strip scrolls sideways when the window is too narrow instead of wrapping: a
-wrapped strip would change its height and push the canvas down. The wheel over
-the strip scrolls it, through a native, non-passive listener, so the browser's
-own horizontal-wheel behaviour is refused rather than doubled - and when the
-strip does not overflow, the wheel is left alone.
+`src/core/panels/panelLayoutSection.ts` carries the layout in the
+preferences document under the `panels` key, and `src/state/panelStore.ts`
+holds the live layout; React reads it through `useSyncExternalStore`. The
+mount policy is the one rule that decides whether a panel is mounted at all:
+a panel that keeps React state of its own (`mounting: "always"`) stays
+mounted while it is hidden, and a panel derived from the document
+(`mounting: "when-visible"`) is unmounted, because it has nothing to lose.
 
 ## Native boundary (Rust)
 
@@ -2648,18 +1996,15 @@ These are real gaps, not footnotes:
 - **Tools**: only `brush`, `eraser`, `select`, `line`, `rectangle`, `ellipse`,
   `polygon`, `star`, `bucket`, `gradient` and `picker`, plus `pan`. There is no
   text tool. A bucket
-  fill writes a region; a gradient is a linear/radial colour function whose
-  geometry is editable on the canvas, but whose stops are not.
+  fill writes a region; a gradient is a two-stop linear/radial colour function,
+  not an editable gradient with draggable stops.
 - **Selection is stroke-level, layer-scoped and limited to translation, scaling,
   rotation, duplication and reflection.** A marquee
   selects whole strokes (never part of one, so a selection cannot split a stroke
   or mask a brush stroke), only on the active layer, and it is dropped when the
-  layer or the tool changes. **Fill patches are not selectable** and gradients
-  are not part of the stroke selection - the stroke-only view deliberately
-  filters them out - so they can only be undone, not moved, duplicated or
-  flipped. A gradient has its own, separate selection (the gradient tool's):
-  it selects the gradient and lets its geometry be edited, and nothing else.
-  There is no add/subtract modifier, no
+  layer or the tool changes. **Fill patches and gradients are not selectable** -
+  the stroke-only view deliberately filters them out - so they can only be
+  undone, not moved, duplicated or flipped. There is no add/subtract modifier, no
   feathering,
   no clipping, no perspective and no non-uniform scale; duplicate stays on the
   layer (there is no cross-layer copy/paste). The frame is the selected strokes'
@@ -2698,17 +2043,13 @@ These are real gaps, not footnotes:
   The scan samples the merged visible composite (including the paper), and
   documents above 16,777,216 pixels refuse a fill with a notice rather than
   risking a long freeze.
-- **A gradient is a whole-layer colour function whose geometry is editable.** The
-  two handles of the selected gradient move its axis (linear) or its centre and
-  radius (radial), and the arrow keys nudge the focused handle - but there is
-  no **stop editor for a committed gradient**: the middle-stop editor describes
-  the *next* drag, so a gradient already on the canvas keeps the stops it was
-  drawn with. There is no angle or aspect modifier, no transparency stop and no
-  clipping to a selection or shape; opacity applies to the entire element. It is
-  content, not an adjustment layer, so it covers earlier elements on its layer.
-  A drag re-rasterizes the whole layer on every pointer move, the same trade as
-  moving a selection; that is the thing to cache first if a heavy layer makes
-  the preview lag.
+- **A gradient is a two-stop whole-layer colour function.** There is no stop
+  editor, no angle or aspect modifier, no transparency stop and no clipping to a
+  selection or shape; opacity applies to the entire element. It is content, not
+  an adjustment layer, so it covers earlier elements on its layer. A drag
+  re-rasterizes the whole layer on every pointer move, the same trade as moving a
+  selection; that is the thing to cache first if a heavy layer makes the preview
+  lag.
 - **An eraser stroke costs one extra surface-sized canvas** while it is in
   flight (its pre-stroke snapshot). It is allocated lazily and released when the
   stroke ends, but on a very large document it is a visible memory spike next to

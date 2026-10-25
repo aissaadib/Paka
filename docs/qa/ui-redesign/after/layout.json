@@ -1,0 +1,994 @@
+{
+  "1440x900": {
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "documentHeight": 900,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1440,
+      "height": 900,
+      "bottom": 900,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 900,
+      "clientWidth": 1440,
+      "clientHeight": 900
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 1440,
+      "height": 34,
+      "bottom": 102,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 33,
+      "clientWidth": 1440,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 1440,
+      "height": 38,
+      "bottom": 68,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 37,
+      "clientWidth": 1440,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 1440,
+      "height": 776,
+      "bottom": 878,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 776,
+      "clientWidth": 1440,
+      "clientHeight": 776
+    },
+    "sidePanels": {
+      "x": 1224,
+      "y": 102,
+      "width": 216,
+      "height": 776,
+      "bottom": 878,
+      "right": 1440,
+      "scrollWidth": 263,
+      "scrollHeight": 776,
+      "clientWidth": 216,
+      "clientHeight": 776
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 776,
+      "bottom": 878,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 776,
+      "clientWidth": 39,
+      "clientHeight": 776
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 1184,
+      "height": 776,
+      "bottom": 878,
+      "right": 1224,
+      "scrollWidth": 1184,
+      "scrollHeight": 776,
+      "clientWidth": 1184,
+      "clientHeight": 776
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 878,
+      "width": 1440,
+      "height": 22,
+      "bottom": 900,
+      "right": 1440,
+      "scrollWidth": 1440,
+      "scrollHeight": 21,
+      "clientWidth": 1440,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 397,
+        "bottom": 529,
+        "headerVisible": true,
+        "bodyHeight": 369
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 348,
+        "bottom": 878,
+        "headerVisible": true,
+        "bodyHeight": 223
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "1366x768": {
+    "viewport": {
+      "width": 1366,
+      "height": 768
+    },
+    "documentHeight": 768,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1366,
+      "height": 768,
+      "bottom": 768,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 768,
+      "clientWidth": 1366,
+      "clientHeight": 768
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 1366,
+      "height": 34,
+      "bottom": 102,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 33,
+      "clientWidth": 1366,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 1366,
+      "height": 38,
+      "bottom": 68,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 37,
+      "clientWidth": 1366,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 1366,
+      "height": 644,
+      "bottom": 746,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 644,
+      "clientWidth": 1366,
+      "clientHeight": 644
+    },
+    "sidePanels": {
+      "x": 1150,
+      "y": 102,
+      "width": 216,
+      "height": 644,
+      "bottom": 746,
+      "right": 1366,
+      "scrollWidth": 263,
+      "scrollHeight": 644,
+      "clientWidth": 216,
+      "clientHeight": 644
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 644,
+      "bottom": 746,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 644,
+      "clientWidth": 39,
+      "clientHeight": 644
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 1110,
+      "height": 644,
+      "bottom": 746,
+      "right": 1150,
+      "scrollWidth": 1110,
+      "scrollHeight": 644,
+      "clientWidth": 1110,
+      "clientHeight": 644
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 746,
+      "width": 1366,
+      "height": 22,
+      "bottom": 768,
+      "right": 1366,
+      "scrollWidth": 1366,
+      "scrollHeight": 21,
+      "clientWidth": 1366,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 324,
+        "bottom": 456,
+        "headerVisible": true,
+        "bodyHeight": 296
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 289,
+        "bottom": 746,
+        "headerVisible": true,
+        "bodyHeight": 164
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "1180x800": {
+    "viewport": {
+      "width": 1180,
+      "height": 800
+    },
+    "documentHeight": 800,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1180,
+      "height": 800,
+      "bottom": 800,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 800,
+      "clientWidth": 1180,
+      "clientHeight": 800
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 1180,
+      "height": 34,
+      "bottom": 102,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 33,
+      "clientWidth": 1180,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 1180,
+      "height": 38,
+      "bottom": 68,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 37,
+      "clientWidth": 1180,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 1180,
+      "height": 676,
+      "bottom": 778,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 676,
+      "clientWidth": 1180,
+      "clientHeight": 676
+    },
+    "sidePanels": {
+      "x": 964,
+      "y": 102,
+      "width": 216,
+      "height": 676,
+      "bottom": 778,
+      "right": 1180,
+      "scrollWidth": 263,
+      "scrollHeight": 676,
+      "clientWidth": 216,
+      "clientHeight": 676
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 676,
+      "bottom": 778,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 676,
+      "clientWidth": 39,
+      "clientHeight": 676
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 924,
+      "height": 676,
+      "bottom": 778,
+      "right": 964,
+      "scrollWidth": 924,
+      "scrollHeight": 676,
+      "clientWidth": 924,
+      "clientHeight": 676
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 778,
+      "width": 1180,
+      "height": 22,
+      "bottom": 800,
+      "right": 1180,
+      "scrollWidth": 1180,
+      "scrollHeight": 21,
+      "clientWidth": 1180,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 342,
+        "bottom": 474,
+        "headerVisible": true,
+        "bodyHeight": 314
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 303,
+        "bottom": 778,
+        "headerVisible": true,
+        "bodyHeight": 178
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "1024x768": {
+    "viewport": {
+      "width": 1024,
+      "height": 768
+    },
+    "documentHeight": 768,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 1024,
+      "height": 768,
+      "bottom": 768,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 768,
+      "clientWidth": 1024,
+      "clientHeight": 768
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 1024,
+      "height": 34,
+      "bottom": 102,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 33,
+      "clientWidth": 1024,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 1024,
+      "height": 38,
+      "bottom": 68,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 37,
+      "clientWidth": 1024,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 1024,
+      "height": 644,
+      "bottom": 746,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 644,
+      "clientWidth": 1024,
+      "clientHeight": 644
+    },
+    "sidePanels": {
+      "x": 808,
+      "y": 102,
+      "width": 216,
+      "height": 644,
+      "bottom": 746,
+      "right": 1024,
+      "scrollWidth": 263,
+      "scrollHeight": 644,
+      "clientWidth": 216,
+      "clientHeight": 644
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 644,
+      "bottom": 746,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 644,
+      "clientWidth": 39,
+      "clientHeight": 644
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 768,
+      "height": 644,
+      "bottom": 746,
+      "right": 808,
+      "scrollWidth": 768,
+      "scrollHeight": 644,
+      "clientWidth": 768,
+      "clientHeight": 644
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 746,
+      "width": 1024,
+      "height": 22,
+      "bottom": 768,
+      "right": 1024,
+      "scrollWidth": 1024,
+      "scrollHeight": 21,
+      "clientWidth": 1024,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 324,
+        "bottom": 456,
+        "headerVisible": true,
+        "bodyHeight": 296
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 289,
+        "bottom": 746,
+        "headerVisible": true,
+        "bodyHeight": 164
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "960x600": {
+    "viewport": {
+      "width": 960,
+      "height": 600
+    },
+    "documentHeight": 600,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 960,
+      "height": 600,
+      "bottom": 600,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 600,
+      "clientWidth": 960,
+      "clientHeight": 600
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 960,
+      "height": 34,
+      "bottom": 102,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 33,
+      "clientWidth": 960,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 960,
+      "height": 38,
+      "bottom": 68,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 37,
+      "clientWidth": 960,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 960,
+      "height": 476,
+      "bottom": 578,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 476,
+      "clientWidth": 960,
+      "clientHeight": 476
+    },
+    "sidePanels": {
+      "x": 744,
+      "y": 102,
+      "width": 216,
+      "height": 476,
+      "bottom": 578,
+      "right": 960,
+      "scrollWidth": 263,
+      "scrollHeight": 476,
+      "clientWidth": 216,
+      "clientHeight": 476
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 476,
+      "bottom": 578,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 476,
+      "clientWidth": 39,
+      "clientHeight": 476
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 704,
+      "height": 476,
+      "bottom": 578,
+      "right": 744,
+      "scrollWidth": 704,
+      "scrollHeight": 476,
+      "clientWidth": 704,
+      "clientHeight": 476
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 578,
+      "width": 960,
+      "height": 22,
+      "bottom": 600,
+      "right": 960,
+      "scrollWidth": 960,
+      "scrollHeight": 21,
+      "clientWidth": 960,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 232,
+        "bottom": 364,
+        "headerVisible": true,
+        "bodyHeight": 204
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 213,
+        "bottom": 578,
+        "headerVisible": true,
+        "bodyHeight": 88
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "900x700": {
+    "viewport": {
+      "width": 900,
+      "height": 700
+    },
+    "documentHeight": 700,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 900,
+      "height": 700,
+      "bottom": 700,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 700,
+      "clientWidth": 900,
+      "clientHeight": 700
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 900,
+      "height": 34,
+      "bottom": 102,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 33,
+      "clientWidth": 900,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 900,
+      "height": 38,
+      "bottom": 68,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 37,
+      "clientWidth": 900,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 900,
+      "height": 576,
+      "bottom": 678,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 576,
+      "clientWidth": 900,
+      "clientHeight": 576
+    },
+    "sidePanels": {
+      "x": 684,
+      "y": 102,
+      "width": 216,
+      "height": 576,
+      "bottom": 678,
+      "right": 900,
+      "scrollWidth": 263,
+      "scrollHeight": 576,
+      "clientWidth": 216,
+      "clientHeight": 576
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 576,
+      "bottom": 678,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 576,
+      "clientWidth": 39,
+      "clientHeight": 576
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 644,
+      "height": 576,
+      "bottom": 678,
+      "right": 684,
+      "scrollWidth": 644,
+      "scrollHeight": 576,
+      "clientWidth": 644,
+      "clientHeight": 576
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 678,
+      "width": 900,
+      "height": 22,
+      "bottom": 700,
+      "right": 900,
+      "scrollWidth": 900,
+      "scrollHeight": 21,
+      "clientWidth": 900,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 287,
+        "bottom": 419,
+        "headerVisible": true,
+        "bodyHeight": 259
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 258,
+        "bottom": 678,
+        "headerVisible": true,
+        "bodyHeight": 133
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "820x700": {
+    "viewport": {
+      "width": 820,
+      "height": 700
+    },
+    "documentHeight": 700,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 820,
+      "height": 700,
+      "bottom": 700,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 700,
+      "clientWidth": 820,
+      "clientHeight": 700
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 820,
+      "height": 34,
+      "bottom": 102,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 33,
+      "clientWidth": 820,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 820,
+      "height": 38,
+      "bottom": 68,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 37,
+      "clientWidth": 820,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 820,
+      "height": 576,
+      "bottom": 678,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 576,
+      "clientWidth": 820,
+      "clientHeight": 576
+    },
+    "sidePanels": {
+      "x": 604,
+      "y": 102,
+      "width": 216,
+      "height": 576,
+      "bottom": 678,
+      "right": 820,
+      "scrollWidth": 263,
+      "scrollHeight": 576,
+      "clientWidth": 216,
+      "clientHeight": 576
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 576,
+      "bottom": 678,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 576,
+      "clientWidth": 39,
+      "clientHeight": 576
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 564,
+      "height": 576,
+      "bottom": 678,
+      "right": 604,
+      "scrollWidth": 564,
+      "scrollHeight": 576,
+      "clientWidth": 564,
+      "clientHeight": 576
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 678,
+      "width": 820,
+      "height": 22,
+      "bottom": 700,
+      "right": 820,
+      "scrollWidth": 820,
+      "scrollHeight": 21,
+      "clientWidth": 820,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 287,
+        "bottom": 419,
+        "headerVisible": true,
+        "bodyHeight": 259
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 258,
+        "bottom": 678,
+        "headerVisible": true,
+        "bodyHeight": 133
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  },
+  "700x640": {
+    "viewport": {
+      "width": 700,
+      "height": 640
+    },
+    "documentHeight": 640,
+    "overflowY": 0,
+    "appShell": {
+      "x": 0,
+      "y": 0,
+      "width": 700,
+      "height": 640,
+      "bottom": 640,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 640,
+      "clientWidth": 700,
+      "clientHeight": 640
+    },
+    "toolbar": {
+      "x": 0,
+      "y": 68,
+      "width": 700,
+      "height": 34,
+      "bottom": 102,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 33,
+      "clientWidth": 700,
+      "clientHeight": 33
+    },
+    "toolOptions": {
+      "x": 0,
+      "y": 30,
+      "width": 700,
+      "height": 38,
+      "bottom": 68,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 37,
+      "clientWidth": 700,
+      "clientHeight": 37
+    },
+    "workspace": {
+      "x": 0,
+      "y": 102,
+      "width": 700,
+      "height": 516,
+      "bottom": 618,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 516,
+      "clientWidth": 700,
+      "clientHeight": 516
+    },
+    "sidePanels": {
+      "x": 484,
+      "y": 102,
+      "width": 216,
+      "height": 516,
+      "bottom": 618,
+      "right": 700,
+      "scrollWidth": 263,
+      "scrollHeight": 516,
+      "clientWidth": 216,
+      "clientHeight": 516
+    },
+    "toolRail": {
+      "x": 0,
+      "y": 102,
+      "width": 40,
+      "height": 516,
+      "bottom": 618,
+      "right": 40,
+      "scrollWidth": 39,
+      "scrollHeight": 516,
+      "clientWidth": 39,
+      "clientHeight": 516
+    },
+    "canvas": {
+      "x": 40,
+      "y": 102,
+      "width": 444,
+      "height": 516,
+      "bottom": 618,
+      "right": 484,
+      "scrollWidth": 444,
+      "scrollHeight": 516,
+      "clientWidth": 444,
+      "clientHeight": 516
+    },
+    "statusBar": {
+      "x": 0,
+      "y": 618,
+      "width": 700,
+      "height": 22,
+      "bottom": 640,
+      "right": 700,
+      "scrollWidth": 700,
+      "scrollHeight": 21,
+      "clientWidth": 700,
+      "clientHeight": 21
+    },
+    "panels": [
+      {
+        "title": "Color",
+        "width": 216,
+        "height": 254,
+        "bottom": 386,
+        "headerVisible": true,
+        "bodyHeight": 226
+      },
+      {
+        "title": "Layers",
+        "width": 216,
+        "height": 231,
+        "bottom": 618,
+        "headerVisible": true,
+        "bodyHeight": 106
+      }
+    ],
+    "clipped": [],
+    "errors": []
+  }
+}

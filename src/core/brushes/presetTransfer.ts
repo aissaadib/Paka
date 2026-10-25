@@ -1,11 +1,11 @@
 /**
- * The brush preset library file: exporting a library and importing one.
+ * The brush library file: the format, the writer and the reader.
  *
  * A library file is Paka's own small JSON document. It is not a project file
- * and it is not the settings file: it holds only the user's brushes, so it
- * can be handed to somebody else or kept as a backup.
+ * and it is not the settings file: it holds only brushes, so it can be handed
+ * to somebody else, kept as a backup or moved to another machine.
  *
- * The format is explicit and versioned, and everything in it is validated on
+ * The format is explicit and versioned, and everything in it is checked on
  * the way in, because the file comes from outside:
  *
  *  - a file that is not JSON, or not a preset library, is an **error** with a
@@ -13,19 +13,22 @@
  *    library, because that would look like a successful import that did
  *    nothing;
  *  - a file from a **newer** version is refused rather than half-read;
- *  - a file that is **too large**, or that holds **more presets** than the
+ *  - a file that is **too large**, or that holds **more brushes** than the
  *    browser will take, is refused before anything is read into memory;
  *  - an individual entry that is malformed is **skipped**, and the rest of
  *    the file is still imported. The number of skipped entries is reported.
  *
- * The ids and the last-used stamps of the source machine are not carried
- * over: an imported preset is a new entry here, with a fresh id, and a name
- * that does not clash with the ones already in the library.
+ * The ids stay behind: an imported brush is a new entry here, with a fresh
+ * id, so the same file can be imported twice without the second copy
+ * replacing the first. The brush itself is read through `readBrushSettings`,
+ * the one reader that knows every field a brush has, so nothing is dropped on
+ * the way in.
  */
 
 import { readBrushSettings } from "./defaults";
 import { normalizePresetName, type BrushPreset } from "./presets";
 import { asRecord } from "../../utils/record";
+import type { BrushSettings } from "../../types/brush";
 
 /** The marker in the file that says "this is a preset library". */
 export const PRESET_LIBRARY_FORMAT = "paka-preset-library";
@@ -42,18 +45,33 @@ export const PRESET_LIBRARY_VERSION = 1;
  */
 export const MAX_PRESET_LIBRARY_BYTES = 256 * 1024;
 
-/** The most presets a library file may hold. */
+/** The most brushes a library file may hold. */
 export const MAX_PRESET_LIBRARY_ENTRIES = 200;
 
 /** The file extension the browser suggests. */
 export const PRESET_LIBRARY_EXTENSION = "json";
 
+/**
+ * One brush as it travels in a library file.
+ *
+ * There is no id: the id belongs to the machine the file came from, and a
+ * new one is minted when the entry is imported.
+ */
+export interface PresetLibraryEntry {
+  /** The name the brush had on the machine it came from. */
+  readonly name: string;
+  /** The brush itself, read field by field. */
+  readonly brush: BrushSettings;
+  /** Whether the brush was starred there. */
+  readonly favorite: boolean;
+}
+
 /** The outcome of reading a library file. */
 export type PresetLibraryRead =
   | {
       readonly ok: true;
-      /** The presets the file holds, in file order. */
-      readonly presets: readonly BrushPreset[];
+      /** The brushes the file holds, in file order. */
+      readonly entries: readonly PresetLibraryEntry[];
       /** How many entries were malformed and skipped. */
       readonly skipped: number;
     }
@@ -64,7 +82,7 @@ export type PresetLibraryRead =
     };
 
 /** The size of a string in bytes, when the platform can tell us. */
-function byteLength(text: string): number {
+export function presetLibraryByteLength(text: string): number {
   const encoder = (globalThis as { TextEncoder?: new () => { encode(value: string): Uint8Array } })
     .TextEncoder;
   if (encoder === undefined) {
@@ -78,19 +96,24 @@ function byteLength(text: string): number {
 /**
  * Writes a library file.
  *
- * The entries are the user's own presets: a built-in brush is code, and
- * shipping it again would only make the file bigger. The id and the last-used
- * stamp stay behind, because they belong to the machine the library came
- * from.
+ * The entries are the brushes the caller hands over: the user's own. A
+ * built-in brush is code, and shipping it again would only make the file
+ * bigger. The ids stay behind, because they belong to the machine the
+ * library came from.
+ *
+ * The starred brushes are written with their star, so a library that is
+ * handed to somebody else carries the note the user made about each brush.
  */
-export function serializePresetLibrary(presets: readonly BrushPreset[]): string {
-  const entries = presets
-    .filter((preset) => !preset.builtin)
-    .map((preset) => ({
-      name: preset.name,
-      brush: preset.brush,
-      favorite: preset.favorite,
-    }));
+export function serializePresetLibrary(
+  presets: readonly BrushPreset[],
+  favorites: readonly string[] = [],
+): string {
+  const starred = new Set(favorites);
+  const entries = presets.map((preset) => ({
+    name: preset.name,
+    brush: preset.brush,
+    favorite: starred.has(preset.id),
+  }));
   return `${JSON.stringify(
     {
       format: PRESET_LIBRARY_FORMAT,
@@ -106,10 +129,10 @@ export function serializePresetLibrary(presets: readonly BrushPreset[]): string 
  * Reads a library file.
  *
  * Never throws: a file that cannot be used comes back as an error with a
- * message, and a file that is usable comes back as the presets it holds.
+ * message, and a file that can be used comes back as the brushes it holds.
  */
 export function parsePresetLibrary(text: string): PresetLibraryRead {
-  if (byteLength(text) > MAX_PRESET_LIBRARY_BYTES) {
+  if (presetLibraryByteLength(text) > MAX_PRESET_LIBRARY_BYTES) {
     return {
       ok: false,
       error: `The file is too large to be a brush library (limit ${Math.floor(
@@ -126,10 +149,7 @@ export function parsePresetLibrary(text: string): PresetLibraryRead {
   }
 
   const record = asRecord(parsed);
-  if (record === null) {
-    return { ok: false, error: "The file is not a Paka brush library." };
-  }
-  if (record.format !== PRESET_LIBRARY_FORMAT) {
+  if (record === null || record.format !== PRESET_LIBRARY_FORMAT) {
     return { ok: false, error: "The file is not a Paka brush library." };
   }
 
@@ -146,16 +166,16 @@ export function parsePresetLibrary(text: string): PresetLibraryRead {
 
   const raw = record.presets;
   if (!Array.isArray(raw)) {
-    return { ok: false, error: "The file has no list of presets." };
+    return { ok: false, error: "The file has no list of brushes." };
   }
   if (raw.length > MAX_PRESET_LIBRARY_ENTRIES) {
     return {
       ok: false,
-      error: `The file holds more than ${MAX_PRESET_LIBRARY_ENTRIES} presets.`,
+      error: `The file holds more than ${MAX_PRESET_LIBRARY_ENTRIES} brushes.`,
     };
   }
 
-  const presets: BrushPreset[] = [];
+  const entries: PresetLibraryEntry[] = [];
   let skipped = 0;
   for (const entry of raw) {
     const entryRecord = asRecord(entry);
@@ -170,21 +190,18 @@ export function parsePresetLibrary(text: string): PresetLibraryRead {
       skipped += 1;
       continue;
     }
-    presets.push({
-      // The id is minted on import, so a library can be imported twice
-      // without the second copy replacing the first.
-      id: "",
+    entries.push({
       name,
+      // The one brush reader: every field a brush has is read here, so a
+      // brush that goes through a file comes back whole.
       brush: readBrushSettings(entryRecord.brush),
       favorite: entryRecord.favorite === true,
-      builtin: false,
-      lastUsedAt: null,
     });
   }
 
-  if (presets.length === 0) {
-    return { ok: false, error: "The file holds no usable presets." };
+  if (entries.length === 0) {
+    return { ok: false, error: "The file holds no usable brushes." };
   }
 
-  return { ok: true, presets, skipped };
+  return { ok: true, entries, skipped };
 }

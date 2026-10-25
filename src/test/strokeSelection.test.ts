@@ -15,11 +15,15 @@ import {
   boundsContainPoint,
   boundsFromCorners,
   inflateBounds,
+  pointInPolygon,
+  polygonBounds,
   segmentIntersectsBounds,
+  segmentsIntersect,
   strokeIntersectsBounds,
+  strokeIntersectsPolygon,
 } from "../core/document/strokeSelection";
 import type { StrokeRecord } from "../core/document/types";
-import type { Bounds } from "../types/geometry";
+import type { Bounds, Point } from "../types/geometry";
 
 const RECT: Bounds = { x: 0, y: 0, width: 10, height: 10 };
 
@@ -153,5 +157,60 @@ describe("stroke against a rectangle", () => {
 
   it("selects on an endpoint that lies on the edge", () => {
     expect(strokeIntersectsBounds(stroke([[0, 0], [-10, -10]]), RECT)).toBe(true);
+  });
+});
+
+describe("lasso polygon selection", () => {
+  // A square with a notch cut out of its left side: a point in the notch is
+  // inside the polygon's box but outside the region, which is what tells a
+  // real polygon test apart from a bounding-box test.
+  const LASSO: readonly Point[] = [
+    { x: 0, y: 0 },
+    { x: 20, y: 0 },
+    { x: 20, y: 20 },
+    { x: 0, y: 20 },
+    { x: 0, y: 12 },
+    { x: 8, y: 12 },
+    { x: 8, y: 8 },
+    { x: 0, y: 8 },
+  ];
+
+  it("tests points against the region, not its bounding box", () => {
+    expect(pointInPolygon({ x: 12, y: 10 }, LASSO)).toBe(true);
+    expect(pointInPolygon({ x: 21, y: 10 }, LASSO)).toBe(false);
+    // Inside the box, inside the notch: outside the region.
+    expect(pointInPolygon({ x: 4, y: 10 }, LASSO)).toBe(false);
+    // On an edge counts as inside, so a click on the lasso line selects.
+    expect(pointInPolygon({ x: 0, y: 5 }, LASSO)).toBe(true);
+    expect(pointInPolygon({ x: 12, y: 10 }, [{ x: 0, y: 0 }, { x: 1, y: 0 }])).toBe(false);
+  });
+
+  it("detects crossing and touching segments", () => {
+    const a = { x: 0, y: 0 };
+    const b = { x: 10, y: 10 };
+    expect(segmentsIntersect(a, b, { x: 0, y: 10 }, { x: 10, y: 0 })).toBe(true);
+    expect(segmentsIntersect(a, b, { x: 0, y: 1 }, { x: 10, y: 11 })).toBe(false);
+    // Collinear and overlapping counts; collinear and disjoint does not.
+    expect(segmentsIntersect(a, b, { x: 5, y: 5 }, { x: 15, y: 15 })).toBe(true);
+    expect(segmentsIntersect(a, b, { x: 11, y: 11 }, { x: 15, y: 15 })).toBe(false);
+  });
+
+  it("selects strokes inside, crossing and near the lasso", () => {
+    expect(strokeIntersectsPolygon(stroke([[12, 10]]), LASSO)).toBe(true);
+    // A stroke whose segment crosses the region with both ends outside.
+    expect(strokeIntersectsPolygon(stroke([[-10, 10], [30, 10]]), LASSO)).toBe(true);
+    // A stroke in the notch is outside even though it is inside the box.
+    expect(strokeIntersectsPolygon(stroke([[4, 10]]), LASSO)).toBe(false);
+    expect(strokeIntersectsPolygon(stroke([[50, 50]]), LASSO)).toBe(false);
+    // Three pixels outside the right edge: padding is the painted width.
+    expect(strokeIntersectsPolygon(stroke([[23, 10]]), LASSO)).toBe(false);
+    expect(strokeIntersectsPolygon(stroke([[23, 10]]), LASSO, 4)).toBe(true);
+    // A degenerate path is not a region.
+    expect(strokeIntersectsPolygon(stroke([[0, 0]]), [{ x: 0, y: 0 }])).toBe(false);
+  });
+
+  it("finds the box of a path", () => {
+    expect(polygonBounds([])).toBeNull();
+    expect(polygonBounds(LASSO)).toEqual({ x: 0, y: 0, width: 20, height: 20 });
   });
 });

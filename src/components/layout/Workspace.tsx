@@ -1,28 +1,36 @@
 /**
- * Application shell: menu bar, tool options bar, toolbar, document tabs, tool
- * rail, canvas, panel stack and status bar.
- * Application shell: menu bar, tool options bar, toolbar, tool rail, canvas,
- * layers panel and status bar.
+ * Application shell: the composition model decides what is mounted and where.
+ *
+ * The shell used to be a hand-written tree - the menu bar, the tool bar, the
+ * tool rail, the canvas, the side column and the status bar were markup, in
+ * the order they happened to be written down. Now the tree is read from the
+ * composition model in `core/workspace`: which parts are shown, in what
+ * order, and how big they are. The shell maps a part to its component and
+ * mounts what the model says.
+ *
+ * The side column is the same story one level down. The panels themselves
+ * come from the shell's registry, their slot comes from the shell's slots
+ * and their visibility from the shell's preferences, so a panel is added by
+ * registering it rather than by editing this file.
  *
  * The state kept here is the workflow the engine deliberately knows nothing
  * about: which dialog is open, and which action is waiting for the user to
- * confirm that unsaved work may be discarded. The panels themselves live in
- * the panel stack, which the panel manager drives.
- *
- * With several documents open, only two things can destroy work: closing a
- * tab that has unsaved changes, and closing the window while any tab has
- * unsaved changes. Both ask first. Creating a new document and opening a
- * project do **not** ask: they add a tab, and the drawing that is on screen
- * keeps its own tab, its own history and its own viewport.
+ * confirm that unsaved work may be discarded.
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
+import { findPanel, registerPanel } from "../../core/shell/panelRegistry";
+import {
+  compositionPanelsInSlot,
+  compositionPartsInRegion,
+  workspaceGrid,
+  type WorkspacePartId,
+} from "../../core/workspace/workspaceSettings";
 import { CanvasStage } from "../../features/canvas/CanvasStage";
 import { CanvasStatusBar } from "../../features/canvas/CanvasStatusBar";
-import { CommandPalette } from "../../features/commands/CommandPalette";
+import { ColorPanel } from "../../features/color/ColorPanel";
 import { NewDocumentDialog } from "../../features/document/NewDocumentDialog";
 import { LayersPanel } from "../../features/layers/LayersPanel";
-import { ToolOptionsBar } from "../../features/options/ToolOptionsBar";
 import {
   UnsavedChangesDialog,
   type UnsavedAction,
@@ -31,47 +39,81 @@ import { useCloseGuard } from "../../features/project/useCloseGuard";
 import { useDocumentTitle } from "../../features/project/useDocumentTitle";
 import { useFileCommands } from "../../features/project/useFileCommands";
 import { closeWindowNow } from "../../features/project/windowControls";
-import { DocumentTabs } from "../../features/tabs/DocumentTabs";
-import { tabCloseDecision } from "../../core/documents/sessionRegistry";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
-import { useDocumentSessions } from "../../hooks/useDocumentSessions";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
-import { usePanModifier } from "../../hooks/usePanModifier";
-import { useWorkspaceSettings } from "../../hooks/useWorkspace";
+import {
+  useWorkspaceActions,
+  useWorkspaceComposition,
+} from "../../hooks/useWorkspace";
+import { WorkspaceProvider } from "../../state/workspaceContext";
+import type { WorkspaceStore } from "../../state/workspaceStore";
 import { fileNameOf } from "../../utils/path";
-import { SecondaryViewPanel } from "../../features/view/SecondaryViewPanel";
-import { PanelStack } from "../panels/PanelStack";
 import { ToolRail } from "../toolbar/ToolRail";
+import { FloatingPanels } from "../panels/FloatingPanels";
+import { PanelDock } from "../panels/PanelDock";
 import { AppMenuBar } from "./AppMenuBar";
 import { ToolBar } from "./ToolBar";
 
-/** An action that is waiting for the user to confirm that work may be lost. */
-interface PendingAction {
-  readonly action: UnsavedAction;
-  /** The tab the question is about, when it is about one tab. */
-  readonly sessionId?: string;
-  /** The name of that tab, so the question names it. */
-  readonly documentName?: string | null;
+/*
+ * The shell's own panels register themselves when this module is evaluated.
+ *
+ * The registry is the shell's list of panels, so the side column is built
+ * from it rather than written out here: a panel is added by registering it,
+ * and the composition decides where it sits and whether it is shown.
+ *
+ * These two registrations are *fallbacks*. A panel that knows how to
+ * register itself - the colour dock does - keeps its own registration, with
+ * its own icon, its own mount policy and its own description. The shell
+ * only speaks for the panels that have not spoken for themselves, so there
+ * is one entry per panel and one dock in the side column.
+ */
+if (!findPanel("color")) {
+  registerPanel({
+    id: "color",
+    title: "Color",
+    slot: "right",
+    order: 0,
+    render: () => <ColorPanel />,
+  });
 }
 
-export function Workspace() {
-  const { actions, files, sessions, recentFiles } = useEditor();
-  const { document: drawingDocument, file, secondaryViewOpen } = useEditorState();
-  const sessionState = useDocumentSessions();
-  const workspace = useWorkspaceSettings();
+if (!findPanel("layers")) {
+  registerPanel({
+    id: "layers",
+    title: "Layers",
+    slot: "right",
+    order: 1,
+    render: () => <LayersPanel />,
+  });
+}
+
+export function Workspace({
+  store,
+}: {
+  /** Optional injected store, used by tests and by the settings wiring. */
+  readonly store?: WorkspaceStore;
+} = {}) {
+  return (
+    <WorkspaceProvider store={store}>
+      <WorkspaceShell />
+    </WorkspaceProvider>
+  );
+}
+
+function WorkspaceShell() {
+  const { actions: editorActions, files } = useEditor();
+  const { document: drawingDocument, file } = useEditorState();
+  const composition = useWorkspaceComposition();
+  const workspaceActions = useWorkspaceActions();
   const [newDocumentOpen, setNewDocumentOpen] = useState(false);
-  const [pending, setPending] = useState<PendingAction | null>(null);
-  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [pending, setPending] = useState<UnsavedAction | null>(null);
 
   const {
     open: openProject,
-    openPath: openRecentFile,
     save,
     saveAs,
     exportPng,
     saveThen,
-    saveSessionThen,
-    saveAllThen,
     busy: fileBusy,
     message: fileMessage,
     dismissMessage,
@@ -82,74 +124,41 @@ export function Workspace() {
   // was created as.
   const documentLabel = file.path === null ? drawingDocument.name : fileNameOf(file.path);
 
-  useDocumentTitle(documentLabel, file.dirty, sessionState.sessions.length);
-  useCloseGuard(useCallback(() => setPending({ action: "close" }), []));
+  useDocumentTitle(documentLabel, file.dirty);
+  useCloseGuard(useCallback(() => setPending("close"), []));
 
   /** Carries out an action the user has agreed may discard unsaved work. */
   const proceed = useCallback(
-    (pendingAction: PendingAction) => {
-      switch (pendingAction.action) {
+    (action: UnsavedAction) => {
+      switch (action) {
         case "new":
           setNewDocumentOpen(true);
           return;
         case "open":
           openProject();
           return;
-        case "closeTab": {
-          const sessionId = pendingAction.sessionId;
-          if (sessionId !== undefined) {
-            files.closeSession(sessionId);
-          }
-          return;
-        }
         case "close":
           void closeWindowNow();
       }
     },
-    [files, openProject],
+    [openProject],
   );
 
-  // A new document is a new tab: the drawing on screen keeps its own tab, so
-  // nothing is discarded and there is nothing to confirm.
   const requestNewDocument = useCallback(() => {
-    setNewDocumentOpen(true);
-  }, []);
+    if (files.hasUnsavedChanges) {
+      setPending("new");
+    } else {
+      setNewDocumentOpen(true);
+    }
+  }, [files]);
 
-  // Opening a project is a new tab as well, for the same reason.
   const requestOpen = useCallback(() => {
-    openProject();
-  }, [openProject]);
-
-  const clearRecentFiles = useCallback(() => {
-    recentFiles.clear();
-  }, [recentFiles]);
-
-  /**
-   * Asks for a tab to be closed.
-   *
-   * A tab with unsaved changes is never closed silently: the user is asked
-   * whether to save it, discard it or keep it.
-   */
-  const requestCloseTab = useCallback(
-    (sessionId: string) => {
-      const session = sessions.findById(sessionId);
-      if (session === undefined) {
-        return;
-      }
-      const snapshot = session.engine.getState();
-      if (tabCloseDecision(session) === "confirm") {
-        setPending({
-          action: "closeTab",
-          sessionId,
-          documentName:
-            snapshot.file.path === null ? snapshot.document.name : fileNameOf(snapshot.file.path),
-        });
-        return;
-      }
-      files.closeSession(sessionId);
-    },
-    [files, sessions],
-  );
+    if (files.hasUnsavedChanges) {
+      setPending("open");
+    } else {
+      openProject();
+    }
+  }, [files, openProject]);
 
   const confirmDiscard = useCallback(() => {
     const action = pending;
@@ -162,94 +171,143 @@ export function Workspace() {
   const saveFirst = useCallback(() => {
     const action = pending;
     setPending(null);
-    if (action === null) {
-      return;
+    if (action !== null) {
+      // Continues only when the document really reached the disk.
+      saveThen(() => proceed(action));
     }
-    if (action.action === "closeTab" && action.sessionId !== undefined) {
-      // Continues only when that document really reached the disk.
-      const sessionId = action.sessionId;
-      saveSessionThen(sessionId, () => proceed({ ...action, sessionId }));
-      return;
-    }
-    if (action.action === "close") {
-      // Every open document with unsaved changes is written first; the window
-      // only closes when all of them reached the disk.
-      saveAllThen(() => proceed(action));
-      return;
-    }
-    saveThen(() => proceed(action));
-  }, [pending, proceed, saveAllThen, saveSessionThen, saveThen]);
+  }, [pending, proceed, saveThen]);
 
-  const openCommandPalette = useCallback(() => setPaletteOpen(true), []);
-  const closeCommandPalette = useCallback(() => setPaletteOpen(false), []);
-  const fileHandlers = useMemo(
-    () => ({ save, saveAs, open: requestOpen }),
-    [requestOpen, save, saveAs],
-  );
+  useKeyboardShortcuts(save, saveAs, requestOpen);
 
-  useKeyboardShortcuts(save, saveAs, requestOpen, openCommandPalette);
-  usePanModifier();
+  /**
+   * The component a part is mounted with.
+   *
+   * The model says which parts are shown and where; this says what each one
+   * is. The parts that need the shell's own state - the menu bar and the
+   * status bar - are handed the props they have always been handed.
+   */
+  const renderPart = (id: WorkspacePartId): ReactNode => {
+    switch (id) {
+      case "menu-bar":
+        return (
+          <AppMenuBar
+            onNewDocument={requestNewDocument}
+            onOpenProject={requestOpen}
+            onSaveProject={save}
+            onSaveProjectAs={saveAs}
+            onExportPng={exportPng}
+          />
+        );
+      case "tool-bar":
+        return <ToolBar />;
+      case "tool-rail":
+        return <ToolRail />;
+      case "canvas":
+        return <CanvasStage />;
+      case "side-column":
+        return <SideColumn />;
+      case "status-bar":
+        return (
+          <CanvasStatusBar
+            fileMessage={fileMessage}
+            fileBusy={fileBusy}
+            onDismissFileMessage={dismissMessage}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  const grid = workspaceGrid(composition);
 
   return (
-    // A hidden shell row takes no space: the grid row collapses to nothing, so
-    // the canvas gets the pixels back without the user resizing the window.
-    <div
-      className="app-shell"
-      data-tool-rail={workspace.shell.toolRail ? "shown" : "hidden"}
-    >
-      <AppMenuBar
-        onNewDocument={requestNewDocument}
-        onOpenProject={requestOpen}
-        onOpenRecent={openRecentFile}
-        onClearRecentFiles={clearRecentFiles}
-        onSaveProject={save}
-        onSaveProjectAs={saveAs}
-        onExportPng={exportPng}
-      />
-      <ToolOptionsBar />
-      <ToolBar />
-      {/* The tab strip and the workspace share one row of the shell: the strip
-          has a fixed height of its own, so a long row of open documents never
-          takes space away from the canvas. */}
-      <div className="workspace-panel">
-        <DocumentTabs onNewDocument={requestNewDocument} onRequestClose={requestCloseTab} />
-        <div className="workspace-body">
-          {workspace.shell.toolRail ? <ToolRail /> : null}
-          <div className="canvas-views">
-            <CanvasStage />
-            {secondaryViewOpen ? <SecondaryViewPanel /> : null}
-          </div>
-          <PanelStack />
-        </div>
+    <div className="app-shell" style={{ gridTemplateRows: grid.rows }}>
+      {compositionPartsInRegion(composition, "top").map((part) =>
+        part.shown ? <Fragment key={part.id}>{renderPart(part.id)}</Fragment> : null,
+      )}
+      <div className="workspace-body" style={{ gridTemplateColumns: grid.columns }}>
+        {compositionPartsInRegion(composition, "body").map((part) =>
+          part.shown ? <Fragment key={part.id}>{renderPart(part.id)}</Fragment> : null,
+        )}
       </div>
-      <CanvasStatusBar
-        fileMessage={fileMessage}
-        fileBusy={fileBusy}
-        onDismissFileMessage={dismissMessage}
+      {compositionPartsInRegion(composition, "bottom").map((part) =>
+        part.shown ? <Fragment key={part.id}>{renderPart(part.id)}</Fragment> : null,
+      )}
+      <FloatingPanels
+        panels={compositionPanelsInSlot(composition, "floating").map((panel) => ({
+          id: panel.id,
+          title: findPanel(panel.id)?.title ?? panel.id,
+          render: () => findPanel(panel.id)?.render() ?? null,
+        }))}
+        onDock={(panelId) => workspaceActions.movePanel(panelId, "right")}
+        onHide={(panelId) => workspaceActions.movePanel(panelId, "hidden")}
       />
       {newDocumentOpen ? (
         <NewDocumentDialog
           onCancel={() => setNewDocumentOpen(false)}
           onCreate={(options) => {
-            actions.newDocument(options);
+            editorActions.newDocument(options);
             setNewDocumentOpen(false);
           }}
         />
       ) : null}
       {pending === null ? null : (
         <UnsavedChangesDialog
-          action={pending.action}
-          documentName={pending.documentName ?? null}
+          action={pending}
           onCancel={() => setPending(null)}
           onSaveFirst={saveFirst}
           onDiscard={confirmDiscard}
         />
       )}
-      <CommandPalette
-        open={paletteOpen}
-        onClose={closeCommandPalette}
-        file={fileHandlers}
-      />
+    </div>
+  );
+}
+
+/**
+ * The right-hand column: a tabbed dock over the layers list.
+ *
+ * The panels come from the registry, their slot from the shell's slots and
+ * their visibility from the shell's preferences, so the column is a reading
+ * of the composition rather than a list of components.
+ *
+ * The dock groups the inspect-and-adjust panels, and the layers list - the
+ * one panel a drawing session works in continuously - keeps a share of the
+ * column of its own. Which panels are in the dock is the composition's
+ * decision; the dock only decides which visible one is on top.
+ */
+function SideColumn() {
+  const composition = useWorkspaceComposition();
+  const workspaceActions = useWorkspaceActions();
+  const panels = compositionPanelsInSlot(composition, "right");
+  const layers = panels.filter((panel) => panel.id === "layers");
+  const docked = panels.filter((panel) => panel.id !== "layers");
+
+  return (
+    <div className="side-panels">
+      {docked.length === 0 ? null : (
+        <PanelDock
+          panels={docked.map((panel) => ({
+            id: panel.id,
+            title: findPanel(panel.id)?.title ?? panel.id,
+            render: () => findPanel(panel.id)?.render() ?? null,
+          }))}
+          onMovePanel={(panelId, index) =>
+            workspaceActions.movePanel(panelId, "right", index)
+          }
+          onFloatPanel={(panelId) =>
+            workspaceActions.movePanel(panelId, "floating")
+          }
+          onResetPanels={workspaceActions.resetPanels}
+        />
+      )}
+      {layers.length === 0 ? null : (
+        <div className="side-panels__layers">
+          {layers.map((panel) => (
+            <Fragment key={panel.id}>{findPanel(panel.id)?.render()}</Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

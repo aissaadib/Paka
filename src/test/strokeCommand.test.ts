@@ -5,6 +5,7 @@ import { CommandStack } from "../core/commands/commandStack";
 import {
   createStrokeCommand,
   createStrokeCommandHost,
+  createStrokesCommand,
 } from "../core/commands/strokeCommand";
 import { StrokeStore } from "../core/document/strokeStore";
 import type { StrokeRecord } from "../core/document/types";
@@ -75,5 +76,46 @@ describe("stroke command", () => {
     const command = createStrokeCommand(createStroke(0), 0, createStrokeCommandHost(store, () => {}));
     expect(command.label).toBe("Stroke");
     expect(command.id).toMatch(/^cmd-/);
+  });
+
+  it("adds and removes a symmetry group as one history step", () => {
+    const store = new StrokeStore();
+    const refresh = vi.fn();
+    const stack = new CommandStack();
+    const host = createStrokeCommandHost(store, refresh);
+
+    const original = createStroke(0);
+    const copies = [createStroke(100), createStroke(200), createStroke(300)];
+    store.insert(original);
+    copies.forEach((copy, position) => {
+      store.insert(copy, position + 1);
+    });
+    stack.push(createStrokesCommand([original, ...copies], [0, 1, 2, 3], host));
+
+    expect(store.list("layer-1").map((entry) => entry.xs[0])).toEqual([0, 100, 200, 300]);
+
+    // One undo takes the original and every copy away together.
+    expect(stack.undo()).toBe(true);
+    expect(store.count("layer-1")).toBe(0);
+
+    // The redo restores the painting order, not just the set.
+    expect(stack.redo()).toBe(true);
+    expect(store.list("layer-1").map((entry) => entry.xs[0])).toEqual([0, 100, 200, 300]);
+    // One refresh per direction, not one per stroke.
+    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledWith("layer-1");
+  });
+
+  it("labels a group an erase when any of its strokes erases", () => {
+    const store = new StrokeStore();
+    const host = createStrokeCommandHost(store, () => {});
+    const erase = createStrokeRecord("layer-1", DEFAULT_BRUSH, true);
+    erase.xs.push(0);
+    erase.ys.push(0);
+    erase.pressures.push(1);
+    erase.times.push(0);
+
+    expect(createStrokesCommand([createStroke(0), erase], [0, 1], host).label).toBe("Erase");
+    expect(createStrokesCommand([createStroke(0)], [0], host).label).toBe("Stroke");
   });
 });

@@ -1,0 +1,28 @@
+{
+  "id": "group-blend",
+  "width": 120,
+  "height": 80,
+  "background": "#ffffff",
+  "layers": [
+    {
+      "id": "Base",
+      "elements": [
+        { "kind": "fill", "color": "#ffff00", "x": 0, "y": 0, "width": 120, "height": 80 }
+      ]
+    },
+    {
+      "id": "Shading",
+      "kind": "group",
+      "blendMode": "multiply",
+      "opacity": 0.5,
+      "children": [
+        {
+          "id": "Blue",
+          "elements": [
+            { "kind": "fill", "color": "#0000ff", "x": 30, "y": 10, "width": 40, "height": 40 }
+          ]
+        }
+      ]
+    }
+  ]
+}

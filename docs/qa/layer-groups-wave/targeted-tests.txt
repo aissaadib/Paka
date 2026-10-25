@@ -1,0 +1,6 @@
+canvas2dRenderer.test.ts 111 passed
+layerGroups.test.ts 39 passed
+layerPanel.test.ts 24 passed
+layerTreeDrag.test.ts 13 passed
+projectFormat.test.ts 79 passed
+total 266 passed

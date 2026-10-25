@@ -74,23 +74,6 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
 - [x] Pressure-sensitive width; pressure-sensitive opacity (applied once per
       stroke, from the stroke's mean pressure).
 - [x] Stable, predictable compositing for repeated strokes on one layer.
-- [x] A **brush cursor**: the brush's real footprint is drawn on the canvas as a
-      ring that follows the pointer, sized in document pixels through the zoom,
-      and a **quick resize** (`Ctrl+Alt` and drag) changes the brush size with
-      a numeric readout, `Esc` cancelling it. Both are **views**: the ring
-      never reaches a layer, an export, the history or a saved file, and the
-      resize is editor state that the next stroke uses. See
-      [ARCHITECTURE.md](ARCHITECTURE.md#the-brush-cursor-and-the-quick-resize).
-- [x] A **contextual tool-options strip** under the menu bar: one row, always
-      the same height, showing the **active tool's** controls - the brush, the
-      shape, the selection actions, the fill tolerance, the gradient's own
-      controls - and nothing else. A control is offered only when the tool
-      really uses it, so nothing on the strip is a decoration: the gradient has
-      no brush size and a shape has no stabilizer. The size and the opacity
-      stay in the strip and the rest of the brush sits behind a popover.
-      Switching tools never moves the canvas, and a window too narrow for the
-      controls scrolls the strip sideways instead of wrapping it.
-      See [ARCHITECTURE.md](ARCHITECTURE.md#the-tool-options-strip).
 
 ## Phase 2 - Illustration tools
 
@@ -171,29 +154,19 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       [ARCHITECTURE.md](ARCHITECTURE.md#the-polygon-and-the-star).
 - [x] Bucket (flood) fill (`F`): a press flood-fills the contiguous region under
       the pointer and writes it to the active layer as a bounded, pixel-exact
-      patch. The scan samples the **reference** the options name: the **merged**
-      visible composite (paper plus every visible layer at its opacity), the
-      **active** layer alone, or **one chosen layer** - so line art on another
-      layer defines the boundary the user sees by default, and a hidden layer
-      never defines one at all. The committed pixels go to the active layer.
-      The toolbar's **Tolerance** slider (`0`-`255`, max per-channel
-      `R`/`G`/`B`/`A` difference) widens what counts as the same region; fully
-      transparent pixels always match one another. **Grow / shrink**
-      (`-32` to `+32` pixels) takes in or drops the pixels around the region,
-      measured from its boundary with an exact Euclidean distance transform, and
-      **Soft edge** (`0`-`8` pixels) turns that boundary into a coverage ramp so
-      the fill does not stair-step along a diagonal. **Close gaps** (`0`-`16`
-      pixels) seals a passage too narrow for the fill to pass through, so a
-      one-pixel break in a line of line art no longer ruins the fill. The patch
-      stores an ordered, tightly cropped coverage mask - not a traced contour -
-      so save/reopen, undo and redo reproduce exactly the pixels the user saw.
-      Undo removes the patch; redo replays the committed mask instead of
-      re-running the scan. One successful fill is one undo step; a cancelled
-      press (lost capture, tool switch, `pointercancel`) removes the preview and
-      records nothing, and a fill that would change nothing is dropped rather
-      than recorded as an invisible undo step. A document above the scan
-      ceiling (16,777,216 pixels) refuses the fill with a status-bar message
-      instead of attempting it. See
+      patch. The scan samples the **merged visible composite** (paper plus every
+      visible layer at its opacity), so line art on another layer defines the
+      boundary the user sees; the committed pixels go to the active layer. The
+      toolbar's **Tolerance** slider (`0`-`255`, max per-channel `R`/`G`/`B`/`A`
+      difference) widens what counts as the same region; fully transparent pixels
+      always match one another. The patch stores an ordered, tightly cropped
+      coverage mask - not a traced contour - so save/reopen, undo and redo
+      reproduce exactly the pixels the user saw. Undo removes the patch; redo
+      replays the committed mask instead of re-running the scan. One successful
+      fill is one undo step; a cancelled press (lost capture, tool switch,
+      `pointercancel`) removes the preview and records nothing. A document above
+      the scan ceiling (16,777,216 pixels) refuses the fill with a status-bar
+      message instead of attempting it. See
       [ARCHITECTURE.md](ARCHITECTURE.md#bucket-flood-fill) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#fills).
 - [x] Gradients (`G`): a drag paints a **linear** or **radial** gradient on the
@@ -208,17 +181,6 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       5 for the new element kind. See
       [ARCHITECTURE.md](ARCHITECTURE.md#gradients) and
       [PROJECT_FORMAT.md](PROJECT_FORMAT.md#gradients).
-- [x] On-canvas gradient editing: the gradient tool selects a gradient by its
-      **geometry** (the axis of a linear one, the circle of a radial one) and
-      shows **two handles**; dragging one previews the new geometry live and
-      commits **one** undo step on the release, while a cancel restores the
-      committed gradient exactly. The handles are a display overlay (never a
-      layer surface, an export or the project file), the focused handle is
-      nudged by the arrow keys, and the format does not change: the record
-      already stored the two points the renderer draws from. The stops of a
-      *committed* gradient are still not editable - the middle-stop editor
-      describes the next drag. See
-      [ARCHITECTURE.md](ARCHITECTURE.md#editing-a-gradient-on-the-canvas).
 
 ## Phase 3 - Brush feel
 
@@ -310,54 +272,6 @@ end-to-end, testable feature. No placeholder buttons and no half-wired tools.
       physical gesture snaps alike at every zoom. The snapping is applied in
       the engine's single pointer entry point, so the sample the user drew and
       the sample that was committed agree. Off by default.
-- [x] **Navigator**: a panel shows the whole document with the visible area
-      marked. A click outside the marked area jumps the view there, a drag
-      inside it keeps the artwork under the pointer, and the arrow keys pan it
-      when it has the focus; the panel shows the zoom and offers **Fit** and
-      **Centre**. The overview is a downscale of the **cached** composite and
-      is rebuilt only when the document changes, so panning and zooming cost
-      nothing. It is view state: no pixels change, no history step, no dirty
-      flag, nothing reaches an export.
-- [x] **Panel manager**: a **registry** of the side panels (a stable id, a
-      label, an icon, a place in the stack and how it is mounted) and a
-      **Panels** menu that shows and hides them, folds them to their header
-      and resets the layout. Hiding a panel gives the space straight back to
-      the canvas, and it never loses the panel's state: a panel that keeps
-      state of its own stays mounted while it is hidden, and a panel derived
-      from the document is unmounted. The layout is shell state - showing a
-      panel is not an edit - and it rides along in the per-user settings file
-      as a section, so there is one settings file and one writer. See
-      [ARCHITECTURE.md](ARCHITECTURE.md#the-panel-manager).
-- [x] **Status bar and view navigation**: the status bar reports what the
-      engine actually holds - the file name and its unsaved marker, the
-      document's size, the active tool, the active layer, the zoom, the history
-      depth, the selection, the guides and the cursor's position in document
-      coordinates - and every field is read from the engine's own state, so no
-      field can drift away from the canvas. The zoom is a bounded, editable
-      field: it shows the zoom the canvas really has and takes a typed one
-      (`150`, `150%` or `1.5x`), clamped to the range the viewport supports.
-      The canvas can be zoomed (buttons, `Ctrl+Wheel`, `Ctrl+=`/`Ctrl+-`),
-      fitted, reset and panned (wheel, middle-drag, the `Pan` tool, or the
-      space bar held down), and it can be **turned**: a 90° rotation and a
-      left-right mirror, with a reset that puts the view back upright. The
-      view's orientation is *display only*: it moves the canvas and nothing
-      else, so it adds no history step, bumps no revision and never marks the
-      file unsaved. See
-      [ARCHITECTURE.md](ARCHITECTURE.md#view-navigation-and-the-status-bar).
-- [x] **Reference images**: a **References** panel imports a local image and
-      places it beside the canvas, where it can be moved, scaled, shown, hidden
-      and removed. A reference lives in **workspace space** - the canvas' own
-      pixels, not document pixels - so it stays where the artist put it while
-      the artwork is zoomed and panned underneath, and moving or scaling it can
-      never disturb the drawing. A reference is **session state**: it is drawn
-      over the workspace and never becomes document content, so it never
-      reaches a project file or an export and never makes a drawing unsaved.
-      The **colour picker** samples a reference under the pointer - the pixel is
-      read through the reference's own placement, so a scaled reference is
-      sampled at the pixel the artist is really pointing at - and `Alt` puts
-      the sampled colour into the background colour. One decoded copy is kept
-      per reference, and the session shares a pixel budget. See
-      [ARCHITECTURE.md](ARCHITECTURE.md#reference-images).
 - [ ] Rulers.
 - [ ] Adjustment layers / non-destructive effects.
 

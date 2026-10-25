@@ -10,12 +10,6 @@
  * polygonal segments, and so that pressure ramps stay smooth. It is bounded
  * per input event to keep a stalled or teleporting pointer from allocating an
  * unbounded number of points.
- *
- * The path itself is filtered by the stabilizer (`core/brushes/stabilizer`),
- * which decides where the stored samples are. The pressure and the time of a
- * sample are the device's own: the stored pressure is what the device
- * measured, and the brush's pressure curve is applied later, when the stroke
- * is rasterized.
  */
 
 import type { BrushSettings } from "../../types/brush";
@@ -23,10 +17,6 @@ import type { StrokeSample } from "../../types/pointer";
 import { createId } from "../../utils/id";
 import { clamp, distance, lerp } from "../../utils/math";
 import type { LayerId, StrokeRecord } from "../document/types";
-import {
-  DEFAULT_STABILIZER_MODE,
-  StrokeStabilizer,
-} from "./stabilizer";
 
 /** Maximum interpolated points generated from a single input sample. */
 export const MAX_INTERPOLATED_POINTS = 96;
@@ -39,6 +29,14 @@ export const MAX_INTERPOLATION_DISTANCE = 2048;
 export const MIN_SAMPLE_DISTANCE = 0.05;
 /** Smallest spacing step in document px, regardless of brush size. */
 export const MIN_SPACING_STEP = 0.75;
+/**
+ * Fraction of the remaining distance a fully stabilized pointer leaves per
+ * input sample. At strength `1` the captured path follows 25% of the way to
+ * each new pointer position, which removes hand jitter at the cost of a short
+ * visible lag; `finish()` settles the path back to the release point. At
+ * strength `0` the follow factor is exactly `1`, so the raw path is unchanged.
+ */
+export const STABILIZER_MAX_LAG = 0.75;
 
 /**
  * Creates an empty stroke. The brush configuration is copied into the record
@@ -87,23 +85,19 @@ export function cloneStroke(stroke: StrokeRecord, layerId: LayerId = stroke.laye
 
 export class StrokeBuilder {
   readonly stroke: StrokeRecord;
-  /** The filter that decides where the stored samples are. */
-  private readonly stabilizer: StrokeStabilizer;
   private lastX = 0;
   private lastY = 0;
   private lastPressure = 1;
   private lastTime = 0;
-  /** Latest raw pointer position, kept separately so the jump guard can use it. */
+  /** Latest raw pointer position, kept separately so `finish()` can settle. */
   private lastRawX = 0;
   private lastRawY = 0;
+  private lastRawPressure = 1;
+  private lastRawTime = 0;
   private count = 0;
 
   constructor(stroke: StrokeRecord) {
     this.stroke = stroke;
-    this.stabilizer = new StrokeStabilizer({
-      mode: stroke.brush.stabilizerMode ?? DEFAULT_STABILIZER_MODE,
-      strength: stroke.brush.stabilizer ?? 0,
-    });
   }
 
   get pointCount(): number {
@@ -112,11 +106,6 @@ export class StrokeBuilder {
 
   /**
    * Appends a sample, inserting interpolated points when needed.
-   *
-   * The sample's position goes through the stabilizer first: what is stored is
-   * the filtered path, so the stroke draws the same line in live drawing, in
-   * undo/redo, in a reopened file and in an export. The pressure and the time
-   * are stored as the device reported them.
    *
    * Returns the index of the first point appended by this call, which is
    * exactly what the renderer needs to rasterize only the new part of the
@@ -133,63 +122,75 @@ export class StrokeBuilder {
 
     const pressure = clamp(sample.pressure, 0, 1);
     const time = Number.isFinite(sample.time) ? sample.time : this.lastTime;
-    const rawSegment = distance(this.lastRawX, this.lastRawY, sample.x, sample.y);
-    const point = this.stabilizer.push({ x: sample.x, y: sample.y, pressure, time });
 
     if (this.count === 0) {
       this.stroke.startTime = time;
       this.lastRawX = sample.x;
       this.lastRawY = sample.y;
-      this.append(point.x, point.y, pressure, time);
+      this.lastRawPressure = pressure;
+      this.lastRawTime = time;
+      this.append(sample.x, sample.y, pressure, time);
       return 0;
     }
 
+    const rawSegment = distance(this.lastRawX, this.lastRawY, sample.x, sample.y);
+    const stabilizer = clamp(this.stroke.brush.stabilizer ?? 0, 0, 1);
+    const follow = 1 - STABILIZER_MAX_LAG * stabilizer;
+    // At strength 0 these are the raw values, so the legacy path is unchanged.
+    const x = stabilizer > 0 ? lerp(this.lastX, sample.x, follow) : sample.x;
+    const y = stabilizer > 0 ? lerp(this.lastY, sample.y, follow) : sample.y;
+    const smoothedPressure =
+      stabilizer > 0 ? lerp(this.lastPressure, pressure, follow) : pressure;
+
     const firstIndex = this.count;
     const step = Math.max(MIN_SPACING_STEP, this.stroke.brush.spacing * this.stroke.brush.size);
-    const segmentLength = distance(this.lastX, this.lastY, point.x, point.y);
+    const segmentLength = distance(this.lastX, this.lastY, x, y);
 
     if (segmentLength > step && rawSegment <= MAX_INTERPOLATION_DISTANCE) {
       const steps = Math.min(MAX_INTERPOLATED_POINTS, Math.floor(segmentLength / step));
       for (let index = 1; index <= steps; index += 1) {
         const t = index / (steps + 1);
         this.append(
-          lerp(this.lastX, point.x, t),
-          lerp(this.lastY, point.y, t),
-          lerp(this.lastPressure, pressure, t),
+          lerp(this.lastX, x, t),
+          lerp(this.lastY, y, t),
+          lerp(this.lastPressure, smoothedPressure, t),
           lerp(this.lastTime, time, t),
         );
       }
     }
 
-    // Keep the latest raw point for the jump guard. The append decision below
-    // uses the distance from the last *appended* point, so sub-pixel motion
+    // Keep the latest raw point for `finish()`. The append decision below uses
+    // the distance from the last *appended* point, so sub-pixel motion
     // accumulates instead of stalling when every event is small.
     this.lastRawX = sample.x;
     this.lastRawY = sample.y;
+    this.lastRawPressure = pressure;
+    this.lastRawTime = time;
 
     if (segmentLength < MIN_SAMPLE_DISTANCE) {
       return firstIndex;
     }
-    this.append(point.x, point.y, pressure, time);
+    this.append(x, y, smoothedPressure, time);
     return firstIndex;
   }
 
   /**
-   * Ends the stroke, catching the path up on the release point.
+   * Ends the stroke, settling a stabilized path on the last raw pointer point.
    *
    * Smoothing deliberately lags the pointer while it moves, but the line must
-   * still end where the user released. The stabilizer's catch-up is a short
-   * curve from the last stored point to the release point, and its last point
-   * is the release point exactly. The tail is part of the stored (and
-   * therefore rendered) samples rather than a hidden post-process.
-   *
-   * Without a release point the last raw position is the target. When the
-   * stabilizer filters nothing, the tail is empty and the stored samples are
-   * exactly the raw ones.
+   * still end where the user released. Appending the raw point here makes the
+   * final segment part of the stored (and therefore rendered) samples rather
+   * than a hidden post-process. At strength 0 this is a no-op, so the legacy
+   * sample sequence is unchanged.
    */
-  finish(release?: StrokeSample): StrokeRecord {
-    for (const point of this.stabilizer.settle(release)) {
-      this.append(point.x, point.y, point.pressure, point.time);
+  finish(): StrokeRecord {
+    const stabilizer = clamp(this.stroke.brush.stabilizer ?? 0, 0, 1);
+    if (
+      stabilizer > 0 &&
+      this.count > 0 &&
+      distance(this.lastX, this.lastY, this.lastRawX, this.lastRawY) >= MIN_SAMPLE_DISTANCE
+    ) {
+      this.append(this.lastRawX, this.lastRawY, this.lastRawPressure, this.lastRawTime);
     }
     return this.stroke;
   }

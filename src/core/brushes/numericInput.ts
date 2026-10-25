@@ -18,8 +18,6 @@
  *     fine step is never bigger than the coarse one.
  */
 
-import { MAX_BRUSH_SIZE, MIN_BRUSH_SIZE, stepBrushSize } from "./defaults";
-
 /** A Shift + arrow moves a tenth of the field's own step. */
 export const FINE_STEP_FACTOR = 0.1;
 
@@ -98,25 +96,41 @@ export function stepValue(
 }
 
 /**
- * The step the brush size moves by under the keyboard.
+ * A value rounded onto the field's own step.
  *
- * The normal step is the one the `[` / `]` shortcuts use: a pixel for a small
- * brush, a tenth of the size for a large one. A fine step is a tenth of that
- * - the last fraction of a pixel, for the size that has to be exact - and a
- * coarse step is ten times it.
+ * The rounding is done in the field's own units, so a value of `0.333` with a
+ * step of `0.1` becomes `0.3` rather than an accumulation of binary
+ * fractions. The result is clamped again, because rounding can push a value
+ * that was inside the range just outside it.
  */
-export function brushSizeStep(
-  current: number,
-  direction: 1 | -1,
-  mode: StepMode = "normal",
-): number {
-  const base = stepBrushSize(current, direction);
-  const delta = base - current;
-  if (mode === "fine") {
-    return clampNumber(current + delta / 10, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+export function snapToStep(value: number, step: number, min: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) {
+    return clampNumber(value, min, max);
   }
-  if (mode === "coarse") {
-    return clampNumber(current + delta * 10, MIN_BRUSH_SIZE, MAX_BRUSH_SIZE);
+  const snapped = Math.round(value / step) * step;
+  // The rounding error of the division can leave a value like 0.30000000000004;
+  // the step's own precision is the right number of decimals to keep.
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)));
+  const factor = 10 ** decimals;
+  return clampNumber(Math.round(snapped * factor) / factor, min, max);
+}
+
+/**
+ * The text the number box keeps, or `null` when the box shows the value.
+ *
+ * The box keeps what the user typed while that text is still the value the
+ * editor holds, so the caret does not jump while they are typing, and drops
+ * it as soon as the value changed under it, so the box can never disagree
+ * with the editor.
+ *
+ * A half-typed value - an empty field, or a field holding something that is
+ * not a number yet - is always kept: it is the user still typing, and it has
+ * not been given a value to disagree with.
+ */
+export function numericDraft(draft: string | null, value: number): string | null {
+  if (draft === null) {
+    return null;
   }
-  return base;
+  const parsed = parseNumericInput(draft);
+  return parsed !== null && parsed !== value ? null : draft;
 }
