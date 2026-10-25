@@ -29,7 +29,8 @@
  * `settingsStore.ts` for how the store reads, watches and writes them.
  */
 
-import { DEFAULT_BRUSH, brushSettingsEqual, readBrushSettings } from "../brushes/defaults";
+import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, readBrushSettings } from "../brushes/defaults";
+import { DEFAULT_PALETTE, normalizePalette, paletteEqual, type PaletteSwatch } from "../color/palette";
 import { DEFAULT_GRADIENT_END_COLOR } from "../gradient/gradientRecord";
 import {
   brushPresetsEqual,
@@ -68,6 +69,20 @@ export interface AppSettings {
   readonly version: typeof SETTINGS_VERSION;
   /** The brush the editor starts with. */
   readonly brush: BrushSettings;
+  /**
+   * The colour a right-button gesture paints with.
+   *
+   * Editor preference, like the brush: it describes the next gesture, so it
+   * never makes a document dirty.
+   */
+  readonly secondaryColor: string;
+  /**
+   * The swatches the artist keeps to hand.
+   *
+   * Additive: a settings file written before the palette existed has no
+   * `palette` field and loads with the shipped default palette.
+   */
+  readonly palette: readonly PaletteSwatch[];
   /** Named brush presets. Missing in older files, which load as an empty list. */
   readonly presets: readonly BrushPreset[];
   /** The tool the editor starts with. */
@@ -103,6 +118,8 @@ export interface AppSettings {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   version: SETTINGS_VERSION,
   brush: DEFAULT_BRUSH,
+  secondaryColor: DEFAULT_SECONDARY_COLOR,
+  palette: DEFAULT_PALETTE,
   presets: [],
   toolId: "brush",
   shapeFill: false,
@@ -215,6 +232,8 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   return {
     version: SETTINGS_VERSION,
     brush: brushOr(record.brush),
+    secondaryColor: colorOr(record.secondaryColor, DEFAULT_APP_SETTINGS.secondaryColor),
+    palette: paletteOr(record.palette),
     presets: presetsOr(record.presets),
     toolId: toolIdOr(record.toolId),
     shapeFill: booleanOr(record.shapeFill, DEFAULT_APP_SETTINGS.shapeFill),
@@ -321,6 +340,8 @@ export function settingsEqual(a: AppSettings, b: AppSettings): boolean {
   return (
     a.version === b.version &&
     brushSettingsEqual(a.brush, b.brush) &&
+    a.secondaryColor === b.secondaryColor &&
+    paletteEqual(a.palette, b.palette) &&
     brushPresetsEqual(a.presets, b.presets) &&
     a.toolId === b.toolId &&
     a.shapeFill === b.shapeFill &&

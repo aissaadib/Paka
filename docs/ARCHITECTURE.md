@@ -639,6 +639,61 @@ the wheel's state remembers the colour it was last reconciled against, and
 any change of the brush colour that the wheel did not write drops the request
 - once and for good, so a stale hue cannot come back.
 
+### The colour dock
+
+The **Colour** panel is the dock: the two colours the artist paints with, the
+wheel that picks a colour, the palette of saved swatches, the recent colours
+and the contrast readout. It is one surface for one job, and the toolbar keeps
+only the quick half of it (the two colours and the two actions that change
+them), because a swatch list in a toolbar row grows with every colour that is
+saved.
+
+**Two colours, one source of truth.** The *ink* is the brush's colour and the
+*alt* colour is the engine's secondary colour - the one a right-button
+gesture paints with. Both are editor state resolved at press time, so
+changing either never repaints what is already drawn and neither is part of
+the project file. Every colour path in the app ends in the same two setters,
+`setBrush` and `setSecondaryColor`: the wheel, the dock's chips, the exact
+text fields, the palette swatches, the recent colours and the canvas picker.
+That is what keeps the wheel, the dock and the next stroke from disagreeing.
+
+**The exact field** (`features/color/ColorTextField.tsx`) is a *view* of a
+colour with a local draft, not a second source of truth. `resolveColorInput`
+answers two questions before anything is stored: is this a colour at all
+(`#rgb`, `#rrggbb`, `#rrggbbaa`, `hsl()`, `oklch()`), and can it be stored.
+The app paints opaque colours only, so a translucent colour is **refused with
+a reason** and the field reverts to the colour the editor holds - the same
+treatment as garbage, with a different, true reason. Nothing is silently
+dropped, and a value the field had to normalise is rewritten to the
+`#rrggbb` the editor now stores.
+
+**The palette** (`core/color/palette.ts`) is a list of named swatches and is
+**editor preference**, like the brush: adding, renaming or removing one costs
+no history entry, no revision bump and no dirty flag, and removing a swatch
+never touches a stroke. The rules live in the model rather than in the panel,
+so the engine and the settings reader enforce the same ones: a name is
+trimmed, non-empty and unique among the swatches (a duplicate gets a numeric
+suffix), a colour that is not a colour is refused, and a palette is capped at
+`MAX_PALETTE_SWATCHES`. A colour that is already in the palette is not added
+twice. The palette is persisted in the settings file, so it survives a
+restart; a file written before the palette existed loads with the shipped
+one.
+
+**The recent colours** (`core/color/history.ts`) are **session state**. The
+list is bounded (`COLOR_HISTORY_LIMIT`), newest first, and a colour that is
+picked again moves to the front instead of appearing twice. It has a clear
+button, because a list that grows without the artist choosing it to is a
+list they cannot get rid of. It is deliberately **not** written to the
+settings file: the palette is the thing that survives a restart, the history
+is what happened in this sitting.
+
+**Keyboard.** `X` swaps the two colours and `D` puts both back to their
+defaults, through the action registry like every other command. The swatch
+grids are grids of real buttons: Tab reaches every swatch, the arrow keys
+step through them, `F2` renames a palette swatch in place and `Delete`
+removes it. A key the panel has claimed does not reach the editor's own
+shortcuts, so stepping through the swatches cannot also nudge the selection.
+
 ### Preferences that survive a restart
 
 The editor's preferences - the brush, the tool, the shape options, the fill

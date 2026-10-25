@@ -13,6 +13,12 @@
  * Changing the colour is not an edit: it sets session state for the next
  * gesture, exactly like the rest of the brush controls, so it pushes no
  * history entry and never marks the document dirty.
+ *
+ * A drag writes a colour on every pointer move, and the colours in between are
+ * not colours the artist chose, so the wheel writes them without recording
+ * them and records the one the drag settles on. The recent-colours list
+ * therefore holds the colours the artist chose, not the path they took to
+ * them.
  */
 
 import { useRef, useState } from "react";
@@ -37,6 +43,8 @@ interface WheelSliderProps {
   readonly step: number;
   readonly display: string;
   readonly onChange: (value: number) => void;
+  /** Called when the artist stops changing the slider. */
+  readonly onSettle: () => void;
 }
 
 function WheelSlider({
@@ -47,6 +55,7 @@ function WheelSlider({
   step,
   display,
   onChange,
+  onSettle,
 }: WheelSliderProps) {
   return (
     <label className="color-wheel__slider">
@@ -61,6 +70,8 @@ function WheelSlider({
         aria-label={label}
         aria-valuetext={display}
         onChange={(event) => onChange(Number(event.target.value))}
+        onPointerUp={onSettle}
+        onBlur={onSettle}
       />
       <span className="color-wheel__slider-value">{display}</span>
     </label>
@@ -97,10 +108,29 @@ export function ColorWheel() {
 
   const marker = hsvToWheelPoint(hsv.h, hsv.s, WHEEL_SIZE);
 
+  /**
+   * Writes the colour the wheel is showing.
+   *
+   * The colour is written without being recorded: a drag writes a colour on
+   * every pointer move, and the colours in between are not colours the artist
+   * chose. The one they settle on is recorded when the drag ends.
+   */
   const apply = (next: Hsv) => {
     const color = hsvToHex(next);
     setState((previous) => reduceWheelState(previous, { kind: "picked", hsv: next, color }));
-    actions.setBrush({ color });
+    actions.setBrush({ color }, { record: false });
+  };
+
+  /**
+   * Records the colour the artist stopped on.
+   *
+   * One adjustment is one choice, so the recent-colours list gains one colour
+   * from it, not one per step. A slider settles when the artist lets go of it
+   * or moves on to something else, so nudging a slider with the arrow keys is
+   * one choice however many steps it took.
+   */
+  const settle = () => {
+    actions.recordColor(brush.color);
   };
 
   const pickFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -137,12 +167,14 @@ export function ColorWheel() {
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
+          settle();
         }}
         onPointerCancel={(event) => {
           dragging.current = false;
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
+          settle();
         }}
       >
         <div
@@ -168,6 +200,7 @@ export function ColorWheel() {
           step={1}
           display={`${Math.round(hsv.h)}°`}
           onChange={(h) => apply({ ...hsv, h })}
+          onSettle={settle}
         />
         <WheelSlider
           label="Saturation"
@@ -177,6 +210,7 @@ export function ColorWheel() {
           step={1}
           display={`${Math.round(hsv.s * 100)}%`}
           onChange={(s) => apply({ ...hsv, s: s / 100 })}
+          onSettle={settle}
         />
         <WheelSlider
           label="Value"
@@ -186,6 +220,7 @@ export function ColorWheel() {
           step={1}
           display={`${Math.round(hsv.v * 100)}%`}
           onChange={(v) => apply({ ...hsv, v: v / 100 })}
+          onSettle={settle}
         />
       </div>
 

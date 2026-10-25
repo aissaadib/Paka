@@ -30,6 +30,21 @@ import { clamp } from "../../utils/math";
 import { createStore, type Listener, type Store } from "../../utils/store";
 import { DEFAULT_BRUSH, DEFAULT_SECONDARY_COLOR, brushSettingsEqual, normalizeBrush, updateBrushSettings } from "../brushes/defaults";
 import {
+  addPaletteSwatch,
+  normalizePalette,
+  paletteEqual,
+  removePaletteSwatch,
+  renamePaletteSwatch,
+  DEFAULT_PALETTE,
+  type PaletteSwatch,
+} from "../color/palette";
+import {
+  colorHistoryEqual,
+  normalizeColorHistory,
+  pushColorHistory,
+  type ColorPickOptions,
+} from "../color/history";
+import {
   brushPresetsEqual,
   createPresetId,
   duplicatePreset,
@@ -282,6 +297,22 @@ export interface EditorSnapshot {
    * artwork and the choice is not part of the project file.
    */
   readonly secondaryColor: string;
+  /**
+   * The swatches the user has saved to hand.
+   *
+   * Editor preference, like the brush itself: adding, renaming or removing a
+   * swatch never touches the document, the revision or history. The settings
+   * store persists the list.
+   */
+  readonly palette: readonly PaletteSwatch[];
+  /**
+   * The colours the user has picked, most recent first.
+   *
+   * Session state, not a preference: the list is bounded, it has a clear
+   * button, and it is deliberately **not** written to the settings file. The
+   * palette is what survives a restart.
+   */
+  readonly colorHistory: readonly string[];
   /**
    * The named brush presets the user has saved.
    *
@@ -836,6 +867,8 @@ export class DrawingEngine implements StrokeSource {
   private viewport: Viewport = { zoom: 1, offsetX: 0, offsetY: 0 };
   private brush: BrushSettings;
   private secondaryColor = DEFAULT_SECONDARY_COLOR;
+  private palette: readonly PaletteSwatch[] = DEFAULT_PALETTE;
+  private colorHistory: readonly string[] = [];
   private presets: readonly BrushPreset[] = [];
   private currentToolId: ToolId;
   private readonly tools: ToolRegistry;
@@ -1596,12 +1629,26 @@ export class DrawingEngine implements StrokeSource {
     this.setBrush({ color: rgbToHex(color) });
   }
 
-  setBrush(patch: Partial<BrushSettings>): void {
+  setBrush(patch: Partial<BrushSettings>, options: ColorPickOptions = {}): void {
     const next = updateBrushSettings(this.brush, patch);
     if (brushSettingsEqual(this.brush, next)) {
       return;
     }
+    const previousColor = this.brush.color;
     this.brush = next;
+    // A colour the artist picked is a colour they will want again, so it goes
+    // to the front of the recent-colours history. Recording it here, in the
+    // one setter every colour path shares, is what keeps the history and the
+    // brush from drifting apart: the wheel, the swatches, the text field and
+    // the canvas picker all land here. A brush change that leaves the colour
+    // alone is not a new colour and is not recorded.
+    //
+    // A write that is not a pick says so: the wheel writes the colour it is
+    // dragging to, and the settings store restores a colour from another
+    // session. Neither is a colour the artist chose here.
+    if (next.color !== previousColor && options.record !== false) {
+      this.rememberColor(next.color);
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -1612,8 +1659,12 @@ export class DrawingEngine implements StrokeSource {
    * Editor state, not a document edit: it describes the *next* gesture. The
    * colour is resolved once at press time, so a stroke keeps the colour it was
    * started with even if this changes before release.
+   *
+   * `options.record` says whether the colour counts as one the artist picked;
+   * the settings store restores the alt colour with it off, because the
+   * recent-colours list is session state.
    */
-  setSecondaryColor(color: string): void {
+  setSecondaryColor(color: string, options: ColorPickOptions = {}): void {
     const normalized = hexToRgb(color);
     if (!normalized) {
       return;
@@ -1623,6 +1674,9 @@ export class DrawingEngine implements StrokeSource {
       return;
     }
     this.secondaryColor = next;
+    if (options.record !== false) {
+      this.rememberColor(next);
+    }
     this.commands.breakMerge();
     this.publish();
   }
@@ -1641,7 +1695,169 @@ export class DrawingEngine implements StrokeSource {
     }
     this.secondaryColor = primary;
     this.brush = updateBrushSettings(this.brush, { color: secondary });
+    // Both colours are in use after a swap, so both are remembered - and the
+    // one the artist is about to paint with is the newer of the two.
+    this.rememberColor(primary);
+    this.rememberColor(secondary);
     this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Puts both colours back to the ones a fresh session starts with.
+   *
+   * Editor state, like everything else about a colour: no history entry, no
+   * revision bump and no dirty flag.
+   */
+  resetColors(): void {
+    const primary = DEFAULT_BRUSH.color;
+    const secondary = DEFAULT_SECONDARY_COLOR;
+    if (this.brush.color === primary && this.secondaryColor === secondary) {
+      return;
+    }
+    this.brush = updateBrushSettings(this.brush, { color: primary });
+    this.secondaryColor = secondary;
+    this.rememberColor(secondary);
+    this.rememberColor(primary);
+    this.commands.breakMerge();
+    this.publish();
+  }
+
+  /**
+   * Records a colour as recently used.
+   *
+   * The recent-colours history is a session convenience, not a preference: it
+   * is bounded, newest first, and it is not written to the settings file.
+   *
+   * This is the seam for a colour that is written but not picked - the colour
+   * a drag settles on, for instance. The colour goes to the front of the
+   * list, and a colour that is already the newest changes nothing.
+   */
+  recordColor(color: string): void {
+    if (this.rememberColor(color)) {
+      this.publish();
+    }
+  }
+
+  /**
+   * Records a colour as recently used, without publishing.
+   *
+   * The caller publishes its own change, so a colour that arrives with
+   * another change costs one notification and not two. Returns whether the
+   * list really changed: a colour that is already the newest does not.
+   */
+  private rememberColor(color: string): boolean {
+    const next = pushColorHistory(this.colorHistory, color);
+    if (next === this.colorHistory) {
+      return false;
+    }
+    this.colorHistory = next;
+    return true;
+  }
+
+  /**
+   * Replaces the palette.
+   *
+   * The settings store calls this once while applying a file. It is editor
+   * state, so it publishes without touching the document, the revision or
+   * history. The entries are read by `normalizePalette`, the same reader the
+   * settings file uses, so a malformed swatch is handled the same way wherever
+   * it comes from.
+   */
+  setPalette(swatches: readonly PaletteSwatch[]): void {
+    const next = normalizePalette(swatches);
+    if (paletteEqual(this.palette, next)) {
+      return;
+    }
+    this.palette = next;
+    this.publish();
+  }
+
+  /**
+   * Saves a colour to the palette and returns the swatch.
+   *
+   * `null` when the colour is not a colour or the palette is full. A colour
+   * that is already in the palette is not added twice: the existing swatch
+   * comes back and the palette is unchanged.
+   */
+  addPaletteSwatch(color: string, name?: string): PaletteSwatch | null {
+    const change = addPaletteSwatch(this.palette, color, name);
+    if (change === null) {
+      return null;
+    }
+    if (change.palette !== this.palette) {
+      this.palette = change.palette;
+      this.publish();
+    }
+    return change.swatch;
+  }
+
+  /**
+   * Renames a swatch and returns it.
+   *
+   * `null` when the id is unknown or the name is empty. The new name is made
+   * unique among the other swatches.
+   */
+  renamePaletteSwatch(id: string, name: string): PaletteSwatch | null {
+    const change = renamePaletteSwatch(this.palette, id, name);
+    if (change === null) {
+      return null;
+    }
+    if (change.palette !== this.palette) {
+      this.palette = change.palette;
+      this.publish();
+    }
+    return change.swatch;
+  }
+
+  /**
+   * Removes a swatch from the palette.
+   *
+   * Editor state: removing a swatch never touches a stroke, so the colours
+   * already painted stay exactly as they are.
+   */
+  removePaletteSwatch(id: string): boolean {
+    const next = removePaletteSwatch(this.palette, id);
+    if (next === null) {
+      return false;
+    }
+    if (paletteEqual(this.palette, next)) {
+      return false;
+    }
+    this.palette = next;
+    this.publish();
+    return true;
+  }
+
+  /**
+   * Replaces the recent-colours history.
+   *
+   * The list is session state, so nothing calls this today: the colours are
+   * recorded as they are picked. It is here so the seam exists for whoever
+   * decides whether a session's colours should be restored - the reader is
+   * `normalizeColorHistory`, the same one the model uses, so an untrusted
+   * list is handled the same way wherever it comes from.
+   */
+  setColorHistory(colours: readonly string[]): void {
+    const next = normalizeColorHistory(colours);
+    if (colorHistoryEqual(this.colorHistory, next)) {
+      return;
+    }
+    this.colorHistory = next;
+    this.publish();
+  }
+
+  /**
+   * Empties the recent-colours history.
+   *
+   * Session state: no history entry, no revision bump, no dirty flag, and
+   * nothing written to the settings file.
+   */
+  clearColorHistory(): void {
+    if (this.colorHistory.length === 0) {
+      return;
+    }
+    this.colorHistory = [];
     this.publish();
   }
 
@@ -5520,6 +5736,8 @@ export class DrawingEngine implements StrokeSource {
       viewportSize: this.viewportSize,
       brush: this.brush,
       secondaryColor: this.secondaryColor,
+      palette: this.palette,
+      colorHistory: this.colorHistory,
       presets: this.presets,
       toolId: this.currentToolId,
       history: this.commands.getState(),
@@ -5566,6 +5784,8 @@ export class DrawingEngine implements StrokeSource {
       previous.viewportSize === next.viewportSize &&
       previous.brush === next.brush &&
       previous.secondaryColor === next.secondaryColor &&
+      previous.palette === next.palette &&
+      previous.colorHistory === next.colorHistory &&
       previous.presets === next.presets &&
       previous.toolId === next.toolId &&
       previous.history === next.history &&

@@ -68,7 +68,9 @@ visual-regression harness.
   blend modes (`normal` / `multiply` / `screen` plus eight separable modes),
   masks and groups remain. The colour panel gained the **contrast and
   colour-difference readout** and **wider input formats** (8-digit hex, `hsl()`,
-  `oklch()`). Phase 0 gained three more correctness items: live-preview
+  `oklch()`), and the **colour dock**: the two colours with their exact
+  values, an editable **palette** that survives a restart, and the **recent
+  colours**. Phase 0 gained three more correctness items: live-preview
   compositing inside its own layer, layer/history safety during a gesture, and a
   bounded document raster budget.
 
@@ -76,6 +78,7 @@ visual-regression harness.
 
 | Commit | Slice |
 | --- | --- |
+| `feat/agent07-color-dock` | **Colour dock, palette and recent colours** - the **Colour** panel is now one surface for colour: the two colours the artist paints with (**ink** for the left button, **alt** for the right) with their **exact values**, a **swap** and a **reset**, the HSV wheel, the **palette** of named swatches, the **recent colours** and the contrast readout. The palette is **editable** - add the current ink, click a swatch to paint with it, right click for the alt colour, `F2` to rename, `Delete` to remove - and it **survives a restart** in the per-user settings file; the **recent colours** are **session state**: bounded, newest first, a colour picked again moves to the front, and a **Clear** button empties them. Every colour path ends in the same two setters, so the wheel, the chips, the text fields, the swatches and the canvas picker cannot disagree about what the next stroke will be painted with; an exact value accepts hex, `hsl()` and `oklch()`, and a value that is not a colour - or not opaque - is **refused with a reason** and the colour the editor holds is left alone. `X` swaps the two colours and `D` resets them. The palette and the alt colour are preferences, so settings stay **version 1**; the recent colours are not written to the file at all. **No project-format change.** |
 | `feat/n1-brush-presets` | **Brush presets** - the brush panel can **save the current brush under a name**, switch between saved brushes, **rename** one and **delete** one, and the library survives a restart in the per-user settings file. Applying a preset goes through the normal brush setter, so it is **not an edit**: no history step, no dirty flag, nothing to undo. A preset stores every `BrushSettings` field (`stamp`, `stampTexture`, `texture`, `stabilizer`, `blendMode`, pressure and colour), and a **table-driven guard enumerates `DEFAULT_BRUSH`** so a field silently dropped by the reader fails a test instead of losing data - the exact bug that `stampTexture` hit in the phase-1 slice. Settings stay **version 1**: the preset list is additive and a file without it loads as an empty list. |
 | `feat/n2-n3-colour-workflow` | **Colour contrast, colour difference and wider colour input** - the colour panel can compare the ink against the paper (**WCAG 2.2 contrast ratio**) and against a second colour, and names the palette swatch perceptually closest to the ink (**CIEDE2000**), computed from WCAG relative luminance, sRGB to CIELAB and the CIEDE2000 formula, with the published verification table as a test fixture. Contrast and colour difference answer different questions and neither is used as a proxy for the other. The readout is **read-only**: no control, no state, no history entry. The hex field now accepts **8-digit hex**, **`hsl()`/`hsla()`** and **`oklch()`**, clamps an out-of-gamut `oklch()` into sRGB, and keeps the stored colour a hex string, so there is **no project-format change**; garbage input reverts to the last valid colour, and a translucent colour is reported as **not a solid colour** rather than silently measured. |
 | `feat/n6-blend-modes` | **Layer blend modes** - `overlay`, `soft-light`, `hard-light`, `color-dodge`, `darken`, `lighten`, `difference` and `exclusion` join `normal` / `multiply` / `screen` in the layer panel and the compositing path, mapped onto the platform's composite operation with the separable formula recorded in `core/document/blendModes.ts` and pinned by expected-pixel tests. `normal`, `multiply` and `screen` are **unchanged**. Format **v11**: a v10 file still opens, a v11 file is refused by a v10 reader instead of rendering an unknown mode as `normal`, and every mode round-trips through save and reopen. |
@@ -209,6 +212,25 @@ visual-regression harness.
   `setBrush`, so it follows a colour picked off the canvas and the toolbar's
   colour input; the sliders are keyboard-operable; choosing a colour is not an
   edit.
+- **Colour dock** (the **Colour** panel): the two colours the artist paints
+  with — the **ink** (left button) and the **alt** colour (right button) —
+  each with a swatch to pick by eye and a field for an exact value. The field
+  takes hex, `hsl()` and `oklch()`; text that is not a colour, and a
+  translucent colour the app cannot paint, are **refused with a reason** and
+  the colour in hand is left exactly as it was. **Swap** (`X`) exchanges the
+  two and **Reset** (`D`) puts both back to their defaults. Both are editor
+  state resolved at press time, so neither repaints existing work.
+- **Palette** (the **Colour** panel): the swatches the artist keeps to hand,
+  and they are **editable** — **Add ink** saves the current colour, clicking a
+  swatch paints with it, right-clicking makes it the alt colour, double
+  clicking (or `F2`) renames it in place and the small cross (or `Delete`)
+  removes it. A colour is never saved twice and a swatch always has a name.
+  The palette is a **preference**: it survives a restart in the settings file,
+  and changing it is not an edit.
+- **Recent colours** (the **Colour** panel): the colours that have been
+  picked, newest first, bounded, with a **Clear** button. A colour picked
+  again moves to the front instead of appearing twice. They are **session
+  state**: not written to the settings file, and not restored at startup.
 - **Brushes**: size 1–512 doc px, opacity, hardness (0–100 %, applied to brush,
   eraser and shapes), sampling (2–200 % of diameter, sample density),
   stabilizer (0–100 %, brush and eraser only), texture (0–100 %, deterministic
@@ -216,7 +238,7 @@ visual-regression harness.
   switch with **stamp spacing** (2–100 % of the brush size, the distance
   between dabs), **stamp hardness** (the falloff of one dab) and **stamp
   texture** (the strength of the bristle lanes) — all four brush and eraser
-  only — colour + 8-swatch palette, pressure size and pressure
+  only — colour, pressure size and pressure
   opacity toggles. All settings are captured per stroke.
 - **Stamp (dab) brush**: with the stamp on, a stroke is a chain of round dabs
   placed along its path instead of round-capped segments. The dabs' coverage is
@@ -272,7 +294,9 @@ src/
                 guides (the guide model, geometry and document operations),
                 selectionTransform (the scale/rotate geometry) and
                 selectionHandles (the transform handles)
-    brushes/    defaults/normalization, strokeBuilder (sample capture)
+    brushes/    defaults/normalization, strokeBuilder (sample capture),
+                presets (the named brush library)
+    color/      palette (the saved swatches) and history (the recent colours)
     fill/       pure flood scan, fill-patch record
     gradient/   gradient geometry/stops/cloning
     tools/      registry, per-tool behaviour, shape geometry
@@ -498,6 +522,30 @@ Key files for the next slice (directional / per-dab stamp textures):
   hue is 220° - and any colour changed elsewhere replaces it with the stored
   colour. Choosing a colour is session state for the next gesture, not an
   edit.
+- **The colour dock has one source of truth too.** The *ink* is the brush's
+  colour and the *alt* colour is the engine's secondary; both are editor
+  state resolved once at press time, so a stroke, a shape, a fill and a
+  gradient each keep the colour they started with. Every colour path in the
+  app ends in the same two setters - `setBrush` and `setSecondaryColor` - so
+  the wheel, the chips, the exact fields, the palette swatches, the recent
+  colours and the canvas picker cannot disagree about what the next gesture
+  will paint with. `setBrush` is also where a colour is **recorded** in the
+  recent-colours history, which is why the history cannot drift away from the
+  brush.
+- **The palette is a preference; the recent colours are session state.** The
+  palette is a list of named swatches and lives in the settings file, so it
+  survives a restart. The recent colours are bounded, newest first, and are
+  deliberately **not** written to the settings file: the palette is the thing
+  that is kept, the history is what happened in this sitting. Both are editor
+  state, so neither adds a history entry, bumps the revision or dirties the
+  drawing - and removing a swatch never touches a stroke.
+- **A translucent colour is refused, not approximated.** The app stores
+  `#rrggbb` everywhere - a brush, a fill, a gradient, a swatch - and paints
+  opaque colours only, so an alpha cannot be honoured. Storing it opaque would
+  paint something the artist did not ask for, and storing the alpha would
+  change the project format and the settings file. The exact field therefore
+  refuses it **with its own reason** and reverts to the colour in hand, the
+  same treatment as garbage but a true one. Nothing is silently dropped.
 - **Format versioning**: a bump is required when an older reader would render a
   *different picture*, not for convenience. v1–v3 use `layers[].strokes`, read
   as stroke elements; v4 adds fills and `layers[].elements`; v5 adds gradients;
@@ -569,6 +617,13 @@ Product:
 - Blend modes are limited to `normal`, `multiply` and `screen`, composited
   against the paper and lower layers; no group/clipping contexts or alpha
   inheritance. No layer masks/groups; no adjustment layers; `Ctrl+N` unbound.
+- Colours: the app has **no alpha anywhere**, so there is no transparent
+  colour to pick and a translucent one is refused rather than approximated. The
+  palette holds one colour per swatch, with no gradients or patterns in it, and
+  a swatch cannot be dragged, resized or given a second colour. The palette is
+  a flat list - there is no reordering, no folders and no multiple palettes.
+  The recent colours are bounded and are not written to the settings file, so
+  they do not survive a restart.
 - **There is no autosave and no crash recovery.** The recovery machinery and
   its policy seam exist (`src/core/autosave/`) and are covered by tests, but
   the decisions that govern autosaving - when it runs, how a never-saved
@@ -596,6 +651,17 @@ Product:
 
 Verification gaps:
 
+- The colour dock was checked **in a real browser** through the Playwright
+  harness (`tests/visual/color-dock.spec.ts`): the two colours and their exact
+  values are on screen, `X` and `D` swap and reset them, a typed value is
+  applied and a wrong one is refused with its reason, the palette is added to,
+  renamed in place and removed from, and the recent colours remember what was
+  picked, newest first. The model, the engine seam and the **settings round
+  trip** are covered by Vitest (`colorPalette.test.ts`, `colorHistory.test.ts`,
+  `settings.test.ts`), including a swatch painting a real stroke, a shape and
+  a fill. The **packaged Tauri window is not verified** for this slice, and the
+  browser preview has no native settings file, so the persistence is proved by
+  the settings test rather than by a reload.
 - The grid and the snapping were checked in the browser app on the **live
   display canvas** (the lattice is painted with the spacing in document pixels
   - 120 screen pixels for a 50 px spacing at 241 % zoom - and a rectangle's

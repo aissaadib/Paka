@@ -71,6 +71,8 @@ export type ActionId =
   | "delete"
   | "brushSizeDown"
   | "brushSizeUp"
+  | "swapColors"
+  | "resetColors"
   | `tool:${ToolId}`;
 
 export interface ActionDefinition {
