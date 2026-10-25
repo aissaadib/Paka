@@ -2,8 +2,14 @@
  * The colour dock: the panel the shell's side column shows.
  *
  * The dock holds everything about the colour the next stroke is painted with:
- * the HSV wheel (with the hex field under it), the fixed palette and the
- * contrast readout that says whether the ink reads on the paper.
+ * the two colours and their exact values at the top, the HSV wheel, the
+ * editable palette, the colours that were picked recently, and the contrast
+ * readout that says whether the ink reads on the paper.
+ *
+ * The two colours are **ink** and **alt**: a left-button gesture paints with
+ * the ink and a right-button gesture paints with the alt colour. A gesture
+ * resolves which of the two it uses once, at press time, so changing a colour
+ * here never repaints anything already drawn.
  *
  * The dock used to be hard-wired into the shell's layout, so adding a panel
  * meant editing the shell's composition. Now it **registers itself**: the
@@ -23,9 +29,11 @@
  */
 
 import { Panel } from "../../components/panels/Panel";
-import { ColorSwatches } from "./ColorSwatches";
+import { ColorDock } from "./ColorDock";
 import { ColorWheel } from "./ColorWheel";
 import { ContrastReadout } from "./ContrastReadout";
+import { PalettePanel } from "./PalettePanel";
+import { RecentColors } from "./RecentColors";
 import { COLOR_PANEL_TITLE, registerColorPanel } from "./colorPanelRegistration";
 import "./color.css";
 
@@ -35,13 +43,13 @@ import "./color.css";
  * The chrome around it - the heading, the fold button, the hidden state - is
  * the shell's, so the body is only the controls themselves.
  */
-export function ColorDock() {
+export function ColorPanelBody() {
   return (
-    <div className="color-dock">
+    <div className="color-panel">
       <ColorWheel />
-      <div className="color-dock__palette">
-        <ColorSwatches />
-      </div>
+      <ColorDock />
+      <PalettePanel />
+      <RecentColors />
       <ContrastReadout />
     </div>
   );
@@ -56,7 +64,7 @@ export function ColorDock() {
 export function ColorPanel() {
   return (
     <Panel title={COLOR_PANEL_TITLE}>
-      <ColorDock />
+      <ColorPanelBody />
     </Panel>
   );
 }
