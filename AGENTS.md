@@ -299,6 +299,7 @@ Rust `lib.rs`/`main.rs`/`native_environment.rs`/`settings_io.rs`,
 | `docs/PROJECT_FORMAT.md` | `### elements[]` (215), `### brush` (323), `## Validation` (335), `## Versioning` (393) |
 | `docs/RELEASE-READINESS.md` | The release-readiness workstream: icons, licence notices, clean-room attestation, and the open owner decisions |
 | `docs/qa/T06-IMPLEMENTATION-REPORT.md` | The settings slice: what is implemented, what is blocked on the owner's autosave decisions, and the verified dirty-state invariants |
+| `docs/qa/PAKA-STATE-REPORT.md` | The app at the vector-icon wave: what it does, the brush library, the icon system, the tests and the packaged measurements |
 | `docs/RELEASE-READINESS-R9-R3-PLAN.md` | The R9 (CI licence allow-list) and R3 (attestation countersignature) preparation: what is verified, what is proposed, and the open owner decisions |
 | `docs/CLEAN-ROOM-ATTESTATION.md` | The stamp engine's provenance record: what was read, what was not, and the owner countersignature |
 | `THIRD_PARTY_NOTICES.md` | The notice file. Generated - read it, do not edit it; edit `scripts/generate-third-party-notices.mjs` or `licenses/dependency-inventory.json` |
