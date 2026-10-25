@@ -273,25 +273,27 @@ export function presetMatchingBrush(
 /**
  * The next brush the keyboard moves to.
  *
- * The list is flat, so the arrow keys walk it in the order it is shown. The
- * selection never leaves the list: moving past the end stays at the end.
+ * The library is a flat list drawn as a grid, so a move is a number of entries
+ * rather than a direction: one tile for a horizontal arrow, one row for a
+ * vertical one. The selection never leaves the list - moving past either end
+ * stays at that end.
  */
 export function nextSelectionId(
   visible: readonly BrushPreset[],
   currentId: string | null,
-  direction: 1 | -1,
+  step: number,
 ): string | null {
   if (visible.length === 0) {
     return null;
   }
   if (currentId === null) {
-    return direction === 1 ? visible[0].id : visible[visible.length - 1].id;
+    return step > 0 ? visible[0].id : visible[visible.length - 1].id;
   }
   const index = visible.findIndex((preset) => preset.id === currentId);
   if (index === -1) {
-    return direction === 1 ? visible[0].id : visible[visible.length - 1].id;
+    return step > 0 ? visible[0].id : visible[visible.length - 1].id;
   }
-  const next = Math.min(Math.max(index + direction, 0), visible.length - 1);
+  const next = Math.min(Math.max(index + step, 0), visible.length - 1);
   return visible[next].id;
 }
 
