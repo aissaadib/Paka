@@ -10,12 +10,19 @@
  * its opacity, its soft edge and whether it is stamped - so a property that
  * changes a stroke changes the mark too. It is a mark, not a picture of a
  * stroke: the pixels a brush lays down are the renderer's business.
+ *
+ * A built-in brush shows its icon instead of the mark. The icon says what
+ * kind of brush it is - a nib, a dab, a marker, an airbrush, a charcoal
+ * stick, a stamp - which the settings cannot say on their own; a saved brush
+ * has no icon, so it keeps its mark.
  */
 
 import type { CSSProperties } from "react";
 import { describePreset } from "../../core/brushes/presetBrowser";
 import type { BrushPreset } from "../../core/brushes/presets";
 import type { BrushSettings } from "../../types/brush";
+import { BrushIcon } from "./BrushIcon";
+import { brushIconForPreset } from "./brushIcons";
 
 /** The largest the mark is drawn, in CSS pixels. */
 const MAX_MARK_SIZE = 14;
@@ -72,6 +79,7 @@ export function PresetRow({
   onToggleFavorite,
 }: PresetRowProps) {
   const description = describePreset(preset);
+  const icon = bundled ? brushIconForPreset(preset.id) : null;
   const title = bundled
     ? `${preset.name} - ${description} (built-in)`
     : `${preset.name} - ${description}`;
@@ -93,7 +101,11 @@ export function PresetRow({
         aria-current={selected ? "true" : undefined}
         onClick={() => onSelect(preset.id)}
       >
-        <span className="brush-row__mark" style={markStyle(preset.brush)} aria-hidden="true" />
+        {icon ? (
+          <BrushIcon icon={icon} />
+        ) : (
+          <span className="brush-row__mark" style={markStyle(preset.brush)} aria-hidden="true" />
+        )}
         <span className="brush-row__name">{preset.name}</span>
         {edited ? (
           <span
