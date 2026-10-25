@@ -13,7 +13,7 @@
  * is a toolbar that pushes the canvas off the screen.
  */
 
-import { canSwapColors, isDefaultColors } from "../../core/color/colors";
+import { canSwapColors } from "../../core/color/colors";
 import { useEditor, useEditorState } from "../../hooks/useEditor";
 import { ColorSwatches } from "./ColorSwatches";
 import { toColorInputValue } from "./colorInput";
@@ -24,7 +24,6 @@ export function ColorControls() {
   const current = brush.color;
   const secondary = secondaryColor;
   const canSwap = canSwapColors(current, secondary);
-  const isDefault = isDefaultColors(current, secondary);
 
   return (
     <div className="toolbar__group color-controls">
@@ -32,7 +31,7 @@ export function ColorControls() {
         <input
           className="color-controls__picker"
           type="color"
-          value={colorInputValue(current)}
+          value={toColorInputValue(current)}
           onChange={(event) => actions.setBrush({ color: event.target.value })}
           aria-label="Primary stroke color"
           title="Primary stroke color (left button)"
@@ -40,7 +39,7 @@ export function ColorControls() {
         <input
           className="color-controls__picker color-controls__picker--secondary"
           type="color"
-          value={colorInputValue(secondary)}
+          value={toColorInputValue(secondary)}
           onChange={(event) => actions.setSecondaryColor(event.target.value)}
           aria-label="Secondary stroke color"
           title="Secondary stroke color (right button)"
