@@ -120,8 +120,15 @@
 }
 
 .brush-browser__group-title {
+  /* The library is long and the grid is short: the heading stays at the top
+     of the list while its own group is on screen, so a tile is never shown
+     without the group it belongs to. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
   margin: 2px 0 1px;
   padding: 0 4px;
+  background: var(--bg-inset);
   color: var(--text-dim);
   font-size: 10px;
   font-weight: 600;
