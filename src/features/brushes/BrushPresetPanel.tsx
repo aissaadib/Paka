@@ -164,8 +164,8 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
     run({ kind: "apply", id });
   };
 
-  const move = (direction: 1 | -1) => {
-    const next = nextSelectionId(visible, selectedId, direction);
+  const move = (step: number) => {
+    const next = nextSelectionId(visible, selectedId, step);
     if (next !== null) {
       setSelectedId(next);
     }
@@ -410,12 +410,25 @@ export function BrushPresetPanel({ bundled = [], gateway = null }: BrushPresetPa
           tabIndex={0}
           aria-label="Brush presets"
           onKeyDown={(event) => {
+            // The library is a grid of thumbnails: the vertical arrows move by
+            // a row, the horizontal ones by a tile.
+            const columns = gridColumnCount(event.currentTarget);
             if (event.key === "ArrowDown") {
+              event.preventDefault();
+              move(columns);
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              move(-columns);
+              return;
+            }
+            if (event.key === "ArrowRight") {
               event.preventDefault();
               move(1);
               return;
             }
-            if (event.key === "ArrowUp") {
+            if (event.key === "ArrowLeft") {
               event.preventDefault();
               move(-1);
               return;
@@ -508,6 +521,25 @@ export function registerBrushPresetPanel(
   });
 }
 
+/**
+ * How many tiles fit in a row of the library's grid.
+ *
+ * The grid is as wide as the panel and its tiles have a fixed minimum, so the
+ * count is the layout's, not a constant: read the used track list rather than
+ * guessing at the panel's width. A hidden grid has no tracks, and one column
+ * is the only sensible answer then.
+ */
+function gridColumnCount(list: HTMLElement): number {
+  const grid = list.querySelector<HTMLElement>(".brush-browser__tiles");
+  if (grid === null) {
+    return 1;
+  }
+  const tracks = getComputedStyle(grid)
+    .gridTemplateColumns.split(" ")
+    .filter((track) => track !== "");
+  return Math.max(1, tracks.length);
+}
+
 interface PresetGroupProps {
   readonly label: string;
   readonly presets: readonly BrushPreset[];
@@ -534,7 +566,7 @@ function PresetGroup({
   return (
     <div className="brush-browser__group">
       <h3 className="brush-browser__group-title">{label}</h3>
-      <ul className="brush-browser__rows">
+      <ul className="brush-browser__tiles">
         {presets.map((preset) => (
           <PresetRow
             key={preset.id}
