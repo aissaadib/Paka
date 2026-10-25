@@ -122,9 +122,10 @@
 .brush-browser__group-title {
   /* The library is long and the grid is short: the heading stays at the top
      of the list while its own group is on screen, so a tile is never shown
-     without the group it belongs to. */
+     without the group it belongs to. It sticks over the list's own padding,
+     so no tile edge shows above it. */
   position: sticky;
-  top: 0;
+  top: -2px;
   z-index: 1;
   margin: 2px 0 1px;
   padding: 0 4px;
