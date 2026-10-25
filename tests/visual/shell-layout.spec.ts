@@ -214,10 +214,10 @@ test("the dock tabs switch panels without dropping the layers list", async ({ pa
   const layersAfter = await page.locator(".side-panels__layers").boundingBox();
   expect(layersAfter?.height).toBe(layersBefore?.height);
 
-  // The brush browser's rows are reachable in its tab.
+  // The brush browser's tiles are reachable in its tab.
   await page.getByRole("tab", { name: "Brushes" }).click();
   await expect(
-    page.locator(".panel-dock__panel:not([hidden]) .brush-row").first(),
+    page.locator(".panel-dock__panel:not([hidden]) .brush-tile").first(),
   ).toBeVisible();
 });
 
