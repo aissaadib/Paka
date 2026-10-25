@@ -22,7 +22,7 @@ import {
   uniqueSwatchName,
 } from "../core/color/palette";
 import { createDocument } from "../core/document/document";
-import { isFillPatch } from "../core/document/types";
+import { isFillPatch, isShape } from "../core/document/types";
 import { DrawingEngine } from "../core/engine/DrawingEngine";
 import type { DrawingRenderer, Rgb } from "../core/rendering/types";
 import {
@@ -276,7 +276,10 @@ describe("a swatch becomes the colour the artist paints with", () => {
     engine.handlePointerSample(createSample({ phase: "move", docX: 20, docY: 20 }));
     engine.handlePointerSample(createSample({ phase: "up", docX: 20, docY: 20 }));
 
-    expect(engine.listStrokes(layerId)[0].brush.color).toBe("#123456");
+    // A shape is its own kind of element, not a stroke: the rectangle the
+    // gesture left behind carries the brush it was drawn with.
+    const shape = engine.listElements(layerId).find(isShape);
+    expect(shape?.brush.color).toBe("#123456");
   });
 
   it("paints a fill in the swatch colour", () => {
