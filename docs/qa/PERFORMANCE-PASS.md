@@ -24,8 +24,9 @@ the **stroke** instead of to the **document**:
 | The eraser's snapshot restore stays a *whole-layer* blit, on purpose | This is the negative result: making it partial made the same workload **333 → 589 ms** |
 
 The live stroke path is unchanged within noise. That is the expected result and
-the report says why in §4: it never cleared the buffer between samples, so there
-was no document-sized work to remove. The cost that remains in a live stroke on a
+the report says why in §5: the pass removed two document-sized clears from it,
+but its cost is dominated by per-segment rasterization and the per-frame display
+blit, which this pass did not touch. The cost that remains in a live stroke on a
 large page is the **display pass**, which is a different problem (§8).
 
 Nothing about drawing changed: brush behaviour, pressure, spacing, hardness,
@@ -219,10 +220,13 @@ spreads.
   unexplained drift, not as a win.
 - `stroke-stamp-2048` (−3 %) and `render-idle-2048` (−3 %) are inside the
   spread.
-- `stroke-hard-*` and `stroke-hard-*-short` are unchanged, which is the correct
-  result: the live path never cleared the buffer between samples (§3.2), so the
-  pass had nothing to remove there. The `+2 %`/`+5 %` rows are the cost of the
-  bookkeeping that pays for the wins elsewhere.
+- `stroke-hard-*` and `stroke-hard-*-short` are unchanged, and that is the honest
+  result rather than a miss. The pass did remove two document-sized clears from
+  the live path — the press (now a no-op, because the tracked ink is empty after
+  the previous release) and the second sample (now a partial clear of one dab) —
+  but the live path's cost is dominated by per-segment rasterization and the
+  per-frame display blit, which this pass did not touch. The `+2 %`/`+5 %` rows
+  are the cost of the bookkeeping that pays for the wins elsewhere.
 
 ---
 
