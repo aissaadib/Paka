@@ -2920,6 +2920,125 @@ describe("Canvas2DRenderer bounded layer rasterization", () => {
   });
 });
 
+/**
+ * The stroke buffer is a document-sized scratch, so clearing all of it is a
+ * full-document memory pass. Only the pixels a stroke inked are tracked and
+ * cleared, except at the end of a stroke, where the whole texture is discarded
+ * because a partial clear preserves it with a copy-on-write and a full one does
+ * not (see `clearStrokeBuffer` and `resetStrokeBuffer`).
+ *
+ * These tests pin both halves of that policy: a bounded clear while the buffer
+ * is being reused, a wholesale discard when the stroke is over, and - the part
+ * that would be a visible defect - no ink surviving into the next stroke.
+ */
+describe("Canvas2DRenderer stroke buffer reuse", () => {
+  it("clears only the ink a shape already laid down, not the document", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 400, height: 400 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(400, 400, 1);
+    // Forget the document swap's own reset so only the shape's work is measured.
+    harness.strokeBuffer.calls.length = 0;
+
+    const shape = (from: number, to: number): StrokeRecord => ({
+      ...createStroke(layerId),
+      xs: [from, to],
+      ys: [from, to],
+      pressures: [1, 1],
+      times: [0, 16],
+    });
+
+    // First move: nothing is inked yet, so there is nothing to clear.
+    harness.renderer.replaceStroke(shape(200, 220));
+    expect(harness.strokeBuffer.named("clearRect")).toHaveLength(0);
+
+    // Second move: the buffer holds the first outline, so only that is cleared.
+    // A 10 px brush pads the samples by 6 px, so it inked 32 x 32 px.
+    harness.renderer.replaceStroke(shape(180, 240));
+    const cleared = harness.strokeBuffer.named("clearRect");
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0].args).toEqual([194, 194, 32, 32]);
+    // A full-document clear would have been 400 x 400.
+    expect(touchedArea(harness.strokeBuffer, "clearRect")).toBe(32 * 32);
+  });
+
+  it("discards the whole buffer when the stroke ends, so nothing survives it", () => {
+    const harness = createHarness();
+    const doc = createDocument({ width: 400, height: 400 });
+    const layerId = doc.layers[0].id;
+    harness.renderer.setDocument(doc);
+    harness.renderer.setDisplaySize(400, 400, 1);
+    harness.strokeBuffer.calls.length = 0;
+
+    const stroke: StrokeRecord = {
+      ...createStroke(layerId),
+      xs: [200, 220],
+      ys: [200, 220],
+      pressures: [1, 1],
+      times: [0, 16],
+    };
+    harness.renderer.beginStroke(stroke);
+    harness.renderer.extendStroke(stroke, 0);
+    harness.renderer.endStroke(stroke);
+
+    // The release clears the whole buffer: a full clear discards the canvas
+    // texture, a partial one copies it, so the cheaper form is the whole one.
+    const clears = harness.strokeBuffer.named("clearRect");
+    expect(clears).toHaveLength(1);
+    expect(clears[0].args).toEqual([0, 0, 400, 400]);
+
+    // The tracked ink was reset with it, so the next stroke has nothing stale to
+    // clear: the clear rectangle and the canvas can never disagree.
+    harness.renderer.replaceStroke({ ...stroke, xs: [100, 120], ys: [100, 120] });
+    expect(harness.strokeBuffer.named("clearRect")).toHaveLength(1);
+  });
+
+  it("does not let a finished stroke's ink leak into the next one", () => {
+    const sampleX = 16;
+    const sampleY = 14;
+    withPixels(
+      (doc) => doc,
+      (harness) => {
+        const layerId = harness.doc.layers[0].id;
+        const brush: BrushSettings = { ...BRUSH, size: 8, hardness: 1, opacity: 0.5 };
+        const path = (id: string): StrokeRecord => ({
+          id,
+          layerId,
+          brush,
+          xs: [6, sampleX, 26],
+          ys: [6, sampleY, 6],
+          pressures: [1, 1, 1],
+          times: [0, 16, 32],
+          startTime: 0,
+        });
+        // The two strokes share their whole path, so a stale buffer would
+        // composite the first stroke's coverage a second time.
+        const first = path("first");
+        const second = path("second");
+
+        for (const stroke of [first, second]) {
+          harness.renderer.beginStroke(stroke);
+          harness.renderer.extendStroke(stroke, 0);
+          harness.renderer.endStroke(stroke);
+        }
+        harness.elements.set(layerId, [first, second]);
+        harness.renderer.render();
+        const live = snapshotCanvas(harness.display);
+
+        // The reference: the same two strokes rasterized from the stroke list.
+        harness.renderer.invalidateLayer(layerId);
+        harness.renderer.render();
+        expectSameCanvas(snapshotCanvas(harness.display), live, "live commits vs rebuild");
+
+        // Two 50 % strokes over one pixel are not four: a leaked buffer would
+        // take this to 32, and a missing commit would leave it at 128.
+        expectPixel(harness.display, sampleX, sampleY, [64, 64, 64], 1);
+      },
+    );
+  });
+});
+
 describe("Canvas2DRenderer bounded rebuild is pixel-identical", () => {
   const SAMPLE_X = 16;
   const SAMPLE_Y = 14;
