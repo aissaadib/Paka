@@ -45,5 +45,22 @@ the Chromium that Playwright pins, runs every workload in the page, and writes
 - **GPU time.** No WebGL/GPU timer is involved.
 - **HiDPI.** The display canvas is 1 device pixel per CSS pixel.
 
-The report that consumes these numbers (`docs/qa/PERFORMANCE-PASS.md`) records
-which rows are measured, which are relative, and which are unmeasured.
+## The recorded runs
+
+`bench/results/` holds the measurements a performance claim was checked against.
+They are recorded artifacts, not fixtures: a test never reads them.
+
+| File | What it is |
+| --- | --- |
+| `before.json` | The pre-optimization baseline, recorded at `38d86d3`. |
+| `pair-before-1.json`, `pair-before-2.json` | The same renderer as `before.json`, re-recorded back to back with the pair below so the comparison is not across two machine states. |
+| `pair-after-1.json`, `pair-after-2.json` | The optimized renderer, recorded immediately after each `pair-before` run. |
+
+The pairing is the point. Whole-run drift of 10-20 % is normal on a development
+machine, so a single before/after pair can invent or hide a change. Each
+`pair-before-N` was taken with `git checkout 38d86d3 -- src/core/rendering/Canvas2DRenderer.ts`
+and each `pair-after-N` immediately after restoring the optimized file, so the
+two halves of a pair describe the same machine state.
+
+`docs/qa/PERFORMANCE-PASS.md` is the report that reads them: it records which
+rows are measured, which are relative, and which are unmeasured.

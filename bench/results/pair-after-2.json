@@ -1,0 +1,221 @@
+{
+  "label": "pair-after-2",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36",
+  "hardwareConcurrency": 20,
+  "display": {
+    "width": 1280,
+    "height": 800
+  },
+  "workloads": [
+    {
+      "name": "stroke-hard-1024",
+      "docSize": 1024,
+      "medianMs": 4.9,
+      "minMs": 4.3,
+      "maxMs": 13.5,
+      "runs": [
+        5.5,
+        5,
+        4.9,
+        4.4,
+        4.8,
+        4.3,
+        13.5
+      ],
+      "flushMs": 0.9
+    },
+    {
+      "name": "stroke-hard-2048",
+      "docSize": 2048,
+      "medianMs": 12.3,
+      "minMs": 11.6,
+      "maxMs": 18.6,
+      "runs": [
+        11.8,
+        18.6,
+        12,
+        18.2,
+        11.6,
+        18,
+        12.3
+      ],
+      "flushMs": 0.9
+    },
+    {
+      "name": "stroke-hard-4096",
+      "docSize": 4096,
+      "medianMs": 108,
+      "minMs": 104.1,
+      "maxMs": 111.7,
+      "runs": [
+        108.6,
+        111.7,
+        105.2,
+        108,
+        104.1
+      ],
+      "flushMs": 0
+    },
+    {
+      "name": "stroke-hard-2048-short",
+      "docSize": 2048,
+      "medianMs": 10.1,
+      "minMs": 9.6,
+      "maxMs": 10.9,
+      "runs": [
+        9.7,
+        10.3,
+        9.6,
+        10.1,
+        10.2,
+        10.9,
+        9.7
+      ],
+      "flushMs": 1.1
+    },
+    {
+      "name": "stroke-hard-4096-short",
+      "docSize": 4096,
+      "medianMs": 50.5,
+      "minMs": 49.5,
+      "maxMs": 89.4,
+      "runs": [
+        50.5,
+        50.3,
+        89.4,
+        49.5,
+        50.2,
+        52.2,
+        53.1
+      ],
+      "flushMs": 0.1
+    },
+    {
+      "name": "stroke-hard-4096-noframes",
+      "docSize": 4096,
+      "medianMs": 40.5,
+      "minMs": 39.4,
+      "maxMs": 44,
+      "runs": [
+        39.5,
+        41.1,
+        39.4,
+        40.5,
+        44
+      ],
+      "flushMs": 0
+    },
+    {
+      "name": "shape-replace-4096",
+      "docSize": 4096,
+      "medianMs": 381.1,
+      "minMs": 347.3,
+      "maxMs": 396.5,
+      "runs": [
+        347.3,
+        391.3,
+        381.1,
+        396.5,
+        362.7
+      ],
+      "flushMs": 0.1
+    },
+    {
+      "name": "stroke-soft-2048",
+      "docSize": 2048,
+      "medianMs": 109.8,
+      "minMs": 99.8,
+      "maxMs": 118.6,
+      "runs": [
+        118.6,
+        114.9,
+        99.8,
+        101.6,
+        109.8
+      ],
+      "flushMs": 0.9
+    },
+    {
+      "name": "stroke-textured-2048",
+      "docSize": 2048,
+      "medianMs": 38.8,
+      "minMs": 31.3,
+      "maxMs": 54.5,
+      "runs": [
+        38.8,
+        45.4,
+        37.9,
+        31.3,
+        54.5
+      ],
+      "flushMs": 0.8
+    },
+    {
+      "name": "stroke-stamp-2048",
+      "docSize": 2048,
+      "medianMs": 304.3,
+      "minMs": 270.7,
+      "maxMs": 307.1,
+      "runs": [
+        270.7,
+        307.1,
+        289.4,
+        304.3,
+        307.1
+      ],
+      "flushMs": 1.1
+    },
+    {
+      "name": "shape-replace-2048",
+      "docSize": 2048,
+      "medianMs": 48.1,
+      "minMs": 40.5,
+      "maxMs": 60.4,
+      "runs": [
+        48.1,
+        60.4,
+        44.8,
+        50.6,
+        40.5
+      ],
+      "flushMs": 1.2
+    },
+    {
+      "name": "erase-2048",
+      "docSize": 2048,
+      "medianMs": 156.1,
+      "minMs": 146.8,
+      "maxMs": 163,
+      "runs": [
+        163,
+        153.5,
+        156.1,
+        159.4,
+        146.8
+      ],
+      "flushMs": 0.9
+    },
+    {
+      "name": "render-idle-2048",
+      "docSize": 2048,
+      "medianMs": 331.9,
+      "minMs": 321.7,
+      "maxMs": 345.4,
+      "runs": [
+        321.7,
+        331.9,
+        333,
+        345.4,
+        325.7
+      ],
+      "flushMs": 1
+    }
+  ],
+  "memory": {
+    "beforeBytes": 5128756,
+    "afterBytes": 5128756,
+    "deltaBytes": 0,
+    "strokes": 120
+  },
+  "memoryFlushMs": 0.3
+}
