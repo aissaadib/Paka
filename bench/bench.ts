@@ -91,12 +91,27 @@ interface Path {
 }
 
 /** A wandering path that stays inside the paper, so no workload is clipped away. */
-function makePath(samples: number, width: number, height: number, seed: number): Path {
+function makePath(
+  samples: number,
+  width: number,
+  height: number,
+  seed: number,
+  /**
+   * The side of the square the walk is confined to, centred on the paper.
+   *
+   * The default is the paper minus an 8 % margin, which is what a long,
+   * whole-page stroke does. A small span is a small stroke on a big page - the
+   * case where document-sized work is most visible.
+   */
+  span?: number,
+): Path {
   const random = seededRandom(seed);
-  const inset = Math.min(width, height) * 0.08;
+  const box = span ?? Math.min(width, height) * 0.84;
+  const originX = (width - box) / 2;
+  const originY = (height - box) / 2;
   const step = Math.max(2, Math.min(width, height) / (samples * 1.4));
-  let x = inset + random() * (width - inset * 2);
-  let y = inset + random() * (height - inset * 2);
+  let x = originX + random() * box;
+  let y = originY + random() * box;
   let angle = random() * Math.PI * 2;
   const xs: number[] = [];
   const ys: number[] = [];
@@ -104,8 +119,8 @@ function makePath(samples: number, width: number, height: number, seed: number):
   const times: number[] = [];
   for (let index = 0; index < samples; index += 1) {
     angle += (random() - 0.5) * 0.7;
-    x = Math.min(width - inset, Math.max(inset, x + Math.cos(angle) * step));
-    y = Math.min(height - inset, Math.max(inset, y + Math.sin(angle) * step));
+    x = Math.min(originX + box, Math.max(originX, x + Math.cos(angle) * step));
+    y = Math.min(originY + box, Math.max(originY, y + Math.sin(angle) * step));
     xs.push(x);
     ys.push(y);
     pressures.push(0.35 + random() * 0.65);
@@ -281,6 +296,66 @@ const WORKLOADS: readonly Workload[] = [
     run: () => {
       const target = createTarget(4096);
       liveStroke(target, HARD_BRUSH, makePath(LIVE_SAMPLES, 4096, 4096, 13));
+      return target;
+    },
+  },
+  {
+    // The same brush and sample count on the same page, confined to a small
+    // area: the stroke's own footprint is constant, the document is not, so the
+    // difference from `stroke-hard-2048-short` is document-sized work.
+    name: "stroke-hard-2048-short",
+    docSize: 2048,
+    repeats: 7,
+    run: () => {
+      const target = createTarget(2048);
+      liveStroke(target, HARD_BRUSH, makePath(60, 2048, 2048, 14, 320));
+      return target;
+    },
+  },
+  {
+    name: "stroke-hard-4096-short",
+    docSize: 4096,
+    repeats: 7,
+    run: () => {
+      const target = createTarget(4096);
+      liveStroke(target, HARD_BRUSH, makePath(60, 4096, 4096, 15, 320));
+      return target;
+    },
+  },
+  {
+    // No frame is rendered between samples, so the workload is the stroke path
+    // itself: dab/segment rasterization, the buffer and the release.
+    name: "stroke-hard-4096-noframes",
+    docSize: 4096,
+    repeats: 5,
+    run: () => {
+      const target = createTarget(4096);
+      liveStroke(target, HARD_BRUSH, makePath(LIVE_SAMPLES, 4096, 4096, 16), LIVE_SAMPLES);
+      return target;
+    },
+  },
+  {
+    name: "shape-replace-4096",
+    docSize: 4096,
+    repeats: 5,
+    run: () => {
+      const target = createTarget(4096);
+      for (let move = 0; move < 120; move += 1) {
+        const inset = 240 + move * 12;
+        const outline = rectangleOutline(inset, inset, 4096 - inset * 2, 2800 - inset, 40);
+        const stroke: StrokeRecord = {
+          id: nextId("shape"),
+          layerId: target.layerId,
+          brush: HARD_BRUSH,
+          xs: outline.xs,
+          ys: outline.ys,
+          pressures: outline.xs.map(() => 1),
+          times: outline.xs.map((_, index) => index * 8),
+          startTime: 0,
+        };
+        target.renderer.replaceStroke(stroke);
+        target.renderer.render();
+      }
       return target;
     },
   },
