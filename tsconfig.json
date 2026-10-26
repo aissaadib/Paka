@@ -25,6 +25,6 @@
     "noPropertyAccessFromIndexSignature": false,
     "verbatimModuleSyntax": true
   },
-  "include": ["src"],
+  "include": ["src", "bench"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
