@@ -674,6 +674,18 @@ describe("Canvas2DRenderer eraser", () => {
     expect(images[1].composite).toBe("destination-out");
     expect(surface.named("clearRect").length).toBeGreaterThan(0);
 
+    // The snapshot is restored in full, and only the subtraction is bounded.
+    // A partial restore is *slower* on the browsers this ships on - clearing a
+    // sub-rectangle preserves the canvas texture with a copy-on-write while a
+    // full clear discards it - so the asymmetry is deliberate and measured, not
+    // an oversight. The restore therefore has to stay a full-document blit.
+    expect(surface.named("clearRect")[0].args).toEqual([0, 0, 100, 80]);
+    expect(images[0].args.slice(1)).toEqual([0, 0, 100, 80]);
+    // The subtraction, by contrast, is the nine-argument one-to-one blit of the
+    // stroke's own padded rectangle: (5, 5) to (45, 5) with a 10 px brush.
+    expect(images[1].args).toHaveLength(9);
+    expect(images[1].args.slice(1)).toEqual([0, 0, 51, 26, 0, 0, 51, 26]);
+
     // The erasure is already in the layer, so the display paints the layer
     // alone - drawing the buffer on top would paint the erased coverage back.
     harness.display.calls.length = 0;
