@@ -35,8 +35,8 @@ async function canvasMiddle(page: Page): Promise<{ x: number; y: number }> {
 
 /** The zoom the status bar reports, as a number. */
 async function zoomOf(page: Page): Promise<number> {
-  const text = await page.locator(".status-bar__item", { hasText: /^zoom / }).first().innerText();
-  const percent = Number.parseFloat(text.replace("zoom", "").replace("%", "").trim());
+  const value = await page.locator(".zoom-field__input").inputValue();
+  const percent = Number.parseFloat(value.trim());
   return percent / 100;
 }
 
